@@ -423,9 +423,11 @@ select.mapper-select option{background:var(--surface2);}
 
   /* Pool rows — bigger tap targets, always-visible hide btn */
   .driver-list { max-height: 70vh; overflow-y: auto; }
-  .driver-row { padding: 10px 7px; }
-  .add-btn, .remove-btn { width: 30px; height: 30px; font-size: 17px; border-radius: 6px; }
-  .hide-btn { width: 24px; height: 24px; font-size: 13px; opacity: 1 !important; }
+  .driver-row { padding: 8px 5px; }
+  .add-btn, .remove-btn { width: 26px; height: 26px; font-size: 15px; border-radius: 5px; }
+  .hide-btn { width: 18px; height: 18px; font-size: 11px; opacity: 1 !important; }
+  .cell-sal { font-size: 11px !important; }
+  .cell-name { font-size: 11px; }
 
   .right-panel { overflow: visible; height: auto; }
   .right-panel.mob-hidden { display: none; }
@@ -1257,17 +1259,25 @@ function slateFields(slate){
 }
 function isMobileView(){ return window.innerWidth <= 768; }
 
+// Returns the two stat fields to show on mobile
+function getMobileStatFields(fields){
+  const eligible=fields.filter(f=>f.key!=='minExp'&&f.key!=='maxExp'&&f.key!=='value');
+  const preferred=['proj','own','rating'];
+  const primary=eligible.find(f=>f.key===sortKey)||eligible.find(f=>preferred.includes(f.key))||eligible[0];
+  const secondary=primary?(eligible.find(f=>f.key!==primary.key&&preferred.includes(f.key))||eligible.find(f=>f.key!==primary.key)):null;
+  return{primary,secondary};
+}
+
 function gridTemplate(fields){
   const slate=activeSlate();
-  // Mobile: collapse to Tee, Name, Salary, one active-sort stat col, +/- btn, hide btn
   if(isMobileView()){
-    const leftWidth = slate?.sport==='pga' ? '54px' : slate?.sport==='ufc' ? '60px' : '32px';
-    const statField = fields.find(f=>f.key===sortKey && f.key!=='minExp' && f.key!=='maxExp' && f.key!=='value');
-    if(statField){
-      const statWidth = statField.key==='proj' ? '52px' : '40px';
-      return `${leftWidth} minmax(100px,1fr) 64px ${statWidth} 28px 22px`;
-    }
-    return `${leftWidth} minmax(100px,1fr) 64px 28px 22px`;
+    const leftWidth=slate?.sport==='pga'?'46px':slate?.sport==='ufc'?'52px':'28px';
+    const{primary,secondary}=getMobileStatFields(fields);
+    const parts=[leftWidth,'minmax(90px,1fr)','56px'];
+    if(primary)parts.push('40px');
+    if(secondary)parts.push('36px');
+    parts.push('26px','18px');
+    return parts.join(' ');
   }
   const leftWidth = slate?.sport==='pga' ? '62px' : slate?.sport==='ufc' ? '76px' : '38px';
   const cols=[leftWidth,'minmax(140px,1fr)','72px'];
@@ -1520,11 +1530,12 @@ function renderPool(){
   const hdr=document.getElementById('colHeaders');
   hdr.style.gridTemplateColumns=gt;
   const mobile = isMobileView();
-  const statField = mobile ? fields.find(f=>f.key===sortKey && f.key!=='minExp' && f.key!=='maxExp' && f.key!=='value') : null;
+  const {primary: mStat1, secondary: mStat2} = mobile ? getMobileStatFields(fields) : {primary:null,secondary:null};
   hdr.innerHTML=(isGroupEdit?`<span class="col-c">✓</span>`:'')
     +`<span class="col-c" onclick="setSort('start')" title="${leftColLabel(activeSlate())}" style="cursor:pointer;padding-right:6px;">${leftColLabel(slate)}</span><span>Name</span><span class="col-r" onclick="setSort('salary')">Sal</span>`
     +(mobile
-      ? (statField ? `<span class="${statField.cls} pool-col-hdr" onclick="setSort('${statField.key}')">${statField.label}</span>` : '')
+      ? (mStat1?`<span class="${mStat1.cls} pool-col-hdr" onclick="setSort('${mStat1.key}')" style="font-size:9px;">${mStat1.label}</span>`:'')
+        +(mStat2?`<span class="${mStat2.cls} pool-col-hdr" onclick="setSort('${mStat2.key}')" style="font-size:9px;">${mStat2.label}</span>`:'')
       : fields.map(f=>{
           const isDraggable = f.key!=='value' && !isGroupEdit;
           const headerLabel = f.key==='proj'
@@ -1629,24 +1640,19 @@ function renderPool(){
         <div class="cell-name" style="flex:1">${p.name}</div>
         ${!isGroupEdit&&dots?`<div class="grp-dots">${dots}</div>`:''}
       </div>
-      <div class="cell-sal col-r">${fmt(p.salary)}</div>
+      <div class="cell-sal col-r" style="${mobile?'font-size:11px;':''}">${fmt(p.salary)}</div>
       ${mobile
-        ? (statField ? (() => {
-            const f = statField;
+        ? [mStat1, mStat2].filter(Boolean).map(f=>{
             let v=p[f.key];if(v==null||v==='')v='—';
-            if(f.key==='proj' && slate.columnMapping?.proj){
+            if(f.key==='proj'&&slate.columnMapping?.proj){
               const isModified=p._origProj!=null&&parseFloat(p._origProj)!==parseFloat(p.proj);
               const color=isModified?(parseFloat(p.proj)>parseFloat(p._origProj)?'var(--green)':'var(--red)'):'var(--text)';
-              return `<div class="cell-mono col-r" style="color:${color};">${(parseFloat(p.proj)||0).toFixed(1)}</div>`;
+              return `<div class="cell-mono col-r" style="color:${color};font-size:10px;">${(parseFloat(p.proj)||0).toFixed(1)}</div>`;
             }
-            if(f.key==='value'){
-              const proj=parseFloat(p.proj)||0;const sal=p.salary||1;
-              const val=proj>0?(proj/(sal/1000)).toFixed(2):'—';
-              const valColor=proj>0?(proj/(sal/1000)>=5?'var(--green)':proj/(sal/1000)>=3.5?'var(--accent)':'var(--muted)'):'var(--muted)';
-              return `<div class="cell-mono col-r" style="color:${valColor};">${val}</div>`;
-            }
-            return `<div class="cell-mono ${f.cls}">${v}</div>`;
-          })() : '')
+            if(f.key==='own') return `<div class="cell-mono col-r" style="font-size:10px;color:var(--muted);">${v!=='—'?parseFloat(v).toFixed(1)+'%':v}</div>`;
+            if(f.key==='rating'){const rv=parseFloat(p.rating);return `<div class="cell-mono col-r" style="font-size:10px;">${isNaN(rv)?'—':rv%1===0?rv:rv.toFixed(1)}</div>`;}
+            return `<div class="cell-mono col-r" style="font-size:10px;">${v}</div>`;
+          }).join('')
         : extraCells
       }
       ${mobile ? '' : `<div class="cell-exp ${expClass(exp,total)} col-c">${exp>0?exp:'—'}</div>`}
