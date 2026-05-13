@@ -145,6 +145,91 @@
 .dd-item{padding:8px 12px;cursor:pointer;font-size:13px;color:var(--text);border-bottom:1px solid var(--border);}
   .dd-item:last-child{border-bottom:none;}
   .dd-item:hover,.dd-item.active{background:rgba(200,240,90,0.08);}
+
+/* ── MOBILE ── */
+@media (max-width: 640px) {
+
+  /* Header */
+  header { padding: 12px 16px; gap: 8px; }
+  header h1 { font-size: 13px; }
+
+  /* Upload zone */
+  .upload-zone { padding: 24px 16px; }
+  .upload-zone h2 { font-size: 14px; }
+
+  /* Sport buttons — bigger tap targets */
+  .sport-btn { padding: 8px 14px; font-size: 13px; }
+
+  /* Username search row */
+  .input-row { padding: 12px 14px; }
+  .input-row input[type="text"] { font-size: 16px; }
+  .btn { padding: 11px 20px; font-size: 14px; }
+
+  /* Tab bar — scrolls horizontally, bigger tap targets */
+  .tab-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+    gap: 0;
+    padding-bottom: 1px;
+  }
+  .tab-bar::-webkit-scrollbar { display: none; }
+  .tab {
+    padding: 12px 14px;
+    font-size: 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Metric values */
+  .metric-value { font-size: 20px; }
+
+  /* Tables — horizontal scroll */
+  .card { padding: 12px 14px; overflow-x: auto; }
+
+  /* Ownership table — relax fixed layout on mobile */
+  .own-table { table-layout: auto; }
+  .own-table th, .own-table td { padding: 7px 8px; font-size: 11px; }
+  .bar-bg { min-width: 40px; }
+  .pct-num { width: 36px; font-size: 11px; }
+
+  /* Duplicates — lineup column can wrap */
+  table td:last-child { word-break: break-word; white-space: normal; }
+
+  /* Leverage — stack the two side-by-side cards vertically */
+  #panel-leverage > div[style*="grid-template-columns"] {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+
+  /* Combo search — stack dropdowns vertically */
+  #panel-combosearch .card > div[style*="flex-wrap"] {
+    flex-direction: column !important;
+  }
+  #panel-combosearch select {
+    font-size: 16px;
+    padding: 9px 10px;
+  }
+
+  /* H2H — search boxes stack vertically */
+  #panel-h2h .card > div[style*="flex-wrap"] {
+    flex-direction: column !important;
+  }
+  #panel-h2h input[type="text"] { font-size: 16px; }
+
+  /* H2H results metric grid — 2 cols max */
+  #h2h-results .card > div[style*="grid-template-columns"] {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Top combos table */
+  #top-combo-results { overflow-x: auto; }
+
+  /* Misc */
+  .legend { font-size: 10px; }
+  .step-label { font-size: 12px; }
+}
 </style>
 </head>
 <body>
