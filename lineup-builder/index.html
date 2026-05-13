@@ -509,6 +509,15 @@ select.mapper-select option{background:var(--surface2);}
 @media (min-width: 769px) {
   #mobilePanelToggle { display: none; }
 }
+
+/* Prevent background scroll when any modal is open */
+body.modal-open {
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+}
+/* Also prevent pull-to-refresh on mobile */
+html { overscroll-behavior-y: contain; }
 </style>
 </head>
 <body>
@@ -4213,6 +4222,7 @@ function openPreviewModal(lineups, optimizeBy){
 
   renderPreviewLineupsList();
   document.getElementById('previewModal').classList.remove('hidden');
+  document.body.classList.add('modal-open');
   renderPreviewExposure();
 }
 
@@ -4402,6 +4412,7 @@ function renderPreviewExposure(){
 
 function closePreviewModal(){
   document.getElementById('previewModal').classList.add('hidden');
+  document.body.classList.remove('modal-open');
   const menu=document.getElementById('historyPickerMenu');
   if(menu) menu.style.display='none';
 }
@@ -4549,8 +4560,12 @@ function openNewSlateModal(){
   document.getElementById('uploadFileName').textContent='';document.getElementById('mapperSection').style.display='none';
   document.getElementById('createSlateBtn').disabled=true;document.getElementById('validationMsg').className='validation-msg';
   document.getElementById('slateModal').classList.remove('hidden');
+  document.body.classList.add('modal-open');
 }
-function closeSlateModal(){document.getElementById('slateModal').classList.add('hidden');}
+function closeSlateModal(){
+  document.getElementById('slateModal').classList.add('hidden');
+  document.body.classList.remove('modal-open');
+}
 
 function onDragOver(e){e.preventDefault();document.getElementById('uploadArea').classList.add('dragover');}
 function onDragLeave(){document.getElementById('uploadArea').classList.remove('dragover');}
@@ -5053,6 +5068,7 @@ function renderOddsCell(val, cls='col-r', slate=null, fieldKey=null){
   return `<div class="cell-mono ${cls}" style="color:${color};" title="${tooltip}">${display}</div>`;
 }
 
+loadFromStorage();
 loadHistory();
 if(slates.length)activeSlateId=slates[0].id;
 renderTopBar();
