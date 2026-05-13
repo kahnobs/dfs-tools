@@ -384,142 +384,75 @@ select.mapper-select option{background:var(--surface2);}
 /* ── MOBILE ── */
 @media (max-width: 768px) {
 
-  /* Topbar: tighter, wrap gracefully */
-  .topbar {
-    padding: 8px 12px;
-    gap: 7px;
-  }
+  .topbar { padding: 8px 12px; gap: 7px; }
   .logo { font-size: 18px; }
-
-  /* Hide Restore/Clear All from topbar on mobile to reduce clutter — still accessible via long-press backup */
-  .topbar > label,
-  .topbar > button:not(.btn-new-slate):not([onclick*="backupData"]) {
-    display: none;
-  }
-
-  /* Slate tabs scroll horizontally — already works, just tighten */
   .slate-tab { padding: 6px 10px; font-size: 12px; }
   .btn-new-slate { padding: 6px 12px; font-size: 12px; }
 
-  /* === MAIN LAYOUT: stack vertically, full scroll === */
+  /* Hide Restore/Clear All on mobile */
+  .topbar > label,
+  .topbar > button:not(.btn-new-slate):not([onclick*="backupData"]) { display: none; }
+
   #appWrap { height: auto; min-height: 100vh; }
+  #mainLayout { display: flex !important; flex-direction: column; height: auto; overflow: visible; }
 
-  #mainLayout {
-    display: flex !important;
-    flex-direction: column;
-    height: auto;
-    overflow: visible;
-  }
-
-  /* Panel toggle bar — shown only on mobile */
+  /* Mobile panel toggle */
   #mobilePanelToggle {
-    display: flex;
-    flex-shrink: 0;
+    display: flex; flex-shrink: 0;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
-    position: sticky;
-    top: 0;
-    z-index: 50;
+    position: sticky; top: 0; z-index: 50;
   }
   .mob-toggle-btn {
-    flex: 1;
-    padding: 11px 8px;
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 14px;
-    letter-spacing: 1px;
-    color: var(--muted);
-    text-align: center;
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    transition: all .15s;
+    flex: 1; padding: 12px 8px;
+    font-family: 'Bebas Neue', sans-serif; font-size: 14px; letter-spacing: 1px;
+    color: var(--muted); text-align: center; cursor: pointer;
+    border-bottom: 2px solid transparent; transition: all .15s;
   }
-  .mob-toggle-btn.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-  }
+  .mob-toggle-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
 
-  /* Pool panel */
-  .pool-panel {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    overflow: visible;
-    height: auto;
-  }
+  .pool-panel { border-right: none; border-bottom: 1px solid var(--border); overflow: visible; height: auto; }
   .pool-panel.mob-hidden { display: none; }
 
-  /* Pool list — let it expand naturally, no fixed height trap */
-  .driver-list {
-    overflow-y: visible;
-    max-height: none;
-    height: auto;
-    /* Cap at a reasonable scroll zone */
-    max-height: 70vh;
-    overflow-y: auto;
-  }
+  /* Pool header */
+  .panel-header { gap: 6px; flex-wrap: wrap; }
+  #searchInput { width: 100%; flex: 1; min-width: 0; font-size: 16px; padding: 8px 10px; }
+  .sort-btns { flex-wrap: wrap; gap: 5px; }
+  .sort-btn { padding: 7px 10px; font-size: 12px; }
+  .show-hidden-btn { padding: 7px 10px; font-size: 12px; }
 
-  /* Panel header wraps better */
-  .panel-header { gap: 6px; }
-  #searchInput { width: 100%; flex: 1; min-width: 0; font-size: 14px; padding: 7px 10px; }
-  .sort-btns { flex-wrap: wrap; gap: 4px; }
-  .sort-btn { padding: 5px 9px; font-size: 11px; }
-  .show-hidden-btn { padding: 5px 9px; font-size: 11px; }
+  /* Pool rows — bigger tap targets, always-visible hide btn */
+  .driver-list { max-height: 70vh; overflow-y: auto; }
+  .driver-row { padding: 10px 7px; }
+  .add-btn, .remove-btn { width: 30px; height: 30px; font-size: 17px; border-radius: 6px; }
+  .hide-btn { width: 24px; height: 24px; font-size: 13px; opacity: 1 !important; }
 
-  /* Bigger tap targets on pool rows */
-  .driver-row { padding: 8px 7px; }
-  .add-btn, .remove-btn { width: 28px; height: 28px; font-size: 16px; }
-  .hide-btn { width: 24px; height: 24px; font-size: 12px; opacity: 1 !important; } /* always visible on mobile */
-
-  /* Right panel */
-  .right-panel {
-    overflow: visible;
-    height: auto;
-  }
+  .right-panel { overflow: visible; height: auto; }
   .right-panel.mob-hidden { display: none; }
 
-  /* Tab bar — bigger tap targets */
   .tabs { overflow-x: auto; }
-  .tab {
-    padding: 12px 4px;
-    font-size: 11px;
-    min-width: 56px;
-  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { padding: 12px 6px; font-size: 11px; min-width: 52px; }
 
-  /* Tab content — let them scroll naturally */
   .tab-content { overflow: visible; height: auto; }
   .tab-content.active { display: flex; flex-direction: column; }
-
-  /* Builder tab inner panels */
   .current-lineup { overflow: visible; }
   .saved-panel { height: auto; overflow: visible; }
   .saved-list { overflow-y: visible; max-height: none; }
+  .exposure-panel, .groups-panel, .autogen-panel { overflow: visible; height: auto; }
 
-  /* Exposure / groups / autogen panels */
-  .exposure-panel,
-  .groups-panel,
-  .autogen-panel { overflow: visible; height: auto; }
-
-  /* Save / clear buttons bigger */
   .btn { padding: 10px 8px; font-size: 13px; }
 
-  /* Autogen setting rows — stack label above input on very narrow screens */
   .setting-row { flex-wrap: wrap; gap: 6px; }
-  .setting-label { min-width: 0; flex: 1 1 100%; }
+  .setting-label { flex: 1 1 100%; }
   .setting-num, .setting-select { width: 100%; }
 
-  /* Modal full-screen on mobile */
   .modal-overlay { padding: 0; align-items: flex-end; }
-  .modal {
-    border-radius: 14px 14px 0 0;
-    max-height: 92vh;
-    width: 100%;
-    max-width: 100%;
-  }
+  .modal { border-radius: 14px 14px 0 0; max-height: 92vh; width: 100%; max-width: 100%; }
 
-  /* Empty state adjustments */
   #emptyState { height: calc(100vh - 60px); padding: 0 16px; }
 }
 
-/* Desktop: hide the mobile toggle bar */
 @media (min-width: 769px) {
   #mobilePanelToggle { display: none; }
 }
@@ -1322,8 +1255,20 @@ function slateFields(slate){
   base.forEach(f=>{if(!order.includes(f.key))ordered.push(f);});
   return ordered;
 }
+function isMobileView(){ return window.innerWidth <= 768; }
+
 function gridTemplate(fields){
   const slate=activeSlate();
+  // Mobile: collapse to Tee, Name, Salary, one active-sort stat col, +/- btn, hide btn
+  if(isMobileView()){
+    const leftWidth = slate?.sport==='pga' ? '54px' : slate?.sport==='ufc' ? '60px' : '32px';
+    const statField = fields.find(f=>f.key===sortKey && f.key!=='minExp' && f.key!=='maxExp' && f.key!=='value');
+    if(statField){
+      const statWidth = statField.key==='proj' ? '52px' : '40px';
+      return `${leftWidth} minmax(100px,1fr) 64px ${statWidth} 28px 22px`;
+    }
+    return `${leftWidth} minmax(100px,1fr) 64px 28px 22px`;
+  }
   const leftWidth = slate?.sport==='pga' ? '62px' : slate?.sport==='ufc' ? '76px' : '38px';
   const cols=[leftWidth,'minmax(140px,1fr)','72px'];
   fields.forEach(f=>{
@@ -1574,18 +1519,24 @@ function renderPool(){
   const hidden=slate.hiddenIds||[];
   const hdr=document.getElementById('colHeaders');
   hdr.style.gridTemplateColumns=gt;
+  const mobile = isMobileView();
+  const statField = mobile ? fields.find(f=>f.key===sortKey && f.key!=='minExp' && f.key!=='maxExp' && f.key!=='value') : null;
   hdr.innerHTML=(isGroupEdit?`<span class="col-c">✓</span>`:'')
     +`<span class="col-c" onclick="setSort('start')" title="${leftColLabel(activeSlate())}" style="cursor:pointer;padding-right:6px;">${leftColLabel(slate)}</span><span>Name</span><span class="col-r" onclick="setSort('salary')">Sal</span>`
-    +fields.map(f=>{
-      const isDraggable = f.key!=='value' && !isGroupEdit;
-      const headerLabel = f.key==='proj'
-        ? `<span style="display:block;padding-right:5px;">${f.label}</span>`
-        : f.label;
-      return `<span class="${f.cls} pool-col-hdr${isDraggable?' draggable-col':''}" data-colkey="${f.key}"
-        onclick="setSort('${f.key}')"
-        ${isDraggable?`draggable="true" ondragstart="colDragStart(event,'${f.key}')" ondragover="event.preventDefault();colDragOver(event,this)" ondragleave="colDragLeave(this)" ondrop="colDrop(event,'${f.key}')" title="Drag to reorder" style="cursor:grab;"`:''}>
-        ${headerLabel}</span>`; }).join('')
-    +`<span class="col-c" onclick="setSort('exp')">Exp</span><span></span><span></span>`;
+    +(mobile
+      ? (statField ? `<span class="${statField.cls} pool-col-hdr" onclick="setSort('${statField.key}')">${statField.label}</span>` : '')
+      : fields.map(f=>{
+          const isDraggable = f.key!=='value' && !isGroupEdit;
+          const headerLabel = f.key==='proj'
+            ? `<span style="display:block;padding-right:5px;">${f.label}</span>`
+            : f.label;
+          return `<span class="${f.cls} pool-col-hdr${isDraggable?' draggable-col':''}" data-colkey="${f.key}"
+            onclick="setSort('${f.key}')"
+            ${isDraggable?`draggable="true" ondragstart="colDragStart(event,'${f.key}')" ondragover="event.preventDefault();colDragOver(event,this)" ondragleave="colDragLeave(this)" ondrop="colDrop(event,'${f.key}')" title="Drag to reorder" style="cursor:grab;"`:''}>
+            ${headerLabel}</span>`; }).join('')
+    )
+    +(mobile ? '' : `<span class="col-c" onclick="setSort('exp')">Exp</span>`)
+    +`<span></span><span></span>`;
   const list=document.getElementById('driverList');
   if(!players.length){list.innerHTML='<div style="text-align:center;color:var(--muted);font-size:11px;padding:20px;font-style:italic">No players match.</div>';return;}
   list.innerHTML=players.map((p,i)=>{
@@ -1679,8 +1630,26 @@ function renderPool(){
         ${!isGroupEdit&&dots?`<div class="grp-dots">${dots}</div>`:''}
       </div>
       <div class="cell-sal col-r">${fmt(p.salary)}</div>
-      ${extraCells}
-      <div class="cell-exp ${expClass(exp,total)} col-c">${exp>0?exp:'—'}</div>
+      ${mobile
+        ? (statField ? (() => {
+            const f = statField;
+            let v=p[f.key];if(v==null||v==='')v='—';
+            if(f.key==='proj' && slate.columnMapping?.proj){
+              const isModified=p._origProj!=null&&parseFloat(p._origProj)!==parseFloat(p.proj);
+              const color=isModified?(parseFloat(p.proj)>parseFloat(p._origProj)?'var(--green)':'var(--red)'):'var(--text)';
+              return `<div class="cell-mono col-r" style="color:${color};">${(parseFloat(p.proj)||0).toFixed(1)}</div>`;
+            }
+            if(f.key==='value'){
+              const proj=parseFloat(p.proj)||0;const sal=p.salary||1;
+              const val=proj>0?(proj/(sal/1000)).toFixed(2):'—';
+              const valColor=proj>0?(proj/(sal/1000)>=5?'var(--green)':proj/(sal/1000)>=3.5?'var(--accent)':'var(--muted)'):'var(--muted)';
+              return `<div class="cell-mono col-r" style="color:${valColor};">${val}</div>`;
+            }
+            return `<div class="cell-mono ${f.cls}">${v}</div>`;
+          })() : '')
+        : extraCells
+      }
+      ${mobile ? '' : `<div class="cell-exp ${expClass(exp,total)} col-c">${exp>0?exp:'—'}</div>`}
       ${isGroupEdit
         ? `<span></span><span></span>`
         : (isSelected
@@ -5029,18 +4998,16 @@ if(activeSlateId)renderSlate();
 
 // ── MOBILE PANEL TOGGLE ──────────────────────────────────────
 function setMobilePanel(panel){
-  const pool = document.querySelector('.pool-panel');
-  const right = document.querySelector('.right-panel');
-  const btnPool = document.getElementById('mobBtnPool');
-  const btnRight = document.getElementById('mobBtnRight');
-  if(!pool||!right) return;
+  const pool=document.querySelector('.pool-panel');
+  const right=document.querySelector('.right-panel');
+  const btnPool=document.getElementById('mobBtnPool');
+  const btnRight=document.getElementById('mobBtnRight');
+  if(!pool||!right)return;
   if(panel==='pool'){
     pool.classList.remove('mob-hidden');
     right.classList.add('mob-hidden');
     btnPool.classList.add('active');
     btnRight.classList.remove('active');
-    // Update toggle label to reflect current tab
-    btnRight.textContent = '📋 Builder';
   } else {
     pool.classList.add('mob-hidden');
     right.classList.remove('mob-hidden');
@@ -5049,20 +5016,20 @@ function setMobilePanel(panel){
   }
 }
 
-// When a player is added/removed on mobile, briefly flash "Builder" tab label
-// to hint user can switch over — only fires on narrow screens
-const _origSwitchTab = typeof switchTab === 'function' ? switchTab : null;
-function mobileTabHint(tabName){
-  const btn = document.getElementById('mobBtnRight');
-  if(!btn) return;
-  const labels = {builder:'📋 Builder',exposure:'📊 Exposure',groups:'👥 Groups',history:'⏱ History',autogen:'⚡ Auto-Gen'};
-  if(labels[tabName]) btn.textContent = labels[tabName];
-}
-// Patch switchTab to also update the mobile toggle label
-const _origSwitchTabFn = window.switchTab;
-window.switchTab = function(tab, el){
-  if(_origSwitchTabFn) _origSwitchTabFn(tab, el);
-  mobileTabHint(tab);
+// Re-render pool on resize so grid template recalculates
+let _resizeTimer;
+window.addEventListener('resize',()=>{
+  clearTimeout(_resizeTimer);
+  _resizeTimer=setTimeout(()=>{ if(activeSlateId) renderPool(); },150);
+});
+
+// Patch switchTab to update mobile toggle label
+const _origSwitchTabFn=window.switchTab;
+window.switchTab=function(tab,el){
+  if(_origSwitchTabFn)_origSwitchTabFn(tab,el);
+  const labels={builder:'📋 Builder',exposure:'📊 Exposure',groups:'👥 Groups',history:'⏱ History',autogen:'⚡ Auto-Gen'};
+  const btn=document.getElementById('mobBtnRight');
+  if(btn&&labels[tab])btn.textContent=labels[tab];
 };
 </script>
 
