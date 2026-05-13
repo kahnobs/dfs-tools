@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Free DraftKings contest analyzer. Upload your contest CSV to analyze lineup duplicates, ownership, leverage spots, and head-to-head comparisons. Works for Golf, NASCAR, and UFC.">
+<title>DK Contest Analyzer — Free DFS Portfolio Tool</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0e0f11;
+    --surface: #16181c;
+    --surface2: #1e2026;
+    --border: rgba(255,255,255,0.07);
+    --border2: rgba(255,255,255,0.12);
+    --text: #f0f0ee;
+    --muted: #7a7d85;
+    --accent: #c8f05a;
+    --red: #ff5f5f;
+    --amber: #f5a623;
+    --blue: #5b9cf6;
+    --radius: 10px;
+    --radius-sm: 6px;
+    --font: 'DM Sans', sans-serif;
+    --mono: 'DM Mono', monospace;
+  }
+
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.6; min-height: 100vh; }
+
+  header { border-bottom: 1px solid var(--border); padding: 18px 32px; display: flex; align-items: center; gap: 12px; background: var(--surface); }
+  .logo-mark { width: 32px; height: 32px; border-radius: 8px; background: var(--accent); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-weight: 500; font-size: 13px; color: #0e0f11; }
+  header h1 { font-size: 15px; font-weight: 500; }
+  header span { font-size: 12px; color: var(--muted); margin-left: 4px; }
+
+  .container { max-width: 1140px; margin: 0 auto; padding: 32px 24px; }
+
+  .upload-zone { border: 1.5px dashed var(--border2); border-radius: var(--radius); padding: 40px 24px; text-align: center; cursor: pointer; transition: all 0.15s; background: var(--surface); }
+  .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: rgba(200,240,90,0.04); }
+  .upload-zone .icon { font-size: 28px; margin-bottom: 10px; }
+  .upload-zone h2 { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
+  .upload-zone p { font-size: 12px; color: var(--muted); }
+  #file-status { font-size: 12px; color: var(--accent); margin-top: 10px; text-align: center; font-family: var(--mono); }
+
+  .input-row { display: flex; gap: 12px; align-items: flex-end; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-top: 16px; }
+  .input-row label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 5px; font-family: var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+  .input-row input[type="text"] { background: var(--bg); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); font-family: var(--font); font-size: 14px; padding: 8px 12px; flex: 1; outline: none; }
+  .input-row input[type="text"]:focus { border-color: var(--accent); }
+
+  .btn { background: var(--accent); color: #0e0f11; border: none; border-radius: var(--radius-sm); font-family: var(--font); font-size: 13px; font-weight: 600; padding: 9px 20px; cursor: pointer; white-space: nowrap; transition: opacity 0.1s; }
+  .btn:hover { opacity: 0.88; }
+  .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border2); border-radius: var(--radius-sm); font-family: var(--font); font-size: 12px; padding: 6px 14px; cursor: pointer; transition: all 0.1s; }
+  .btn-ghost:hover { background: var(--surface2); }
+
+  #results { margin-top: 24px; display: none; }
+
+  .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+  .metric { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .metric-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--mono); margin-bottom: 4px; }
+  .metric-value { font-size: 24px; font-weight: 500; font-family: var(--mono); color: var(--accent); }
+
+  .tab-bar { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+  .tab { padding: 10px 18px; font-size: 13px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 0.1s; white-space: nowrap; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 12px; }
+  .card-title { font-size: 12px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--mono); margin-bottom: 14px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-size: 10px; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+  th.sortable { cursor: pointer; }
+  th.sortable:hover { color: var(--text); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-family: var(--mono); font-weight: 500; white-space: nowrap; }
+  .b-green { background: rgba(200,240,90,0.15); color: var(--accent); }
+  .b-amber { background: rgba(245,166,35,0.15); color: var(--amber); }
+  .b-red { background: rgba(255,95,95,0.15); color: var(--red); }
+  .b-gray { background: rgba(255,255,255,0.06); color: var(--muted); }
+
+  /* Ownership — fixed layout, no overflow */
+  .own-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+  .own-table th { text-align: left; font-size: 10px; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+  .own-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: middle; overflow: hidden; }
+  .own-table tr:last-child td { border-bottom: none; }
+  .own-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .bar-cell { display: flex; align-items: center; gap: 10px; }
+  .bar-bg { flex: 1; height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; min-width: 0; }
+  .bar-fill { height: 5px; border-radius: 3px; }
+  .bar-field { background: rgba(255,255,255,0.3); }
+  .bar-user { background: var(--accent); }
+  .pct-num { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; width: 42px; text-align: right; flex-shrink: 0; }
+  .pct-num-hi { color: var(--text); }
+
+  .diff-pos { color: var(--accent); font-weight: 500; font-family: var(--mono); font-size: 12px; text-align: right; }
+  .diff-neg { color: var(--red); font-weight: 500; font-family: var(--mono); font-size: 12px; text-align: right; }
+  .diff-neu { color: var(--muted); font-family: var(--mono); font-size: 12px; text-align: right; }
+  .hl-pos td { background: rgba(200,240,90,0.035) !important; }
+  .hl-neg td { background: rgba(255,95,95,0.035) !important; }
+
+  textarea.copy-area { width: 100%; font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); resize: none; padding: 10px 12px; line-height: 1.5; outline: none; }
+  textarea.copy-area:focus { border-color: var(--accent); }
+
+  .odds-input { width: 72px; font-size: 12px; font-family: var(--mono); padding: 4px 8px; text-align: center; background: var(--bg); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); outline: none; }
+  .odds-input:focus { border-color: var(--accent); }
+  .odds-input.filled { border-color: rgba(200,240,90,0.4); color: var(--accent); }
+
+  .surv-cell { font-family: var(--mono); font-size: 12px; }
+  .exp-hi { color: var(--accent); }
+  .exp-mid { color: var(--amber); }
+  .exp-lo { color: var(--red); }
+  .player-tag { display: inline-block; font-size: 10px; font-family: var(--mono); padding: 2px 6px; border-radius: 3px; margin: 1px 2px; white-space: nowrap; }
+
+  .legend { font-size: 11px; color: var(--muted); margin-top: 8px; font-family: var(--mono); }
+  .step-label { font-size: 12px; color: var(--muted); margin-bottom: 10px; line-height: 1.5; }
+
+
+
+
+
+  .divider { display: flex; align-items: center; gap: 12px; margin: 16px 0 4px; }
+  .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  .divider span { font-size: 11px; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+
+  .sport-btn { background: transparent; color: var(--muted); border: 1px solid var(--border2); border-radius: var(--radius-sm); font-family: var(--mono); font-size: 12px; padding: 5px 14px; cursor: pointer; transition: all 0.1s; }
+  .sport-btn:hover { color: var(--text); border-color: var(--border2); }
+  .sport-btn.active { background: var(--accent); color: #0e0f11; border-color: var(--accent); font-weight: 500; }
+  .dd-item { padding: 8px 12px; cursor: pointer; font-size: 13px; color: var(--text); border-bottom: 1px solid var(--border); }
+  .dd-item:last-child { border-bottom: none; }
+  .dd-item:hover, .dd-item.active { background: rgba(200,240,90,0.08); }
+
+  @media (max-width: 640px) {
+    .metric-grid { grid-template-columns: repeat(2, 1fr); }
+    .container { padding: 16px 12px; }
+  }
+.dd-item{padding:8px 12px;cursor:pointer;font-size:13px;color:var(--text);border-bottom:1px solid var(--border);}
+  .dd-item:last-child{border-bottom:none;}
+  .dd-item:hover,.dd-item.active{background:rgba(200,240,90,0.08);}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-mark">DK</div>
+  <h1>DK Contest Analyzer</h1>
+  <span id="sport-label" style="font-size:11px;font-family:var(--mono);color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:3px 10px;">Golf</span>
+</header>
+
+<div class="container">
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="upload-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+      <div class="icon">&#8686;</div>
+      <h2>Drop contest CSV here</h2>
+      <p>DraftKings standings export &mdash; extract .csv from zip first</p>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px;display:flex;align-items:center;gap:6px;"><span style="color:var(--accent);">&#9679;</span> Your data never leaves your browser &mdash; all analysis runs locally.</div>
+      <div style="margin-top:14px;display:flex;align-items:center;gap:10px;">
+        <span style="font-size:11px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.05em;">Sport</span>
+        <div style="display:flex;gap:6px;">
+          <button id="sport-golf" onclick="setSport('golf')" class="sport-btn active">Golf</button>
+          <button id="sport-nascar" onclick="setSport('nascar')" class="sport-btn">NASCAR</button>
+          <button id="sport-ufc" onclick="setSport('ufc')" class="sport-btn">UFC</button>
+        </div>
+      </div>
+      <input type="file" id="file-input" accept=".csv" style="display:none">
+    </div>
+    <div id="file-status"></div>
+  </div>
+
+  <div id="username-row" style="display:none;">
+    <div class="input-row" style="flex-direction:column;align-items:stretch;gap:10px;">
+      <label>Search contestant</label>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <div style="flex:1;position:relative;">
+          <input type="text" id="username-search" placeholder="Type any part of a username&#x2026;" autocomplete="off" oninput="onUsernameSearch()" onkeydown="onUsernameKey(event)" style="width:100%;">
+          <div id="username-dropdown" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--radius-sm);max-height:220px;overflow-y:auto;z-index:100;"></div>
+        </div>
+        <button class="btn" id="analyze-btn" onclick="runAnalysis()" style="opacity:0.4;cursor:default;">Analyze</button>
+      </div>
+      <div id="selected-user-display" style="display:none;font-size:12px;font-family:var(--mono);color:var(--accent);"></div>
+    </div>
+  </div>
+
+  <div id="results">
+    <div class="metric-grid" id="metrics-row"></div>
+    <div class="tab-bar">
+      <div class="tab active" onclick="switchTab('duplicates',this)">Lineup Duplicates</div>
+      <div class="tab" onclick="switchTab('ownership',this)">Ownership</div>
+      <div class="tab" onclick="switchTab('leverage',this)">Leverage</div>
+      <div class="tab" onclick="switchTab('combosearch',this)">Combo Search</div>
+      <div class="tab" onclick="switchTab('h2h',this)">Head to Head</div>
+    </div>
+    <div id="panel-duplicates" class="panel active"></div>
+    <div id="panel-ownership" class="panel"></div>
+    <div id="panel-leverage" class="panel"></div>
+    <div id="panel-combosearch" class="panel"></div>
+    <div id="panel-h2h" class="panel"></div>
+  </div>
+
+</div>
+
+<script>
+let parsedData=[], myEntries=[], fieldEntries=[], fieldOwnership={}, myOwnership={}, enriched=[];
+let currentSport='golf'; // golf | nascar | ufc
+let currentSort={col:'dupes',dir:'desc'};
+let cutOdds={};
+let uniquePlayers=[];
+let allUsernames=[];
+let selectedUsername='';
+
+document.getElementById('file-input').addEventListener('change',e=>{if(e.target.files[0])loadCSV(e.target.files[0]);});
+// Prevent browser navigation if file dropped outside the zone
+document.addEventListener('dragover',e=>{if(!e.target.closest('#drop-zone'))e.preventDefault();});
+document.addEventListener('drop',e=>{if(!e.target.closest('#drop-zone'))e.preventDefault();});
+const dz=document.getElementById('drop-zone');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag');});
+dz.addEventListener('dragleave',()=>dz.classList.remove('drag'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag');if(e.dataTransfer.files[0])loadCSV(e.dataTransfer.files[0]);});
+
+function parseCSVLine(line){
+  const r=[];let cur='',inQ=false;
+  for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'){inQ=!inQ;}else if(c===','&&!inQ){r.push(cur);cur='';}else{cur+=c;}}
+  r.push(cur);return r.map(s=>s.trim().replace(/^"|"$/g,''));
+}
+
+function loadCSV(file){
+  const status=document.getElementById('file-status');
+  status.textContent='Parsing...';
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const text=ev.target.result.replace(/^\uFEFF/,'');
+      const lines=text.split('\n').filter(l=>l.trim());
+      const headers=parseCSVLine(lines[0]);
+      const niIdx=headers.findIndex(h=>h.toLowerCase().includes('entryname'));
+      const luIdx=headers.findIndex(h=>h.toLowerCase()==='lineup');
+      if(niIdx===-1||luIdx===-1){status.textContent='Error: missing EntryName or Lineup columns.';return;}
+      const rows=[];
+      for(let i=1;i<lines.length;i++){
+        const cols=parseCSVLine(lines[i]);
+        if(cols.length>Math.max(niIdx,luIdx)){
+          const name=cols[niIdx]?.trim(),lineup=cols[luIdx]?.trim();
+          if(name&&lineup)rows.push({name,lineup});
+        }
+      }
+      parsedData=rows;
+      // Auto-detect sport from lineup prefix
+      if(rows.length>0){
+        const sampleLineup=rows[0].lineup||'';
+        if(sampleLineup.startsWith('D '))setSport('nascar');
+        else if(sampleLineup.startsWith('F '))setSport('ufc');
+        else setSport('golf');
+      }
+      // Extract unique base usernames (strip entry suffix)
+      const unameSet=new Set();
+      for(const r of rows)unameSet.add(r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim());
+      allUsernames=[...unameSet].sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()));
+      selectedUsername='';
+      document.getElementById('username-search').value='';
+      document.getElementById('selected-user-display').style.display='none';
+      const abtn=document.getElementById('analyze-btn');
+      abtn.style.opacity='0.4';abtn.style.cursor='default';
+      status.textContent='✓ Loaded '+rows.length.toLocaleString()+' entries · '+allUsernames.length.toLocaleString()+' contestants from '+file.name;
+      document.getElementById('username-row').style.display='block';
+      document.getElementById('results').style.display='none';
+    }catch(err){status.textContent='Error: '+err.message;}
+  };
+  reader.readAsText(file);
+}
+
+function setSport(sport){
+  currentSport=sport;
+  ['golf','nascar','ufc'].forEach(s=>{
+    const btn=document.getElementById('sport-'+s);
+    if(btn)btn.classList.toggle('active',s===sport);
+  });
+  const lbl=document.getElementById('sport-label');
+  if(lbl)lbl.textContent=sport==='golf'?'Golf':sport==='nascar'?'NASCAR':'UFC';
+}
+
+function extractPlayers(lineup){
+  // Golf=G, NASCAR=D, UFC=F
+  const pfx=currentSport==='nascar'?'D':currentSport==='ufc'?'F':'G';
+  return lineup.split(' '+pfx+' ').map(p=>p.replace(new RegExp('^'+pfx+' '),'').trim()).filter(p=>p);
+}
+
+function computeOwnership(entries){
+  if(!entries.length)return{};
+  const counts={};
+  for(const r of entries)for(const p of extractPlayers(r.lineup))counts[p]=(counts[p]||0)+1;
+  const res={};
+  for(const[p,c]of Object.entries(counts))res[p]=(c/entries.length)*100;
+  return res;
+}
+
+function runAnalysis(){
+  if(!selectedUsername||!parsedData.length)return;
+  const username=selectedUsername;
+  myEntries=parsedData.filter(r=>r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim()===username);
+  fieldEntries=parsedData.filter(r=>r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim()!==username);
+  if(!myEntries.length){alert('No entries found for that username.');return;}
+
+  const flc={};
+  for(const r of fieldEntries)flc[r.lineup]=(flc[r.lineup]||0)+1;
+
+  fieldOwnership=computeOwnership(fieldEntries);
+  myOwnership=computeOwnership(myEntries);
+
+  enriched=myEntries.map(r=>({
+    ...r,
+    dupes:flc[r.lineup]||0,
+    entryNum:parseInt(r.name.match(/\((\d+)\//)?.[1]||'0'),
+    players:extractPlayers(r.lineup)
+  })).sort((a,b)=>a.entryNum-b.entryNum);
+
+  const ps=new Set();
+  for(const r of myEntries)for(const p of extractPlayers(r.lineup))ps.add(p);
+  uniquePlayers=[...ps].sort();
+  cutOdds={};
+
+  const avgD=(enriched.reduce((s,r)=>s+r.dupes,0)/enriched.length).toFixed(1);
+  const uq=enriched.filter(r=>r.dupes===0).length;
+
+  document.getElementById('metrics-row').innerHTML=`
+    <div class="metric"><div class="metric-label">Your entries</div><div class="metric-value">${myEntries.length}</div></div>
+    <div class="metric"><div class="metric-label">Field size</div><div class="metric-value">${parsedData.length.toLocaleString()}</div></div>
+    <div class="metric"><div class="metric-label">Avg dupes</div><div class="metric-value">${avgD}</div></div>
+    <div class="metric"><div class="metric-label">Unique lineups</div><div class="metric-value">${uq}</div></div>`;
+
+  renderDuplicates();
+  renderOwnership();
+  renderLeverage();
+  renderComboSearch();
+  renderH2H();
+
+  document.getElementById('results').style.display='block';
+}
+
+/* ── DUPLICATES ── */
+function renderDuplicates(){
+  const sorted=[...enriched].sort((a,b)=>{
+    const v=currentSort.dir==='desc'?-1:1;
+    return currentSort.col==='dupes'?v*(a.dupes-b.dupes):v*(a.entryNum-b.entryNum);
+  });
+  const rows=sorted.map(r=>{
+    let badge=r.dupes===0?'<span class="badge b-green">unique</span>':
+      r.dupes<=5?`<span class="badge b-green">${r.dupes}</span>`:
+      r.dupes<=20?`<span class="badge b-amber">${r.dupes}</span>`:
+      `<span class="badge b-red">${r.dupes}</span>`;
+    const lbl=r.name.replace(/ \(\d+\/\d+\)/,'')+' '+(r.name.match(/\(\d+\/\d+\)/)?.[0]||'');
+    return `<tr><td style="font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap;">${lbl}</td><td>${badge}</td><td style="color:var(--muted);font-size:12px;">${r.players.join(' · ')}</td></tr>`;
+  }).join('');
+  const eS=currentSort.col==='entry'?(currentSort.dir==='desc'?'↓':'↑'):'';
+  const dS=currentSort.col==='dupes'?(currentSort.dir==='desc'?'↓':'↑'):'';
+  document.getElementById('panel-duplicates').innerHTML=`
+    <div class="card" style="overflow-x:auto;">
+      <table><thead><tr>
+        <th class="sortable" onclick="sortDupes('entry')">Entry ${eS}</th>
+        <th class="sortable" onclick="sortDupes('dupes')">Dupes ${dS}</th>
+        <th>Lineup</th>
+      </tr></thead><tbody>${rows}</tbody></table>
+    </div>
+    <p class="legend">Green ≤5 · Amber 6–20 · Red 21+</p>`;
+}
+
+function sortDupes(col){
+  currentSort.col===col?(currentSort.dir=currentSort.dir==='desc'?'asc':'desc'):(currentSort.col=col,currentSort.dir='desc');
+  renderDuplicates();
+}
+
+/* ── OWNERSHIP ── */
+function renderOwnership(){
+  const all=new Set([...Object.keys(fieldOwnership),...Object.keys(myOwnership)]);
+  const myPool=new Set(uniquePlayers);
+  // Show: players in user's pool OR field ownership >= 1%
+  const rows=[...all].map(p=>({
+    player:p,
+    field:fieldOwnership[p]||0,
+    mine:myOwnership[p]||0,
+    diff:(myOwnership[p]||0)-(fieldOwnership[p]||0)
+  })).filter(r=>myPool.has(r.player)||r.field>=1.0).sort((a,b)=>b.diff-a.diff);
+
+  const maxAll=Math.max(...rows.map(r=>Math.max(r.field,r.mine)),1);
+
+  const trs=rows.map(r=>{
+    const dc=r.diff>2?'diff-pos':r.diff<-2?'diff-neg':'diff-neu';
+    const rc=r.diff>5?'hl-pos':r.diff<-5?'hl-neg':'';
+    const fw=Math.round(r.field/maxAll*100);
+    const mw=Math.round(r.mine/maxAll*100);
+    const ds=(r.diff>0?'+':'')+r.diff.toFixed(1)+'%';
+    return `<tr class="${rc}">
+      <td style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${r.player}</td>
+      <td><div class="bar-cell"><div class="bar-bg"><div class="bar-fill bar-field" style="width:${fw}%"></div></div><span class="pct-num">${r.field.toFixed(1)}%</span></div></td>
+      <td><div class="bar-cell"><div class="bar-bg"><div class="bar-fill bar-user" style="width:${mw}%"></div></div><span class="pct-num pct-num-hi">${r.mine.toFixed(1)}%</span></div></td>
+      <td class="${dc}">${ds}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('panel-ownership').innerHTML=`
+    <div class="card">
+      <div style="display:flex;gap:24px;margin-bottom:16px;font-size:12px;font-family:var(--mono);">
+        <span style="display:flex;align-items:center;gap:7px;"><span style="width:14px;height:5px;border-radius:2px;background:rgba(255,255,255,0.3);display:inline-block;"></span>Field ownership</span>
+        <span style="display:flex;align-items:center;gap:7px;"><span style="width:14px;height:5px;border-radius:2px;background:var(--accent);display:inline-block;"></span>Your ownership</span>
+      </div>
+      <table class="own-table">
+        <colgroup>
+          <col style="width:20%">
+          <col style="width:34%">
+          <col style="width:34%">
+          <col style="width:12%">
+        </colgroup>
+        <thead><tr>
+          <th>Player</th>
+          <th>Field own%</th>
+          <th>Your own%</th>
+          <th style="text-align:right;">Diff</th>
+        </tr></thead>
+        <tbody>${trs}</tbody>
+      </table>
+    </div>
+    <p class="legend">Showing: players in your pool + anyone ≥1% field owned. Sorted overweight → underweight. Green rows = +5%+ above field · Red = 5%+ below field.</p>`;
+}
+
+/* ── LEVERAGE ── */
+function renderLeverage(){
+  const all=new Set([...Object.keys(fieldOwnership),...Object.keys(myOwnership)]);
+  const pl=[...all].map(p=>({player:p,field:fieldOwnership[p]||0,mine:myOwnership[p]||0,diff:(myOwnership[p]||0)-(fieldOwnership[p]||0)}));
+  const over=pl.filter(p=>p.diff>0).sort((a,b)=>b.diff-a.diff).slice(0,10);
+  const under=pl.filter(p=>p.diff<0).sort((a,b)=>a.diff-b.diff).slice(0,10);
+  const row=(p,t)=>{
+    const d=(p.diff>0?'+':'')+p.diff.toFixed(1)+'%';
+    const badge=t==='over'?`<span class="badge b-green">${d}</span>`:`<span class="badge b-red">${d}</span>`;
+    return `<tr><td style="font-weight:500;">${p.player}</td><td style="font-family:var(--mono);font-size:11px;color:var(--muted);">${p.field.toFixed(1)}%</td><td style="font-family:var(--mono);font-size:11px;">${p.mine.toFixed(1)}%</td><td>${badge}</td></tr>`;
+  };
+  document.getElementById('panel-leverage').innerHTML=`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="card">
+        <div class="card-title" style="color:var(--accent);">↑ Root for — overweight</div>
+        <table><thead><tr><th>Player</th><th>Field</th><th>Yours</th><th>Edge</th></tr></thead>
+        <tbody>${over.map(p=>row(p,'over')).join('')}</tbody></table>
+      </div>
+      <div class="card">
+        <div class="card-title" style="color:var(--red);">↓ Fade spots — underweight</div>
+        <table><thead><tr><th>Player</th><th>Field</th><th>Yours</th><th>Diff</th></tr></thead>
+        <tbody>${under.map(p=>row(p,'under')).join('')}</tbody></table>
+      </div>
+    </div>`;
+}
+
+/* ── CUT SWEAT ── */
+function onUsernameSearch(){
+  const q=document.getElementById('username-search').value.trim().toLowerCase();
+  const dd=document.getElementById('username-dropdown');
+  if(q.length<1){dd.style.display='none';return;}
+  const matches=allUsernames.filter(u=>u.toLowerCase().includes(q)).slice(0,50);
+  if(!matches.length){dd.style.display='none';return;}
+  dd.innerHTML=matches.map((u,i)=>`<div class="dd-item" data-name="${u.replace(/"/g,'&quot;')}" onclick="selectUsername('${u.replace(/'/g,"\'")}')"><span style="font-family:var(--mono);font-size:13px;">${highlightMatch(u,q)}</span></div>`).join('');
+  dd.style.display='block';
+}
+
+function highlightMatch(str,q){
+  const idx=str.toLowerCase().indexOf(q);
+  if(idx===-1)return str;
+  return str.slice(0,idx)+'<mark style="background:rgba(200,240,90,0.3);color:var(--text);border-radius:2px;">'+str.slice(idx,idx+q.length)+'</mark>'+str.slice(idx+q.length);
+}
+
+function selectUsername(name){
+  selectedUsername=name;
+  document.getElementById('username-search').value=name;
+  document.getElementById('username-dropdown').style.display='none';
+  const disp=document.getElementById('selected-user-display');
+  const entries=parsedData.filter(r=>r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim()===name);
+  disp.textContent='✓ '+name+' — '+entries.length+' entr'+(entries.length===1?'y':'ies')+' found';
+  disp.style.display='block';
+  const abtn=document.getElementById('analyze-btn');
+  abtn.style.opacity='1';abtn.style.cursor='pointer';
+}
+
+function onUsernameKey(e){
+  const dd=document.getElementById('username-dropdown');
+  const items=dd.querySelectorAll('.dd-item');
+  if(!items.length)return;
+  const active=dd.querySelector('.dd-item.active');
+  if(e.key==='ArrowDown'){
+    e.preventDefault();
+    const next=active?active.nextElementSibling:items[0];
+    if(active)active.classList.remove('active');
+    if(next){next.classList.add('active');next.scrollIntoView({block:'nearest'});}
+  }else if(e.key==='ArrowUp'){
+    e.preventDefault();
+    const prev=active?active.previousElementSibling:items[items.length-1];
+    if(active)active.classList.remove('active');
+    if(prev){prev.classList.add('active');prev.scrollIntoView({block:'nearest'});}
+  }else if(e.key==='Enter'){
+    e.preventDefault();
+    if(active)active.click();
+    else if(items.length===1)items[0].click();
+  }else if(e.key==='Escape'){
+    dd.style.display='none';
+  }
+}
+
+document.addEventListener('click',e=>{
+  const dd=document.getElementById('username-dropdown');
+  if(dd&&!dd.contains(e.target)&&e.target.id!=='username-search')dd.style.display='none';
+});
+
+let topComboSize=2;
+
+function renderComboSearch(){
+  const allFieldPlayers=new Set();
+  for(const r of parsedData)for(const p of extractPlayers(r.lineup))allFieldPlayers.add(p);
+  const playerList=[...allFieldPlayers].sort();
+  const options=playerList.map(p=>`<option value="${p}">${p}</option>`).join('');
+  const slots=Array.from({length:6},(_,i)=>`
+    <div style="flex:1;min-width:160px;">
+      <label style="font-size:10px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:4px;">Player ${i+1}${i>=2?' (optional)':''}</label>
+      <select id="combo-slot-${i}" style="width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:var(--radius-sm);color:var(--text);font-family:var(--font);font-size:13px;padding:7px 10px;outline:none;">
+        <option value="">— any —</option>${options}
+      </select>
+    </div>`).join('');
+  document.getElementById('panel-combosearch').innerHTML=`
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-title">Top field combos</div>
+      <p class="step-label">Automatically find the highest-owned player combinations across the entire field.</p>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <span style="font-size:11px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.05em;">Combo size</span>
+        <button id="top-combo-btn-2" class="sport-btn active" onclick="setTopComboSize(2)">2-man</button>
+        <button id="top-combo-btn-3" class="sport-btn" onclick="setTopComboSize(3)">3-man</button>
+      </div>
+      <button class="btn" onclick="runTopCombos()">Show top combos</button>
+      <div id="top-combo-results" style="margin-top:14px;"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Manual combo search</div>
+      <p class="step-label">Select 2–6 players to see how many field entries and your entries contain that exact combination.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">${slots}</div>
+      <button class="btn" onclick="searchCombos()">Search</button>
+    </div>
+    <div id="combo-results"></div>`;
+}
+
+function setTopComboSize(n){
+  topComboSize=n;
+  document.getElementById('top-combo-btn-2').classList.toggle('active',n===2);
+  document.getElementById('top-combo-btn-3').classList.toggle('active',n===3);
+  // Clear previous results when switching size
+  document.getElementById('top-combo-results').innerHTML='';
+}
+
+function runTopCombos(){
+  const container=document.getElementById('top-combo-results');
+  container.innerHTML=`<p style="font-size:12px;color:var(--muted);font-family:var(--mono);">Computing… this may take a moment for large contests.</p>`;
+
+  // Defer to allow the browser to repaint the "Computing..." message first
+  setTimeout(()=>{
+    const fieldTotal=fieldEntries.length;
+    if(!fieldTotal){container.innerHTML='<p style="font-size:12px;color:var(--red);">No field entries loaded.</p>';return;}
+
+    // Build array of player arrays per field entry (use Set for fast lookup)
+    const fieldLineups=fieldEntries.map(r=>extractPlayers(r.lineup));
+    const myLineups=enriched.map(r=>r.players);
+
+    // Count combos across all field lineups
+    const comboCounts={};
+    for(const players of fieldLineups){
+      const combos=getCombinations(players,topComboSize);
+      for(const combo of combos){
+        const key=combo.join('|');
+        comboCounts[key]=(comboCounts[key]||0)+1;
+      }
+    }
+
+    // Sort by count desc, take top 25
+    const sorted=Object.entries(comboCounts)
+      .sort((a,b)=>b[1]-a[1])
+      .slice(0,25);
+
+    if(!sorted.length){container.innerHTML='<p style="font-size:12px;color:var(--muted);">No combos found.</p>';return;}
+
+    // Pre-compute my exposure to each combo
+    const rows=sorted.map(([key,count],rank)=>{
+      const players=key.split('|');
+      const fieldPct=(count/fieldTotal*100).toFixed(2);
+      const myCount=enriched.length>0?myLineups.filter(lp=>players.every(p=>lp.includes(p))).length:0;
+      const myPct=enriched.length>0?(myCount/enriched.length*100).toFixed(1):'—';
+      const diff=enriched.length>0?((myCount/enriched.length*100)-(count/fieldTotal*100)):null;
+      const diffStr=diff===null?'—':(diff>0?'+':'')+diff.toFixed(1)+'%';
+      const diffCls=diff===null?'diff-neu':diff>2?'diff-pos':diff<-2?'diff-neg':'diff-neu';
+      const playersDisplay=players.join(' · ');
+      return `<tr>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--muted);width:28px;text-align:center;">${rank+1}</td>
+        <td style="font-weight:500;">${playersDisplay}</td>
+        <td style="font-family:var(--mono);font-size:12px;text-align:right;">${count.toLocaleString()}</td>
+        <td style="font-family:var(--mono);font-size:12px;text-align:right;color:var(--text);">${fieldPct}%</td>
+        <td style="font-family:var(--mono);font-size:12px;text-align:right;color:${myCount>0?'var(--accent)':'var(--muted)'};">${myCount>0?myCount:'—'}</td>
+        <td style="font-family:var(--mono);font-size:12px;text-align:right;color:${myCount>0?'var(--accent)':'var(--muted)'};">${myCount>0?myPct+'%':'—'}</td>
+        <td class="${diffCls}" style="text-align:right;">${diffStr}</td>
+      </tr>`;
+    }).join('');
+
+    container.innerHTML=`
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr>
+            <th style="text-align:center;">#</th>
+            <th>Players</th>
+            <th style="text-align:right;">Field entries</th>
+            <th style="text-align:right;">Field own%</th>
+            <th style="text-align:right;">Your entries</th>
+            <th style="text-align:right;">Your exp%</th>
+            <th style="text-align:right;">Diff</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="legend" style="margin-top:8px;">Top 25 ${topComboSize}-man combos by field ownership. Diff = your exposure minus field ownership.</p>`;
+  },30);
+}
+
+// Returns all combinations of size k from an array
+function getCombinations(arr,k){
+  const result=[];
+  function helper(start,combo){
+    if(combo.length===k){result.push([...combo].sort());return;}
+    for(let i=start;i<arr.length;i++){
+      combo.push(arr[i]);
+      helper(i+1,combo);
+      combo.pop();
+    }
+  }
+  helper(0,[]);
+  return result;
+}
+
+function searchCombos(){
+  const selected=[];
+  for(let i=0;i<6;i++){
+    const v=document.getElementById('combo-slot-'+i)?.value;
+    if(v)selected.push(v);
+  }
+  if(selected.length<2){alert('Select at least 2 players.');return;}
+  if(new Set(selected).size!==selected.length){alert('Each player can only be selected once.');return;}
+
+  const fieldMatches=fieldEntries.filter(r=>selected.every(p=>extractPlayers(r.lineup).includes(p)));
+  const myMatches=enriched.filter(r=>selected.every(p=>r.players.includes(p)));
+  const fieldPct=(fieldMatches.length/fieldEntries.length*100).toFixed(2);
+  const myPct=enriched.length>0?(myMatches.length/enriched.length*100).toFixed(1):'0.0';
+
+  const myRows=myMatches.map(r=>{
+    const lbl=r.name.replace(/ \(\d+\/\d+\)/,'')+' '+(r.name.match(/\(\d+\/\d+\)/)?.[0]||'');
+    const b=r.dupes===0?'<span class="badge b-green">unique</span>':r.dupes<=5?`<span class="badge b-green">${r.dupes}</span>`:r.dupes<=20?`<span class="badge b-amber">${r.dupes}</span>`:`<span class="badge b-red">${r.dupes}</span>`;
+    return `<tr><td style="font-family:var(--mono);font-size:11px;color:var(--muted);">${lbl}</td><td>${b}</td><td style="font-size:12px;color:var(--muted);">${r.players.join(' · ')}</td></tr>`;
+  }).join('');
+
+  // Build per-user breakdown from all field matches
+  const userCounts={};
+  for(const r of fieldMatches){
+    const uname=r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim();
+    userCounts[uname]=(userCounts[uname]||0)+1;
+  }
+  // Also include selected user even if 0 (they're in fieldEntries exclusion — add from myMatches)
+  if(selectedUsername&&!userCounts[selectedUsername])userCounts[selectedUsername]=0;
+  if(selectedUsername&&myMatches.length)userCounts[selectedUsername]=myMatches.length;
+
+  const sortedUsers=Object.entries(userCounts).sort((a,b)=>b[1]-a[1]);
+  const userRows=sortedUsers.map(([uname,cnt])=>{
+    const isMe=uname===selectedUsername;
+    const totalEntries=parsedData.filter(r=>r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim()===uname).length;
+    const expPct=totalEntries>0?(cnt/totalEntries*100).toFixed(1)+'%':'—';
+    return `<tr style="${isMe?'background:rgba(200,240,90,0.06);':''}">
+      <td style="font-family:var(--mono);font-size:12px;color:${isMe?'var(--accent)':'var(--text)'};font-weight:${isMe?'500':'400'};">${uname}${isMe?' ★':''}</td>
+      <td style="font-family:var(--mono);font-size:13px;font-weight:500;text-align:right;">${cnt}</td>
+      <td style="font-family:var(--mono);font-size:12px;color:var(--muted);text-align:right;">${expPct}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('combo-results').innerHTML=`
+    <div class="card" style="margin-top:12px;">
+      <div style="font-size:12px;font-family:var(--mono);color:var(--muted);margin-bottom:14px;">
+        Results for: <span style="color:var(--text);">${selected.join(' + ')}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
+        <div class="metric"><div class="metric-label">Field entries</div><div class="metric-value">${fieldMatches.length.toLocaleString()}</div></div>
+        <div class="metric"><div class="metric-label">Field ownership</div><div class="metric-value">${fieldPct}%</div></div>
+        <div class="metric"><div class="metric-label">Your entries</div><div class="metric-value">${myMatches.length}</div></div>
+        <div class="metric"><div class="metric-label">Your exposure</div><div class="metric-value">${myPct}%</div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div>
+          <div class="card-title" style="margin-bottom:10px;">Users with this combo</div>
+          <div style="max-height:400px;overflow-y:auto;">
+            <table>
+              <thead><tr><th>User</th><th style="text-align:right;">Entries</th><th style="text-align:right;">% of their book</th></tr></thead>
+              <tbody>${userRows}</tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          ${myMatches.length>0?`
+          <div class="card-title" style="margin-bottom:10px;">Your lineups with this combo</div>
+          <div style="max-height:400px;overflow-y:auto;">
+            <table><thead><tr><th>Entry</th><th>Dupes</th><th>Full lineup</th></tr></thead>
+            <tbody>${myRows}</tbody></table>
+          </div>`:'<p style="font-size:13px;color:var(--muted);margin-top:8px;">None of your entries contain this combination.</p>'}
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderH2H(){
+  const searchBoxes=Array.from({length:4},(_,i)=>`
+    <div style="flex:1;min-width:180px;position:relative;">
+      <label style="font-size:10px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:4px;">User ${i+1}${i>=2?' (optional)':''}</label>
+      <input type="text" id="h2h-search-${i}" placeholder="Type username..." autocomplete="off"
+        oninput="onH2HSearch(${i})" onkeydown="onH2HKey(event,${i})"
+        style="width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:var(--radius-sm);color:var(--text);font-family:var(--font);font-size:13px;padding:7px 10px;outline:none;">
+      <div id="h2h-dd-${i}" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--radius-sm);max-height:200px;overflow-y:auto;z-index:100;"></div>
+      <div id="h2h-sel-${i}" style="font-size:11px;color:var(--accent);font-family:var(--mono);margin-top:4px;min-height:16px;"></div>
+    </div>`).join('');
+
+  document.getElementById('panel-h2h').innerHTML=`
+    <div class="card">
+      <div class="card-title">Head to head comparison</div>
+      <p class="step-label">Select 2–4 users to compare their portfolios — ownership breakdown and lineup overlap side by side.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">${searchBoxes}</div>
+      <button class="btn" onclick="runH2H()">Compare</button>
+    </div>
+    <div id="h2h-results"></div>`;
+
+  // Wire up close-on-click-outside for each dropdown
+  for(let i=0;i<4;i++){
+    (function(idx){
+      document.addEventListener('click',function(e){
+        const dd=document.getElementById('h2h-dd-'+idx);
+        const inp=document.getElementById('h2h-search-'+idx);
+        if(dd&&!dd.contains(e.target)&&e.target!==inp)dd.style.display='none';
+      });
+    })(i);
+  }
+}
+
+const h2hSelected=[];
+function onH2HSearch(idx){
+  const q=document.getElementById('h2h-search-'+idx).value.trim().toLowerCase();
+  const dd=document.getElementById('h2h-dd-'+idx);
+  if(q.length<1){dd.style.display='none';return;}
+  const matches=allUsernames.filter(u=>u.toLowerCase().includes(q)).slice(0,50);
+  if(!matches.length){dd.style.display='none';return;}
+  dd.innerHTML=matches.map(u=>{
+    const idx2=u.toLowerCase().indexOf(q);
+    const hi=u.slice(0,idx2)+'<mark style="background:rgba(200,240,90,0.3);color:var(--text);border-radius:2px;">'+u.slice(idx2,idx2+q.length)+'</mark>'+u.slice(idx2+q.length);
+    const esc=u.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return '<div class="dd-item" onclick="selectH2HUser('+idx+',\''+esc+'\')">'+hi+'</div>';
+  }).join('');
+  dd.style.display='block';
+}
+
+function selectH2HUser(idx,name){
+  h2hSelected[idx]=name;
+  document.getElementById('h2h-search-'+idx).value=name;
+  document.getElementById('h2h-dd-'+idx).style.display='none';
+  const entries=parsedData.filter(r=>r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim()===name);
+  document.getElementById('h2h-sel-'+idx).textContent='\u2713 '+entries.length+' entr'+(entries.length===1?'y':'ies');
+}
+
+function onH2HKey(e,idx){
+  const dd=document.getElementById('h2h-dd-'+idx);
+  const items=dd.querySelectorAll('.dd-item');
+  if(!items.length)return;
+  const active=dd.querySelector('.dd-item.active');
+  if(e.key==='ArrowDown'){e.preventDefault();const n=active?active.nextElementSibling:items[0];if(active)active.classList.remove('active');if(n){n.classList.add('active');n.scrollIntoView({block:'nearest'});}}
+  else if(e.key==='ArrowUp'){e.preventDefault();const p=active?active.previousElementSibling:items[items.length-1];if(active)active.classList.remove('active');if(p){p.classList.add('active');p.scrollIntoView({block:'nearest'});}}
+  else if(e.key==='Enter'){e.preventDefault();if(active)active.click();else if(items.length===1)items[0].click();}
+  else if(e.key==='Escape')dd.style.display='none';
+}
+
+// Colour palette for up to 4 users
+const H2H_COLORS=['#c8f05a','#5b9cf6','#f5a623','#ff5f5f'];
+const H2H_DIM=['rgba(200,240,90,0.15)','rgba(91,156,246,0.15)','rgba(245,166,35,0.15)','rgba(255,95,95,0.15)'];
+
+function runH2H(){
+  const users=[];
+  for(let i=0;i<4;i++){if(h2hSelected[i])users.push(h2hSelected[i]);}
+  if(users.length<2){alert('Select at least 2 users.');return;}
+
+  // Build entry sets per user
+  const userEntries=users.map(u=>({
+    name:u,
+    entries:parsedData.filter(r=>r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim()===u),
+    players:[]
+  }));
+  userEntries.forEach(u=>{
+    u.entries.forEach(r=>u.players.push({lineup:r.lineup,players:extractPlayers(r.lineup),name:r.name}));
+  });
+
+  // Field lineup lookup for dupe counts
+  const fieldLineCounts={};
+  fieldEntries.forEach(r=>fieldLineCounts[r.lineup]=(fieldLineCounts[r.lineup]||0)+1);
+
+  // Ownership per user
+  const userOwn=userEntries.map(u=>computeOwnership(u.entries));
+
+  // Summary cards
+  const summaryCards=users.map((u,i)=>`
+    <div class="metric" style="border-left:3px solid ${H2H_COLORS[i]};">
+      <div class="metric-label" style="color:${H2H_COLORS[i]};">${u}</div>
+      <div style="font-size:18px;font-weight:500;font-family:var(--mono);color:var(--text);margin-top:2px;">${userEntries[i].entries.length} entries</div>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:2px;">${new Set(userEntries[i].entries.map(r=>r.lineup)).size} unique lineups</div>
+    </div>`).join('');
+
+  // Shared lineups between each pair
+  let sharedSections='';
+  for(let i=0;i<users.length;i++){
+    for(let j=i+1;j<users.length;j++){
+      const linesI=new Map();
+      userEntries[i].players.forEach(r=>linesI.set(r.lineup,(linesI.get(r.lineup)||[]).concat(r.name)));
+      const linesJ=new Set(userEntries[j].players.map(r=>r.lineup));
+      const shared=[];
+      linesI.forEach((names,lineup)=>{if(linesJ.has(lineup))shared.push({lineup,names});});
+
+      if(shared.length===0){
+        sharedSections+=`
+          <div style="margin-bottom:16px;">
+            <div style="font-size:13px;font-weight:500;margin-bottom:8px;">
+              <span style="color:${H2H_COLORS[i]};">${users[i]}</span>
+              <span style="color:var(--muted);margin:0 8px;">vs</span>
+              <span style="color:${H2H_COLORS[j]};">${users[j]}</span>
+              <span class="badge b-gray" style="margin-left:10px;">0 shared lineups</span>
+            </div>
+            <p style="font-size:12px;color:var(--muted);">No lineups in common.</p>
+          </div>`;
+      } else {
+        const rows=shared.map(({lineup,names})=>{
+          const dupes=fieldLineCounts[lineup]||0;
+          const badge=dupes===0?'<span class="badge b-green">unique</span>':dupes<=5?`<span class="badge b-green">${dupes}</span>`:dupes<=20?`<span class="badge b-amber">${dupes}</span>`:`<span class="badge b-red">${dupes}</span>`;
+          const players=extractPlayers(lineup).join(' · ');
+          // How many entries each user has with this lineup
+          const cntI=userEntries[i].players.filter(r=>r.lineup===lineup).length;
+          const cntJ=userEntries[j].players.filter(r=>r.lineup===lineup).length;
+          return `<tr>
+            <td style="font-size:12px;color:var(--muted);">${players}</td>
+            <td style="text-align:center;font-family:var(--mono);font-size:12px;color:${H2H_COLORS[i]};">${cntI}</td>
+            <td style="text-align:center;font-family:var(--mono);font-size:12px;color:${H2H_COLORS[j]};">${cntJ}</td>
+            <td style="text-align:center;">${badge}</td>
+          </tr>`;
+        }).join('');
+        sharedSections+=`
+          <div style="margin-bottom:20px;">
+            <div style="font-size:13px;font-weight:500;margin-bottom:10px;">
+              <span style="color:${H2H_COLORS[i]};">${users[i]}</span>
+              <span style="color:var(--muted);margin:0 8px;">vs</span>
+              <span style="color:${H2H_COLORS[j]};">${users[j]}</span>
+              <span class="badge b-amber" style="margin-left:10px;">${shared.length} shared lineup${shared.length!==1?'s':''}</span>
+            </div>
+            <div style="overflow-x:auto;">
+              <table>
+                <thead><tr>
+                  <th>Lineup</th>
+                  <th style="text-align:center;color:${H2H_COLORS[i]};">${users[i]}</th>
+                  <th style="text-align:center;color:${H2H_COLORS[j]};">${users[j]}</th>
+                  <th style="text-align:center;">Field dupes</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          </div>`;
+      }
+    }
+  }
+
+  // Ownership comparison table
+  const allP=new Set();
+  userEntries.forEach(u=>u.entries.forEach(r=>extractPlayers(r.lineup).forEach(p=>allP.add(p))));
+  Object.entries(fieldOwnership).forEach(([p,v])=>{if(v>=1)allP.add(p);});
+  const ownRows=[...allP].map(p=>({
+    p,
+    vals:userOwn.map(o=>o[p]||0),
+    field:fieldOwnership[p]||0
+  })).sort((a,b)=>Math.max(...b.vals)-Math.max(...a.vals));
+
+  const ownHeaders=users.map((u,i)=>`<th style="text-align:right;color:${H2H_COLORS[i]};">${u}</th>`).join('');
+  const ownTableRows=ownRows.map(({p,vals,field})=>{
+    const cells=vals.map((v,i)=>`<td style="text-align:right;font-family:var(--mono);font-size:12px;color:${v>0?H2H_COLORS[i]:'var(--muted)'};">${v.toFixed(1)}%</td>`).join('');
+    return `<tr><td style="font-weight:500;">${p}</td><td style="text-align:right;font-family:var(--mono);font-size:12px;color:var(--muted);">${field.toFixed(1)}%</td>${cells}</tr>`;
+  }).join('');
+
+  document.getElementById('h2h-results').innerHTML=`
+    <div class="card" style="margin-top:12px;">
+      <div style="display:grid;grid-template-columns:repeat(${users.length},1fr);gap:10px;margin-bottom:24px;">${summaryCards}</div>
+
+      <div class="card-title" style="margin-bottom:14px;">Shared lineups</div>
+      ${sharedSections}
+
+      <div class="card-title" style="margin-top:8px;margin-bottom:8px;">Ownership comparison</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px;">Players in any user's pool or ≥1% field owned, sorted by highest ownership across the group.</p>
+      <div style="overflow-x:auto;max-height:500px;overflow-y:auto;">
+        <table>
+          <thead><tr><th>Player</th><th style="text-align:right;color:var(--muted);">Field</th>${ownHeaders}</tr></thead>
+          <tbody>${ownTableRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+
+function switchTab(tab,el){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-'+tab).classList.add('active');
+}
+</script>
+</body>
+</html>
