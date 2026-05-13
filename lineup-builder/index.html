@@ -455,15 +455,15 @@ select.mapper-select option{background:var(--surface2);}
   .modal-overlay { padding: 0; align-items: flex-end; }
   .modal { border-radius: 14px 14px 0 0; max-height: 92vh; width: 100%; max-width: 100%; }
 
-  /* Preview modal — full screen */
+  /* Preview modal — full screen, single scroll */
   #previewModal .modal {
     border-radius: 0;
-    max-height: 100vh;
+    max-height: 100dvh;
     height: 100dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    padding: 10px 12px 8px;
+    padding: 10px 12px 0;
   }
   #previewModal .modal-title { font-size: 16px; margin-bottom: 2px; }
   #previewModal .modal-sub { font-size: 11px; margin-bottom: 4px; }
@@ -474,40 +474,45 @@ select.mapper-select option{background:var(--surface2);}
     flex-direction: column !important;
     flex: 1 1 0;
     min-height: 0;
-    overflow: hidden;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
     gap: 0 !important;
   }
-  /* Exposure: top, max 40% of modal body, scrolls internally */
+  /* Exposure: natural height, no cap — shows fully */
   #previewExposureSidebar {
     order: -1;
     border-left: none !important;
     border-bottom: 1px solid var(--border);
-    padding: 0 0 6px 0 !important;
+    padding: 0 0 10px 0 !important;
     min-width: 0 !important;
-    flex: 0 0 auto;
-    max-height: 40%;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    flex-shrink: 0;
+    overflow: visible;
+    max-height: none;
   }
-  #previewExposureList { overflow-y: auto; max-height: none; }
-  /* Lineups: takes all remaining space, scrolls internally */
+  #previewExposureList { overflow: visible; max-height: none; }
+  /* Lineups: natural height, flows after exposure in same scroll */
   #previewModalBody > div:first-child {
-    flex: 1 1 0;
-    min-height: 0;
+    flex-shrink: 0;
+    overflow: visible;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
-    padding-top: 8px;
+    padding-top: 10px;
+    /* Extra bottom padding so last lineup isn't hidden behind save button */
+    padding-bottom: 68px;
   }
-  #previewLineupsList {
-    flex: 1 1 0;
-    min-height: 0;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+  #previewLineupsList { overflow: visible; flex: none; }
+  /* Save button: sticky at bottom of screen */
+  .preview-actions {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    padding: 10px 12px 12px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    z-index: 10;
+    flex-shrink: 0;
   }
   .preview-lineup-card { padding: 7px 8px; }
   .preview-lineup-names { font-size: 11px; line-height: 1.5; }
-  .preview-actions { padding: 6px 0 2px; flex-shrink: 0; }
   .btn-add-selected { padding: 10px; font-size: 13px; }
 
   #emptyState { height: calc(100vh - 60px); padding: 0 16px; }
