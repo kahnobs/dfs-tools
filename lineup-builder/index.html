@@ -452,6 +452,45 @@ select.mapper-select option{background:var(--surface2);}
   .modal-overlay { padding: 0; align-items: flex-end; }
   .modal { border-radius: 14px 14px 0 0; max-height: 92vh; width: 100%; max-width: 100%; }
 
+  /* Preview modal — full screen, stacked layout */
+  #previewModal .modal {
+    border-radius: 0;
+    max-height: 100vh;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  #previewModalBody {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1;
+    overflow: hidden;
+    gap: 0 !important;
+  }
+  /* Lineups list takes most of the space */
+  #previewModalBody > div:first-child {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  #previewLineupsList { overflow-y: auto; flex: 1; }
+  /* Exposure sidebar collapses to a compact strip below lineups */
+  #previewExposureSidebar {
+    border-left: none !important;
+    border-top: 1px solid var(--border);
+    padding-left: 0 !important;
+    min-width: 0 !important;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  /* Lineup cards — slightly more compact on mobile */
+  .preview-lineup-card { padding: 8px; }
+  .preview-lineup-names { font-size: 11px; }
+  .preview-actions { padding: 8px 0 4px; }
+  .btn-add-selected { padding: 10px; font-size: 13px; }
+
   #emptyState { height: calc(100vh - 60px); padding: 0 16px; }
 }
 
@@ -894,7 +933,7 @@ select.mapper-select option{background:var(--surface2);}
     <div id="previewFilterBtns" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
 
     <!-- two-column body -->
-    <div style="display:grid;grid-template-columns:1fr 300px;gap:14px;min-height:0;overflow:hidden;">
+    <div id="previewModalBody" style="display:grid;grid-template-columns:1fr 300px;gap:14px;min-height:0;overflow:hidden;">
       <!-- lineups list -->
       <div style="display:flex;flex-direction:column;overflow:hidden;">
         <div style="overflow-y:auto;flex:1;" id="previewLineupsList"></div>
@@ -905,7 +944,7 @@ select.mapper-select option{background:var(--surface2);}
       </div>
 
       <!-- exposure sidebar -->
-      <div style="display:flex;flex-direction:column;overflow:hidden;border-left:1px solid var(--border);padding-left:14px;min-width:260px;">
+      <div id="previewExposureSidebar" style="display:flex;flex-direction:column;overflow:hidden;border-left:1px solid var(--border);padding-left:14px;min-width:260px;">
         <div style="font-family:'Bebas Neue',sans-serif;font-size:13px;letter-spacing:1px;color:var(--muted);margin-bottom:8px;flex-shrink:0;">Exposure in Preview</div>
         <div id="previewExposureList" style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:1px;padding-right:8px;"></div>
       </div>
