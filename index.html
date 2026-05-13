@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DFS Tools</title>
+<meta name="description" content="Free, browser-based DFS tools for DraftKings contests. No login required. Your data never leaves your device.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0a0b0d;
+  --surface: #111316;
+  --surface2: #191c21;
+  --border: rgba(255,255,255,0.06);
+  --border2: rgba(255,255,255,0.1);
+  --text: #eeecea;
+  --muted: #666d78;
+  --accent: #c8f05a;
+  --accent-dim: rgba(200,240,90,0.08);
+  --font: 'Syne', sans-serif;
+  --mono: 'DM Mono', monospace;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Grid background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(200,240,90,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(200,240,90,0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 24px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Nav */
+nav {
+  padding: 24px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+
+.logo-mark {
+  width: 34px;
+  height: 34px;
+  background: var(--accent);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 13px;
+  color: #0a0b0d;
+  flex-shrink: 0;
+}
+
+.nav-wordmark {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.nav-badge {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--muted);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  padding: 3px 8px;
+}
+
+/* Hero */
+.hero {
+  padding: 96px 0 80px;
+  text-align: center;
+}
+
+.hero-eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hero-eyebrow::before, .hero-eyebrow::after {
+  content: '';
+  width: 24px;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+.hero h1 {
+  font-size: clamp(42px, 7vw, 72px);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin-bottom: 20px;
+  color: var(--text);
+}
+
+.hero h1 em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+.hero p {
+  font-size: 17px;
+  color: var(--muted);
+  max-width: 480px;
+  margin: 0 auto 40px;
+  line-height: 1.65;
+  font-weight: 400;
+}
+
+.hero-pills {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border2);
+  border-radius: 100px;
+  padding: 5px 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+/* Tools grid */
+.section-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+}
+
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  margin-bottom: 80px;
+}
+
+.tool-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+  text-decoration: none;
+  display: block;
+  transition: border-color 0.15s, transform 0.15s, background 0.15s;
+  position: relative;
+  overflow: hidden;
+  animation: fadeUp 0.5s ease both;
+}
+
+.tool-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  transform: translateY(-2px);
+}
+
+.tool-card::after {
+  content: '→';
+  position: absolute;
+  top: 28px;
+  right: 28px;
+  font-size: 18px;
+  color: var(--muted);
+  transition: color 0.15s, transform 0.15s;
+}
+
+.tool-card:hover::after {
+  color: var(--accent);
+  transform: translate(3px, -3px);
+}
+
+.tool-sports {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.sport-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.05);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.sport-tag.active {
+  background: rgba(200,240,90,0.1);
+  color: var(--accent);
+  border-color: rgba(200,240,90,0.2);
+}
+
+.tool-name {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin-bottom: 8px;
+  padding-right: 32px;
+}
+
+.tool-desc {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.6;
+  font-family: var(--mono);
+  font-weight: 400;
+}
+
+.tool-features {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.feature-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--surface2);
+  border-radius: 4px;
+  padding: 3px 8px;
+}
+
+/* Coming soon card */
+.tool-card.coming-soon {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
+}
+
+.tool-card.coming-soon::after {
+  content: 'soon';
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  top: 30px;
+  right: 28px;
+}
+
+/* Footer */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 32px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+footer p {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.footer-privacy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.footer-privacy::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tool-card:nth-child(1) { animation-delay: 0.05s; }
+.tool-card:nth-child(2) { animation-delay: 0.1s; }
+.tool-card:nth-child(3) { animation-delay: 0.15s; }
+.tool-card:nth-child(4) { animation-delay: 0.2s; }
+
+@media (max-width: 600px) {
+  .hero { padding: 64px 0 56px; }
+  nav { padding: 16px 0; }
+  .tools-grid { grid-template-columns: 1fr; }
+  footer { flex-direction: column; align-items: flex-start; }
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <nav>
+    <a href="/" class="nav-logo">
+      <div class="logo-mark">DFS</div>
+      <span class="nav-wordmark">DFS Tools</span>
+    </a>
+    <span class="nav-badge">free &amp; open source</span>
+  </nav>
+
+  <section class="hero">
+    <div class="hero-eyebrow">DraftKings Analytics</div>
+    <h1>Tools built for<br><em>serious DFS players</em></h1>
+    <p>Free, browser-based tools to analyze your DraftKings contests. No account needed. Your data never leaves your device.</p>
+    <div class="hero-pills">
+      <div class="pill"><span class="pill-dot"></span> 100% client-side</div>
+      <div class="pill"><span class="pill-dot"></span> No login required</div>
+      <div class="pill"><span class="pill-dot"></span> Golf · NASCAR · UFC</div>
+    </div>
+  </section>
+
+  <div class="section-label">Available tools</div>
+  <div class="tools-grid">
+
+    <a href="./contest-analyzer/" class="tool-card">
+      <div class="tool-sports">
+        <span class="sport-tag active">Golf</span>
+        <span class="sport-tag active">NASCAR</span>
+        <span class="sport-tag active">UFC</span>
+      </div>
+      <div class="tool-name">Contest Analyzer</div>
+      <div class="tool-desc">Upload any DK contest CSV and analyze your portfolio against the full field.</div>
+      <div class="tool-features">
+        <span class="feature-tag">Lineup duplicates</span>
+        <span class="feature-tag">Ownership</span>
+        <span class="feature-tag">Leverage</span>
+        <span class="feature-tag">Combo search</span>
+        <span class="feature-tag">Head to head</span>
+      </div>
+    </a>
+
+    <a href="./lineup-builder/" class="tool-card">
+      <div class="tool-sports">
+        <span class="sport-tag active">Golf</span>
+        <span class="sport-tag active">NASCAR</span>
+        <span class="sport-tag active">UFC</span>
+      </div>
+      <div class="tool-name">Lineup Builder</div>
+      <div class="tool-desc">Build and manage DK lineups across multiple slates with a full player pool and export tools.</div>
+      <div class="tool-features">
+        <span class="feature-tag">Multi-slate</span>
+        <span class="feature-tag">Player pool</span>
+        <span class="feature-tag">Ownership %</span>
+        <span class="feature-tag">Export</span>
+      </div>
+    </a>
+
+  </div>
+
+  <footer>
+    <p>Built for DraftKings GPP players &mdash; kahnobs.github.io/dfs-tools</p>
+    <div class="footer-privacy">All analysis runs locally in your browser. No data is ever uploaded or stored.</div>
+  </footer>
+</div>
+
+</body>
+</html>
