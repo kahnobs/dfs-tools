@@ -447,7 +447,10 @@ select.mapper-select option{background:var(--surface2);}
 
   .setting-row { flex-wrap: wrap; gap: 6px; }
   .setting-label { flex: 1 1 100%; }
-  .setting-num, .setting-select { width: 100%; }
+  .setting-num, .setting-select { width: 100%; font-size: 16px !important; }
+
+  /* Prevent iOS auto-zoom on ALL inputs/selects/textareas */
+  input, select, textarea { font-size: 16px !important; }
 
   .modal-overlay { padding: 0; align-items: flex-end; }
   .modal { border-radius: 14px 14px 0 0; max-height: 92vh; width: 100%; max-width: 100%; }
