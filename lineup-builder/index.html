@@ -380,6 +380,149 @@ select.mapper-select option{background:var(--surface2);}
 .btn-add-selected{flex:1;background:var(--purple);color:#fff;border:none;padding:8px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;}
 .btn-add-selected:hover{background:#c026d3;}
 .btn-add-selected:disabled{background:var(--surface2);color:var(--muted);cursor:not-allowed;}
+
+/* ── MOBILE ── */
+@media (max-width: 768px) {
+
+  /* Topbar: tighter, wrap gracefully */
+  .topbar {
+    padding: 8px 12px;
+    gap: 7px;
+  }
+  .logo { font-size: 18px; }
+
+  /* Hide Restore/Clear All from topbar on mobile to reduce clutter — still accessible via long-press backup */
+  .topbar > label,
+  .topbar > button:not(.btn-new-slate):not([onclick*="backupData"]) {
+    display: none;
+  }
+
+  /* Slate tabs scroll horizontally — already works, just tighten */
+  .slate-tab { padding: 6px 10px; font-size: 12px; }
+  .btn-new-slate { padding: 6px 12px; font-size: 12px; }
+
+  /* === MAIN LAYOUT: stack vertically, full scroll === */
+  #appWrap { height: auto; min-height: 100vh; }
+
+  #mainLayout {
+    display: flex !important;
+    flex-direction: column;
+    height: auto;
+    overflow: visible;
+  }
+
+  /* Panel toggle bar — shown only on mobile */
+  #mobilePanelToggle {
+    display: flex;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+  .mob-toggle-btn {
+    flex: 1;
+    padding: 11px 8px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 14px;
+    letter-spacing: 1px;
+    color: var(--muted);
+    text-align: center;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all .15s;
+  }
+  .mob-toggle-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  /* Pool panel */
+  .pool-panel {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow: visible;
+    height: auto;
+  }
+  .pool-panel.mob-hidden { display: none; }
+
+  /* Pool list — let it expand naturally, no fixed height trap */
+  .driver-list {
+    overflow-y: visible;
+    max-height: none;
+    height: auto;
+    /* Cap at a reasonable scroll zone */
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+
+  /* Panel header wraps better */
+  .panel-header { gap: 6px; }
+  #searchInput { width: 100%; flex: 1; min-width: 0; font-size: 14px; padding: 7px 10px; }
+  .sort-btns { flex-wrap: wrap; gap: 4px; }
+  .sort-btn { padding: 5px 9px; font-size: 11px; }
+  .show-hidden-btn { padding: 5px 9px; font-size: 11px; }
+
+  /* Bigger tap targets on pool rows */
+  .driver-row { padding: 8px 7px; }
+  .add-btn, .remove-btn { width: 28px; height: 28px; font-size: 16px; }
+  .hide-btn { width: 24px; height: 24px; font-size: 12px; opacity: 1 !important; } /* always visible on mobile */
+
+  /* Right panel */
+  .right-panel {
+    overflow: visible;
+    height: auto;
+  }
+  .right-panel.mob-hidden { display: none; }
+
+  /* Tab bar — bigger tap targets */
+  .tabs { overflow-x: auto; }
+  .tab {
+    padding: 12px 4px;
+    font-size: 11px;
+    min-width: 56px;
+  }
+
+  /* Tab content — let them scroll naturally */
+  .tab-content { overflow: visible; height: auto; }
+  .tab-content.active { display: flex; flex-direction: column; }
+
+  /* Builder tab inner panels */
+  .current-lineup { overflow: visible; }
+  .saved-panel { height: auto; overflow: visible; }
+  .saved-list { overflow-y: visible; max-height: none; }
+
+  /* Exposure / groups / autogen panels */
+  .exposure-panel,
+  .groups-panel,
+  .autogen-panel { overflow: visible; height: auto; }
+
+  /* Save / clear buttons bigger */
+  .btn { padding: 10px 8px; font-size: 13px; }
+
+  /* Autogen setting rows — stack label above input on very narrow screens */
+  .setting-row { flex-wrap: wrap; gap: 6px; }
+  .setting-label { min-width: 0; flex: 1 1 100%; }
+  .setting-num, .setting-select { width: 100%; }
+
+  /* Modal full-screen on mobile */
+  .modal-overlay { padding: 0; align-items: flex-end; }
+  .modal {
+    border-radius: 14px 14px 0 0;
+    max-height: 92vh;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* Empty state adjustments */
+  #emptyState { height: calc(100vh - 60px); padding: 0 16px; }
+}
+
+/* Desktop: hide the mobile toggle bar */
+@media (min-width: 769px) {
+  #mobilePanelToggle { display: none; }
+}
 </style>
 </head>
 <body>
@@ -399,6 +542,12 @@ select.mapper-select option{background:var(--surface2);}
   <div class="empty-title">No Slates Yet</div>
   <div class="empty-sub">Create a new slate to get started. Upload a player pool CSV and start building lineups for NASCAR, PGA, or UFC.</div>
   <button class="btn-start" onclick="openNewSlateModal()">＋ Create First Slate</button>
+</div>
+
+<!-- Mobile panel toggle — hidden on desktop via CSS -->
+<div id="mobilePanelToggle">
+  <div class="mob-toggle-btn active" id="mobBtnPool" onclick="setMobilePanel('pool')">🏌 Player Pool</div>
+  <div class="mob-toggle-btn" id="mobBtnRight" onclick="setMobilePanel('right')">📋 Builder</div>
 </div>
 
 <div id="mainLayout">
@@ -4877,6 +5026,44 @@ loadHistory();
 if(slates.length)activeSlateId=slates[0].id;
 renderTopBar();
 if(activeSlateId)renderSlate();
+
+// ── MOBILE PANEL TOGGLE ──────────────────────────────────────
+function setMobilePanel(panel){
+  const pool = document.querySelector('.pool-panel');
+  const right = document.querySelector('.right-panel');
+  const btnPool = document.getElementById('mobBtnPool');
+  const btnRight = document.getElementById('mobBtnRight');
+  if(!pool||!right) return;
+  if(panel==='pool'){
+    pool.classList.remove('mob-hidden');
+    right.classList.add('mob-hidden');
+    btnPool.classList.add('active');
+    btnRight.classList.remove('active');
+    // Update toggle label to reflect current tab
+    btnRight.textContent = '📋 Builder';
+  } else {
+    pool.classList.add('mob-hidden');
+    right.classList.remove('mob-hidden');
+    btnRight.classList.add('active');
+    btnPool.classList.remove('active');
+  }
+}
+
+// When a player is added/removed on mobile, briefly flash "Builder" tab label
+// to hint user can switch over — only fires on narrow screens
+const _origSwitchTab = typeof switchTab === 'function' ? switchTab : null;
+function mobileTabHint(tabName){
+  const btn = document.getElementById('mobBtnRight');
+  if(!btn) return;
+  const labels = {builder:'📋 Builder',exposure:'📊 Exposure',groups:'👥 Groups',history:'⏱ History',autogen:'⚡ Auto-Gen'};
+  if(labels[tabName]) btn.textContent = labels[tabName];
+}
+// Patch switchTab to also update the mobile toggle label
+const _origSwitchTabFn = window.switchTab;
+window.switchTab = function(tab, el){
+  if(_origSwitchTabFn) _origSwitchTabFn(tab, el);
+  mobileTabHint(tab);
+};
 </script>
 
 </body>
