@@ -513,11 +513,14 @@ select.mapper-select option{background:var(--surface2);}
 /* Prevent background scroll when any modal is open */
 body.modal-open {
   overflow: hidden;
-  position: fixed;
-  width: 100%;
 }
 /* Also prevent pull-to-refresh on mobile */
 html { overscroll-behavior-y: contain; }
+/* Modal overlay itself handles scroll containment */
+.modal-overlay:not(.hidden) {
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
 </style>
 </head>
 <body>
