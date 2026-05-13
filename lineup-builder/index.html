@@ -424,8 +424,8 @@ select.mapper-select option{background:var(--surface2);}
   /* Pool rows — bigger tap targets, always-visible hide btn */
   .driver-list { max-height: 70vh; overflow-y: auto; }
   .driver-row { padding: 8px 5px; }
-  .add-btn, .remove-btn { width: 26px; height: 26px; font-size: 15px; border-radius: 5px; }
-  .hide-btn { width: 18px; height: 18px; font-size: 11px; opacity: 1 !important; }
+  .add-btn, .remove-btn { width: 28px; height: 28px; font-size: 15px; border-radius: 5px; }
+  .hide-btn { width: 22px; height: 22px; font-size: 12px; opacity: 1 !important; border: 1px solid var(--border) !important; border-radius: 4px !important; }
   .cell-sal { font-size: 11px !important; }
   .cell-name { font-size: 11px; }
 
@@ -1117,7 +1117,6 @@ function leftColValue(slate, p, i){
     const fight = p.fightNum || '—';
     const opp = p.opp || p.team || '';
     const oppDisplay = opp ? opp.split(' ').slice(-1)[0] : '';
-    // Find opponent's player ID for row highlighting
     const oppPlayer = opp ? slate.players.find(q => q.name===opp) : null;
     const oppPid = oppPlayer ? oppPlayer.id : '';
     return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1;cursor:default;"
@@ -1127,9 +1126,14 @@ function leftColValue(slate, p, i){
     </div>`;
   }
   if(slate.sport==='pga'){
-    const tee = formatTeeDisplay(p.start);
     const ampm = detectTeeAMPM(p.start);
     const color = ampm==='AM'?'var(--green)':ampm==='PM'?'var(--accent)':'var(--muted)';
+    if(isMobileView()){
+      // Mobile: just show AM / PM pill
+      const label = ampm || '—';
+      return `<span style="font-family:'DM Mono',monospace;font-size:10px;color:${color};font-weight:700;letter-spacing:.5px;">${label}</span>`;
+    }
+    const tee = formatTeeDisplay(p.start);
     return `<span style="font-family:'DM Mono',monospace;font-size:10px;color:${color};font-weight:600;white-space:nowrap;">${tee}</span>`;
   }
   // NASCAR — grid position
@@ -1271,12 +1275,13 @@ function getMobileStatFields(fields){
 function gridTemplate(fields){
   const slate=activeSlate();
   if(isMobileView()){
-    const leftWidth=slate?.sport==='pga'?'46px':slate?.sport==='ufc'?'52px':'28px';
+    // PGA tee col is just "AM"/"PM" on mobile — much narrower
+    const leftWidth=slate?.sport==='pga'?'30px':slate?.sport==='ufc'?'52px':'28px';
     const{primary,secondary}=getMobileStatFields(fields);
     const parts=[leftWidth,'minmax(90px,1fr)','56px'];
     if(primary)parts.push('40px');
     if(secondary)parts.push('36px');
-    parts.push('26px','18px');
+    parts.push('28px','22px');
     return parts.join(' ');
   }
   const leftWidth = slate?.sport==='pga' ? '62px' : slate?.sport==='ufc' ? '76px' : '38px';
