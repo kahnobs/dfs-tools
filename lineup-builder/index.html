@@ -467,7 +467,18 @@ select.mapper-select option{background:var(--surface2);}
     overflow: hidden;
     gap: 0 !important;
   }
-  /* Lineups list takes most of the space */
+  /* Exposure sidebar moves to top on mobile, compact fixed height */
+  #previewExposureSidebar {
+    order: -1;
+    border-left: none !important;
+    border-bottom: 1px solid var(--border);
+    padding-left: 0 !important;
+    min-width: 0 !important;
+    max-height: 220px;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  /* Lineups list takes remaining space */
   #previewModalBody > div:first-child {
     flex: 1;
     min-height: 0;
@@ -476,15 +487,6 @@ select.mapper-select option{background:var(--surface2);}
     flex-direction: column;
   }
   #previewLineupsList { overflow-y: auto; flex: 1; }
-  /* Exposure sidebar collapses to a compact strip below lineups */
-  #previewExposureSidebar {
-    border-left: none !important;
-    border-top: 1px solid var(--border);
-    padding-left: 0 !important;
-    min-width: 0 !important;
-    max-height: 200px;
-    overflow-y: auto;
-  }
   /* Lineup cards — slightly more compact on mobile */
   .preview-lineup-card { padding: 8px; }
   .preview-lineup-names { font-size: 11px; }
