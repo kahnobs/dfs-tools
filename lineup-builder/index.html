@@ -455,45 +455,52 @@ select.mapper-select option{background:var(--surface2);}
   .modal-overlay { padding: 0; align-items: flex-end; }
   .modal { border-radius: 14px 14px 0 0; max-height: 92vh; width: 100%; max-width: 100%; }
 
-  /* Preview modal — full screen, stacked layout */
+  /* Preview modal — full screen */
   #previewModal .modal {
     border-radius: 0;
     max-height: 100vh;
     height: 100vh;
     display: flex;
     flex-direction: column;
+    padding: 10px 12px 8px;
   }
+  #previewModal .modal-title { font-size: 16px; margin-bottom: 2px; }
+  #previewModal .modal-sub { font-size: 11px; margin-bottom: 4px; }
+  #previewModal #previewFilterBtns { margin-bottom: 6px; gap: 4px; }
+
   #previewModalBody {
     display: flex !important;
     flex-direction: column !important;
     flex: 1;
+    min-height: 0;
     overflow: hidden;
     gap: 0 !important;
   }
-  /* Exposure sidebar moves to top on mobile, compact fixed height */
+  /* Exposure sidebar: top, sizes to its full content */
   #previewExposureSidebar {
     order: -1;
     border-left: none !important;
     border-bottom: 1px solid var(--border);
-    padding-left: 0 !important;
+    padding: 0 0 8px 0 !important;
     min-width: 0 !important;
-    max-height: 220px;
-    overflow-y: auto;
     flex-shrink: 0;
+    overflow-y: visible;
+    max-height: none;
   }
-  /* Lineups list takes remaining space */
+  #previewExposureList { overflow-y: visible; max-height: none; }
+  /* Lineups list scrolls in remaining space */
   #previewModalBody > div:first-child {
     flex: 1;
     min-height: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    padding-top: 8px;
   }
   #previewLineupsList { overflow-y: auto; flex: 1; }
-  /* Lineup cards — slightly more compact on mobile */
-  .preview-lineup-card { padding: 8px; }
-  .preview-lineup-names { font-size: 11px; }
-  .preview-actions { padding: 8px 0 4px; }
+  .preview-lineup-card { padding: 7px 8px; }
+  .preview-lineup-names { font-size: 11px; line-height: 1.5; }
+  .preview-actions { padding: 6px 0 2px; flex-shrink: 0; }
   .btn-add-selected { padding: 10px; font-size: 13px; }
 
   #emptyState { height: calc(100vh - 60px); padding: 0 16px; }
