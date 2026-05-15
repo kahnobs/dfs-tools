@@ -747,7 +747,7 @@ html { overscroll-behavior-y: contain; }
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
             <div>
               <div style="font-size:11px;font-weight:600;color:var(--text);">Simulation Mode</div>
-              <div style="font-size:10px;color:var(--muted);margin-top:2px;">Simulate finish order from WIN/TOP5/TOP10 odds + projected finish position</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px;">Simulate finish order from WIN odds + any available Top 3 / Top 5 / Top 10 odds. Missing tiers are extrapolated — more odds = more accurate distribution.</div>
             </div>
             <label class="toggle-switch">
               <input type="checkbox" id="genNascarSimMode" onchange="toggleNascarSimMode()">
@@ -1021,6 +1021,7 @@ const OPTIONAL_ROLES = [
   {value:'ml',         label:'Moneyline (ML)'},
   {value:'itd',        label:'In The Distance (ITD)'},
   {value:'win',        label:'Win Odds'},
+  {value:'top3',       label:'Top 3 Odds'},
   {value:'top5',       label:'Top 5 Odds'},
   {value:'top10',      label:'Top 10 Odds'},
   {value:'cut',        label:'Make Cut Odds'},
@@ -1041,6 +1042,7 @@ const AUTO_MAP = {
   ml:     /^(ml|moneyline|money[\s_]?line)$/i,
   itd:    /^(itd|in[\s_]?the[\s_]?distance)$/i,
   win:    /^(win|win[\s_]?odds|to[\s_]?win)$/i,
+  top3:   /^(top[\s_]?3([\s_]?odds?)?|t3)$/i,
   top5:   /^(top[\s_]?5([\s_]?odds?)?|t5)$/i,
   top10:  /^(top[\s_]?10([\s_]?odds?)?|t10)$/i,
   cut:        /^(cut|make[\s_]?cut|make[\s_]?the[\s_]?cut)$/i,
@@ -1315,6 +1317,7 @@ function slateFieldsBase(slate){
   if(cm.ml)     f.push({key:'ml',    label:'ML',    cls:'col-r'});
   if(cm.itd)    f.push({key:'itd',   label:'ITD',   cls:'col-r'});
   if(cm.win)    f.push({key:'win',   label:'Win',   cls:'col-r'});
+  if(cm.top3)   f.push({key:'top3',  label:'Top3',  cls:'col-r'});
   if(cm.top5)   f.push({key:'top5',  label:'Top5',  cls:'col-r'});
   if(cm.top10)  f.push({key:'top10', label:'Top10', cls:'col-r'});
   // Show sim-derived p50 projection for NASCAR slates after sims have been run
@@ -1364,7 +1367,7 @@ function gridTemplate(fields){
   fields.forEach(f=>{
     if(f.key==='proj')  cols.push('56px');
     else if(f.key==='value') cols.push('38px');
-    else if(f.key==='ml'||f.key==='itd'||f.key==='win'||f.key==='top5'||f.key==='top10'||f.key==='cut') cols.push('48px');
+    else if(f.key==='ml'||f.key==='itd'||f.key==='win'||f.key==='top3'||f.key==='top5'||f.key==='top10'||f.key==='cut') cols.push('48px');
     else if(f.key==='minExp'||f.key==='maxExp') cols.push('50px');
     else cols.push(f.key==='team'?'56px':'44px');
   });
@@ -1547,7 +1550,7 @@ function getSortedPlayers(){
         if(aVal !== bVal) return dir*(aVal - bVal);
         return (b.salary||0) - (a.salary||0);
       }
-      if(sortKey==='ml'||sortKey==='itd'||sortKey==='win'||sortKey==='top5'||sortKey==='top10'||sortKey==='cut'){
+      if(sortKey==='ml'||sortKey==='itd'||sortKey==='win'||sortKey==='top3'||sortKey==='top5'||sortKey==='top10'||sortKey==='cut'){
         const pa=impliedProb(a[sortKey])||0;
         const pb=impliedProb(b[sortKey])||0;
         return dir*(pb-pa);
@@ -1692,7 +1695,7 @@ function renderPool(){
            </div>
          </div>`;
        }
-        if(f.key==='ml'||f.key==='itd'||f.key==='win'||f.key==='top5'||f.key==='top10'||f.key==='cut'){
+        if(f.key==='ml'||f.key==='itd'||f.key==='win'||f.key==='top3'||f.key==='top5'||f.key==='top10'||f.key==='cut'){
           return renderOddsCell(p[f.key], f.cls, slate, f.key);
         }
         if(f.key==='_simP50'){
@@ -3199,7 +3202,9 @@ function nascarDrawFinishPos(skillRank, projFinish, pWin, pTop5, pTop10, fieldSi
 }
 
 // Track-aware version used by the sim (passes trackType for std dev lookup)
-function nascarDrawFinishPosTyped(skillRank, projFinish, pWin, pTop5, pTop10, fieldSize, trackType){
+// Accepts any combination of pWin / pTop3 / pTop5 / pTop10 — all optional except pWin.
+// Uses available CDF anchors; missing tiers fall through to Gaussian finish model.
+function nascarDrawFinishPosTyped(skillRank, projFinish, pWin, pTop3, pTop5, pTop10, fieldSize, trackType){
   const isSuper = trackType === 'superspeedway';
 
   if(isSuper){
@@ -3213,18 +3218,29 @@ function nascarDrawFinishPosTyped(skillRank, projFinish, pWin, pTop5, pTop10, fi
   let rawPos;
 
   if(pWin && u <= pWin){
+    // Driver wins
     rawPos = 1;
+  } else if(pTop3 && u <= pTop3){
+    // Finish 2nd or 3rd
+    const pBase = pWin || 0;
+    const t = (u - pBase) / (pTop3 - pBase);
+    rawPos = 1 + t * 2; // interpolate from ~1 to ~3
   } else if(pTop5 && u <= pTop5){
-    const t = (u - (pWin||0)) / (pTop5 - (pWin||0));
-    rawPos = 1 + t * 4;
+    // Finish 4th or 5th
+    const pBase = pTop3 || pWin || 0;
+    const t = (u - pBase) / (pTop5 - pBase);
+    rawPos = (pTop3 ? 3 : 1) + t * (5 - (pTop3 ? 3 : 1));
   } else if(pTop10 && u <= pTop10){
-    const t = (u - (pTop5||pWin||0)) / (pTop10 - (pTop5||pWin||0));
-    rawPos = 5 + t * 5;
+    // Finish 6th–10th
+    const pBase = pTop5 || pTop3 || pWin || 0;
+    const topBound = pTop5 ? 5 : pTop3 ? 3 : 1;
+    const t = (u - pBase) / (pTop10 - pBase);
+    rawPos = topBound + t * (10 - topBound);
   } else {
+    // Beyond available odds: Gaussian anchored to skill rank + projected finish
     const anchor = projFinish
       ? projFinish * 0.50 + skillRank * 0.50
       : skillRank;
-    // Std devs from data: road ~9.0, intermediate ~9.2, short ~8.7
     const stdDev = trackType==='short' ? 8.7 : trackType==='intermediate' ? 9.2 : 9.0;
     const u1=Math.random(), u2=Math.random();
     const z = Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2);
@@ -3282,6 +3298,7 @@ function runNascarSims(pool, numSims, totalLaps, trackType, chaosPct){
   // ── Pre-parse driver data ─────────────────────────────────────────────────
   pool.forEach(p=>{
     p._nPWin   = nascarMlToProb(p.win);
+    p._nPTop3  = nascarMlToProb(p.top3);
     p._nPTop5  = nascarMlToProb(p.top5);
     p._nPTop10 = nascarMlToProb(p.top10);
     p._nGrid   = parseInt(p.start) || parseInt(p.grid) || 20;
@@ -3289,16 +3306,86 @@ function runNascarSims(pool, numSims, totalLaps, trackType, chaosPct){
     p._nOwn    = parseFloat(p.own) || 0;
   });
 
-  // ── Skill score: 65% odds-based, 35% historical rating ───────────────────
+  // ── Determine which odds tiers are available across the field ────────────
+  const fieldHasTop3  = pool.some(p=>p._nPTop3  != null);
+  const fieldHasTop5  = pool.some(p=>p._nPTop5  != null);
+  const fieldHasTop10 = pool.some(p=>p._nPTop10 != null);
+
+  // ── For each driver, fill in missing tiers by extrapolation ──────────────
+  // Relationships derived from historical implied prob ratios across large samples:
+  //   Top3  ≈ Win × 2.8  (win→top3 multiplier ~2.8)
+  //   Top5  ≈ Win × 4.0  (win→top5 multiplier ~4.0)
+  //   Top10 ≈ Top5 × 1.9 or Win × 7.5
+  // When a higher tier IS available, use it as the anchor for lower-tier estimates.
+  // All estimates are capped at a field-sum that doesn't exceed 1.0 per tier.
+  pool.forEach(p=>{
+    const pW = p._nPWin || 0;
+
+    // Estimate top3 if missing
+    if(p._nPTop3 == null){
+      if(p._nPTop5 != null){
+        // top3 ≈ top5 × 0.72 (3/5 positions ≈ 72% of top5 prob based on position distribution)
+        p._nPTop3 = Math.min(p._nPTop5 * 0.72, 0.98);
+      } else if(pW > 0){
+        p._nPTop3 = Math.min(pW * 2.8, 0.98);
+      }
+    }
+
+    // Estimate top5 if missing
+    if(p._nPTop5 == null){
+      if(p._nPTop3 != null){
+        // top5 ≈ top3 / 0.72
+        p._nPTop5 = Math.min(p._nPTop3 / 0.72, 0.98);
+      } else if(pW > 0){
+        p._nPTop5 = Math.min(pW * 4.0, 0.98);
+      }
+    }
+
+    // Estimate top10 if missing
+    if(p._nPTop10 == null){
+      if(p._nPTop5 != null){
+        p._nPTop10 = Math.min(p._nPTop5 * 1.9, 0.98);
+      } else if(pW > 0){
+        p._nPTop10 = Math.min(pW * 7.5, 0.98);
+      }
+    }
+
+    // Mark which values were estimated vs. real (for logging/confidence)
+    p._nTop3Est  = !nascarMlToProb(p.top3)  && p._nPTop3  != null;
+    p._nTop5Est  = !nascarMlToProb(p.top5)  && p._nPTop5  != null;
+    p._nTop10Est = !nascarMlToProb(p.top10) && p._nPTop10 != null;
+
+    // Final safety: enforce monotonicity (win ≤ top3 ≤ top5 ≤ top10)
+    if(p._nPTop3  != null && p._nPTop3  < pW)            p._nPTop3  = pW;
+    if(p._nPTop5  != null && p._nPTop3  != null && p._nPTop5  < p._nPTop3)  p._nPTop5  = p._nPTop3;
+    if(p._nPTop10 != null && p._nPTop5  != null && p._nPTop10 < p._nPTop5)  p._nPTop10 = p._nPTop5;
+  });
+
+  // ── Skill score: 65% odds-based (weighted by available tiers), 35% rating ─
   const ratings    = pool.map(p=>parseFloat(p.rating)||0);
   const maxRating  = Math.max(...ratings);
   const minRating  = Math.min(...ratings.filter(r=>r>0));
   const ratingRange= maxRating - minRating || 1;
   pool.forEach(p=>{
-    const oddsScore  = (p._nPWin||0)*3 + (p._nPTop5||0)*2 + (p._nPTop10||0);
+    // Weight odds tiers by market informativeness. Win is most signal-dense.
+    // If a tier was estimated (not real), use it but at half weight.
+    const wWin  = p._nPWin   != null ? 3.0 : 0;
+    const wTop3 = p._nPTop3  != null ? (p._nTop3Est  ? 0.75 : 1.5) : 0;
+    const wTop5 = p._nPTop5  != null ? (p._nTop5Est  ? 1.0  : 2.0) : 0;
+    const wTop10= p._nPTop10 != null ? (p._nTop10Est ? 0.5  : 1.0) : 0;
+    const totalW = wWin + wTop3 + wTop5 + wTop10 || 1;
+    const oddsScore = (
+      (p._nPWin   || 0) * wWin  +
+      (p._nPTop3  || 0) * wTop3 +
+      (p._nPTop5  || 0) * wTop5 +
+      (p._nPTop10 || 0) * wTop10
+    ) / totalW;
     const rtg        = parseFloat(p.rating)||0;
     const normRating = rtg > 0 ? (rtg - minRating) / ratingRange : 0.5;
-    p._nSkillScore   = oddsScore * 0.65 + normRating * 0.35;
+    // Ratings get more weight when fewer real odds tiers are available
+    const realTiers = [p._nPWin, !p._nTop3Est && p._nPTop3, !p._nTop5Est && p._nPTop5, !p._nTop10Est && p._nPTop10].filter(Boolean).length;
+    const oddsWeight = 0.50 + (realTiers / 4) * 0.20; // 0.50–0.70 based on real tier count
+    p._nSkillScore   = oddsScore * oddsWeight + normRating * (1 - oddsWeight);
   });
   const skillSorted = [...pool].sort((a,b)=>b._nSkillScore - a._nSkillScore);
   skillSorted.forEach((p,i)=>{ p._nSkillRank = i+1; });
@@ -3348,7 +3435,7 @@ function runNascarSims(pool, numSims, totalLaps, trackType, chaosPct){
       p,
       rawPos: nascarDrawFinishPosTyped(
         p._nSkillRank, p._nProj,
-        p._nPWin, p._nPTop5, p._nPTop10,
+        p._nPWin, p._nPTop3, p._nPTop5, p._nPTop10,
         FIELD, trackType
       ) + Math.random()*0.4
     }));
@@ -3496,9 +3583,9 @@ async function runNascarSimGen(){
   const pool    = (slate.players||[]).filter(p=>!hidden.includes(p.id)&&p.salary>0);
   const overrides = slate.playerExpOverrides||{};
 
-  const hasOdds = pool.some(p=>p.win||p.top5||p.top10);
+  const hasOdds = pool.some(p=>p.win);
   if(!hasOdds){
-    alert('NASCAR Simulation Mode requires WIN, TOP5, and TOP10 odds columns mapped.');
+    alert('NASCAR Simulation Mode requires at least WIN odds to be mapped. Top 3, Top 5, and Top 10 odds are optional — the sim will extrapolate missing tiers from what is available.');
     document.getElementById('genBtn').disabled=false;
     return;
   }
@@ -3519,7 +3606,21 @@ async function runNascarSimGen(){
 
   await new Promise(r=>setTimeout(r,0));
 
+  // Log which odds tiers are real vs. estimated
+  const realWin  = pool.filter(p=>nascarMlToProb(p.win)).length;
+  const realTop3 = pool.filter(p=>nascarMlToProb(p.top3)).length;
+  const realTop5 = pool.filter(p=>nascarMlToProb(p.top5)).length;
+  const realTop10= pool.filter(p=>nascarMlToProb(p.top10)).length;
+  const tiers = [`Win:${realWin}`];
+  if(realTop3>0)  tiers.push(`Top3:${realTop3}${realTop3<pool.length?'(partial)':''}`);
+  if(realTop5>0)  tiers.push(`Top5:${realTop5}${realTop5<pool.length?'(partial)':''}`);
+  if(realTop10>0) tiers.push(`Top10:${realTop10}${realTop10<pool.length?'(partial)':''}`);
+  const missingTiers = [];
+  if(realTop3===0) missingTiers.push('Top3');
+  if(realTop5===0) missingTiers.push('Top5');
+  if(realTop10===0) missingTiers.push('Top10');
   log(`Running ${numSims.toLocaleString()} correlated race sims for ${pool.length} drivers...`);
+  log(`Odds available — ${tiers.join(' | ')}${missingTiers.length ? ` | Estimating: ${missingTiers.join(', ')}` : ' | Full distribution'}`);
   await new Promise(r=>setTimeout(r,0));
 
   const simResults = runNascarSims(pool, numSims, totalLaps, trackType, chaosPct);
@@ -4713,6 +4814,7 @@ function createSlate(){
     if(colMapping.ml!=null)    p.ml=(row[colMapping.ml]||'').trim();
     if(colMapping.itd!=null)   p.itd=(row[colMapping.itd]||'').trim();
     if(colMapping.win!=null)   p.win=(row[colMapping.win]||'').trim();
+    if(colMapping.top3!=null)  p.top3=(row[colMapping.top3]||'').trim();
     if(colMapping.top5!=null)  p.top5=(row[colMapping.top5]||'').trim();
     if(colMapping.top10!=null) p.top10=(row[colMapping.top10]||'').trim();
     if(colMapping.projFinish!=null) p.projFinish=parseInt(row[colMapping.projFinish])||null;
@@ -4951,6 +5053,7 @@ function applyPoolUpdate(){
     if(cm.ml!=null){  p.ml=(row[cm.ml]||'').trim(); }
     if(cm.itd!=null){ p.itd=(row[cm.itd]||'').trim(); }
     if(cm.win!=null)   p.win=(row[cm.win]||'').trim();
+    if(cm.top3!=null)  p.top3=(row[cm.top3]||'').trim();
     if(cm.top5!=null)  p.top5=(row[cm.top5]||'').trim();
     if(cm.top10!=null) p.top10=(row[cm.top10]||'').trim();
     if(cm.projFinish!=null) p.projFinish=parseInt(row[cm.projFinish])||null;
@@ -4974,6 +5077,7 @@ function applyPoolUpdate(){
     if(cm.ml!=null)   p.ml=(row[cm.ml]||'').trim();
     if(cm.itd!=null)  p.itd=(row[cm.itd]||'').trim();
     if(cm.win!=null)   p.win=(row[cm.win]||'').trim();
+    if(cm.top3!=null)  p.top3=(row[cm.top3]||'').trim();
     if(cm.top5!=null)  p.top5=(row[cm.top5]||'').trim();
     if(cm.top10!=null) p.top10=(row[cm.top10]||'').trim();
     if(cm.projFinish!=null) p.projFinish=parseInt(row[cm.projFinish])||null;
