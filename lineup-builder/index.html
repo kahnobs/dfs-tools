@@ -610,6 +610,7 @@ html { overscroll-behavior-y: contain; }
       <div class="tab" onclick="switchTab('groups',this)">Groups</div>
       <div class="tab" onclick="switchTab('history',this)">History</div>
       <div class="tab" onclick="switchTab('autogen',this)">Auto-Gen</div>
+      <div class="tab" id="tab-btn-siminputs" style="display:none;" onclick="switchTab('siminputs',this)">Odds</div>
     </div>
 
     <!-- BUILDER -->
@@ -815,11 +816,6 @@ html { overscroll-behavior-y: contain; }
             <div id="ufcFightToggles" style="display:flex;flex-wrap:wrap;gap:4px;"></div>
           </div>
           <div style="height:1px;background:var(--border);margin:10px 0;"></div>
-          <div style="margin-bottom:6px;">
-            <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:3px;">5-Round Fights</div>
-            <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">Tag fights scheduled for 5 rounds — sim uses higher score ceilings &amp; more accumulation time for these bouts.</div>
-            <div id="ufc5RoundToggles" style="display:flex;flex-wrap:wrap;gap:4px;"><span style="font-size:10px;color:var(--muted);font-style:italic;">Load a slate to see fights</span></div>
-          </div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
             <div>
               <div style="font-size:11px;font-weight:600;color:var(--text);">Simulation Mode</div>
@@ -833,9 +829,9 @@ html { overscroll-behavior-y: contain; }
           <div id="ufcSimSettings" style="display:none;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
               <span style="font-size:10px;color:var(--muted);">Simulations per lineup</span>
-              <span id="ufcSimCountLabel" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--purple);font-weight:600;">500</span>
+              <span id="ufcSimCountLabel" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--purple);font-weight:600;">2000</span>
             </div>
-            <input type="range" min="100" max="2000" step="100" value="500" id="ufcSimCountSlider"
+            <input type="range" min="500" max="10000" step="500" value="2000" id="ufcSimCountSlider"
               style="width:100%;accent-color:var(--purple);"
               oninput="document.getElementById('ufcSimCountLabel').textContent=this.value">
             <div style="display:flex;justify-content:space-between;margin-top:2px;margin-bottom:8px;">
@@ -898,6 +894,17 @@ html { overscroll-behavior-y: contain; }
         <button class="btn-generate" id="genBtn" onclick="runAutoGen()">⚡ Generate Lineups</button>
       </div>
     </div>
+
+    <!-- SIM INPUTS TAB -->
+    <div class="tab-content" id="tab-siminputs" style="overflow-y:auto;padding:12px;">
+      <div style="margin-bottom:10px;">
+        <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:4px;">Fighter</div>
+        <select id="simInputFighterSelect" onchange="renderSimInputs()" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;font-family:'DM Sans',sans-serif;outline:none;">
+          <option value="">— Select a fighter —</option>
+        </select>
+      </div>
+      <div id="simInputsDisplay"></div>
+    </div>
   </div>
 </div>
 
@@ -936,6 +943,13 @@ html { overscroll-behavior-y: contain; }
       <div id="mapperOptionalWrap">
         <div class="mapper-opt-title">Optional Columns — label any you want to include</div>
         <div class="mapper-grid" id="mapperOptional"></div>
+      </div>
+      <div id="mapperSimInputs" style="display:none;margin-top:10px;">
+        <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;" onclick="const g=document.getElementById('mapperSimGrid');const arr=document.getElementById('simInputsArrow');g.style.display=g.style.display==='none'?'grid':'none';arr.textContent=g.style.display==='none'?'&#9658;':'&#9660;';">
+          <span style="font-family:'DM Mono',monospace;font-size:10px;font-weight:600;color:var(--blue);text-transform:uppercase;letter-spacing:.05em;">&#9881; Sim inputs detected</span>
+          <span id="simInputsArrow" style="font-size:9px;color:var(--muted);">&#9658;</span>
+        </div>
+        <div id="mapperSimGrid" style="display:none;margin-top:6px;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;max-height:180px;overflow-y:auto;grid-template-columns:1fr 1fr;gap:2px;"></div>
       </div>
       <div class="mapper-title" style="margin-top:10px;margin-bottom:5px;">Preview (first 3 rows of mapped columns)</div>
       <div style="overflow-x:auto;"><table class="preview-table" id="previewTable"></table></div>
@@ -1323,6 +1337,7 @@ function slateFieldsBase(slate){
   // Show sim-derived p50 projection for NASCAR slates after sims have been run
   if(slate.sport==='nascar' && (slate.players||[]).some(p=>p._simP50!=null))
     f.push({key:'_simP50', label:'Sim', cls:'col-r'});
+  // UFC sim score shown left of salary column — not in right fields
   if(cm.cut)    f.push({key:'cut',   label:'Cut',   cls:'col-r'});
   f.push({key:'minExp', label:'Min%', cls:'col-c', inline:true});
   f.push({key:'maxExp', label:'Max%', cls:'col-c', inline:true});
@@ -1363,7 +1378,8 @@ function gridTemplate(fields){
     return parts.join(' ');
   }
   const leftWidth = slate?.sport==='pga' ? '62px' : slate?.sport==='ufc' ? '76px' : '38px';
-  const cols=[leftWidth,'minmax(140px,1fr)','72px'];
+  const hasUFCSim = slate?.sport==='ufc' && (slate?.players||[]).some(p=>p._simP50!=null);
+  const cols=[leftWidth,'minmax(140px,1fr)', ...(hasUFCSim ? ['48px','60px'] : ['72px'])];
   fields.forEach(f=>{
     if(f.key==='proj')  cols.push('56px');
     else if(f.key==='value') cols.push('38px');
@@ -1424,7 +1440,7 @@ function renderSlate(){
   if(nh>0){nb.textContent=nh+' hidden';nb.classList.add('on');}else nb.classList.remove('on');
   const uab=document.getElementById('unhideAllBtn');
   if(uab) uab.style.display=nh>0?'':'none';
-  renderPool(); renderLineup(); renderSaved(); renderExposure(); renderGroups(); renderGroupRulesSummary();
+  renderPool(); renderLineup(); renderSaved(); renderExposure(); renderGroups(); renderGroupRulesSummary(); refreshSimInputsTab();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1614,8 +1630,12 @@ function renderPool(){
   hdr.style.gridTemplateColumns=gt;
   const mobile = isMobileView();
   const {primary: mStat1, secondary: mStat2} = mobile ? getMobileStatFields(fields) : {primary:null,secondary:null};
+  const _hasUFCSim = slate?.sport==='ufc' && (slate?.players||[]).some(p=>p._simP50!=null);
   hdr.innerHTML=(isGroupEdit?`<span class="col-c">✓</span>`:'')
-    +`<span class="col-c" onclick="setSort('start')" title="${leftColLabel(activeSlate())}" style="cursor:pointer;padding-right:6px;">${leftColLabel(slate)}</span><span>Name</span><span class="col-r" onclick="setSort('salary')">Sal</span>`
+    +`<span class="col-c" onclick="setSort('start')" title="${leftColLabel(activeSlate())}" style="cursor:pointer;padding-right:6px;">${leftColLabel(slate)}</span><span>Name</span>`
+    +(_hasUFCSim
+      ? `<span class="col-r" onclick="setSort('_simP50')" style="cursor:pointer;color:var(--green);">Sim</span><span class="col-r" onclick="setSort('salary')">Sal</span>`
+      : `<span class="col-r" onclick="setSort('salary')">Sal</span>`)
     +(mobile
       ? (mStat1?`<span class="${mStat1.cls} pool-col-hdr" onclick="setSort('${mStat1.key}')" style="font-size:9px;">${mStat1.label}</span>`:'')
         +(mStat2?`<span class="${mStat2.cls} pool-col-hdr" onclick="setSort('${mStat2.key}')" style="font-size:9px;">${mStat2.label}</span>`:'')
@@ -1723,6 +1743,9 @@ function renderPool(){
         <div class="cell-name" style="flex:1">${p.name}</div>
         ${!isGroupEdit&&dots?`<div class="grp-dots">${dots}</div>`:''}
       </div>
+      ${(_hasUFCSim||false) && !mobile
+        ? `<div class="cell-mono col-r" style="color:${p._simP50!=null?'var(--green)':'var(--muted)'};font-weight:600;">${p._simP50!=null?p._simP50.toFixed(1):'—'}</div>`
+        : ''}
       <div class="cell-sal col-r" style="${mobile?'font-size:11px;':''}">${fmt(p.salary)}</div>
       ${mobile
         ? [mStat1, mStat2].filter(Boolean).map(f=>{
@@ -2573,234 +2596,288 @@ function setNascarTrack(type, btn){
 // ═══════════════════════════════════════════════════════════
 // UFC MONTE CARLO SIMULATION ENGINE
 // ═══════════════════════════════════════════════════════════
-// Converts American ML odds → true win probability (vig-adjusted)
+// Converts American ML odds → raw implied probability
+function mlToProb(ml){
+  if(!ml || isNaN(ml)) return null;
+  return ml < 0 ? (-ml)/((-ml)+100) : 100/(ml+100);
+}
+
 function mlToWinProb(ml){
   if(!ml || isNaN(ml)) return 0.5;
   const raw = ml > 0 ? 100/(ml+100) : (-ml)/((-ml)+100);
-  return Math.max(0.05, Math.min(0.95, raw)); // clamp to 5-95% — no locks
+  return Math.max(0.05, Math.min(0.95, raw));
 }
 
-// Given a fight result, draw a DK score from realistic distributions.
-// Salary tier influences ceiling since higher-priced fighters get more
-// significant strikes, control time, and pace.
-// DK UFC scoring: 3pts/sig strike, 3pts/takedown, 1pt/control min,
-// 3pt advance, 3pt reversal, 3pt KD, finish bonus ~90-130pts typical
-// finishProb: derived from ITD line (probability fight ends before decision)
-// is5Round: whether this is a 5-round fight — higher ceilings, more accumulation time
-function drawScore(fighter, won, ownFinishProb, fightFinishProb, is5Round){
+// ── CDF FITTING ──────────────────────────────────────────────
+// Given a fighter's alternate lines [{threshold, prob}], fit a discrete CDF.
+// Returns a sampler function that draws a value, optionally capped by maxVal (duration constraint).
+function buildCDF(points){
+  if(!points || points.length === 0) return null;
+  points = points.slice().sort((a,b)=>a.threshold - b.threshold);
+  const buckets = [];
+  for(let i=0; i<points.length; i++){
+    const pThis = points[i].prob;
+    const pNext = i+1 < points.length ? points[i+1].prob : 0;
+    const mass = Math.max(0, pThis - pNext);
+    const step = i+1 < points.length ? points[i+1].threshold - points[i].threshold : 5;
+    buckets.push({low: points[i].threshold, high: points[i].threshold + step, mass});
+  }
+  const belowMass = Math.max(0, 1 - points[0].prob);
+  const total = buckets.reduce((s,b)=>s+b.mass,0) + belowMass;
+
+  return function sampleFromCDF(maxVal){
+    const r = Math.random() * total;
+    if(r < belowMass){
+      const cap = maxVal != null ? Math.min(points[0].threshold, maxVal) : points[0].threshold;
+      return Math.random() * cap;
+    }
+    let acc = belowMass;
+    for(const b of buckets){
+      if(maxVal != null && b.low >= maxVal) break;
+      acc += b.mass;
+      if(r < acc){
+        const hi = maxVal != null ? Math.min(b.high, maxVal) : b.high;
+        return b.low + Math.random() * (hi - b.low);
+      }
+    }
+    return points[0].threshold * 0.5;
+  };
+}
+
+function extractSSCDF(p){
+  const pts = [
+    {threshold:35,ml:p.ss_35},{threshold:40,ml:p.ss_40},{threshold:45,ml:p.ss_45},
+    {threshold:50,ml:p.ss_50},{threshold:55,ml:p.ss_55},{threshold:60,ml:p.ss_60},
+    {threshold:65,ml:p.ss_65},{threshold:70,ml:p.ss_70},{threshold:75,ml:p.ss_75},
+    {threshold:80,ml:p.ss_80},{threshold:85,ml:p.ss_85},{threshold:90,ml:p.ss_90},
+    {threshold:95,ml:p.ss_95},{threshold:100,ml:p.ss_100},{threshold:105,ml:p.ss_105},
+    {threshold:110,ml:p.ss_110},{threshold:115,ml:p.ss_115},{threshold:120,ml:p.ss_120},
+    {threshold:125,ml:p.ss_125},
+  ].filter(pt=>pt.ml!=null).map(pt=>({threshold:pt.threshold, prob:mlToProb(pt.ml)}));
+  return buildCDF(pts);
+}
+
+function extractTDCDF(p){
+  const pts = [
+    {threshold:1,ml:p.td_1},{threshold:2,ml:p.td_2},{threshold:3,ml:p.td_3},
+    {threshold:4,ml:p.td_4},{threshold:5,ml:p.td_5},{threshold:6,ml:p.td_6},
+  ].filter(pt=>pt.ml!=null).map(pt=>({threshold:pt.threshold, prob:mlToProb(pt.ml)}));
+  return buildCDF(pts);
+}
+
+// ── FIGHT OUTCOME SAMPLER ─────────────────────────────────────
+// Samples fight outcome (who wins, what round) from per-fighter per-round finish odds.
+// Key: early finish → short fight → truncated volume (negative correlation enforced).
+function sampleFightOutcome(a, b){
+  const finishKeys = ['finish_r1','finish_r2','finish_r3','finish_r4','finish_r5'];
+  const roundNums  = [1, 2, 3, 4, 5];
+  const outcomes   = [];
+  for(let i=0; i<5; i++){
+    const pA = a[finishKeys[i]] != null ? mlToProb(a[finishKeys[i]]) : null;
+    const pB = b && b[finishKeys[i]] != null ? mlToProb(b[finishKeys[i]]) : null;
+    if(pA != null) outcomes.push({winner:'a', round:roundNums[i], prob:pA});
+    if(pB != null) outcomes.push({winner:'b', round:roundNums[i], prob:pB});
+  }
+  const decA = a.decision != null ? mlToProb(a.decision) : null;
+  const decB = b && b.decision != null ? mlToProb(b.decision) : null;
+  let pDec = (decA!=null && decB!=null) ? (decA+decB)/2 : (decA||decB||null);
+
+  if(outcomes.length===0 && pDec===null){
+    return {winner: Math.random()<(a._simWinProb||0.5)?'a':'b', round:'dec'};
+  }
+  const rawTotal = outcomes.reduce((s,o)=>s+o.prob,0) + (pDec||0);
+  const norm = rawTotal>0 ? 1/rawTotal : 1;
+  const r = Math.random();
+  let acc = 0;
+  for(const o of outcomes){
+    acc += o.prob * norm;
+    if(r < acc) return {winner:o.winner, round:o.round};
+  }
+  // Decision — who wins from ML
+  return {winner: Math.random()<(a._simWinProb||0.5)?'a':'b', round:'dec'};
+}
+
+// ── VOLUME CAPS BY FIGHT DURATION ─────────────────────────────
+// These caps enforce the negative correlation between early finish and volume.
+// A R1 finish means ~2-3 minutes of action max — you cannot land 80 sig strikes.
+function ssCapForRound(round){
+  if(round===1)    return 28;
+  if(round===2)    return 52;
+  if(round===3)    return 78;
+  if(round===4)    return 104;
+  if(round===5)    return 130;
+  return 130; // decision
+}
+function tdCapForRound(round){
+  if(round===1)    return 2;
+  if(round===2)    return 4;
+  if(round===3)    return 6;
+  if(round===4)    return 8;
+  if(round===5)    return 10;
+  return 10; // decision
+}
+
+// ── WIN BONUS ─────────────────────────────────────────────────
+function winBonus(round){
+  if(round===1)    return 90;
+  if(round===2)    return 70;
+  if(round===3)    return 45;
+  if(round===4)    return 40;
+  if(round===5)    return 40;
+  return 30; // decision
+}
+
+// ── FIGHTER SCORE DRAW ────────────────────────────────────────
+// Scores a fighter given the fight outcome. Volume is sampled from odds-derived
+// CDFs, capped by fight duration. This enforces the key insight: early finish
+// = win bonus + low volume; decision = no finish bonus + high volume opportunity.
+function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
   const sal  = fighter.salary || 8000;
   const tier = Math.max(0, Math.min(1, (sal - 6400) / (9800 - 6400)));
+  const ssCap = ssCapForRound(round);
+  const tdCap = tdCapForRound(round);
 
-  const proj = parseFloat(fighter.proj) || (75 + tier * 30);
-  const pWin = parseFloat(fighter._simWinProb) || 0.5;
+  // Sample sig strikes capped to what's achievable in this fight duration
+  let ss = 0;
+  if(ssCDF){
+    ss = Math.max(0, Math.round(ssCDF(ssCap)));
+  } else {
+    const baseSS = 35 + tier * 45;
+    ss = Math.round(baseSS * (ssCap/130) * (0.5 + Math.random() * 0.9));
+  }
 
-  // ownFinishProb: P(this fighter specifically finishes) = their ITD implied prob
-  // fightFinishProb: P(fight ends by finish at all) = sum of both fighters' ITD probs
-  // If the fight finishes, it's because ONE fighter did it — for loss scenarios we
-  // care about the opponent's finish probability, which is fightFinishProb - ownFinishProb
-  const myFP  = ownFinishProb  != null ? ownFinishProb  : (0.25 + tier * 0.10);
-  const oppFP = fightFinishProb != null ? Math.max(0, fightFinishProb - myFP) : (0.25 + tier * 0.10);
+  // Sample takedowns capped by duration
+  let td = 0;
+  if(tdCDF){
+    td = Math.max(0, Math.round(tdCDF(tdCap)));
+  } else {
+    td = Math.round(tier * 3 * (tdCap/10) * Math.random());
+  }
+
+  // Control time derived from takedowns: each TD averages ~45-90s of control
+  const ctrlSecs = td * (45 + Math.random() * 45);
+
+  // Knockdowns: rare, more likely on finishes
+  const kdProb = (won && round !== 'dec') ? 0.12 : 0.05;
+  const kd = Math.random() < kdProb ? 1 : 0;
+
+  // DK scoring: sig strikes count as both strike (+0.2) and sig strike (+0.2) = +0.4 total
+  let total = ss * 0.4 + td * 5 + ctrlSecs * 0.03 + kd * 10;
 
   if(won){
-    if(Math.random() < myFP / Math.max(pWin, 0.05)){
-      // Finish win — salary-anchored ceiling, same regardless of whether you were favored
-      const finishBase = 88 + tier * 20;
-      return finishBase + (Math.random()**0.7) * 35;
-    } else {
-      // Decision win — projection-anchored (wrestling/grappling upside lives here)
-      const eWin = Math.min(160, proj / Math.max(pWin, 0.15) * 0.75);
-      const decScore = eWin * 0.78 + Math.random() * eWin * 0.20;
-      return is5Round ? decScore * 1.30 : decScore;
-    }
+    total += winBonus(round);
   } else {
-    if(Math.random() < oppFP / Math.max(1 - pWin, 0.05)){
-      // Opponent finished you — stopped early, minimal score
-      return 5 + Math.random() * 20;
-    } else {
-      // Decision loss — went the distance, accumulated some stats
-      const eLoss = Math.max(5, (proj - pWin * (88 + tier * 20)) / Math.max(1 - pWin, 0.05));
-      const base  = Math.max(15, Math.min(45, eLoss));
-      const decScore = base + Math.random() * 20;
-      return is5Round ? decScore * 1.20 : decScore;
-    }
+    // Loss: opponent controlled, absorbed damage — discount volume
+    total *= 0.75;
   }
+  return Math.max(0, total);
 }
 
-// Build fight pairs from the pool using the Opp field.
-// Also extracts ITD finish probability for each fight — ITD odds represent
-// the probability the fight ends before a decision (shared for both fighters).
+// ── FIGHT PAIR BUILDER ────────────────────────────────────────
 function buildFightPairs(pool){
-  const pairs = []; // [{a, b, fightNum, finishProb}]
-  const seen = new Set();
+  const pairs = [];
+  const seen  = new Set();
   pool.forEach(p=>{
     if(seen.has(p.id)) return;
-    const opp = pool.find(o=> o.id !== p.id && (
-      (p.opp && (p.opp === o.name || p.opp === o.id)) ||
-      (o.opp && (o.opp === p.name || o.opp === p.id))
+    const opp = pool.find(o=> o.id!==p.id && (
+      (p.opp && (p.opp===o.name || p.opp===o.id)) ||
+      (o.opp && (o.opp===p.name || o.opp===p.id))
     ));
-    // Derive finish probability from ITD line.
-    // ITD is listed as American odds for "fight ends inside the distance".
-    // Average the two fighters' ITD lines if both present for a cleaner number.
-    let finishProb = null;
-    const itdA = parseFloat(p.itd);
-    const itdB = opp ? parseFloat(opp.itd) : NaN;
-    const validA = !isNaN(itdA) && itdA !== 0;
-    const validB = !isNaN(itdB) && itdB !== 0;
-    if(validA && validB){
-      finishProb = (mlToWinProb(itdA) + mlToWinProb(itdB)) / 2;
-    } else if(validA){
-      finishProb = mlToWinProb(itdA);
-    } else if(validB){
-      finishProb = mlToWinProb(itdB);
-    }
-    // null finishProb → drawScore falls back to salary-tier estimate
-
+    const fNum = p.fightNum || parseInt(p.start) || 0;
     if(opp && !seen.has(opp.id)){
-      const fNum = p.fightNum || parseInt(p.start) || 0;
-      pairs.push({a: p, b: opp, fightNum: fNum, finishProb, is5Round: ufc5RoundFights.has(fNum)});
-      seen.add(p.id);
-      seen.add(opp.id);
+      pairs.push({a:p, b:opp, fightNum:fNum});
+      seen.add(p.id); seen.add(opp.id);
     } else if(!opp){
-      const fNum = p.fightNum || 0;
-      pairs.push({a: p, b: null, fightNum: fNum, finishProb, is5Round: ufc5RoundFights.has(fNum)});
+      pairs.push({a:p, b:null, fightNum:fNum});
       seen.add(p.id);
     }
   });
   return pairs;
 }
 
-// Run N simulations. Returns a Map: lineupKey → {avgScore, p90Score, count}
-// lineups is an array of player-arrays (candidates)
+// ── MAIN SIM RUNNER ───────────────────────────────────────────
 function runUFCSims(lineups, pool, numSims){
   const pairs = buildFightPairs(pool);
 
-  // Precompute win probs and finish probs per fighter ID
-  const winProb        = {};
-  const finishProbById = {}; // id → P(THIS fighter finishes the fight) = their own ITD implied prob
-  const fightFinishById= {}; // id → P(fight ends by finish, either fighter) = sum of both ITD probs
-  const is5RoundById   = {};
-  pairs.forEach(({a, b, is5Round})=>{
-    const mlA = parseFloat(a.ml) || 0;
-    const mlB = b ? (parseFloat(b.ml) || 0) : 0;
-    let pA;
-    if(mlA !== 0){
-      pA = mlToWinProb(mlA);
-    } else if(b && mlB !== 0){
-      pA = 1 - mlToWinProb(mlB);
-    } else {
-      pA = 0.5;
-    }
-    const pB = b ? 1 - pA : 0;
+  // Precompute win probs
+  const winProb = {};
+  pairs.forEach(({a,b})=>{
+    const mlA = parseFloat(a.ml)||0, mlB = b?(parseFloat(b.ml)||0):0;
+    const pA  = mlA!==0 ? mlToWinProb(mlA) : (b&&mlB!==0 ? 1-mlToWinProb(mlB) : 0.5);
     winProb[a.id] = pA;
-    if(b) winProb[b.id] = pB;
-
-    // Per-fighter ITD: each fighter's OWN implied probability of finishing the fight
-    // e.g. Dawson +325 = 24%, Rebecki +225 = 31% — these are independent per-fighter probs
-    const itdA = parseFloat(a.itd);
-    const itdB = b ? parseFloat(b.itd) : NaN;
-    const pFinA = (!isNaN(itdA) && itdA !== 0) ? mlToWinProb(itdA) : null;
-    const pFinB = b && (!isNaN(itdB) && itdB !== 0) ? mlToWinProb(itdB) : null;
-
-    // Fallback if ITD not mapped: estimate from salary tier
-    const tierA = Math.max(0, Math.min(1, ((a.salary||8000) - 6400) / (9800 - 6400)));
-    const tierB = b ? Math.max(0, Math.min(1, ((b.salary||8000) - 6400) / (9800 - 6400))) : 0;
-
-    finishProbById[a.id] = pFinA !== null ? pFinA : (0.20 + tierA * 0.10);
-    if(b) finishProbById[b.id] = pFinB !== null ? pFinB : (0.20 + tierB * 0.10);
-
-    // Fight-level finish total = sum of both fighters' own ITD probs
-    const fightFP = (pFinA || 0) + (pFinB || 0) || 0.45;
-    fightFinishById[a.id] = fightFP;
-    if(b) fightFinishById[b.id] = fightFP;
-
-    is5RoundById[a.id] = !!is5Round;
-    if(b) is5RoundById[b.id] = !!is5Round;
+    if(b) winProb[b.id] = 1-pA;
   });
+  pool.forEach(p=>{ p._simWinProb = winProb[p.id]!==undefined ? winProb[p.id] : 0.5; });
 
-  // Inject win probabilities onto player objects so drawScore can anchor distributions
-  pool.forEach(p=>{ p._simWinProb = winProb[p.id] !== undefined ? winProb[p.id] : 0.5; });
+  // Build CDFs once per fighter — expensive, do not repeat in loop
+  const ssCDFById = {}, tdCDFById = {};
+  pool.forEach(p=>{ ssCDFById[p.id]=extractSSCDF(p); tdCDFById[p.id]=extractTDCDF(p); });
 
-  // Map lineups to arrays of IDs for fast lookup
-  const lineupIds = lineups.map(l => l.map(p=>p.id));
-  const poolById = {};
-  pool.forEach(p=>{ poolById[p.id] = p; });
+  const lineupIds = lineups.map(l=>l.map(p=>p.id));
+  const poolById  = {};
+  pool.forEach(p=>{ poolById[p.id]=p; });
 
-  // Per-fighter accumulators — track avg score when they win across all sims
-  const fighterWinSum   = {}; // id → sum of scores in sims where they won
-  const fighterWinCount = {}; // id → count of sims where they won
-  pool.forEach(p=>{ fighterWinSum[p.id]=0; fighterWinCount[p.id]=0; });
+  const fighterWinSum={}, fighterWinCount={};
+  const fighterAllScores={}; // all scores regardless of win/loss for median
+  pool.forEach(p=>{ fighterWinSum[p.id]=0; fighterWinCount[p.id]=0; fighterAllScores[p.id]=[]; });
 
-  // Lineup accumulators
-  const sumScore     = new Array(lineups.length).fill(0);
-  const sumWinScore  = new Array(lineups.length).fill(0);
-  const winSimCount  = new Array(lineups.length).fill(0);
-  const win5SimCount = new Array(lineups.length).fill(0);
-  const simScores    = lineups.map(()=>[]);
+  const sumScore    = new Array(lineups.length).fill(0);
+  const sumWinScore = new Array(lineups.length).fill(0);
+  const winSimCount = new Array(lineups.length).fill(0);
+  const win5SimCount= new Array(lineups.length).fill(0);
+  const simScores   = lineups.map(()=>[]);
 
-  for(let s = 0; s < numSims; s++){
-    const simWinner = {};
-    pairs.forEach(({a, b})=>{
-      const aWins = Math.random() < winProb[a.id];
-      simWinner[a.id] = aWins;
-      if(b) simWinner[b.id] = !aWins;
+  for(let s=0; s<numSims; s++){
+    const simWinner={}, simRound={};
+
+    // Step 1: sample fight outcome (winner + round) for each fight
+    pairs.forEach(({a,b})=>{
+      const outcome = sampleFightOutcome(a, b);
+      const aWon    = outcome.winner==='a';
+      simWinner[a.id] = aWon;
+      if(b) simWinner[b.id] = !aWon;
+      simRound[a.id]  = outcome.round;
+      if(b) simRound[b.id] = outcome.round;
     });
-    const simScore = {};
+
+    // Step 2: score each fighter conditioned on fight duration
+    const simScore={};
     pool.forEach(p=>{
-      const won = simWinner[p.id] !== undefined ? simWinner[p.id] : true;
-      simScore[p.id] = drawScore(p, won,
-        finishProbById[p.id],
-        fightFinishById[p.id],
-        !!is5RoundById[p.id]);
-      // Track per-fighter win scores
-      if(simWinner[p.id]){
-        fighterWinSum[p.id]   += simScore[p.id];
-        fighterWinCount[p.id] += 1;
-      }
+      const won   = simWinner[p.id]!==undefined ? simWinner[p.id] : true;
+      const round = simRound[p.id]!==undefined  ? simRound[p.id]  : 'dec';
+      simScore[p.id] = drawScoreOdds(p, won, round, ssCDFById[p.id], tdCDFById[p.id]);
+      fighterAllScores[p.id].push(simScore[p.id]);
+      if(simWinner[p.id]){ fighterWinSum[p.id]+=simScore[p.id]; fighterWinCount[p.id]+=1; }
     });
-    // Score each lineup, track win counts
-    lineupIds.forEach((ids, li)=>{
-      const total = ids.reduce((sum, id)=> sum + (simScore[id]||0), 0);
-      const wins  = ids.filter(id=> simWinner[id] !== false).length;
-      sumScore[li] += total;
-      simScores[li].push(total);
-      if(wins >= ids.length){
-        sumWinScore[li] += total;
-        winSimCount[li] += 1;
-        win5SimCount[li] += 1;
-      } else if(wins >= ids.length - 1){
-        win5SimCount[li] += 1;
-      }
+
+    lineupIds.forEach((ids,li)=>{
+      const total = ids.reduce((sum,id)=>sum+(simScore[id]||0),0);
+      const wins  = ids.filter(id=>simWinner[id]!==false).length;
+      sumScore[li]+=total; simScores[li].push(total);
+      if(wins>=ids.length){ sumWinScore[li]+=total; winSimCount[li]+=1; win5SimCount[li]+=1; }
+      else if(wins>=ids.length-1){ win5SimCount[li]+=1; }
     });
   }
 
-  // Per-fighter: avg score when they win — the true signal of their upside value
-  const avgWinScoreById = {};
+  const avgWinScoreById={}, medianScoreById={};
   pool.forEach(p=>{
-    avgWinScoreById[p.id] = fighterWinCount[p.id] > 0
-      ? fighterWinSum[p.id] / fighterWinCount[p.id]
-      : 0;
+    avgWinScoreById[p.id] = fighterWinCount[p.id]>0 ? fighterWinSum[p.id]/fighterWinCount[p.id] : 0;
+    const sorted = fighterAllScores[p.id].slice().sort((a,b)=>a-b);
+    medianScoreById[p.id] = sorted.length>0 ? sorted[Math.floor(sorted.length*0.5)] : 0;
   });
 
-  const results = lineups.map((lineup, li)=>{
-    const avg        = sumScore[li] / numSims;
-    const winRate6   = winSimCount[li] / numSims;
-    const winRate5   = win5SimCount[li] / numSims;
-    const avgWhenWin = winSimCount[li] > 0 ? sumWinScore[li] / winSimCount[li] : 0;
+  const results = lineups.map((lineup,li)=>{
+    const avg        = sumScore[li]/numSims;
+    const winRate6   = winSimCount[li]/numSims;
+    const winRate5   = win5SimCount[li]/numSims;
+    const avgWhenWin = winSimCount[li]>0 ? sumWinScore[li]/winSimCount[li] : 0;
     const sorted     = simScores[li].slice().sort((a,b)=>a-b);
-    const p80        = sorted[Math.floor(sorted.length * 0.8)];
-
-    // Composite: winRate6^0.3 × avgWhenWin^2
-    // Validated via simulation: this formula correctly ranks lineups by GPP value.
-    // Heavy avgWhenWin^2 weighting rewards lineups that score big in winning scenarios
-    // (Chimaev+Tulio type lineups with high finish-win ceilings).
-    // Light winRate6^0.3 gives diminishing credit for frequency — prevents cheap
-    // decision grinders (Gomis/Miller) from gaming the metric via higher win rates.
-    const composite = Math.pow(winRate6, 0.3) * Math.pow(avgWhenWin, 2);
-
-    return { lineup, avg, winRate6, winRate5, avgWhenWin, p80, composite };
+    const p80        = sorted[Math.floor(sorted.length*0.8)];
+    const composite  = Math.pow(winRate6,0.3)*Math.pow(avgWhenWin,2);
+    return {lineup, avg, winRate6, winRate5, avgWhenWin, p80, composite};
   });
 
-  return { results, winProb, avgWinScoreById };
+  return {results, winProb, avgWinScoreById, medianScoreById};
 }
 
 async function runUFCSimGen(){
@@ -2943,7 +3020,10 @@ async function runUFCSimGen(){
     log(`Running ${numSims.toLocaleString()} simulations across ${generated.length} candidates...`);
     await new Promise(r=>setTimeout(r,0));
 
-    const { results: simResults, winProb: simWinProb, avgWinScoreById } = runUFCSims(generated, pool, numSims);
+    const { results: simResults, winProb: simWinProb, avgWinScoreById, medianScoreById } = runUFCSims(generated, pool, numSims);
+    // Store median sim score on each player for pool table display
+    pool.forEach(p=>{ p._simP50 = medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null; });
+    if(typeof renderPool==='function') renderPool();
 
     // Compute pool-wide avg win score to set the "elite" threshold.
     // Fighters whose avg win score is significantly above the pool mean
@@ -4723,11 +4803,26 @@ function buildMapper(){
     </div>`;
   }).join('');
 
-  // Optional section — only show columns NOT already mapped as required
+  // Columns auto-read by the UFC sim — hidden from optional mapper
+  const UFC_SIM_COLS = new Set([
+    'finish_r1','finish_r2','finish_r3','finish_r4','finish_r5','decision',
+    'ss_55plus','ss_60plus','ss_65plus','ss_70plus','ss_75plus','ss_80plus','ss_85plus','ss_90plus',
+    'ss_95plus','ss_100plus','ss_105plus','ss_110plus','ss_115plus','ss_120plus','ss_125plus',
+    'td_1plus','td_2plus','td_3plus','td_4plus','td_5plus','td_6plus',
+  ]);
+  const isUFCUpload = document.getElementById('slateSport')?.value === 'ufc';
+
+  // Optional section — skip required-mapped cols and UFC sim cols
   const requiredMappedCols = new Set(REQUIRED_ROLES.map(r=>colMapping[r.value]).filter(v=>v!=null));
   const optEl=document.getElementById('mapperOptional');
+  const simColRows = [];
   optEl.innerHTML=parsedCSV.headers.map((h,i)=>{
-    if(requiredMappedCols.has(i)) return ''; // skip columns already used as required
+    if(requiredMappedCols.has(i)) return '';
+    if(isUFCUpload && UFC_SIM_COLS.has(h.trim().toLowerCase())){
+      const sample=(parsedCSV.rows[0]?.[i]||'').toString().slice(0,20);
+      simColRows.push({h, sample});
+      return '';
+    }
     const optRole=Object.entries(colMapping).find(([k,v])=>v===i&&OPTIONAL_ROLES.find(r=>r.value===k))?.[0]||'';
     const sample=(parsedCSV.rows[0]?.[i]||'').toString().slice(0,25);
     return `<div class="mapper-row">
@@ -4739,6 +4834,25 @@ function buildMapper(){
       </select>
     </div>`;
   }).join('');
+
+  // Collapsed sim inputs section
+  const simWrap = document.getElementById('mapperSimInputs');
+  if(simWrap){
+    if(isUFCUpload && simColRows.length > 0){
+      simWrap.style.display='block';
+      const simGrid = document.getElementById('mapperSimGrid');
+      if(simGrid){
+        simGrid.innerHTML = simColRows.map(function(row){
+          return '<div style="display:flex;align-items:center;gap:8px;padding:2px 0;">'
+            + '<span style="font-family:\'DM Mono\',monospace;font-size:10px;color:var(--accent);min-width:120px;">'+row.h+'</span>'
+            + '<span style="font-family:\'DM Mono\',monospace;font-size:10px;color:var(--muted);">'+( row.sample||'—')+'</span>'
+            + '</div>';
+        }).join('');
+      }
+    } else {
+      simWrap.style.display='none';
+    }
+  }
 
   buildPreview();
   document.getElementById('mapperSection').style.display='block';
@@ -4819,6 +4933,45 @@ function createSlate(){
     if(colMapping.top10!=null) p.top10=(row[colMapping.top10]||'').trim();
     if(colMapping.projFinish!=null) p.projFinish=parseInt(row[colMapping.projFinish])||null;
     if(colMapping.cut!=null)   p.cut=(row[colMapping.cut]||'').trim();
+
+    // UFC odds columns — read directly by header name from raw CSV row
+    // These are not role-mapped; we just scan headers for matching names
+    if(sport==='ufc'){
+      const hdrs = parsedCSV.headers;
+      const get = name => { const i=hdrs.findIndex(h=>h.trim().toLowerCase()===name.toLowerCase()); return i>=0?(row[i]||'').trim():null; };
+      const getNum = name => { const v=get(name); const n=parseFloat(v); return (!isNaN(n)&&n!==0)?n:null; };
+      // Finish round odds per fighter
+      p.finish_r1  = getNum('Finish_R1');
+      p.finish_r2  = getNum('Finish_R2');
+      p.finish_r3  = getNum('Finish_R3');
+      p.finish_r4  = getNum('Finish_R4');
+      p.finish_r5  = getNum('Finish_R5');
+      p.decision   = getNum('Decision');
+      // Sig strike alternate lines
+      p.ss_55  = getNum('SS_55plus');
+      p.ss_60  = getNum('SS_60plus');
+      p.ss_65  = getNum('SS_65plus');
+      p.ss_70  = getNum('SS_70plus');
+      p.ss_75  = getNum('SS_75plus');
+      p.ss_80  = getNum('SS_80plus');
+      p.ss_85  = getNum('SS_85plus');
+      p.ss_90  = getNum('SS_90plus');
+      p.ss_95  = getNum('SS_95plus');
+      p.ss_100 = getNum('SS_100plus');
+      p.ss_105 = getNum('SS_105plus');
+      p.ss_110 = getNum('SS_110plus');
+      p.ss_115 = getNum('SS_115plus');
+      p.ss_120 = getNum('SS_120plus');
+      p.ss_125 = getNum('SS_125plus');
+      // Takedown alternate lines
+      p.td_1 = getNum('TD_1plus');
+      p.td_2 = getNum('TD_2plus');
+      p.td_3 = getNum('TD_3plus');
+      p.td_4 = getNum('TD_4plus');
+      p.td_5 = getNum('TD_5plus');
+      p.td_6 = getNum('TD_6plus');
+    }
+
     players.push(p);
   });
 
@@ -5187,6 +5340,112 @@ function renderOddsCell(val, cls='col-r', slate=null, fieldKey=null){
   return `<div class="cell-mono ${cls}" style="color:${color};" title="${tooltip}">${display}</div>`;
 }
 
+// ── SIM INPUTS TAB ─────────────────────────────────────────────
+function refreshSimInputsTab(){
+  const slate = activeSlate();
+  const btn = document.getElementById('tab-btn-siminputs');
+  if(btn) btn.style.display = (slate && slate.sport==='ufc') ? 'block' : 'none';
+  if(!slate || slate.sport!=='ufc') return;
+  const sel = document.getElementById('simInputFighterSelect');
+  if(!sel) return;
+  const current = sel.value;
+  const players = (slate.players||[]).filter(p=>p.salary>0);
+  // Group by fight, show both fighters per fight
+  const fights = {};
+  players.forEach(p=>{ const f=p.fightNum||0; if(!fights[f])fights[f]=[]; fights[f].push(p); });
+  sel.innerHTML = '<option value="">— Select a fighter —</option>';
+  Object.keys(fights).sort((a,b)=>a-b).forEach(fn=>{
+    const grp = document.createElement('optgroup');
+    grp.label = 'Fight #'+fn;
+    fights[fn].forEach(p=>{
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name + (p.opp ? ' vs '+p.opp : '');
+      if(p.id===current) opt.selected=true;
+      grp.appendChild(opt);
+    });
+    sel.appendChild(grp);
+  });
+  if(current) renderSimInputs();
+}
+
+function renderSimInputs(){
+  const slate = activeSlate(); if(!slate) return;
+  const sel = document.getElementById('simInputFighterSelect');
+  const display = document.getElementById('simInputsDisplay');
+  if(!sel||!display) return;
+  const pid = sel.value;
+  if(!pid){ display.innerHTML=''; return; }
+  const p = (slate.players||[]).find(q=>q.id===pid);
+  if(!p){ display.innerHTML=''; return; }
+
+  function row(label, val, color){
+    const n = parseFloat(val);
+    const fmt = (!isNaN(n)&&val!=null&&val!=='') ? (n>0?'+'+Math.round(n):Math.round(n)) : '—';
+    const prob = (!isNaN(n)&&val!=null&&val!=='') ? (n<0?Math.round((-n)/(-n+100)*100):Math.round(100/(n+100)*100))+'%' : '';
+    const c = color || (fmt==='—'?'var(--muted)':'var(--text)');
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);">
+      <span style="font-size:11px;color:var(--muted);">${label}</span>
+      <div style="display:flex;align-items:center;gap:8px;">
+        ${prob?`<span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">${prob}</span>`:''}
+        <span style="font-family:'DM Mono',monospace;font-size:11px;font-weight:600;color:${c};">${fmt}</span>
+      </div>
+    </div>`;
+  }
+
+  function section(title){
+    return `<div style="font-family:'DM Mono',monospace;font-size:10px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;padding:8px 0 4px;">${title}</div>`;
+  }
+
+  let html = `<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:2px;">${p.name}</div>`;
+  html += `<div style="font-size:11px;color:var(--muted);margin-bottom:10px;">vs ${p.opp||'—'} &nbsp;·&nbsp; Fight #${p.fightNum||'—'} &nbsp;·&nbsp; $${(p.salary||0).toLocaleString()}</div>`;
+  if(p._simP50!=null){
+    html += `<div style="display:flex;align-items:center;justify-content:space-between;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:6px;padding:6px 10px;margin-bottom:10px;">`
+      + `<span style="font-size:11px;color:var(--muted);">Sim median score</span>`
+      + `<span style="font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:var(--green);">${p._simP50.toFixed(1)}</span>`
+      + `</div>`;
+  } else {
+    html += `<div style="font-size:10px;color:var(--muted);font-style:italic;margin-bottom:10px;">Run Auto-Gen sims to see projected score</div>`;
+  }
+
+  html += section('Win odds');
+  html += row('Moneyline', p.ml, 'var(--accent)');
+  html += row('ITD (finish)', p.itd, 'var(--accent2)');
+
+  html += section('Finish by round');
+  html += row('Round 1', p.finish_r1);
+  html += row('Round 2', p.finish_r2);
+  html += row('Round 3', p.finish_r3);
+  if(p.finish_r4!=null) html += row('Round 4', p.finish_r4);
+  if(p.finish_r5!=null) html += row('Round 5', p.finish_r5);
+  html += row('Decision', p.decision);
+
+  const ssFields = [
+    {k:'ss_35',l:'35+'},{k:'ss_40',l:'40+'},{k:'ss_45',l:'45+'},{k:'ss_50',l:'50+'},
+    {k:'ss_55',l:'55+'},{k:'ss_60',l:'60+'},{k:'ss_65',l:'65+'},{k:'ss_70',l:'70+'},
+    {k:'ss_75',l:'75+'},{k:'ss_80',l:'80+'},{k:'ss_85',l:'85+'},{k:'ss_90',l:'90+'},
+    {k:'ss_95',l:'95+'},{k:'ss_100',l:'100+'},{k:'ss_105',l:'105+'},{k:'ss_110',l:'110+'},
+    {k:'ss_115',l:'115+'},{k:'ss_120',l:'120+'},{k:'ss_125',l:'125+'},
+  ].filter(f=>p[f.k]!=null);
+
+  if(ssFields.length){
+    html += section('Sig strikes alternate lines');
+    ssFields.forEach(f=>{ html += row(f.l+' sig strikes', p[f.k], 'var(--blue)'); });
+  }
+
+  const tdFields = [
+    {k:'td_1',l:'1+'},{k:'td_2',l:'2+'},{k:'td_3',l:'3+'},
+    {k:'td_4',l:'4+'},{k:'td_5',l:'5+'},{k:'td_6',l:'6+'},
+  ].filter(f=>p[f.k]!=null);
+
+  if(tdFields.length){
+    html += section('Takedown alternate lines');
+    tdFields.forEach(f=>{ html += row(f.l+' takedowns', p[f.k], 'var(--purple)'); });
+  }
+
+  display.innerHTML = html;
+}
+
 loadFromStorage();
 loadHistory();
 if(slates.length)activeSlateId=slates[0].id;
@@ -5224,7 +5483,7 @@ window.addEventListener('resize',()=>{
 const _origSwitchTabFn=window.switchTab;
 window.switchTab=function(tab,el){
   if(_origSwitchTabFn)_origSwitchTabFn(tab,el);
-  const labels={builder:'📋 Builder',exposure:'📊 Exposure',groups:'👥 Groups',history:'⏱ History',autogen:'⚡ Auto-Gen'};
+  const labels={builder:'📋 Builder',exposure:'📊 Exposure',groups:'👥 Groups',history:'⏱ History',autogen:'⚡ Auto-Gen',siminputs:'🎯 Odds'};
   const btn=document.getElementById('mobBtnRight');
   if(btn&&labels[tab])btn.textContent=labels[tab];
 };
