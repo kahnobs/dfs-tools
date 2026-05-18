@@ -533,18 +533,36 @@ html { overscroll-behavior-y: contain; }
   overscroll-behavior: contain;
   touch-action: pan-y;
 }
+
+  /* ── Home nav link in topbar ── */
+  .topbar-home { display:flex; align-items:center; gap:6px; text-decoration:none; color:var(--muted); font-family:'DM Mono',monospace; font-size:11px; transition:color .15s; padding-right:12px; border-right:1px solid var(--border); margin-right:4px; flex-shrink:0; }
+  .topbar-home:hover { color:var(--accent); }
+  .topbar-home-mark { width:22px; height:22px; background:var(--accent); border-radius:4px; display:flex; align-items:center; justify-content:center; font-family:'DM Mono',monospace; font-weight:500; font-size:9px; color:#0e0f11; flex-shrink:0; }
+  .topbar-home-label { font-size:10px; letter-spacing:.03em; }
+  /* Tool links on right of topbar */
+  .topbar-right { display:flex; align-items:center; gap:4px; margin-left:auto; }
+  .topbar-tool-link { font-family:'DM Mono',monospace; font-size:10px; color:var(--muted); text-decoration:none; padding:4px 10px; border-radius:5px; border:1px solid transparent; transition:all .15s; }
+  .topbar-tool-link:hover { color:var(--accent); border-color:rgba(200,240,90,0.2); background:rgba(200,240,90,0.05); }
 </style>
 </head>
 <body>
 <div id="appWrap">
 
 <div class="topbar">
+  <a href="../" class="topbar-home">
+    <div class="topbar-home-mark">DFS</div>
+    <span class="topbar-home-label">All Tools</span>
+  </a>
   <div class="logo">DFS <span>//</span> Builder</div>
   <div class="slate-tabs" id="slateTabs"></div>
   <button class="btn-new-slate" onclick="openNewSlateModal()">＋ New Slate</button>
   <button onclick="backupData()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:5px;font-size:10px;font-family:'DM Mono',monospace;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='var(--green)';this.style.color='var(--green)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">↓ Backup</button>
   <label style="background:none;border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:5px;font-size:10px;font-family:'DM Mono',monospace;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">↑ Restore<input type="file" accept=".json" style="display:none" onchange="restoreData(this)"></label>
   <button onclick="clearAllData()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:5px;font-size:10px;font-family:'DM Mono',monospace;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">⊘ Clear All</button>
+  <div class="topbar-right">
+    <a href="../contest-analyzer/" class="topbar-tool-link">Contest Analyzer</a>
+    <a href="../" class="topbar-tool-link">← Home</a>
+  </div>
 </div>
 
 <div id="emptyState">
