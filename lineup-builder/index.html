@@ -695,29 +695,25 @@ html { overscroll-behavior-y: contain; }
     <!-- AUTO-GEN -->
     <div class="tab-content" id="tab-autogen">
       <div class="autogen-panel">
+
+        <!-- Mode sub-tabs -->
+        <div style="display:flex;gap:2px;margin-bottom:12px;background:var(--surface2);border-radius:8px;padding:3px;">
+          <button id="modeTabOptimize" onclick="switchGenMode('optimize')"
+            style="flex:1;padding:6px 0;font-size:11px;font-weight:600;border:none;border-radius:6px;cursor:pointer;background:var(--surface);color:var(--text);font-family:'DM Sans',sans-serif;">
+            ⚡ Optimize
+          </button>
+          <button id="modeTabSimulate" onclick="switchGenMode('simulate')"
+            style="flex:1;padding:6px 0;font-size:11px;font-weight:600;border:none;border-radius:6px;cursor:pointer;background:transparent;color:var(--muted);font-family:'DM Sans',sans-serif;">
+            🎲 Simulate
+          </button>
+        </div>
+
+        <!-- SHARED SETTINGS (always visible) -->
         <div class="autogen-section">
-          <div class="autogen-section-title">Generation Settings</div>
+          <div class="autogen-section-title">Settings</div>
           <div class="setting-row">
-            <div class="setting-label">Number of lineups to generate</div>
+            <div class="setting-label">Number of lineups</div>
             <input type="number" class="setting-num" id="genCount" value="20" min="1" max="500">
-          </div>
-          <div class="setting-row">
-            <div class="setting-label">Optimize by</div>
-            <select class="setting-select" id="genOptimize" onchange="toggleBlendRow()">
-              <option value="">— choose —</option>
-              <option value="proj">Projection</option>
-              <option value="rating">Rating</option>
-              <option value="blend">Blend (Proj + Rating)</option>
-            </select>
-          </div>
-          <div class="setting-row" id="blendRow" style="display:none;flex-direction:column;gap:6px;align-items:stretch;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">Proj</span>
-              <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);" id="blendLabel">50% / 50%</span>
-              <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">Rating</span>
-            </div>
-            <input type="range" id="blendSlider" min="0" max="100" value="50" style="width:100%;accent-color:var(--accent);" oninput="updateBlendLabel(this.value)">
-            <div style="font-size:10px;color:var(--muted);text-align:center;">Slide left for more Projection weight, right for more Rating</div>
           </div>
           <div class="setting-row">
             <div class="setting-label">Max exposure per player (%)</div>
@@ -731,31 +727,48 @@ html { overscroll-behavior-y: contain; }
             <div class="setting-label">Max lineup salary</div>
             <input type="number" class="setting-num" id="genMaxSal" value="50000" min="1" max="50000" style="width:80px;">
           </div>
-          <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:6px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span class="setting-label">Randomness</span>
-              <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);" id="randomnessLabel">25</span>
+        </div>
+
+        <!-- OPTIMIZE MODE SETTINGS -->
+        <div id="optimizeSettings">
+          <div class="autogen-section">
+            <div class="autogen-section-title">Optimizer Settings</div>
+            <div class="setting-row" id="optimizeRow">
+              <div class="setting-label">Optimize by</div>
+              <select class="setting-select" id="genOptimize" onchange="toggleBlendRow()">
+                <option value="">— choose —</option>
+                <option value="proj">Projection</option>
+                <option value="rating">Rating</option>
+                <option value="blend">Blend (Proj + Rating)</option>
+              </select>
             </div>
-            <input type="range" id="randomnessSlider" min="1" max="99" value="25" style="width:100%;accent-color:var(--accent);" oninput="document.getElementById('randomnessLabel').textContent=this.value">
-            <div style="display:flex;justify-content:space-between;">
-              <span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">Low (more optimal)</span>
-              <span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">High (more variance)</span>
+            <div class="setting-row" id="blendRow" style="display:none;flex-direction:column;gap:6px;align-items:stretch;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">Proj</span>
+                <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);" id="blendLabel">50% / 50%</span>
+                <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">Rating</span>
+              </div>
+              <input type="range" id="blendSlider" min="0" max="100" value="50" style="width:100%;accent-color:var(--accent);" oninput="updateBlendLabel(this.value)">
+              <div style="font-size:10px;color:var(--muted);text-align:center;">Slide left for Projection, right for Rating</div>
+            </div>
+            <div class="setting-row" id="randomnessRow" style="flex-direction:column;align-items:stretch;gap:6px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="setting-label">Randomness</span>
+                <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);" id="randomnessLabel">25</span>
+              </div>
+              <input type="range" id="randomnessSlider" min="1" max="99" value="25" style="width:100%;accent-color:var(--accent);" oninput="document.getElementById('randomnessLabel').textContent=this.value">
+              <div style="display:flex;justify-content:space-between;">
+                <span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">Low (more optimal)</span>
+                <span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">High (more variance)</span>
+              </div>
             </div>
           </div>
         </div>
-        <div class="autogen-section" id="nascarSection" style="display:none;">
-          <div class="autogen-section-title">NASCAR Settings</div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-            <div>
-              <div style="font-size:11px;font-weight:600;color:var(--text);">Simulation Mode</div>
-              <div style="font-size:10px;color:var(--muted);margin-top:2px;">Simulate finish order from WIN odds + any available Top 3 / Top 5 / Top 10 odds. Missing tiers are extrapolated — more odds = more accurate distribution.</div>
-            </div>
-            <label class="toggle-switch">
-              <input type="checkbox" id="genNascarSimMode" onchange="toggleNascarSimMode()">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div id="nascarSimSettings" style="display:none;">
+
+        <!-- SIMULATE MODE SETTINGS -->
+        <div id="simulateSettings" style="display:none;">
+          <div class="autogen-section" id="nascarSection" style="display:none;">
+            <div class="autogen-section-title">NASCAR Simulation</div>
             <div style="margin-bottom:8px;">
               <div style="font-size:10px;color:var(--muted);margin-bottom:5px;">Track Type</div>
               <div style="display:flex;gap:4px;flex-wrap:wrap;" id="nascarTrackBtns">
@@ -773,62 +786,37 @@ html { overscroll-behavior-y: contain; }
               </div>
               <div style="flex:1;">
                 <div style="font-size:10px;color:var(--muted);margin-bottom:3px;">Simulations</div>
-                <div style="display:flex;align-items:center;justify-content:space-between;">
-                  <input type="range" min="200" max="2000" step="100" value="500" id="nascarSimCountSlider"
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <input type="range" min="500" max="10000" step="500" value="2000" id="nascarSimCountSlider"
                     style="flex:1;accent-color:var(--accent2);"
                     oninput="document.getElementById('nascarSimCountLabel').textContent=this.value">
-                  <span id="nascarSimCountLabel" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent2);font-weight:600;margin-left:6px;min-width:30px;">500</span>
+                  <span id="nascarSimCountLabel" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent2);font-weight:600;min-width:38px;">2000</span>
                 </div>
               </div>
             </div>
-            <div style="margin-bottom:8px;">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
-                <div style="font-size:10px;color:var(--muted);">Chaos Target %</div>
-                <span id="nascarChaosLabel" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent2);font-weight:600;">20%</span>
-              </div>
-              <input type="range" min="0" max="100" step="5" value="20" id="nascarChaosSlider"
-                style="width:100%;accent-color:var(--accent2);"
-                oninput="document.getElementById('nascarChaosLabel').textContent=this.value+'%'">
-              <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-top:2px;">
-                <span>← All Clean</span><span>All Chaos →</span>
-              </div>
-            </div>
             <div style="padding:6px 8px;background:rgba(232,66,26,.07);border:1px solid rgba(232,66,26,.2);border-radius:5px;font-size:9px;color:var(--muted);line-height:1.5;">
-              Requires <span style="color:var(--accent2);font-weight:600;">WIN</span>, <span style="color:var(--accent2);font-weight:600;">TOP5</span>, <span style="color:var(--accent2);font-weight:600;">TOP10</span> odds and <span style="color:var(--accent2);font-weight:600;">Grid</span> position mapped. <span style="color:var(--accent2);font-weight:600;">Proj Finish</span> recommended for accuracy.
+              Requires <span style="color:var(--accent2);font-weight:600;">WIN</span>, <span style="color:var(--accent2);font-weight:600;">TOP5</span>, <span style="color:var(--accent2);font-weight:600;">TOP10</span> odds and <span style="color:var(--accent2);font-weight:600;">Grid</span> mapped. <span style="color:var(--accent2);font-weight:600;">Proj Finish</span> recommended.
             </div>
           </div>
-        </div>
 
-        <div class="autogen-section" id="ufcSection" style="display:none;">
-          <div class="autogen-section-title">UFC Settings</div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-            <div>
-              <div style="font-size:11px;font-weight:600;color:var(--text);">No Opposing Fighters</div>
-              <div style="font-size:10px;color:var(--muted);margin-top:2px;">Prevent fighters from the same bout in the same lineup</div>
+          <div class="autogen-section" id="ufcSection" style="display:none;">
+            <div class="autogen-section-title">UFC Simulation</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+              <div>
+                <div style="font-size:11px;font-weight:600;color:var(--text);">No Opposing Fighters</div>
+                <div style="font-size:10px;color:var(--muted);margin-top:2px;">Prevent fighters from the same bout in the same lineup</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="genUfcNoOppose" onchange="renderUfcExclusions();save()">
+                <span class="toggle-slider"></span>
+              </label>
             </div>
-            <label class="toggle-switch">
-              <input type="checkbox" id="genUfcNoOppose" onchange="renderUfcExclusions();save()">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div id="ufcExclusionRow" style="display:none;">
-            <div style="font-size:10px;color:var(--muted);margin-bottom:5px;">Exclude fights from rule (allow both fighters):</div>
-            <div id="ufcFightToggles" style="display:flex;flex-wrap:wrap;gap:4px;"></div>
-          </div>
-          <div style="height:1px;background:var(--border);margin:10px 0;"></div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-            <div>
-              <div style="font-size:11px;font-weight:600;color:var(--text);">Simulation Mode</div>
-              <div style="font-size:10px;color:var(--muted);margin-top:2px;">Use ML odds to simulate fight outcomes &amp; score lineups across scenarios instead of median projections</div>
+            <div id="ufcExclusionRow" style="display:none;">
+              <div style="font-size:10px;color:var(--muted);margin-bottom:5px;">Exclude fights from rule (allow both fighters):</div>
+              <div id="ufcFightToggles" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;"></div>
             </div>
-            <label class="toggle-switch">
-              <input type="checkbox" id="genUfcSimMode" onchange="toggleUfcSimMode()">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div id="ufcSimSettings" style="display:none;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-              <span style="font-size:10px;color:var(--muted);">Simulations per lineup</span>
+              <span style="font-size:10px;color:var(--muted);">Simulations</span>
               <span id="ufcSimCountLabel" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--purple);font-weight:600;">2000</span>
             </div>
             <input type="range" min="500" max="10000" step="500" value="2000" id="ufcSimCountSlider"
@@ -839,10 +827,12 @@ html { overscroll-behavior-y: contain; }
               <span style="font-size:9px;color:var(--muted);">More accurate</span>
             </div>
             <div style="padding:6px 8px;background:rgba(168,85,247,.07);border:1px solid rgba(168,85,247,.2);border-radius:5px;font-size:9px;color:var(--muted);line-height:1.5;">
-              Requires <span style="color:var(--purple);font-weight:600;">ML</span> and <span style="color:var(--purple);font-weight:600;">ITD</span> columns mapped. Sim draws fight winners from odds, scores by outcome type, ranks by all-6-win rate × avg score when all win.
+              Requires <span style="color:var(--purple);font-weight:600;">ML</span> mapped. Sim samples fight outcomes from odds, picks optimal lineup per sim, ranks by frequency.
             </div>
           </div>
         </div>
+
+        <!-- SHARED BOTTOM (always visible) -->
         <div class="autogen-section">
           <div class="autogen-section-title">Group Rules Summary</div>
           <div id="groupRulesSummary" style="font-size:11px;color:var(--muted);font-style:italic;">No groups defined yet.</div>
@@ -879,7 +869,7 @@ html { overscroll-behavior-y: contain; }
             <span style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;">Unconstrained</span>
             <span id="unconstrainedPct" style="font-size:10px;font-family:'DM Mono',monospace;color:var(--accent);">100%</span>
           </div>
-          <div style="font-size:10px;color:var(--muted);margin-top:6px;">Tilt strength: how much to lift the archetype and suppress the opposing archetype. Keeps elite players competitive — just narrows the gap.</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:6px;">Tilt strength: how much to lift the archetype and suppress the opposing archetype.</div>
           <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
             <span style="font-size:10px;color:var(--muted);">Subtle</span>
             <input type="range" id="archetypeBoostSlider" min="1" max="5" step="0.5" value="4" style="flex:1;accent-color:var(--accent);" oninput="document.getElementById('archetypeBoostVal').textContent=this.value+'×'">
@@ -888,7 +878,7 @@ html { overscroll-behavior-y: contain; }
           </div>
         </div>
         <div class="autogen-section">
-          <div style="font-size:10px;color:var(--muted);padding:4px 0 2px;">Per-player min/max exposure can be set directly in the pool — use the <span style="color:var(--green);font-family:'DM Mono',monospace;">Min%</span> and <span style="color:var(--accent);font-family:'DM Mono',monospace;">Max%</span> columns. <button onclick="resetPlayerExposures()" style="background:none;border:none;color:var(--muted);text-decoration:underline;cursor:pointer;font-size:10px;padding:0;">Reset all</button></div>
+          <div style="font-size:10px;color:var(--muted);padding:4px 0 2px;">Per-player min/max exposure via <span style="color:var(--green);font-family:'DM Mono',monospace;">Min%</span> / <span style="color:var(--accent);font-family:'DM Mono',monospace;">Max%</span> columns. <button onclick="resetPlayerExposures()" style="background:none;border:none;color:var(--muted);text-decoration:underline;cursor:pointer;font-size:10px;padding:0;">Reset all</button></div>
         </div>
         <div class="gen-log" id="genLog">Ready to generate.</div>
         <button class="btn-generate" id="genBtn" onclick="runAutoGen()">⚡ Generate Lineups</button>
@@ -1109,7 +1099,6 @@ function addToHistory(slateId, label, lineups){
     const ids = l.map(p=>p.id);
     ids._archetypeTag = l._archetypeTag||null;
     ids._waveTag = l._waveTag||null;
-    ids._nascarTag = l._nascarTag||null;
     return ids;
   })};
   lineupHistory[slateId].unshift(entry);
@@ -1162,7 +1151,6 @@ function previewHistorySet(id){
   const lineups=set.lineups.map(ids=>{
     const lineup=ids.map(pid=>playerById(slate,pid)).filter(Boolean);
     lineup._archetypeTag = ids._archetypeTag||null;
-    lineup._nascarTag = ids._nascarTag||null;
     lineup._waveTag = ids._waveTag||null;
     return lineup;
   });
@@ -2314,6 +2302,9 @@ function renderGroupRulesSummary(){
   // Show/hide sport-specific sections — must happen regardless of group count
   const ufcSection = document.getElementById('ufcSection');
   if(ufcSection) ufcSection.style.display = slate.sport==='ufc' ? 'block' : 'none';
+  // Default to simulate tab for UFC/NASCAR (they have full sim support), optimize for others
+  if(slate.sport==='ufc'||slate.sport==='nascar') switchGenMode('simulate');
+  else switchGenMode('optimize');
   const nascarSection = document.getElementById('nascarSection');
   if(nascarSection){
     nascarSection.style.display = slate.sport==='nascar' ? 'block' : 'none';
@@ -2579,10 +2570,26 @@ function stepRule(gid, field, delta){
   renderGroupRulesSummary();
 }
 
+// Current gen mode: 'optimize' or 'simulate'
+let _genMode = 'optimize';
+
+function switchGenMode(mode){
+  _genMode = mode;
+  const optBtn = document.getElementById('modeTabOptimize');
+  const simBtn = document.getElementById('modeTabSimulate');
+  const optSettings = document.getElementById('optimizeSettings');
+  const simSettings = document.getElementById('simulateSettings');
+  if(optBtn){ optBtn.style.background = mode==='optimize' ? 'var(--surface)' : 'transparent'; optBtn.style.color = mode==='optimize' ? 'var(--text)' : 'var(--muted)'; }
+  if(simBtn){ simBtn.style.background = mode==='simulate' ? 'var(--surface)' : 'transparent'; simBtn.style.color = mode==='simulate' ? 'var(--text)' : 'var(--muted)'; }
+  if(optSettings) optSettings.style.display = mode==='optimize' ? 'block' : 'none';
+  if(simSettings) simSettings.style.display = mode==='simulate' ? 'block' : 'none';
+  // Update generate button label
+  const btn = document.getElementById('genBtn');
+  if(btn) btn.textContent = mode==='simulate' ? '🎲 Run Simulation' : '⚡ Generate Lineups';
+}
+
 function toggleNascarSimMode(){
-  const on = document.getElementById('genNascarSimMode')?.checked;
-  const settings = document.getElementById('nascarSimSettings');
-  if(settings) settings.style.display = on ? 'block' : 'none';
+  // Legacy toggle — now handled by switchGenMode
 }
 
 function setNascarTrack(type, btn){
@@ -2602,10 +2609,17 @@ function mlToProb(ml){
   return ml < 0 ? (-ml)/((-ml)+100) : 100/(ml+100);
 }
 
-function mlToWinProb(ml){
-  if(!ml || isNaN(ml)) return 0.5;
-  const raw = ml > 0 ? 100/(ml+100) : (-ml)/((-ml)+100);
-  return Math.max(0.05, Math.min(0.95, raw));
+// Vig-removed win probability for a pair of fighters.
+// Raw implied probs sum to >1.0 due to book margin — normalize to remove vig.
+// If only one fighter's ML is available, fall back to raw prob (no pair to normalize against).
+function vigRemovedWinProb(mlA, mlB){
+  const rawA = mlToProb(mlA), rawB = mlToProb(mlB);
+  if(rawA != null && rawB != null){
+    const total = rawA + rawB;
+    return Math.max(0.05, Math.min(0.95, rawA / total));
+  }
+  if(rawA != null) return Math.max(0.05, Math.min(0.95, rawA));
+  return 0.5;
 }
 
 // ── CDF FITTING ──────────────────────────────────────────────
@@ -2667,54 +2681,67 @@ function extractTDCDF(p){
 
 // ── FIGHT OUTCOME SAMPLER ─────────────────────────────────────
 // Samples fight outcome (who wins, what round) from per-fighter per-round finish odds.
+// Decision odds are treated as direct market data identical to finish odds —
+// each fighter's decision ML is its own outcome in the distribution.
+// No averaging needed; normalization handles the joint distribution.
 // Key: early finish → short fight → truncated volume (negative correlation enforced).
 function sampleFightOutcome(a, b){
   const finishKeys = ['finish_r1','finish_r2','finish_r3','finish_r4','finish_r5'];
   const roundNums  = [1, 2, 3, 4, 5];
   const outcomes   = [];
+
+  // Per-round finish outcomes
   for(let i=0; i<5; i++){
     const pA = a[finishKeys[i]] != null ? mlToProb(a[finishKeys[i]]) : null;
     const pB = b && b[finishKeys[i]] != null ? mlToProb(b[finishKeys[i]]) : null;
     if(pA != null) outcomes.push({winner:'a', round:roundNums[i], prob:pA});
     if(pB != null) outcomes.push({winner:'b', round:roundNums[i], prob:pB});
   }
+
+  // Decision outcomes — each fighter's decision ML is a direct market probability.
+  // Fighter A wins by decision and Fighter B wins by decision are separate outcomes.
   const decA = a.decision != null ? mlToProb(a.decision) : null;
   const decB = b && b.decision != null ? mlToProb(b.decision) : null;
-  let pDec = (decA!=null && decB!=null) ? (decA+decB)/2 : (decA||decB||null);
+  if(decA != null) outcomes.push({winner:'a', round:'dec', prob:decA});
+  if(decB != null) outcomes.push({winner:'b', round:'dec', prob:decB});
 
-  if(outcomes.length===0 && pDec===null){
-    return {winner: Math.random()<(a._simWinProb||0.5)?'a':'b', round:'dec'};
+  // No odds at all — fall back to vig-removed ML win probability
+  if(outcomes.length === 0){
+    return {winner: Math.random() < (a._simWinProb||0.5) ? 'a' : 'b', round:'dec'};
   }
-  const rawTotal = outcomes.reduce((s,o)=>s+o.prob,0) + (pDec||0);
-  const norm = rawTotal>0 ? 1/rawTotal : 1;
+
+  // Normalize across all outcomes (removes residual vig in the joint distribution)
+  const rawTotal = outcomes.reduce((s,o)=>s+o.prob, 0);
+  const norm = rawTotal > 0 ? 1/rawTotal : 1;
   const r = Math.random();
   let acc = 0;
   for(const o of outcomes){
     acc += o.prob * norm;
     if(r < acc) return {winner:o.winner, round:o.round};
   }
-  // Decision — who wins from ML
-  return {winner: Math.random()<(a._simWinProb||0.5)?'a':'b', round:'dec'};
+  // Final fallback — use vig-removed win prob for decision winner
+  return {winner: Math.random() < (a._simWinProb||0.5) ? 'a' : 'b', round:'dec'};
 }
 
 // ── VOLUME CAPS BY FIGHT DURATION ─────────────────────────────
 // These caps enforce the negative correlation between early finish and volume.
 // A R1 finish means ~2-3 minutes of action max — you cannot land 80 sig strikes.
-function ssCapForRound(round){
+// is5Round flag distinguishes 3-round decision (130 cap) from 5-round decision (200 cap).
+function ssCapForRound(round, is5Round){
   if(round===1)    return 28;
   if(round===2)    return 52;
   if(round===3)    return 78;
   if(round===4)    return 104;
   if(round===5)    return 130;
-  return 130; // decision
+  return is5Round ? 200 : 130; // 5-round decision = 25 min, 3-round = 15 min
 }
-function tdCapForRound(round){
+function tdCapForRound(round, is5Round){
   if(round===1)    return 2;
   if(round===2)    return 4;
   if(round===3)    return 6;
   if(round===4)    return 8;
   if(round===5)    return 10;
-  return 10; // decision
+  return is5Round ? 15 : 10;
 }
 
 // ── WIN BONUS ─────────────────────────────────────────────────
@@ -2734,8 +2761,10 @@ function winBonus(round){
 function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
   const sal  = fighter.salary || 8000;
   const tier = Math.max(0, Math.min(1, (sal - 6400) / (9800 - 6400)));
-  const ssCap = ssCapForRound(round);
-  const tdCap = tdCapForRound(round);
+  // Detect 5-round fight: fighter has R4 or R5 finish odds
+  const is5Round = fighter.finish_r4 != null || fighter.finish_r5 != null;
+  const ssCap = ssCapForRound(round, is5Round);
+  const tdCap = tdCapForRound(round, is5Round);
 
   // Sample sig strikes capped to what's achievable in this fight duration
   let ss = 0;
@@ -2767,8 +2796,14 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
   if(won){
     total += winBonus(round);
   } else {
-    // Loss: opponent controlled, absorbed damage — discount volume
-    total *= 0.75;
+    // Loss: opponent controlled, absorbed damage — discount volume.
+    // Scale by fight duration: a R1 KO loss produces almost no volume (deep discount),
+    // a decision loss means 3-5 full rounds of action (shallow discount).
+    // Range: R1 loss ~0.55x, decision loss ~0.82x.
+    const roundsFought = round === 'dec' ? (is5Round ? 5 : 3) : round;
+    const maxRounds    = is5Round ? 5 : 3;
+    const lossMult     = 0.55 + (roundsFought / maxRounds) * 0.27;
+    total *= lossMult;
   }
   return Math.max(0, total);
 }
@@ -2795,118 +2830,172 @@ function buildFightPairs(pool){
   return pairs;
 }
 
-// ── MAIN SIM RUNNER ───────────────────────────────────────────
-function runUFCSims(lineups, pool, numSims){
+// ── OPTIMAL LINEUP PICKER ────────────────────────────────────
+// Given per-fighter scores for one sim, greedily pick the best 6-fighter lineup
+// within salary cap, respecting group rules and no-oppose setting.
+function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
+  // Branch-and-bound knapsack: finds the true optimal 6-fighter combo,
+  // not just the greedy top-scorers-first selection.
+  const candidates = pool
+    .map(p=>({p, score: simScore[p.id]||0, sal: p.salary||0}))
+    .sort((a,b)=>b.score-a.score);
+
+  let bestScore = -Infinity;
+  let bestLineup = null;
+
+  function upperBound(idx, slots, salLeft, curScore){
+    let score=curScore, s=slots;
+    for(let i=idx; i<candidates.length && s>0; i++){
+      if(candidates[i].sal<=salLeft){ score+=candidates[i].score; s--; }
+    }
+    return score;
+  }
+
+  function search(idx, chosen, salUsed, curScore){
+    if(chosen.length===6){
+      const sal=salUsed;
+      if(sal>=(minSal||0) && sal<=salaryCap){
+        if(!groups||!groups.length||checkGroupRules(chosen)){
+          if(curScore>bestScore){ bestScore=curScore; bestLineup=chosen.map(c=>c.p); }
+        }
+      }
+      return;
+    }
+    const slotsLeft=6-chosen.length;
+    if(candidates.length-idx<slotsLeft) return;
+    if(upperBound(idx,slotsLeft,salaryCap-salUsed,curScore)<=bestScore) return;
+
+    for(let i=idx; i<candidates.length; i++){
+      const c=candidates[i];
+      // No-oppose check
+      if(noOppose){
+        const conflict=chosen.some(x=>x.p.opp===c.p.name||(c.p.opp&&c.p.opp===x.p.name));
+        if(conflict) continue;
+      }
+      const newSal=salUsed+c.sal;
+      if(newSal>salaryCap) continue;
+      const slotsAfter=slotsLeft-1;
+      if(slotsAfter>0){
+        let cheapSum=0, cheapCount=0;
+        for(let j=i+1; j<candidates.length && cheapCount<slotsAfter; j++){
+          if(!noOppose || !chosen.some(x=>x.p.opp===candidates[j].p.name||(candidates[j].p.opp&&candidates[j].p.opp===x.p.name))){
+            cheapSum+=candidates[j].sal; cheapCount++;
+          }
+        }
+        if(cheapCount<slotsAfter||newSal+cheapSum>salaryCap) continue;
+      }
+      chosen.push(c);
+      search(i+1, chosen, newSal, curScore+c.score);
+      chosen.pop();
+    }
+  }
+
+  search(0, [], 0, 0);
+  return bestLineup;
+}
+
+// ── UFC SIMULATION-FIRST ENGINE ───────────────────────────────
+// For each sim: sample fight outcomes → score all fighters → pick optimal lineup.
+// After N sims: aggregate lineup frequencies → select top lineups by count + diversity.
+function runUFCSimsNew(pool, numSims, salaryCap, groups, noOppose, minSal){
   const pairs = buildFightPairs(pool);
 
-  // Precompute win probs
+  // Precompute vig-removed win probs and CDFs.
+  // vigRemovedWinProb normalizes the two fighters' raw implied probs to sum to 1.0,
+  // removing the book's margin before using them as simulation probabilities.
   const winProb = {};
   pairs.forEach(({a,b})=>{
     const mlA = parseFloat(a.ml)||0, mlB = b?(parseFloat(b.ml)||0):0;
-    const pA  = mlA!==0 ? mlToWinProb(mlA) : (b&&mlB!==0 ? 1-mlToWinProb(mlB) : 0.5);
+    const pA  = vigRemovedWinProb(mlA || null, mlB || null);
     winProb[a.id] = pA;
     if(b) winProb[b.id] = 1-pA;
   });
   pool.forEach(p=>{ p._simWinProb = winProb[p.id]!==undefined ? winProb[p.id] : 0.5; });
 
-  // Build CDFs once per fighter — expensive, do not repeat in loop
   const ssCDFById = {}, tdCDFById = {};
   pool.forEach(p=>{ ssCDFById[p.id]=extractSSCDF(p); tdCDFById[p.id]=extractTDCDF(p); });
 
-  const lineupIds = lineups.map(l=>l.map(p=>p.id));
-  const poolById  = {};
-  pool.forEach(p=>{ poolById[p.id]=p; });
+  // Per-fighter score tracking for median display
+  const fighterAllScores = {};
+  pool.forEach(p=>{ fighterAllScores[p.id]=[]; });
 
-  const fighterWinSum={}, fighterWinCount={};
-  const fighterAllScores={}; // all scores regardless of win/loss for median
-  pool.forEach(p=>{ fighterWinSum[p.id]=0; fighterWinCount[p.id]=0; fighterAllScores[p.id]=[]; });
-
-  const sumScore    = new Array(lineups.length).fill(0);
-  const sumWinScore = new Array(lineups.length).fill(0);
-  const winSimCount = new Array(lineups.length).fill(0);
-  const win5SimCount= new Array(lineups.length).fill(0);
-  const simScores   = lineups.map(()=>[]);
+  // Lineup frequency map: key → {lineup, count, totalScore}
+  const lineupFreq = new Map();
 
   for(let s=0; s<numSims; s++){
+    // Step 1: sample fight outcomes
     const simWinner={}, simRound={};
-
-    // Step 1: sample fight outcome (winner + round) for each fight
     pairs.forEach(({a,b})=>{
-      const outcome = sampleFightOutcome(a, b);
-      const aWon    = outcome.winner==='a';
-      simWinner[a.id] = aWon;
-      if(b) simWinner[b.id] = !aWon;
-      simRound[a.id]  = outcome.round;
-      if(b) simRound[b.id] = outcome.round;
+      const outcome = sampleFightOutcome(a,b);
+      const aWon = outcome.winner==='a';
+      simWinner[a.id]=aWon; if(b) simWinner[b.id]=!aWon;
+      simRound[a.id]=outcome.round; if(b) simRound[b.id]=outcome.round;
     });
 
-    // Step 2: score each fighter conditioned on fight duration
+    // Step 2: score every fighter
     const simScore={};
     pool.forEach(p=>{
       const won   = simWinner[p.id]!==undefined ? simWinner[p.id] : true;
       const round = simRound[p.id]!==undefined  ? simRound[p.id]  : 'dec';
-      simScore[p.id] = drawScoreOdds(p, won, round, ssCDFById[p.id], tdCDFById[p.id]);
-      fighterAllScores[p.id].push(simScore[p.id]);
-      if(simWinner[p.id]){ fighterWinSum[p.id]+=simScore[p.id]; fighterWinCount[p.id]+=1; }
+      const sc = drawScoreOdds(p, won, round, ssCDFById[p.id], tdCDFById[p.id]);
+      simScore[p.id] = sc;
+      fighterAllScores[p.id].push(sc);
     });
 
-    lineupIds.forEach((ids,li)=>{
-      const total = ids.reduce((sum,id)=>sum+(simScore[id]||0),0);
-      const wins  = ids.filter(id=>simWinner[id]!==false).length;
-      sumScore[li]+=total; simScores[li].push(total);
-      if(wins>=ids.length){ sumWinScore[li]+=total; winSimCount[li]+=1; win5SimCount[li]+=1; }
-      else if(wins>=ids.length-1){ win5SimCount[li]+=1; }
-    });
+    // Step 3: pick the optimal salary-legal lineup for this sim's scores
+    const optimal = pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal);
+    if(!optimal) continue;
+
+    const key = optimal.map(p=>p.id).sort().join('|');
+    const total = optimal.reduce((s,p)=>s+(simScore[p.id]||0),0);
+    if(lineupFreq.has(key)){
+      const e = lineupFreq.get(key);
+      e.count++;
+      e.totalScore+=total;
+    } else {
+      lineupFreq.set(key, {lineup:optimal, count:1, totalScore:total, key});
+    }
   }
 
-  const avgWinScoreById={}, medianScoreById={};
+  // Compute per-fighter median for pool display
+  const medianScoreById = {};
   pool.forEach(p=>{
-    avgWinScoreById[p.id] = fighterWinCount[p.id]>0 ? fighterWinSum[p.id]/fighterWinCount[p.id] : 0;
-    const sorted = fighterAllScores[p.id].slice().sort((a,b)=>a-b);
-    medianScoreById[p.id] = sorted.length>0 ? sorted[Math.floor(sorted.length*0.5)] : 0;
+    const arr = fighterAllScores[p.id].slice().sort((a,b)=>a-b);
+    medianScoreById[p.id] = arr.length>0 ? arr[Math.floor(arr.length*0.5)] : 0;
   });
 
-  const results = lineups.map((lineup,li)=>{
-    const avg        = sumScore[li]/numSims;
-    const winRate6   = winSimCount[li]/numSims;
-    const winRate5   = win5SimCount[li]/numSims;
-    const avgWhenWin = winSimCount[li]>0 ? sumWinScore[li]/winSimCount[li] : 0;
-    const sorted     = simScores[li].slice().sort((a,b)=>a-b);
-    const p80        = sorted[Math.floor(sorted.length*0.8)];
-    const composite  = Math.pow(winRate6,0.3)*Math.pow(avgWhenWin,2);
-    return {lineup, avg, winRate6, winRate5, avgWhenWin, p80, composite};
-  });
+  // Convert freq map to sorted array
+  const ranked = Array.from(lineupFreq.values())
+    .sort((a,b)=>b.count-a.count || b.totalScore-a.totalScore);
 
-  return {results, winProb, avgWinScoreById, medianScoreById};
+  return {ranked, medianScoreById, winProb, totalSims: numSims};
 }
 
 async function runUFCSimGen(){
   const slate = activeSlate(); if(!slate) return;
-  const target = parseInt(document.getElementById('genCount').value)||20;
-  const maxExpPct = parseInt(document.getElementById('genMaxExp').value)||100;
-  const minSal = parseInt(document.getElementById('genMinSal').value)||0;
-  const maxSal = parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP;
-  const numSims = parseInt(document.getElementById('ufcSimCountSlider')?.value)||500;
-  const groups = slate.groups||[];
-  const hidden = slate.hiddenIds||[];
-  const pool = (slate.players||[]).filter(p=>!hidden.includes(p.id)&&p.salary>0);
-  const overrides = slate.playerExpOverrides||{};
-  const minOverrides = slate.playerMinOverrides||{};
+  const target     = parseInt(document.getElementById('genCount').value)||20;
+  const maxExpPct  = parseInt(document.getElementById('genMaxExp').value)||100;
+  const minSal     = parseInt(document.getElementById('genMinSal').value)||0;
+  const maxSal     = parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP;
+  const numSims    = parseInt(document.getElementById('ufcSimCountSlider')?.value)||2000;
+  const groups     = slate.groups||[];
+  const hidden     = slate.hiddenIds||[];
+  const pool       = (slate.players||[]).filter(p=>!hidden.includes(p.id)&&p.salary>0);
+  const overrides  = slate.playerExpOverrides||{};
 
-  // Check ML is mapped
-  const hasMl = pool.some(p=> p.ml !== undefined && p.ml !== null && p.ml !== '');
+  const hasMl = pool.some(p=>p.ml!==undefined&&p.ml!==null&&p.ml!=='');
   if(!hasMl){
-    alert('Simulation Mode requires the ML (moneyline) column to be mapped. Please re-upload your pool CSV and map the ML column.');
+    alert('Simulation Mode requires the ML (moneyline) column to be mapped.');
     document.getElementById('genBtn').disabled=false;
     return;
   }
 
-  ufcNoOpposeGlobal = slate.sport==='ufc' && (document.getElementById('genUfcNoOppose')?.checked||false);
+  ufcNoOpposeGlobal = slate.sport==='ufc'&&(document.getElementById('genUfcNoOppose')?.checked||false);
 
   const el = document.getElementById('genLog');
   el.textContent = 'Starting UFC simulation...';
-
   window._genCancelled = false;
+
   let cancelBtn = document.getElementById('genCancelBtn');
   if(!cancelBtn){
     cancelBtn = document.createElement('button');
@@ -2917,225 +3006,109 @@ async function runUFCSimGen(){
     el.parentNode.insertBefore(cancelBtn, el.nextSibling);
   }
 
-  // --- Phase 1: Generate candidate lineups (same constraint engine as normal gen) ---
-  const candidateTarget = Math.max(500, target * 20);
-  const playerMaxCount = {};
-  pool.forEach(p=>{
-    const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
-    playerMaxCount[p.id] = Math.ceil((candidateTarget*pct)/100);
-  });
+  // Run sims in async chunks to avoid blocking the UI
+  log(`Running ${numSims.toLocaleString()} simulations...`);
+  await new Promise(r=>setTimeout(r,0));
 
-  const expTracker = {}; pool.forEach(p=>expTracker[p.id]=0);
-  const generated = [];
-  const existingKeys = new Set((slate.savedLineups||[]).map(l=>lineupKey(l)));
-  const randomness = parseInt(document.getElementById('randomnessSlider').value)/100;
+  if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return; }
 
-  // Use median proj for candidate generation seeding (just to get valid lineups built)
-  const getBaseScore = p => parseFloat(p.proj)||0;
-  const getNoisyScore = p => {
-    const base = getBaseScore(p);
-    return base * (1 + (Math.random()*2-1)*randomness);
-  };
-  const scored = [...pool].sort((a,b)=>getBaseScore(b)-getBaseScore(a));
+  const {ranked, medianScoreById, winProb, totalSims} = runUFCSimsNew(
+    pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal
+  );
 
-  const maxAttempts = Math.max(candidateTarget*300, 100000);
-  let attempts = 0;
+  // Store per-fighter median for pool display
+  pool.forEach(p=>{ p._simP50 = medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null; });
+  if(typeof renderPool==='function') renderPool();
 
-  const runChunk = async ()=>{
-    if(window._genCancelled){
-      log('Cancelled.');
-      document.getElementById('genBtn').disabled=false;
-      cancelBtn?.remove();
-      return;
-    }
-
-    const chunkEnd = attempts + 2000;
-    while(generated.length < candidateTarget && attempts < chunkEnd){
-      attempts++;
-      // Build a random lineup weighted by noisy score
-      const weights = scored.map(p=>{
-        if(expTracker[p.id] >= playerMaxCount[p.id]) return 0;
-        return Math.max(0, getNoisyScore(p));
-      });
-      const totalW = weights.reduce((s,w)=>s+w,0);
-      if(!totalW) break;
-
-      const lineup = [];
-      const usedIds = new Set();
-      const tempWeights = [...weights];
-      const slots = 6; // DK UFC is 6 fighters
-
-      for(let slot=0; slot<slots; slot++){
-        const tw = tempWeights.reduce((s,w)=>s+w,0);
-        if(!tw) break;
-        let r = Math.random()*tw, pick = -1;
-        for(let i=0;i<scored.length;i++){
-          r -= tempWeights[i];
-          if(r<=0){ pick=i; break; }
-        }
-        if(pick<0) pick = tempWeights.findLastIndex(w=>w>0);
-        if(pick<0) break;
-        const p = scored[pick];
-        lineup.push(p);
-        usedIds.add(p.id);
-        tempWeights[pick]=0; // no duplicates
-        // Zero out opponent if no-oppose is on
-        if(ufcNoOpposeGlobal){
-          scored.forEach((o,oi)=>{
-            if(usedIds.has(o.id)) return;
-            const oppA = p.opp||''; const oppB = o.opp||'';
-            if(oppA&&(oppA===o.name||oppA===o.opp)) tempWeights[oi]=0;
-            if(oppB&&(oppB===p.name||oppB===p.opp)) tempWeights[oi]=0;
-          });
-        }
-      }
-
-      if(lineup.length < slots) continue;
-      const sal = lineup.reduce((s,p)=>s+(p.salary||0),0);
-      if(sal < minSal || sal > maxSal) continue;
-      if(!checkGroupRules(lineup, groups)) continue;
-      const key = lineupKey(lineup.map(p=>p.id).sort());
-      if(existingKeys.has(key)) continue;
-
-      generated.push(lineup);
-      lineup.forEach(p=>{ expTracker[p.id]=(expTracker[p.id]||0)+1; });
-      existingKeys.add(key);
-
-      if(generated.length%100===0) log(`Built ${generated.length}/${candidateTarget} candidates... (${attempts.toLocaleString()} attempts)`);
-    }
-
-    if(generated.length < candidateTarget && attempts < maxAttempts){
-      await new Promise(r=>setTimeout(r,0));
-      return runChunk();
-    }
-
-    if(!generated.length){
-      alert('Could not generate valid candidates. Try relaxing rules or increasing salary range.');
-      document.getElementById('genBtn').disabled=false;
-      cancelBtn?.remove();
-      return;
-    }
-
-    // --- Phase 2: Score all candidates through Monte Carlo ---
-    log(`Running ${numSims.toLocaleString()} simulations across ${generated.length} candidates...`);
-    await new Promise(r=>setTimeout(r,0));
-
-    const { results: simResults, winProb: simWinProb, avgWinScoreById, medianScoreById } = runUFCSims(generated, pool, numSims);
-    // Store median sim score on each player for pool table display
-    pool.forEach(p=>{ p._simP50 = medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null; });
-    if(typeof renderPool==='function') renderPool();
-
-    // Compute pool-wide avg win score to set the "elite" threshold.
-    // Fighters whose avg win score is significantly above the pool mean
-    // are the plays we want to lean into — they get reduced Jaccard weight
-    // so they can repeat across lineups without being diversity-penalized.
-    const winScores = Object.values(avgWinScoreById).filter(v=>v>0);
-    const poolAvgWinScore = winScores.length ? winScores.reduce((s,v)=>s+v,0)/winScores.length : 100;
-    // Elite threshold: 20% above pool average win score
-    const eliteWinScoreThreshold = poolAvgWinScore * 1.20;
-
-    // --- Phase 3: Diversity selection ---
-    simResults.sort((a,b)=>b.composite-a.composite);
-
-    const topComp = simResults[0]?.composite||1;
-    const quality = simResults.filter(x=>x.composite >= topComp*0.70);
-
-    const outputExpCount = {};
-    const selectedSets = [];
-    const filled = [];
-    const remaining = [...quality];
-    // High quality weight: composite drives exposure, Jaccard just prevents clones
-    const QUALITY_WEIGHT = 0.75;
-
-    const minComp = quality[quality.length-1]?.composite||0;
-    const maxComp = quality[0]?.composite||1;
-    const compRange = maxComp-minComp||1;
-    const normComp = x=>(x.composite-minComp)/compRange;
-
-    while(filled.length < target && remaining.length > 0){
-      let bestIdx=0, bestVal=-Infinity;
-      for(let ri=0; ri<remaining.length; ri++){
-        const x = remaining[ri];
-        const ids = new Set(x.lineup.map(p=>p.id));
-        const exceedsCap = x.lineup.some(p=>{
-          const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
-          if(pct>=100) return false;
-          const cap = Math.max(1, Math.ceil(pct/100*target));
-          return (outputExpCount[p.id]||0) >= cap;
-        });
-        if(exceedsCap) continue;
-
-        // Jaccard with sim-score-based elite weighting.
-        // Fighters whose avg win score is 20%+ above pool mean get 0.3x weight —
-        // they're elite plays the sim wants to lean into, not spread out.
-        // Based on actual simulated upside, NOT moneyline:
-        // Chimaev (124 avg win score) qualifies. Gomis (81) does not.
-        let maxSim2=0;
-        const checkSets = selectedSets.length<=5 ? selectedSets : selectedSets.slice(-5);
-        for(const sel of checkSets){
-          let shared=0, unionSize=0;
-          const allIds = new Set([...ids, ...sel]);
-          allIds.forEach(id=>{
-            const w = (avgWinScoreById[id]||0) >= eliteWinScoreThreshold ? 0.3 : 1.0;
-            const inA = ids.has(id), inB = sel.has(id);
-            if(inA && inB) shared += w;
-            unionSize += w;
-          });
-          const sim2 = unionSize > 0 ? shared/unionSize : 0;
-          if(sim2>maxSim2) maxSim2=sim2;
-        }
-
-        const val = QUALITY_WEIGHT*normComp(x) + (1-QUALITY_WEIGHT)*(1-maxSim2);
-        if(val>bestVal){ bestVal=val; bestIdx=ri; }
-      }
-      if(bestVal===-Infinity) break;
-      const chosen = remaining.splice(bestIdx,1)[0];
-      chosen.lineup.forEach(p=>{ outputExpCount[p.id]=(outputExpCount[p.id]||0)+1; });
-      const chosenSet = new Set(chosen.lineup.map(p=>p.id));
-      selectedSets.push(chosenSet);
-      filled.push(chosen);
-    }
-
-    if(!filled.length){
-      alert('Simulation complete but no lineups passed the quality filter. Try relaxing group rules or exposure settings.');
-      document.getElementById('genBtn').disabled=false;
-      cancelBtn?.remove();
-      return;
-    }
-
-    // Attach sim metadata to lineup arrays for preview display
-    const finalLineups = filled.map(x=>{
-      const l = x.lineup;
-      l._simAvg     = x.avg.toFixed(1);
-      l._simWinRate = (x.winRate6 * 100).toFixed(1);
-      l._simWinAvg  = x.avgWhenWin.toFixed(1);
-      return l;
-    });
-
-    // Shuffle for variety in preview
-    for(let i=finalLineups.length-1;i>0;i--){
-      const j=Math.floor(Math.random()*(i+1));
-      [finalLineups[i],finalLineups[j]]=[finalLineups[j],finalLineups[i]];
-    }
-
-    const avgWinRate = (filled.reduce((s,x)=>s+x.winRate6,0)/filled.length*100).toFixed(1);
-    const avgWhenWin = (filled.reduce((s,x)=>s+x.avgWhenWin,0)/filled.length).toFixed(1);
-    const avgOfAvgs  = (filled.reduce((s,x)=>s+x.avg,0)/filled.length).toFixed(1);
-    log(`Done! ${generated.length} candidates → ${filled.length} lineups selected.`);
-    log(`Avg all-6-win rate: ${avgWinRate}% | Avg score when all win: ${avgWhenWin} pts | Avg overall: ${avgOfAvgs} pts`);
-    log(`(${attempts.toLocaleString()} lineup attempts, ${numSims.toLocaleString()} sims each)`);
-
-    // Save to history
-    const now=new Date();
-    const timeStr=now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-    addToHistory(slate.id, `${finalLineups.length} lineups (sim) @ ${timeStr}`, finalLineups);
-
+  log(`${ranked.length} unique optimal lineups found across ${totalSims.toLocaleString()} sims.`);
+  if(!ranked.length){
+    alert('No valid lineups generated. Try relaxing salary or group rules.');
     document.getElementById('genBtn').disabled=false;
     cancelBtn?.remove();
-    openPreviewModal(finalLineups, 'proj');
-  };
+    return;
+  }
 
-  runChunk();
+  // Select final lineups: top by frequency + Jaccard diversity to avoid near-duplicates
+  // Also respect per-player exposure caps
+  const outputExpCount = {};
+  const selectedSets   = [];
+  const filled         = [];
+  const remaining      = [...ranked];
+
+  while(filled.length < target && remaining.length > 0){
+    let bestIdx=-1, bestVal=-Infinity;
+
+    for(let ri=0; ri<remaining.length; ri++){
+      const x = remaining[ri];
+      const ids = new Set(x.lineup.map(p=>p.id));
+
+      // Check exposure caps
+      const exceedsCap = x.lineup.some(p=>{
+        const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
+        if(pct>=100) return false;
+        return (outputExpCount[p.id]||0) >= Math.max(1,Math.ceil(pct/100*target));
+      });
+      if(exceedsCap) continue;
+
+      // Jaccard similarity vs already-selected lineups (check last 8)
+      let maxSim=0;
+      const checkSets = selectedSets.slice(-8);
+      for(const sel of checkSets){
+        let shared=0;
+        ids.forEach(id=>{ if(sel.has(id)) shared++; });
+        const sim = shared / (ids.size + sel.size - shared);
+        if(sim>maxSim) maxSim=sim;
+      }
+
+      // Score = frequency (normalized) × diversity penalty
+      // 0.7 weight on frequency, 0.3 on diversity
+      const normFreq = x.count / (ranked[0]?.count||1);
+      const val = 0.7*normFreq + 0.3*(1-maxSim);
+      if(val>bestVal){ bestVal=val; bestIdx=ri; }
+    }
+
+    if(bestIdx===-1) break;
+    const chosen = remaining.splice(bestIdx,1)[0];
+    chosen.lineup.forEach(p=>{ outputExpCount[p.id]=(outputExpCount[p.id]||0)+1; });
+    selectedSets.push(new Set(chosen.lineup.map(p=>p.id)));
+    filled.push(chosen);
+  }
+
+  if(!filled.length){
+    alert('No lineups passed selection. Try relaxing exposure or group rules.');
+    document.getElementById('genBtn').disabled=false;
+    cancelBtn?.remove();
+    return;
+  }
+
+  // Build final lineup arrays with sim metadata
+  const avgSim = filled.reduce((s,x)=>s+(x.totalScore/x.count),0)/filled.length;
+  const finalLineups = filled.map(x=>{
+    const l = [...x.lineup];
+    const avgScore = x.totalScore/x.count;
+    l._simAvg     = avgScore.toFixed(1);
+    l._simWinRate = ((x.count/totalSims)*100).toFixed(1);
+    l._simWinAvg  = avgScore.toFixed(1);
+    return l;
+  });
+
+  // Shuffle for variety in preview order
+  for(let i=finalLineups.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [finalLineups[i],finalLineups[j]]=[finalLineups[j],finalLineups[i]];
+  }
+
+  const topCount = filled[0]?.count||0;
+  log(`Done! ${filled.length} lineups selected.`);
+  log(`Top lineup appeared optimal in ${topCount} of ${totalSims.toLocaleString()} sims (${(topCount/totalSims*100).toFixed(1)}%).`);
+  log(`Avg sim score across selected lineups: ${avgSim.toFixed(1)} pts`);
+
+  const now=new Date();
+  addToHistory(slate.id, `${finalLineups.length} lineups (sim) @ ${now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`, finalLineups);
+
+  document.getElementById('genBtn').disabled=false;
+  cancelBtn?.remove();
+  openPreviewModal(finalLineups, 'proj');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3177,25 +3150,19 @@ const NASCAR_FL_DECAY = { road:0.41, intermediate:0.39, short:0.32, superspeedwa
 // Incident count distributions per race type (from accident count per race data)
 // Each entry: [probability, min, max] for that bucket
 // Clean = 0-2 accidents, Chaos = 6+ accidents
+// Single merged incident distribution per track type.
+// Combines historical clean/chaos frequencies into one distribution —
+// some sims naturally draw low incidents (clean race), some draw high (chaos).
+// Road: 70% clean, 30% chaos historically
+// Intermediate: 55% clean, 45% chaos
+// Short: 50% clean, 50% chaos
+// Superspeedway: 39% clean, 61% chaos
 const NASCAR_INCIDENT_DIST = {
-  road: {
-    clean: [[0.35,0,0],[0.65,1,2]],        // 35% zero, 65% 1-2
-    chaos: [[0.40,6,7],[0.35,8,9],[0.25,9,9]] // max 9 at road courses
-  },
-  intermediate: {
-    clean: [[0.15,0,0],[0.55,1,2],[0.30,3,5]],
-    chaos: [[0.37,6,7],[0.24,8,9],[0.24,10,11],[0.15,12,17]]
-  },
-  short: {
-    clean: [[0.23,0,0],[0.54,1,2],[0.23,3,5]],
-    chaos: [[0.50,6,7],[0.29,8,9],[0.21,10,10]]
-  },
-  superspeedway: {
-    clean: [[0.09,0,0],[0.15,1,2],[0.15,3,5]],  // only 39% of SS races are "clean"
-    chaos: [[0.13,6,7],[0.04,8,8],[0.06,9,9],
-            [0.06,11,11],[0.09,12,12],[0.06,13,13],
-            [0.06,14,14],[0.06,15,15],[0.05,16,24]]
-  }
+  road:         [[0.245,0,0],[0.455,1,2],[0.120,6,7],[0.105,8,9],[0.075,9,9]],
+  intermediate: [[0.083,0,0],[0.303,1,2],[0.165,3,5],[0.167,6,7],[0.108,8,9],[0.108,10,11],[0.068,12,17]],
+  short:        [[0.115,0,0],[0.270,1,2],[0.115,3,5],[0.250,6,7],[0.145,8,9],[0.105,10,10]],
+  superspeedway:[[0.035,0,0],[0.059,1,2],[0.059,3,5],[0.079,6,7],[0.024,8,8],[0.037,9,9],
+                 [0.037,11,11],[0.055,12,12],[0.037,13,13],[0.037,14,14],[0.037,15,15],[0.031,16,24]]
 };
 
 // Accident exit timing — what fraction of race is completed before crash
@@ -3210,9 +3177,8 @@ const NASCAR_EXIT_TIMING = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-function nascarDrawIncidentCount(isChaos, trackType){
-  const dist = NASCAR_INCIDENT_DIST[trackType] || NASCAR_INCIDENT_DIST.intermediate;
-  const buckets = isChaos ? dist.chaos : dist.clean;
+function nascarDrawIncidentCount(trackType){
+  const buckets = NASCAR_INCIDENT_DIST[trackType] || NASCAR_INCIDENT_DIST.intermediate;
   let r = Math.random(), cum = 0;
   for(const [prob, lo, hi] of buckets){
     cum += prob;
@@ -3317,14 +3283,23 @@ function nascarDrawFinishPosTyped(skillRank, projFinish, pWin, pTop3, pTop5, pTo
     const t = (u - pBase) / (pTop10 - pBase);
     rawPos = topBound + t * (10 - topBound);
   } else {
-    // Beyond available odds: Gaussian anchored to skill rank + projected finish
+    // Beyond available odds: Gaussian anchored to skill rank + projected finish.
+    // Std dev scales with skill rank — top drivers have wide variance (can win or crash),
+    // backmarkers have almost no upside variance (they finish near the back every time).
+    // A skill rank 1 driver has full std dev; rank 38 driver has minimal upside std dev.
     const anchor = projFinish
       ? projFinish * 0.50 + skillRank * 0.50
       : skillRank;
-    const stdDev = trackType==='short' ? 8.7 : trackType==='intermediate' ? 9.2 : 9.0;
+    const baseStdDev = trackType==='short' ? 8.7 : trackType==='intermediate' ? 9.2 : 9.0;
+    // Upside std dev shrinks for back-of-field drivers: rank 1 gets full stdDev,
+    // rank 38 gets only 20% (they can fall back but not move up much).
+    const relRank = (skillRank - 1) / Math.max(fieldSize - 1, 1); // 0 (best) to 1 (worst)
+    const upsideStd = baseStdDev * (1 - relRank * 0.80); // shrinks to 20% for worst driver
+    const downsideStd = baseStdDev; // everyone can fall back equally
     const u1=Math.random(), u2=Math.random();
     const z = Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2);
-    rawPos = anchor + z * stdDev;
+    // Apply asymmetric std dev: positive z = move up (use upsideStd), negative z = fall back
+    rawPos = anchor + z * (z < 0 ? downsideStd : upsideStd);
   }
 
   return Math.max(1, Math.min(fieldSize, Math.round(rawPos + Math.random()*0.4)));
@@ -3358,7 +3333,7 @@ function nascarCalcScore(startPos, finishPos, lapsLed, fastestLaps){
 //  6. Track-specific decay rates, leader counts, and FL driver counts
 // ─────────────────────────────────────────────────────────────────────────────
 
-function runNascarSims(pool, numSims, totalLaps, trackType, chaosPct){
+function runNascarSims(pool, numSims, totalLaps, trackType){
   const FIELD   = pool.length;
   const isSuper = trackType === 'superspeedway';
 
@@ -3461,42 +3436,62 @@ function runNascarSims(pool, numSims, totalLaps, trackType, chaosPct){
       (p._nPTop10 || 0) * wTop10
     ) / totalW;
     const rtg        = parseFloat(p.rating)||0;
-    const normRating = rtg > 0 ? (rtg - minRating) / ratingRange : 0.5;
+    // Drivers with no rating get 0 (worst), not 0.5 (middle).
+    // Defaulting to 0.5 was incorrectly ranking no-rating backmarkers above
+    // drivers with legitimately bad odds.
+    const normRating = rtg > 0 ? (rtg - minRating) / ratingRange : 0;
     // Ratings get more weight when fewer real odds tiers are available
     const realTiers = [p._nPWin, !p._nTop3Est && p._nPTop3, !p._nTop5Est && p._nPTop5, !p._nTop10Est && p._nPTop10].filter(Boolean).length;
-    const oddsWeight = 0.50 + (realTiers / 4) * 0.20; // 0.50–0.70 based on real tier count
-    p._nSkillScore   = oddsScore * oddsWeight + normRating * (1 - oddsWeight);
+    // Rating is a tiebreaker, not a primary signal.
+    // With full odds coverage (4 tiers): 97% odds, 3% rating.
+    // With only win odds (1 tier): 85% odds, 15% rating.
+    // With no odds: 0% odds, 100% rating (pure tiebreaker among unpriced drivers).
+    // Drivers with no odds get a skill score below ANY driver with odds.
+    // Rating alone is not a reliable finish predictor — if the market didn't
+    // price them, they're almost certainly not competitive.
+    // We use a small negative base so no-odds drivers always rank below odds drivers.
+    if(realTiers === 0){
+      p._nSkillScore = -0.1 + normRating * 0.05; // -0.10 to -0.05: always below odds drivers
+    } else {
+      const oddsWeight = 0.85 + (realTiers / 4) * 0.12; // 0.85–0.97
+      p._nSkillScore = oddsScore * oddsWeight + normRating * (1 - oddsWeight);
+    }
+    // Store raw odds score for later use
+    p._nOddsScore = oddsScore;
   });
-  const skillSorted = [...pool].sort((a,b)=>b._nSkillScore - a._nSkillScore);
+  // Primary sort by skill score
+  // For drivers whose odds scores are very close (backmarkers all near zero),
+  // use projected finish position as a tiebreaker — it reflects expected finishing
+  // order based on qualifying speed and team strength, which the market odds
+  // don't differentiate well among tail-end drivers.
+  const skillSorted = [...pool].sort((a,b)=>{
+    const scoreDiff = b._nSkillScore - a._nSkillScore;
+    // If skill scores are very close (within 0.01), use projected finish as tiebreaker
+    if(Math.abs(scoreDiff) < 0.01 && a._nProj && b._nProj){
+      return a._nProj - b._nProj; // lower proj finish = better
+    }
+    return scoreDiff;
+  });
   skillSorted.forEach((p,i)=>{ p._nSkillRank = i+1; });
 
   // ── Accumulators ──────────────────────────────────────────────────────────
   const sumScore       = new Array(FIELD).fill(0);
   const sumLapsLed     = new Array(FIELD).fill(0);
-  const dominatorCount = new Array(FIELD).fill(0);
-  const sumDomScore    = new Array(FIELD).fill(0);
+
   const simScores      = pool.map(()=>[]);
-  const sumCleanScore  = new Array(FIELD).fill(0);
-  const sumChaosScore  = new Array(FIELD).fill(0);
-  const cleanScores    = pool.map(()=>[]);
-  const chaosScores    = pool.map(()=>[]);
-  let cleanCount=0, chaosCount=0;
+
 
   for(let s=0; s<numSims; s++){
 
-    // ── 1. Draw race type (shared across all drivers this sim) ────────────
-    const isChaos = Math.random() < (chaosPct/100);
-    if(isChaos) chaosCount++; else cleanCount++;
+    // ── 1. Draw incident count from historical track-specific distribution ──
+    const numIncidents = nascarDrawIncidentCount(trackType);
 
-    // ── 2. Draw incident count from track-specific weighted distribution ──
-    const numIncidents = nascarDrawIncidentCount(isChaos, trackType);
-
-    // ── 3. Assign incidents — uniform across field (data: zero grid correlation)
+    // ── 3. Assign incidents — uniform across field
     const incidentSet = new Set();
-    const candidates  = pool.map((p,i)=>({i, w:1.0})); // uniform weight
+    const candidates  = pool.map((p,i)=>({i, w:1.0}));
     for(let n=0; n<Math.min(numIncidents, FIELD-2); n++){
       const rem = candidates.filter(c=>!incidentSet.has(c.i));
-      const tw  = rem.length; // all equal weight
+      const tw  = rem.length;
       const pick = rem[Math.floor(Math.random()*tw)];
       if(pick) incidentSet.add(pick.i);
     }
@@ -3508,19 +3503,58 @@ function runNascarSims(pool, numSims, totalLaps, trackType, chaosPct){
     });
 
     // ── 5. Survivor finish order ──────────────────────────────────────────
+    // Every surviving driver gets a position drawn from their odds distribution.
+    // Drivers with real win/top3/top5/top10 odds use the CDF directly.
+    // Drivers beyond available odds tiers use skill rank as an anchor.
+    // All positions are then sorted to assign unique finish positions.
     const survivors    = pool.filter((_,i)=>!incidentSet.has(i));
     const numSurvivors = survivors.length;
 
-    const survivorDrawn = survivors.map(p=>({
-      p,
-      rawPos: nascarDrawFinishPosTyped(
-        p._nSkillRank, p._nProj,
-        p._nPWin, p._nPTop3, p._nPTop5, p._nPTop10,
-        FIELD, trackType
-      ) + Math.random()*0.4
-    }));
-    survivorDrawn.sort((a,b)=>a.rawPos - b.rawPos);
-    survivorDrawn.forEach((d,i)=>{ d.finishPos=i+1; d.lapsLed=0; d.fastestLaps=0; });
+    // Sort survivors by skill score to use as tiebreaker anchor
+    const survivorDrawn = survivors
+      .map(p=>({p, lapsLed:0, fastestLaps:0}))
+      .sort((a,b)=>b.p._nSkillScore - a.p._nSkillScore);
+
+    // Draw a raw position for every surviving driver from their odds distribution.
+    // This is honest probability sampling — no floors, no ceilings, no forcing.
+    // Good drivers naturally finish well more often because their odds say so.
+    survivorDrawn.forEach((d, skillIdx)=>{
+      const pW=d.p._nPWin||0, pT3=d.p._nPTop3||0, pT5=d.p._nPTop5||0, pT10=d.p._nPTop10||0;
+      const u = Math.random();
+
+      if(pW && u <= pW){
+        // Win: position 1
+        d._rawPos = 1 + Math.random()*0.4;
+      } else if(pT3 && u <= pT3){
+        // Top 3 (not win)
+        d._rawPos = 1.5 + Math.random()*1.5;
+      } else if(pT5 && u <= pT5){
+        // Top 5 (not top 3)
+        d._rawPos = 3.5 + Math.random()*1.5;
+      } else if(pT10 && u <= pT10){
+        // Top 10 (not top 5)
+        d._rawPos = 5.5 + Math.random()*4.5;
+      } else {
+        // Outside available odds tiers: use skill rank as anchor with
+        // historical std dev of ~9 (data-confirmed across all starting positions).
+        // Both upside and downside variance are symmetric — the odds already
+        // gave this driver low probability of a top finish; any remaining
+        // variance is legitimate race uncertainty.
+        const anchor = d.p._nProj
+          ? d.p._nProj * 0.5 + (skillIdx+1) * 0.5
+          : skillIdx + 1;
+        const stdDev = trackType==='short' ? 8.7 : trackType==='intermediate' ? 9.2 : 9.0;
+        const _u1=Math.max(1e-10,Math.random()), _u2=Math.random();
+        const z = Math.sqrt(-2*Math.log(_u1))*Math.cos(2*Math.PI*_u2);
+        d._rawPos = Math.max(1, anchor + z*stdDev);
+      }
+    });
+
+    // Sort by raw position to get finish order, add tiny noise to break ties
+    survivorDrawn.sort((a,b)=>(a._rawPos||99)-(b._rawPos||99));
+    survivorDrawn.forEach((d,i)=>{ d.finishPos=i+1; });
+
+    const survivorDrawnFinal = survivorDrawn;
 
     // ── 6. Incident drivers fill back positions ───────────────────────────
     // Sorted by exit timing: earliest crash → last position
@@ -3540,51 +3574,82 @@ function runNascarSims(pool, numSims, totalLaps, trackType, chaosPct){
       d.lapsLed=0; d.fastestLaps=0;
     });
 
-    // ── 7. Laps led allocation ────────────────────────────────────────────
-    // Pool = green flag laps only (caution discount already applied)
-    // LL weight: finish pos 50%, grid 50% for road/intermediate/short
-    //            grid 60%, finish pos 40% for superspeedway
-    const finishWeight = isSuper ? 0.40 : 0.50;
-    const gridWeight   = isSuper ? 0.60 : 0.50;
+    // ── 7. Laps led allocation (two-phase) ───────────────────────────────
+    // Phase 1 (early): grid position dominates — front-starters lead until
+    //   fast cars work through traffic. Fraction varies by track type:
+    //   superspeedway 15% (drafting chaos, grid irrelevant quickly),
+    //   short 20% (lots of position changes, fast cars get through fast),
+    //   road 25%, intermediate 30% (harder to pass, grid advantage persists).
+    // Phase 2 (late): finish position dominates — best cars are now at the
+    //   front competing for laps led.
+    const EARLY_FRAC = isSuper ? 0.15
+                     : trackType==='short'        ? 0.20
+                     : trackType==='road'         ? 0.25
+                     : 0.30; // intermediate default
+    const earlyLaps = Math.round(greenLaps * EARLY_FRAC);
+    const lateLaps  = greenLaps - earlyLaps;
 
     // Stochastic decay rate centered on track-specific value ± range
     const lapDecayRate = llDecayCenter + (Math.random()*2-1) * llDecayRange;
 
-    const lapLeaders = survivorDrawn.slice(0, Math.min(LEADERS, numSurvivors));
+    const lapLeaders = survivorDrawnFinal.slice(0, Math.min(LEADERS, numSurvivors));
     if(lapLeaders.length > 0){
+      // Skill rank dampens laps led for lucky backmarkers throughout both phases
       const lapWeights = lapLeaders.map(d=>{
-        const finishW = Math.exp(-lapDecayRate*(d.finishPos-1));
-        const gridW   = Math.exp(-lapDecayRate*(d.p._nGrid-1));
-        return finishW*finishWeight + gridW*gridWeight;
+        const skillW   = Math.exp(-0.15*(d.p._nSkillRank-1));
+
+        // Early phase: grid position drives who leads
+        const earlyW   = Math.exp(-lapDecayRate*(d.p._nGrid-1));
+        // Late phase: finish position drives who leads
+        const lateW    = Math.exp(-lapDecayRate*(d.finishPos-1));
+
+        return (earlyW * earlyLaps + lateW * lateLaps) * skillW;
       });
       const totalLapW = lapWeights.reduce((s,w)=>s+w,0);
       lapLeaders.forEach((d,i)=>{
         d.lapsLed = Math.round((lapWeights[i]/totalLapW)*greenLaps);
       });
     }
-    survivorDrawn.slice(LEADERS).forEach(d=>{ d.lapsLed=0; });
+    survivorDrawnFinal.slice(LEADERS).forEach(d=>{ d.lapsLed=0; });
 
-    // ── 8. Redistribute incident drivers' laps to race winner ────────────
-    // When a strong driver crashes, their expected laps flow to whoever leads.
-    // Late crash (exit=0.90) = very few laps to redistribute
-    // Early crash (exit=0.10) = most expected laps redistributed
-    // Mechanicals at superspeedway exit early (median 35%) vs accidents late (87%)
-    const winner = survivorDrawn[0];
-    if(winner){
-      const survW = survivors.reduce((s,p)=>s+Math.exp(-0.65*(p._nSkillRank-1)),0);
+    // ── 8. Redistribute incident drivers' expected laps to surviving leaders ──
+    // A strong driver who crashes early would have led laps — those laps
+    // transfer to whoever ends up leading. We estimate the incident driver's
+    // expected laps led as: their skill weight share × greenLaps × (1-exit).
+    // To avoid double-counting with the regular laps led pool, we scale
+    // by the fraction of laps BEFORE their crash (exit), not the full race.
+    // Only top-skilled drivers benefit from redistribution — a backmarker
+    // crashing doesn't free up meaningful laps for the leader.
+    if(survivorDrawnFinal.length > 0){
+      const allSkillW = pool.reduce((s,p)=>s+Math.exp(-0.65*(p._nSkillRank-1)),0);
       incidentDrivers.forEach(d=>{
-        const incW = Math.exp(-0.65*(d.p._nSkillRank-1));
-        const expectedLaps = Math.round((incW/(survW+incW)) * greenLaps * (1-d.exit));
-        winner.lapsLed += Math.max(0, expectedLaps);
+        const incSkillW = Math.exp(-0.65*(d.p._nSkillRank-1));
+        // Only redistribute for drivers with meaningful laps led probability
+        // (top-half of skill distribution — incSkillW > median)
+        if(incSkillW < 0.05) return; // backmarkers: no meaningful laps to redistribute
+        // Expected laps this driver would have led (their share of the pre-crash period)
+        const expectedLapsLed = Math.round((incSkillW/allSkillW) * greenLaps * (1-d.exit));
+        if(expectedLapsLed <= 0) return;
+        // Give to top 3 finishers, weighted by their skill
+        const recipients = survivorDrawnFinal.slice(0, Math.min(3, numSurvivors));
+        const recWeights = recipients.map(r=>Math.exp(-0.65*(r.p._nSkillRank-1)));
+        const totalRecW = recWeights.reduce((s,w)=>s+w,0);
+        if(totalRecW > 0){
+          recipients.forEach((r,ri)=>{
+            r.lapsLed += Math.round((recWeights[ri]/totalRecW)*expectedLapsLed);
+          });
+        }
       });
-      // Cap at 95% of green flag laps (can't lead literally every lap)
-      winner.lapsLed = Math.min(winner.lapsLed, Math.round(greenLaps * 0.95));
+      // Cap each driver at 90% of green flag laps (winner rarely leads every lap)
+      survivorDrawnFinal.forEach(d=>{
+        d.lapsLed = Math.min(d.lapsLed, Math.round(greenLaps*0.90));
+      });
     }
 
     // ── 9. Fastest laps allocation ────────────────────────────────────────
     // FL pool = all green flag laps (every lap has one fastest driver)
     // Track-specific decay and driver count — superspeedway most spread
-    const fastLeaders = survivorDrawn.slice(0, Math.min(FL_DRIVERS, numSurvivors));
+    const fastLeaders = survivorDrawnFinal.slice(0, Math.min(FL_DRIVERS, numSurvivors));
     const fastWeights = fastLeaders.map(d=>Math.exp(-FL_DECAY*(d.finishPos-1)));
     const totalFastW  = fastWeights.reduce((s,w)=>s+w,0);
     if(totalFastW > 0){
@@ -3592,25 +3657,17 @@ function runNascarSims(pool, numSims, totalLaps, trackType, chaosPct){
         d.fastestLaps = Math.round((fastWeights[i]/totalFastW)*FL_POOL);
       });
     }
-    survivorDrawn.slice(FL_DRIVERS).forEach(d=>{ d.fastestLaps=0; });
+    survivorDrawnFinal.slice(FL_DRIVERS).forEach(d=>{ d.fastestLaps=0; });
 
     // ── 10. Score every driver ────────────────────────────────────────────
-    const allDrawn = [...survivorDrawn, ...incidentDrivers];
-    // Track who led most laps (for dominator composite)
-    const maxLL = Math.max(0, ...allDrawn.map(d=>d.lapsLed||0));
+    const allDrawn = [...survivorDrawnFinal, ...incidentDrivers];
 
     allDrawn.forEach(d=>{
       const idx   = pool.indexOf(d.p);
       const score = nascarCalcScore(d.p._nGrid, d.finishPos, d.lapsLed||0, d.fastestLaps||0);
       sumScore[idx]  += score;
       sumLapsLed[idx]+= d.lapsLed||0;
-      if((d.lapsLed||0)===maxLL && maxLL>0){
-        dominatorCount[idx]++;
-        sumDomScore[idx]+=score;
-      }
       simScores[idx].push(score);
-      if(isChaos){ sumChaosScore[idx]+=score; chaosScores[idx].push(score); }
-      else        { sumCleanScore[idx]+=score; cleanScores[idx].push(score); }
     });
   }
 
@@ -3621,288 +3678,268 @@ function runNascarSims(pool, numSims, totalLaps, trackType, chaosPct){
     const p50    = sorted[Math.floor(sorted.length*0.50)];
     const p75    = sorted[Math.floor(sorted.length*0.75)];
     const p90    = sorted[Math.floor(sorted.length*0.90)];
-    const domRate  = dominatorCount[i]/numSims;
-    const domScore = dominatorCount[i]>0 ? sumDomScore[i]/dominatorCount[i] : 0;
-    const dominatorEV = domRate*domScore;
+    // dominatorEV removed — dominator outcomes are already captured inside
+    // avg and p90; double-counting them was inflating grid-pole drivers unfairly.
 
-    const cSorted  = cleanScores[i].slice().sort((a,b)=>a-b);
-    const cleanAvg = cleanCount>0 ? sumCleanScore[i]/cleanCount : avg;
-    const cleanP75 = cSorted.length>0 ? cSorted[Math.floor(cSorted.length*0.75)] : p75;
-    const cleanComposite = cleanAvg*0.45 + cleanP75*0.30 + dominatorEV*0.25;
+    // Ownership penalty: max 2% haircut for the highest-owned player.
+    // Acts as a pure tiebreaker toward leverage — never large enough to
+    // override a genuine sim edge.
+    const maxOwn    = Math.max(...pool.map(q=>q._nOwn||0)) || 1;
+    const ownPenalty= ((p._nOwn||0) / maxOwn) * 0.02;
 
-    const xSorted  = chaosScores[i].slice().sort((a,b)=>a-b);
-    const chaosAvg = chaosCount>0 ? sumChaosScore[i]/chaosCount : avg;
-    const chaosP75 = xSorted.length>0 ? xSorted[Math.floor(xSorted.length*0.75)] : p75;
-    const chaosComposite = chaosAvg*0.50 + chaosP75*0.50;
+    // Composite: floor (avg) + consistency bridge (p75) + ceiling (p90)
+    // equally split between floor and ceiling, p75 as the bridge.
+    const composite = (avg*0.40 + p75*0.30 + p90*0.30) * (1 - ownPenalty);
 
-    const chaosFrac = chaosPct/100;
-    const composite = cleanComposite*(1-chaosFrac) + chaosComposite*chaosFrac;
-
-    return { player:p, avg, p50, p75, p90, domRate, domScore, dominatorEV,
-             cleanComposite, chaosComposite, composite };
+    return { player:p, avg, p50, p75, p90, composite };
   });
 }
 
 
 async function runNascarSimGen(){
-  const slate = activeSlate(); if(!slate) return;
+  const slate     = activeSlate(); if(!slate) return;
   const target    = parseInt(document.getElementById('genCount').value)||20;
   const maxExpPct = parseInt(document.getElementById('genMaxExp').value)||100;
   const minSal    = parseInt(document.getElementById('genMinSal').value)||0;
   const maxSal    = parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP;
-  const totalLaps = parseInt(document.getElementById('nascarTotalLaps')?.value)||100;
-  const numSims   = parseInt(document.getElementById('nascarSimCountSlider')?.value)||500;
-  const chaosPct  = parseInt(document.getElementById('nascarChaosSlider')?.value)||20;
+  const totalLaps = parseInt(document.getElementById('nascarTotalLaps')?.value)||300;
+  const numSims   = parseInt(document.getElementById('nascarSimCountSlider')?.value)||2000;
   const trackBtn  = document.querySelector('.nascar-track-btn.active');
-  const trackType = trackBtn ? trackBtn.dataset.laps==='188' ? 'superspeedway'
-                             : trackBtn.dataset.laps==='500' ? 'short'
-                             : trackBtn.dataset.laps==='300' ? 'intermediate' : 'road'
-                  : 'road';
-  const groups  = slate.groups||[];
-  const hidden  = slate.hiddenIds||[];
-  const pool    = (slate.players||[]).filter(p=>!hidden.includes(p.id)&&p.salary>0);
-  const overrides = slate.playerExpOverrides||{};
+  const trackType = trackBtn ? (
+    trackBtn.dataset.laps==='188' ? 'superspeedway' :
+    trackBtn.dataset.laps==='500' ? 'short' :
+    trackBtn.dataset.laps==='300' ? 'intermediate' : 'road'
+  ) : 'road';
+  const groups   = slate.groups||[];
+  const hidden   = slate.hiddenIds||[];
+  const pool     = (slate.players||[]).filter(p=>!hidden.includes(p.id)&&p.salary>0);
+  const overrides= slate.playerExpOverrides||{};
 
-  const hasOdds = pool.some(p=>p.win);
-  if(!hasOdds){
-    alert('NASCAR Simulation Mode requires at least WIN odds to be mapped. Top 3, Top 5, and Top 10 odds are optional — the sim will extrapolate missing tiers from what is available.');
-    document.getElementById('genBtn').disabled=false;
+  if(!pool.some(p=>p.win)){
+    alert('NASCAR Simulation Mode requires at least WIN odds to be mapped.');
     return;
   }
 
+  document.getElementById('genBtn').disabled = true;
   const el = document.getElementById('genLog');
-  el.textContent = `Starting NASCAR sim (${trackType}, ${totalLaps} laps, ${numSims} sims, ${chaosPct}% chaos)...`;
-
+  el.textContent = `Running ${numSims.toLocaleString()} race sims (${trackType}, ${totalLaps} laps)...`;
   window._genCancelled = false;
+
   let cancelBtn = document.getElementById('genCancelBtn');
   if(!cancelBtn){
     cancelBtn = document.createElement('button');
-    cancelBtn.id='genCancelBtn';
-    cancelBtn.textContent='✕ Cancel';
+    cancelBtn.id='genCancelBtn'; cancelBtn.textContent='✕ Cancel';
     cancelBtn.style.cssText='width:100%;padding:7px;background:none;border:1px solid var(--border);color:var(--muted);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:"DM Sans",sans-serif;margin-top:6px;';
     cancelBtn.onclick=()=>{ window._genCancelled=true; cancelBtn.remove(); };
     el.parentNode.insertBefore(cancelBtn, el.nextSibling);
   }
+  const done = ()=>{ document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); };
 
   await new Promise(r=>setTimeout(r,0));
+  if(window._genCancelled){ log('Cancelled.'); done(); return; }
 
-  // Log which odds tiers are real vs. estimated
-  const realWin  = pool.filter(p=>nascarMlToProb(p.win)).length;
-  const realTop3 = pool.filter(p=>nascarMlToProb(p.top3)).length;
-  const realTop5 = pool.filter(p=>nascarMlToProb(p.top5)).length;
-  const realTop10= pool.filter(p=>nascarMlToProb(p.top10)).length;
-  const tiers = [`Win:${realWin}`];
-  if(realTop3>0)  tiers.push(`Top3:${realTop3}${realTop3<pool.length?'(partial)':''}`);
-  if(realTop5>0)  tiers.push(`Top5:${realTop5}${realTop5<pool.length?'(partial)':''}`);
-  if(realTop10>0) tiers.push(`Top10:${realTop10}${realTop10<pool.length?'(partial)':''}`);
-  const missingTiers = [];
-  if(realTop3===0) missingTiers.push('Top3');
-  if(realTop5===0) missingTiers.push('Top5');
-  if(realTop10===0) missingTiers.push('Top10');
-  log(`Running ${numSims.toLocaleString()} correlated race sims for ${pool.length} drivers...`);
-  log(`Odds available — ${tiers.join(' | ')}${missingTiers.length ? ` | Estimating: ${missingTiers.join(', ')}` : ' | Full distribution'}`);
-  await new Promise(r=>setTimeout(r,0));
-
-  const simResults = runNascarSims(pool, numSims, totalLaps, trackType, chaosPct);
-
-  // Store sim-derived p50 on each player for pool table display
-  simResults.forEach(r=>{ r.player._simP50 = r.p50; });
-
-  // Trigger pool re-render so "Sim" column shows updated projections
-  if(typeof renderPool === 'function') renderPool();
-
-  // Per-driver score lookups
-  const cleanById = {}, chaosById = {}, overallById = {};
+  // Step 1: run sims, get composite scores
+  const simResults = runNascarSims(pool, numSims, totalLaps, trackType);
   simResults.forEach(r=>{
-    cleanById[r.player.id]   = r.cleanComposite;
-    chaosById[r.player.id]   = r.chaosComposite;
-    overallById[r.player.id] = r.composite;
+    r.player._simP50       = r.p50!=null ? Math.round(r.p50*10)/10 : null;
+    r.player._simComposite = r.composite;
   });
-
-  // Ownership lookup for chaos penalty
-  const ownById = {};
-  pool.forEach(p=>{ ownById[p.id] = parseFloat(p.own)||0; });
-  const maxOwn = Math.max(...Object.values(ownById))||1;
-
-  // How many of each type to generate
-  const chaosTarget = Math.round(target * chaosPct/100);
-  const cleanTarget = target - chaosTarget;
-
-  log(`Generating ${cleanTarget} clean + ${chaosTarget} chaos lineups...`);
+  if(typeof renderPool==='function') renderPool();
+  log(`Sim scores ready. Building lineups...`);
   await new Promise(r=>setTimeout(r,0));
+  if(window._genCancelled){ log('Cancelled.'); done(); return; }
 
-  const candidateMultiplier = 15;
-  const existingKeys = new Set((slate.savedLineups||[]).map(l=>lineupKey(l)));
-  const randomness   = parseInt(document.getElementById('randomnessSlider')?.value||'25')/100;
-  const slots        = 6;
+  // Step 2: generate unique salary-legal lineups using weighted random sampling.
+  //
+  // At each slot, perform a weighted random draw (not greedy max) from available
+  // drivers. This is the key to diversity — different draws produce different lineups
+  // naturally. Weight = composite score with noise. Drivers with negative composite
+  // (BJ McLeod style) get weight 0 and are never selected.
+  //
+  // We generate as many unique lineups as we can in the available attempts,
+  // then the selection step picks the best target-count with Jaccard diversity.
 
-  // Generic candidate builder — scoreById drives which type of lineup gets built
-  async function buildCandidates(scoreById, count, ownPenaltyStrength){
-    const candidates = [];
-    const expTracker = {}; pool.forEach(p=>expTracker[p.id]=0);
-    const candidateTarget = Math.max(300, count*candidateMultiplier);
-    const playerMax = {};
+  const scores = {};
+  pool.forEach(p=>{ scores[p.id] = Math.max(0, p._simComposite||0); });
+
+  // Pre-sort cheapest available (ascending) for cap feasibility check
+  const cheapest = [...pool].sort((a,b)=>(a.salary||0)-(b.salary||0));
+  // Build id→index map for O(1) lookup
+  const poolIdx = new Map(pool.map((p,i)=>[p.id,i]));
+  const cheapestIdx = new Map(cheapest.map((p,i)=>[p.id,i]));
+
+  const generated = [];
+  const seenKeys  = new Set((slate.savedLineups||[]).map(l=>lineupKey(l)));
+
+  // How many attempts — keep going until we have plenty or hit a hard limit
+  const WANT = Math.max(target * 50, 2000);
+  const MAX_ATTEMPTS = WANT * 10;
+  let attempts = 0;
+
+  const runChunk = async () => {
+    if(window._genCancelled){ log('Cancelled.'); done(); return; }
+
+    const chunkEnd = Math.min(attempts + 1000, MAX_ATTEMPTS);
+
+    while(attempts < chunkEnd){
+      attempts++;
+
+      // Draw fresh noisy weights for this attempt — fully independent each time
+      const noise = 0.60; // enough randomness to explore the full combination space
+      const w = new Float64Array(pool.length);
+      for(let i=0; i<pool.length; i++){
+        w[i] = scores[pool[i].id] * (1 + (Math.random()*2-1)*noise);
+        if(w[i] < 0) w[i] = 0;
+      }
+
+      // Build lineup: weighted random draw at each slot (not greedy)
+      const lineup = []; const usedIdx = new Set(); let salUsed = 0; let failed = false;
+
+      for(let slot=0; slot<6; slot++){
+        const slotsLeft = 5 - slot;
+
+        // Compute per-driver eligibility and weights for this slot
+        let totalW = 0;
+        const eligible = [];
+        for(let i=0; i<pool.length; i++){
+          if(usedIdx.has(i) || w[i]<=0) continue;
+          const p = pool[i];
+          const newSal = salUsed + (p.salary||0);
+          if(newSal > maxSal) continue;
+          // Check we can still fill remaining slots within cap using cheapest available
+          if(slotsLeft > 0){
+            let cheapSum=0, cheapCnt=0;
+            for(let j=0; j<cheapest.length && cheapCnt<slotsLeft; j++){
+              const c = cheapest[j];
+              const ci = poolIdx.get(c.id);
+              if(!usedIdx.has(ci) && c.id!==p.id && w[ci]>0){
+                cheapSum+=c.salary||0; cheapCnt++;
+              }
+            }
+            if(cheapCnt<slotsLeft || newSal+cheapSum>maxSal) continue;
+          }
+          eligible.push(i);
+          totalW += w[i];
+        }
+
+        if(eligible.length===0 || totalW<=0){ failed=true; break; }
+
+        // Weighted random draw
+        let r = Math.random() * totalW;
+        let picked = eligible[eligible.length-1];
+        for(const i of eligible){
+          r -= w[i];
+          if(r <= 0){ picked=i; break; }
+        }
+
+        lineup.push(pool[picked]);
+        usedIdx.add(picked);
+        salUsed += pool[picked].salary||0;
+      }
+
+      if(failed || lineup.length<6) continue;
+      const sal = lineup.reduce((s,p)=>s+(p.salary||0),0);
+      if(sal<minSal||sal>maxSal) continue;
+      if(groups.length&&!checkGroupRules(lineup,groups)) continue;
+      const key = lineupKey(lineup.map(p=>p.id));
+      if(seenKeys.has(key)) continue;
+
+      generated.push(lineup);
+      seenKeys.add(key);
+      if(generated.length >= WANT) break;
+    }
+
+    if(generated.length < WANT && attempts < MAX_ATTEMPTS && !window._genCancelled){
+      await new Promise(r=>setTimeout(r,0));
+      return runChunk();
+    }
+
+    log(`${generated.length} unique lineups generated in ${attempts.toLocaleString()} attempts.`);
+    if(!generated.length){ alert('No valid lineups generated.'); done(); return; }
+
+    // Step 3: score all candidates by composite sum, select with Jaccard diversity
+    const candidates = generated.map(lu=>({
+      lu,
+      score: lu.reduce((s,p)=>s+(p._simComposite||0), 0),
+    })).sort((a,b)=>b.score-a.score);
+
+    const topScore  = candidates[0].score || 1;
+    const expCount  = {};
+    const selSets   = [];
+    const filled    = [];
+    const remaining = [...candidates];
+
+    // Per-player output cap
+    const outCap = {};
     pool.forEach(p=>{
       const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
-      playerMax[p.id] = Math.ceil((candidateTarget*pct)/100);
+      outCap[p.id] = Math.ceil(target * pct / 100);
     });
-    const scored = [...pool].sort((a,b)=>(scoreById[b.id]||0)-(scoreById[a.id]||0));
-    let attempts=0;
-    const maxAttempts = candidateTarget*200;
 
-    while(candidates.length < candidateTarget && attempts < maxAttempts){
-      if(window._genCancelled) return candidates;
-      attempts++;
-      const weights = scored.map(p=>{
-        if(expTracker[p.id]>=(playerMax[p.id]||999)) return 0;
-        const base = scoreById[p.id]||0;
-        // Ownership penalty for chaos lineups: high-owned players less likely to appear
-        const ownPenalty = ownPenaltyStrength > 0
-          ? 1 - ownPenaltyStrength * (ownById[p.id]||0) / maxOwn
-          : 1;
-        return Math.max(0, base * Math.max(0.1, ownPenalty) * (1+(Math.random()*2-1)*randomness));
-      });
-      const totalW = weights.reduce((s,w)=>s+w,0);
-      if(!totalW) break;
+    while(filled.length < target && remaining.length > 0){
+      let bestI=-1, bestV=-Infinity;
 
-      const lineup=[], tempW=[...weights];
-      for(let slot=0;slot<slots;slot++){
-        const tw=tempW.reduce((s,w)=>s+w,0); if(!tw) break;
-        let r=Math.random()*tw, pick=-1;
-        for(let i=0;i<scored.length;i++){r-=tempW[i];if(r<=0){pick=i;break;}}
-        if(pick<0) pick=tempW.findLastIndex(w=>w>0);
-        if(pick<0) break;
-        lineup.push(scored[pick]); tempW[pick]=0;
-      }
-      if(lineup.length<slots) continue;
-      const sal=lineup.reduce((s,p)=>s+(p.salary||0),0);
-      if(sal<minSal||sal>maxSal) continue;
-      if(!checkGroupRules(lineup,groups)) continue;
-      const key=lineupKey(lineup.map(p=>p.id).sort());
-      if(existingKeys.has(key)) continue;
-      candidates.push(lineup);
-      lineup.forEach(p=>{ expTracker[p.id]=(expTracker[p.id]||0)+1; });
-      existingKeys.add(key);
-    }
-    return candidates;
-  }
+      for(let i=0; i<remaining.length; i++){
+        const x = remaining[i];
+        const ids = new Set(x.lu.map(p=>p.id));
 
-  // Score candidates by sum of their drivers' composites
-  function scoreCandidates(candidates, scoreById){
-    return candidates.map(lineup=>({
-      lineup,
-      composite: lineup.reduce((s,p)=>s+(scoreById[p.id]||0),0)
-    }));
-  }
-
-  // Jaccard diversity selection
-  function selectLineups(scored, count, overridesMap, maxExpPctVal){
-    scored.sort((a,b)=>b.composite-a.composite);
-    const topComp = scored[0]?.composite||1;
-    // Tight quality filter: only consider lineups within 90% of top composite.
-    // This prevents low-composite "salary dump" lineups from sneaking in
-    // via Jaccard diversity — they should genuinely compete on merit.
-    const quality = scored.filter(x=>x.composite>=topComp*0.90);
-    // Fall back to 80% if tight filter leaves too few candidates
-    const qualityFinal = quality.length >= count*3 ? quality
-      : scored.filter(x=>x.composite>=topComp*0.80);
-    const minC=qualityFinal[qualityFinal.length-1]?.composite||0;
-    const maxC=qualityFinal[0]?.composite||1;
-    const normC=x=>(x.composite-minC)/(maxC-minC||1);
-    const outputExpCount={}, selectedSets=[], filled=[];
-    const remaining=[...qualityFinal];
-    // Higher quality weight means composite score matters more than uniqueness.
-    // This prevents low-composite players from appearing just because they're
-    // "different" — a lineup needs to genuinely compete on projected score.
-    const QUALITY_WEIGHT=0.82;
-    while(filled.length<count && remaining.length>0){
-      let bestIdx=0, bestVal=-Infinity;
-      for(let ri=0;ri<remaining.length;ri++){
-        const x=remaining[ri];
-        const ids=new Set(x.lineup.map(p=>p.id));
-        const exceedsCap=x.lineup.some(p=>{
-          const pct=overridesMap[p.id]!=null?overridesMap[p.id]:maxExpPctVal;
-          if(pct>=100) return false;
-          const cap=Math.max(1,Math.ceil(pct/100*count));
-          return (outputExpCount[p.id]||0)>=cap;
+        // Exposure cap
+        const overExp = x.lu.some(p=>{
+          const cap = outCap[p.id];
+          return cap < target && (expCount[p.id]||0) >= cap;
         });
-        if(exceedsCap) continue;
-        let maxSim2=0;
-        const checkSets=selectedSets.length<=5?selectedSets:selectedSets.slice(-5);
-        for(const sel of checkSets){
-          let shared=0; ids.forEach(id=>{if(sel.has(id))shared++;});
-          const sim2=shared/(ids.size+sel.size-shared);
-          if(sim2>maxSim2)maxSim2=sim2;
+        if(overExp) continue;
+
+        // Jaccard vs last 8 selected
+        let maxJ=0;
+        for(const s of selSets.slice(-8)){
+          let sh=0; ids.forEach(id=>{ if(s.has(id)) sh++; });
+          maxJ=Math.max(maxJ, sh/(ids.size+s.size-sh));
         }
-        const val=QUALITY_WEIGHT*normC(x)+(1-QUALITY_WEIGHT)*(1-maxSim2);
-        if(val>bestVal){bestVal=val;bestIdx=ri;}
+
+        const v = 0.70*(x.score/topScore) + 0.30*(1-maxJ);
+        if(v>bestV){ bestV=v; bestI=i; }
       }
-      if(bestVal===-Infinity) break;
-      const chosen=remaining.splice(bestIdx,1)[0];
-      chosen.lineup.forEach(p=>{outputExpCount[p.id]=(outputExpCount[p.id]||0)+1;});
-      selectedSets.push(new Set(chosen.lineup.map(p=>p.id)));
+
+      if(bestI===-1) break;
+      const chosen = remaining.splice(bestI,1)[0];
+      chosen.lu.forEach(p=>{ expCount[p.id]=(expCount[p.id]||0)+1; });
+      selSets.push(new Set(chosen.lu.map(p=>p.id)));
       filled.push(chosen);
     }
-    return filled;
-  }
 
-  if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return; }
+    if(!filled.length){ alert('No lineups passed selection.'); done(); return; }
 
-  // Build clean lineups
-  const cleanCandidates = cleanTarget>0 ? await buildCandidates(cleanById, cleanTarget, 0) : [];
-  if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return; }
+    const finalLineups = filled.map(x=>{
+      const l = [...x.lu];
+      l._simAvg    = x.score.toFixed(1);
+      l._simWinAvg = x.score.toFixed(1);
+      l._simWinRate= '—';
+      return l;
+    });
 
-  // Build chaos lineups (with ownership penalty 0.4 = moderate soft penalty)
-  const chaosCandidates = chaosTarget>0 ? await buildCandidates(chaosById, chaosTarget, 0.4) : [];
-  if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return; }
+    const avgScore = filled.reduce((s,x)=>s+x.score,0)/filled.length;
+    log(`Done! ${filled.length} lineups selected. Avg composite: ${avgScore.toFixed(1)}`);
+    const now=new Date();
+    addToHistory(slate.id,`${finalLineups.length} lineups (sim) @ ${now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`,finalLineups);
+    done();
+    openPreviewModal(finalLineups,'proj');
+  };
 
-  log(`Selecting from ${cleanCandidates.length} clean + ${chaosCandidates.length} chaos candidates...`);
-  await new Promise(r=>setTimeout(r,0));
-
-  const cleanScored  = scoreCandidates(cleanCandidates, cleanById);
-  const chaosScored  = scoreCandidates(chaosCandidates, chaosById);
-
-  const cleanFilled  = cleanTarget>0 ? selectLineups(cleanScored, cleanTarget, overrides, maxExpPct) : [];
-  const chaosFilled  = chaosTarget>0 ? selectLineups(chaosScored, chaosTarget, overrides, maxExpPct) : [];
-
-  // Tag lineups for preview display
-  cleanFilled.forEach(x=>{ x.lineup._nascarTag='clean'; });
-  chaosFilled.forEach(x=>{ x.lineup._nascarTag='chaos'; });
-
-  const allFilled = [...cleanFilled, ...chaosFilled];
-  if(!allFilled.length){
-    alert('No lineups generated. Try relaxing group rules or salary range.');
-    document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return;
-  }
-
-  const topCleanDriver = simResults.sort((a,b)=>b.cleanComposite-a.cleanComposite)[0];
-  const topChaosDriver = [...simResults].sort((a,b)=>b.chaosComposite-a.chaosComposite)[0];
-  log(`Done! ${cleanFilled.length} clean + ${chaosFilled.length} chaos lineups.`);
-  log(`Top clean play: ${topCleanDriver.player.name} (p50:${topCleanDriver.p50.toFixed(1)}, domRate:${(topCleanDriver.domRate*100).toFixed(0)}%)`);
-  log(`Top chaos play: ${topChaosDriver.player.name} (chaosComp:${topChaosDriver.chaosComposite.toFixed(1)})`);
-
-  const finalLineups = allFilled.map(x=>x.lineup);
-  const now=new Date();
-  const timeStr=now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-  addToHistory(slate.id, `${finalLineups.length} lineups (sim) @ ${timeStr}`, finalLineups);
-  document.getElementById('genBtn').disabled=false;
-  cancelBtn?.remove();
-  openPreviewModal(finalLineups,'proj');
+  runChunk();
 }
+
+
 async function runAutoGen(){
   const slate=activeSlate();if(!slate)return;
 
-  // NASCAR simulation mode branch
-  if(slate.sport==='nascar' && document.getElementById('genNascarSimMode')?.checked){
-    return runNascarSimGen();
-  }
-
-  // UFC simulation mode branch
-  if(slate.sport==='ufc' && document.getElementById('genUfcSimMode')?.checked){
-    return runUFCSimGen();
+  // Route to simulation engine if simulate mode is active
+  if(_genMode === 'simulate'){
+    if(slate.sport==='ufc') return runUFCSimGen();
+    if(slate.sport==='nascar') return runNascarSimGen();
   }
   const optimizeBy=document.getElementById('genOptimize').value;
-  if(!optimizeBy){alert('Please select an optimization metric.');return;}
+  if(!optimizeBy && _genMode!=='simulate'){alert('Please select an optimization metric.');return;}
   const target=parseInt(document.getElementById('genCount').value)||20;
   const maxExpPct=parseInt(document.getElementById('genMaxExp').value)||100;
   const minOverrides=slate.playerMinOverrides||{};
@@ -4356,7 +4393,6 @@ async function runAutoGen(){
 
   runChunk();
 }
-
 // ═══════════════════════════════════════════════════════════
 // PREVIEW MODAL
 // ═══════════════════════════════════════════════════════════
@@ -4372,20 +4408,12 @@ function openPreviewModal(lineups, optimizeBy){
   // Build filter buttons if archetypes are present
   const archetypes = (slate.groups||[]).filter(g=>g.isArchetype);
   const hasWave = slate.sport==='pga' && !!slate.columnMapping?.start;
-  const hasNascarTags = slate.sport==='nascar' && lineups.some(l=>l._nascarTag);
+
   const filterBtns = document.getElementById('previewFilterBtns');
-  if(archetypes.some(g=>lineups.some(l=>l._archetypeTag===g.id)) || hasWave || hasNascarTags){
+  if(archetypes.some(g=>lineups.some(l=>l._archetypeTag===g.id)) || hasWave){
     const btnStyle = 'border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:5px;font-size:11px;cursor:pointer;font-family:"DM Sans",sans-serif;transition:all .15s;background:none;';
     const activeStyle = 'background:rgba(245,197,24,.1);border-color:var(--accent);color:var(--accent);';
     let html = `<button class="preview-filter-btn" data-gid="all" onclick="setPreviewFilter(null)" style="${btnStyle}${activeStyle}">All (${lineups.length})</button>`;
-
-    // NASCAR clean/chaos filter buttons
-    if(hasNascarTags){
-      const cleanCount = lineups.filter(l=>l._nascarTag==='clean').length;
-      const chaosCount = lineups.filter(l=>l._nascarTag==='chaos').length;
-      if(cleanCount) html += `<button class="preview-filter-btn" data-gid="nascar_clean" onclick="setPreviewFilter('nascar_clean')" style="${btnStyle}"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#60a5fa;margin-right:4px;"></span>Clean (${cleanCount})</button>`;
-      if(chaosCount) html += `<button class="preview-filter-btn" data-gid="nascar_chaos" onclick="setPreviewFilter('nascar_chaos')" style="${btnStyle}"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--accent2);margin-right:4px;"></span>Chaos (${chaosCount})</button>`;
-    }
 
     // Archetype filter buttons — these are mutually exclusive categories
     archetypes.forEach(g=>{
@@ -4394,7 +4422,7 @@ function openPreviewModal(lineups, optimizeBy){
       html += `<button class="preview-filter-btn" data-gid="${g.id}" onclick="setPreviewFilter('${g.id}')" style="${btnStyle}"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${g.color};margin-right:4px;"></span>${g.name} (${count})</button>`;
     });
     const unconstrainedCount = lineups.filter(l=>!l._archetypeTag).length;
-    if(unconstrainedCount && !hasNascarTags) html += `<button class="preview-filter-btn" data-gid="unconstrained" onclick="setPreviewFilter('unconstrained')" style="${btnStyle}">Mixed (${unconstrainedCount})</button>`;
+    if(unconstrainedCount) html += `<button class="preview-filter-btn" data-gid="unconstrained" onclick="setPreviewFilter('unconstrained')" style="${btnStyle}">Mixed (${unconstrainedCount})</button>`;
 
     // Wave info — shown as a separate informational row below, not mixed with archetype filters
     if(hasWave){
@@ -4428,8 +4456,7 @@ function getFilteredLineups(){
   if(previewFilter==='wave_none') return previewLineups.filter(l=>!l._waveTag);
   if(previewFilter==='wave_am') return previewLineups.filter(l=>l._waveTag==='am');
   if(previewFilter==='wave_pm') return previewLineups.filter(l=>l._waveTag==='pm');
-  if(previewFilter==='nascar_clean') return previewLineups.filter(l=>l._nascarTag==='clean');
-  if(previewFilter==='nascar_chaos') return previewLineups.filter(l=>l._nascarTag==='chaos');
+
   return previewLineups.filter(l=>l._archetypeTag===previewFilter);
 }
 
@@ -4457,16 +4484,12 @@ function renderPreviewLineupsList(){
     const waveTag = lineup._waveTag;
     const arcTag = arcGroup ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${arcGroup.color}22;color:${arcGroup.color};border:1px solid ${arcGroup.color}44;margin-left:4px;">${arcGroup.name}</span>` : '';
     const wTag = waveTag ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${waveTag==='am'?'rgba(34,197,94,.15)':'rgba(245,197,24,.15)'};color:${waveTag==='am'?'var(--green)':'var(--accent)'};border:1px solid ${waveTag==='am'?'rgba(34,197,94,.3)':'rgba(245,197,24,.3)'};margin-left:4px;">${waveTag==='am'?'AM':'PM'}</span>` : '';
-    const nascarTag = lineup._nascarTag==='chaos'
-      ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(232,66,26,.15);color:var(--accent2);border:1px solid rgba(232,66,26,.35);margin-left:4px;">CHAOS</span>`
-      : lineup._nascarTag==='clean'
-      ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(59,130,246,.12);color:#60a5fa;border:1px solid rgba(59,130,246,.3);margin-left:4px;">CLEAN</span>`
-      : '';
+
     // Find original index in full previewLineups array for checkbox id
     const origIdx = previewLineups.indexOf(lineup);
     return `<div class="preview-lineup-card">
       <div class="preview-lineup-top">
-        <div style="display:flex;align-items:center;gap:4px;"><div class="preview-lineup-num">Lineup ${origIdx+1}</div>${wTag}${arcTag}${nascarTag}</div>
+        <div style="display:flex;align-items:center;gap:4px;"><div class="preview-lineup-num">Lineup ${origIdx+1}</div></div>
         <div style="display:flex;align-items:center;gap:8px">
           <div class="preview-lineup-meta">${fmt(sal)}</div>
           <input type="checkbox" class="preview-check" id="pc${origIdx}" checked onchange="renderPreviewExposure()">
@@ -4656,7 +4679,6 @@ function loadHistorySetIntoPreview(id){
     const lineup=ids.map(pid=>playerById(slate,pid)).filter(Boolean);
     lineup._archetypeTag = ids._archetypeTag||null;
     lineup._waveTag = ids._waveTag||null;
-    lineup._nascarTag = ids._nascarTag||null;
     return lineup;
   });
   document.getElementById('historyPickerMenu').style.display='none';
