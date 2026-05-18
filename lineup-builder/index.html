@@ -391,7 +391,7 @@ select.mapper-select option{background:var(--surface2);}
 
   /* Hide Restore/Clear All on mobile */
   .topbar > label,
-  .topbar > button:not(.btn-new-slate):not([onclick*="backupData"]) { display: none; }
+  .topbar > button:not(.btn-new-slate):not(.btn-topbar-menu) { display: none; }
 
   #appWrap { height: auto; min-height: 100vh; }
   #mainLayout { display: flex !important; flex-direction: column; height: auto; overflow: visible; }
@@ -540,9 +540,33 @@ html { overscroll-behavior-y: contain; }
   .topbar-home-mark { width:22px; height:22px; background:var(--accent); border-radius:4px; display:flex; align-items:center; justify-content:center; font-family:'DM Mono',monospace; font-weight:500; font-size:9px; color:#0e0f11; flex-shrink:0; }
   .topbar-home-label { font-size:10px; letter-spacing:.03em; }
   /* Tool links on right of topbar */
-  .topbar-right { display:flex; align-items:center; gap:4px; margin-left:auto; }
-  .topbar-tool-link { font-family:'DM Mono',monospace; font-size:10px; color:var(--muted); text-decoration:none; padding:4px 10px; border-radius:5px; border:1px solid transparent; transition:all .15s; }
-  .topbar-tool-link:hover { color:var(--accent); border-color:rgba(200,240,90,0.2); background:rgba(200,240,90,0.05); }
+
+  /* ── Google Sheets import ── */
+  .sheet-slate-list{display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto;margin:12px 0;}
+  .sheet-slate-item{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:all .15s;}
+  .sheet-slate-item:hover{border-color:var(--accent);background:var(--accent-dim);}
+  .sheet-slate-name{font-size:13px;font-weight:600;color:var(--text);}
+  .sheet-slate-meta{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);}
+  .sheet-sport-tag{font-family:'DM Mono',monospace;font-size:10px;padding:2px 8px;border-radius:4px;background:rgba(200,240,90,0.1);color:var(--accent);border:1px solid rgba(200,240,90,0.2);}
+  .sheet-loading{text-align:center;padding:32px;font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);}
+  .sheet-error{text-align:center;padding:24px;font-family:'DM Mono',monospace;font-size:11px;color:var(--red);}
+  .sheet-modal-source{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:6px;}
+  .sheet-modal-source::before{content:'';width:6px;height:6px;border-radius:50%;background:#34a853;flex-shrink:0;}
+
+  /* ── Topbar dropdown menu ── */
+  .topbar-menu-wrap { position:relative; }
+  .btn-topbar-menu { display:flex; align-items:center; gap:4px; padding:4px 10px; background:var(--surface2); border:1px solid var(--border); border-radius:5px; font-size:11px; font-weight:600; color:var(--muted); cursor:pointer; white-space:nowrap; transition:all .15s; font-family:'DM Mono',monospace; }
+  .btn-topbar-menu:hover { border-color:var(--accent); color:var(--accent); }
+  .btn-topbar-menu.open { border-color:var(--accent); color:var(--accent); }
+  .topbar-dropdown { display:none; position:absolute; right:0; top:calc(100% + 6px); background:var(--surface); border:1px solid var(--border2); border-radius:8px; min-width:160px; z-index:200; box-shadow:0 8px 24px rgba(0,0,0,.5); overflow:hidden; }
+  .topbar-dropdown.open { display:block; }
+  .topbar-dropdown-item { display:flex; align-items:center; gap:8px; padding:9px 14px; font-family:'DM Mono',monospace; font-size:11px; color:var(--muted); cursor:pointer; transition:all .15s; background:none; border:none; width:100%; text-align:left; text-decoration:none; white-space:nowrap; }
+  .topbar-dropdown-item:hover { background:var(--surface2); color:var(--text); }
+  .topbar-dropdown-item.danger:hover { color:var(--red); }
+  .topbar-dropdown-item.green:hover { color:var(--green); }
+  .topbar-dropdown-item.accent:hover { color:var(--accent); }
+  .topbar-dropdown-divider { height:1px; background:var(--border); margin:4px 0; }
+  .topbar-dropdown-label { padding:6px 14px 3px; font-family:'DM Mono',monospace; font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
 </style>
 </head>
 <body>
@@ -556,12 +580,18 @@ html { overscroll-behavior-y: contain; }
   <div class="logo">DFS <span>//</span> Builder</div>
   <div class="slate-tabs" id="slateTabs"></div>
   <button class="btn-new-slate" onclick="openNewSlateModal()">＋ New Slate</button>
-  <button onclick="backupData()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:5px;font-size:10px;font-family:'DM Mono',monospace;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='var(--green)';this.style.color='var(--green)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">↓ Backup</button>
-  <label style="background:none;border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:5px;font-size:10px;font-family:'DM Mono',monospace;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">↑ Restore<input type="file" accept=".json" style="display:none" onchange="restoreData(this)"></label>
-  <button onclick="clearAllData()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:5px;font-size:10px;font-family:'DM Mono',monospace;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">⊘ Clear All</button>
-  <div class="topbar-right">
-    <a href="../contest-analyzer/" class="topbar-tool-link">Contest Analyzer</a>
-    <a href="../" class="topbar-tool-link">← Home</a>
+  <div class="topbar-menu-wrap" id="topbarMenuWrap">
+    <button class="btn-topbar-menu" id="topbarMenuBtn" onclick="toggleTopbarMenu()">••• <span style="font-size:9px;">▾</span></button>
+    <div class="topbar-dropdown" id="topbarDropdown">
+      <div class="topbar-dropdown-label">Data</div>
+      <button class="topbar-dropdown-item green" onclick="backupData();closeTopbarMenu()">↓ Backup</button>
+      <label class="topbar-dropdown-item accent">↑ Restore<input type="file" accept=".json" style="display:none" onchange="restoreData(this);closeTopbarMenu()"></label>
+      <button class="topbar-dropdown-item danger" onclick="clearAllData();closeTopbarMenu()">⊘ Clear All</button>
+      <div class="topbar-dropdown-divider"></div>
+      <div class="topbar-dropdown-label">Navigate</div>
+      <a href="../contest-analyzer/" class="topbar-dropdown-item">Contest Analyzer ↗</a>
+      <a href="../" class="topbar-dropdown-item">← All Tools</a>
+    </div>
   </div>
 </div>
 
@@ -589,6 +619,7 @@ html { overscroll-behavior-y: contain; }
       <button class="show-hidden-btn" id="showHiddenBtn" onclick="toggleShowHidden()">👁 Hidden</button>
       <button class="show-hidden-btn" id="unhideAllBtn" onclick="unhideAll()" style="display:none;">✕ Unhide All</button>
       <button class="show-hidden-btn" id="updatePoolBtn" onclick="openUpdatePoolModal()" title="Re-upload CSV to refresh projections, ownership, salary, tee times">↺ Update</button>
+      <button class="show-hidden-btn" id="refreshSheetBtn" onclick="refreshFromSheet()" title="Re-fetch latest data from Google Sheet" style="display:none;border-color:rgba(52,168,83,0.3);color:#34a853;">↺ Refresh</button>
     </div>
     <!-- UPDATE POOL MODAL -->
     <div id="updatePoolModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9000;align-items:center;justify-content:center;backdrop-filter:blur(2px);">
@@ -906,10 +937,18 @@ html { overscroll-behavior-y: contain; }
     <!-- SIM INPUTS TAB -->
     <div class="tab-content" id="tab-siminputs" style="overflow-y:auto;padding:12px;">
       <div style="margin-bottom:10px;">
-        <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:4px;">Fighter</div>
-        <select id="simInputFighterSelect" onchange="renderSimInputs()" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;font-family:'DM Sans',sans-serif;outline:none;">
-          <option value="">— Select a fighter —</option>
-        </select>
+        <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:6px;">Compare Fighters <span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);font-weight:400;">up to 3</span></div>
+        <div id="simInputFighterSelects" style="display:flex;flex-direction:column;gap:6px;">
+          <select id="simInputFighterSelect" onchange="renderSimInputs()" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;font-family:'DM Sans',sans-serif;outline:none;">
+            <option value="">— Select fighter 1 —</option>
+          </select>
+          <select id="simInputFighterSelect2" onchange="renderSimInputs()" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;font-family:'DM Sans',sans-serif;outline:none;">
+            <option value="">— Compare with fighter 2 (optional) —</option>
+          </select>
+          <select id="simInputFighterSelect3" onchange="renderSimInputs()" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;font-family:'DM Sans',sans-serif;outline:none;">
+            <option value="">— Add fighter 3 (optional) —</option>
+          </select>
+        </div>
       </div>
       <div id="simInputsDisplay"></div>
     </div>
@@ -920,52 +959,95 @@ html { overscroll-behavior-y: contain; }
 <div class="modal-overlay hidden" id="slateModal">
   <div class="modal">
     <div class="modal-title">New Slate</div>
-    <div class="modal-sub">Name your slate, pick a sport, then upload a CSV and map its columns.</div>
-    <div class="form-row">
-      <div class="form-group">
-        <div class="form-label">Slate Name</div>
-        <input type="text" class="form-input" id="slateName" placeholder="e.g. Texas Motor Speedway">
-      </div>
-      <div class="form-group">
-        <div class="form-label">Sport</div>
-        <select class="form-input" id="slateSport">
-          <option value="nascar">NASCAR (Drivers)</option>
-          <option value="pga">PGA (Golfers)</option>
-          <option value="ufc">UFC (Fighters)</option>
-        </select>
+
+    <!-- Import path selector — shown first -->
+    <div id="slatePathChooser">
+      <div class="modal-sub" style="margin-bottom:14px;">How would you like to create this slate?</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
+        <button onclick="chooseSlatePathSheet()" style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:rgba(52,168,83,0.08);border:1px solid rgba(52,168,83,0.25);border-radius:8px;cursor:pointer;transition:all .15s;text-align:left;width:100%;" onmouseover="this.style.borderColor='rgba(52,168,83,0.6)'" onmouseout="this.style.borderColor='rgba(52,168,83,0.25)'">
+          <span style="font-size:18px;">⬇</span>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:#34a853;">Select Slate</div>
+            <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-top:2px;">Choose from available preloaded slates</div>
+          </div>
+        </button>
+        <button onclick="chooseSlatePathManual()" style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:all .15s;text-align:left;width:100%;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+          <span style="font-size:18px;">📂</span>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--text);">Upload CSV manually</div>
+            <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-top:2px;">Upload a DraftKings player pool CSV</div>
+          </div>
+        </button>
       </div>
     </div>
-    <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
-      <div class="upload-icon">📂</div>
-      <div class="upload-text"><strong>Click to upload</strong> or drag & drop a CSV</div>
-      <div id="uploadFileName" style="margin-top:4px;font-size:10px;color:var(--muted);"></div>
+
+    <!-- Sheet import path -->
+    <div id="slatePathSheetContent" style="display:none;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+        <button onclick="backToPathChooser()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0;">← Back</button>
+        <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">Select a slate</div>
+      </div>
+      <div id="slateModalSheetList" class="sheet-slate-list">
+        <div class="sheet-loading">Fetching available slates…</div>
+      </div>
     </div>
-    <input type="file" id="fileInput" accept=".csv" onchange="onFileSelected(event)">
-    <div id="mapperSection" style="display:none;">
-      <div class="validation-msg" id="validationMsg"></div>
-      <!-- Required columns shown first -->
-      <div class="mapper-required-section">
-        <div class="mapper-req-title">★ Required Columns — auto-detected, confirm mapping</div>
-        <div class="mapper-grid" id="mapperRequired"></div>
+
+    <!-- Manual CSV path -->
+    <div id="slatePathManualContent" style="display:none;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+        <button onclick="backToPathChooser()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0;">← Back</button>
       </div>
-      <div id="mapperOptionalWrap">
-        <div class="mapper-opt-title">Optional Columns — label any you want to include</div>
-        <div class="mapper-grid" id="mapperOptional"></div>
-      </div>
-      <div id="mapperSimInputs" style="display:none;margin-top:10px;">
-        <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;" onclick="const g=document.getElementById('mapperSimGrid');const arr=document.getElementById('simInputsArrow');g.style.display=g.style.display==='none'?'grid':'none';arr.textContent=g.style.display==='none'?'&#9658;':'&#9660;';">
-          <span style="font-family:'DM Mono',monospace;font-size:10px;font-weight:600;color:var(--blue);text-transform:uppercase;letter-spacing:.05em;">&#9881; Sim inputs detected</span>
-          <span id="simInputsArrow" style="font-size:9px;color:var(--muted);">&#9658;</span>
+      <div class="form-row">
+        <div class="form-group">
+          <div class="form-label">Slate Name</div>
+          <input type="text" class="form-input" id="slateName" placeholder="e.g. Texas Motor Speedway">
         </div>
-        <div id="mapperSimGrid" style="display:none;margin-top:6px;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;max-height:180px;overflow-y:auto;grid-template-columns:1fr 1fr;gap:2px;"></div>
+        <div class="form-group">
+          <div class="form-label">Sport</div>
+          <select class="form-input" id="slateSport">
+            <option value="nascar">NASCAR (Drivers)</option>
+            <option value="pga">PGA (Golfers)</option>
+            <option value="ufc">UFC (Fighters)</option>
+          </select>
+        </div>
       </div>
-      <div class="mapper-title" style="margin-top:10px;margin-bottom:5px;">Preview (first 3 rows of mapped columns)</div>
-      <div style="overflow-x:auto;"><table class="preview-table" id="previewTable"></table></div>
+      <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+        <div class="upload-icon">📂</div>
+        <div class="upload-text"><strong>Click to upload</strong> or drag & drop a CSV</div>
+        <div id="uploadFileName" style="margin-top:4px;font-size:10px;color:var(--muted);"></div>
+      </div>
+      <input type="file" id="fileInput" accept=".csv" onchange="onFileSelected(event)">
+      <div id="mapperSection" style="display:none;">
+        <div class="validation-msg" id="validationMsg"></div>
+        <div class="mapper-required-section">
+          <div class="mapper-req-title">★ Required Columns — auto-detected, confirm mapping</div>
+          <div class="mapper-grid" id="mapperRequired"></div>
+        </div>
+        <div id="mapperOptionalWrap">
+          <div class="mapper-opt-title">Optional Columns — label any you want to include</div>
+          <div class="mapper-grid" id="mapperOptional"></div>
+        </div>
+        <div id="mapperSimInputs" style="display:none;margin-top:10px;">
+          <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;" onclick="const g=document.getElementById('mapperSimGrid');const arr=document.getElementById('simInputsArrow');g.style.display=g.style.display==='none'?'grid':'none';arr.textContent=g.style.display==='none'?'&#9658;':'&#9660;';">
+            <span style="font-family:'DM Mono',monospace;font-size:10px;font-weight:600;color:var(--blue);text-transform:uppercase;letter-spacing:.05em;">&#9881; Sim inputs detected</span>
+            <span id="simInputsArrow" style="font-size:9px;color:var(--muted);">&#9658;</span>
+          </div>
+          <div id="mapperSimGrid" style="display:none;margin-top:6px;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;max-height:180px;overflow-y:auto;grid-template-columns:1fr 1fr;gap:2px;"></div>
+        </div>
+        <div class="mapper-title" style="margin-top:10px;margin-bottom:5px;">Preview (first 3 rows of mapped columns)</div>
+        <div style="overflow-x:auto;"><table class="preview-table" id="previewTable"></table></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal btn-modal-cancel" onclick="closeSlateModal()">Cancel</button>
+        <button class="btn-modal btn-modal-primary" id="createSlateBtn" onclick="createSlate()" disabled>Create Slate</button>
+      </div>
     </div>
-    <div class="modal-footer">
+
+    <!-- Cancel shown on path chooser -->
+    <div id="slatePathChooserFooter" class="modal-footer">
       <button class="btn-modal btn-modal-cancel" onclick="closeSlateModal()">Cancel</button>
-      <button class="btn-modal btn-modal-primary" id="createSlateBtn" onclick="createSlate()" disabled>Create Slate</button>
     </div>
+
   </div>
 </div>
 
@@ -1404,6 +1486,12 @@ function getPlayerGroups(slate, playerId) {
 // TOP BAR
 // ═══════════════════════════════════════════════════════════
 function renderTopBar() {
+  // Show/hide sheet refresh button based on whether active slate came from sheet
+  const _refreshBtn = document.getElementById('refreshSheetBtn');
+  if(_refreshBtn){
+    const _sl = activeSlate();
+    _refreshBtn.style.display = (_sl && _sl.sheetTab) ? 'inline-flex' : 'none';
+  }
   const tabs=document.getElementById('slateTabs');
   tabs.innerHTML=slates.map(s=>{
     const cfg=SPORT_CFG[s.sport]||SPORT_CFG.nascar;
@@ -4790,17 +4878,237 @@ function hideToast(){document.getElementById('toast').classList.remove('show');}
 // ═══════════════════════════════════════════════════════════
 // NEW SLATE MODAL
 // ═══════════════════════════════════════════════════════════
+// ── GOOGLE SHEETS INTEGRATION ─────────────────────────────────────────────
+const SHEET_ID  = '1IXx0Jmt6j9dY4X6qUeQw_i3u8uGHk41hlebSYJCcAHw';
+const SHEET_KEY = 'AIzaSyADsP-BJmEYFIPzXpydw1xCIQImDTz53jk';
+
+function detectSportFromTab(title){
+  const t = title.toLowerCase();
+  if(t.startsWith('ufc'))    return 'ufc';
+  if(t.startsWith('nascar')) return 'nascar';
+  if(t.startsWith('pga') || t.startsWith('golf')) return 'pga';
+  // fallback — try to detect from keywords
+  if(t.includes('ufc') || t.includes('mma'))    return 'ufc';
+  if(t.includes('nascar') || t.includes('race')) return 'nascar';
+  if(t.includes('pga') || t.includes('golf'))    return 'pga';
+  return 'nascar'; // default
+}
+
+async function importSheetSlate(tabTitle, gid, sport){
+  // List element lives inside the new slate modal
+  const listEl = document.getElementById('slateModalSheetList');
+  if(listEl) listEl.innerHTML = `<div class="sheet-loading">Loading ${tabTitle}…</div>`;
+
+  try {
+    // Fetch tab data as CSV — no GID dependency on the URL, use title-based range
+    const csvUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabTitle)}?key=${SHEET_KEY}`;
+    const res = await fetch(csvUrl);
+    if(!res.ok) throw new Error(`API error ${res.status}`);
+    const data = await res.json();
+    const rows = data.values || [];
+    if(rows.length < 2){
+      listEl.innerHTML = '<div class="sheet-error">Tab appears to be empty.</div>';
+      return;
+    }
+
+    // Parse into the same structure processFile() produces
+    parsedCSV.headers = rows[0].map(h => h.trim());
+    parsedCSV.rows    = rows.slice(1).filter(r => r.some(c => c.trim()));
+    // Pad short rows to header length
+    parsedCSV.rows = parsedCSV.rows.map(r => {
+      while(r.length < parsedCSV.headers.length) r.push('');
+      return r;
+    });
+
+    // Pre-fill slate name and sport from tab title
+    document.getElementById('slateName').value  = tabTitle;
+    document.getElementById('slateSport').value = sport;
+
+    // Show the manual content area with mapper (sheet data pre-loaded)
+    parsedCSV._fromSheet = true;
+    colMapping = {};
+    document.getElementById('uploadFileName').textContent = `⬇ ${tabTitle}`;
+    document.getElementById('createSlateBtn').disabled = true;
+    document.getElementById('validationMsg').className = 'validation-msg';
+    // Switch to manual content area which has the mapper + create button
+    document.getElementById('slatePathSheetContent').style.display='none';
+    document.getElementById('slatePathManualContent').style.display='block';
+    // Trigger auto-mapping
+    autoMapColumns(sport);
+
+  } catch(e){
+    if(listEl) listEl.innerHTML = `<div class="sheet-error">Failed to load tab data.<br>${e.message}</div>`;
+    console.error('importSheetSlate error:', e);
+  }
+}
+
+function autoMapColumns(sport){
+  // Mirror exactly what processFile() does after parsing:
+  // 1. Reset colMapping, 2. Auto-detect via AUTO_MAP, 3. Build mapper UI
+  colMapping = {};
+  parsedCSV.headers.forEach((h, i) => {
+    for(const [role, rx] of Object.entries(AUTO_MAP)){
+      if(rx.test(h.trim()) && colMapping[role] == null){ colMapping[role] = i; break; }
+    }
+  });
+  document.getElementById('mapperSection').style.display = 'block';
+  buildMapper();
+}
+
+
+function toggleTopbarMenu(){
+  const btn  = document.getElementById('topbarMenuBtn');
+  const menu = document.getElementById('topbarDropdown');
+  const open = menu.classList.toggle('open');
+  btn.classList.toggle('open', open);
+}
+function closeTopbarMenu(){
+  document.getElementById('topbarDropdown').classList.remove('open');
+  document.getElementById('topbarMenuBtn').classList.remove('open');
+}
+// Close dropdown when clicking outside
+document.addEventListener('click', e => {
+  const wrap = document.getElementById('topbarMenuWrap');
+  if(wrap && !wrap.contains(e.target)) closeTopbarMenu();
+});
+
+
+// ── SHEET REFRESH ────────────────────────────────────────────────────────────
+async function refreshFromSheet(){
+  const slate = activeSlate();
+  if(!slate || !slate.sheetTab) return;
+  const btn = document.getElementById('refreshSheetBtn');
+  if(btn){ btn.textContent='↺ Refreshing…'; btn.disabled=true; }
+  try {
+    const csvUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(slate.sheetTab)}?key=${SHEET_KEY}`;
+    const res = await fetch(csvUrl);
+    if(!res.ok) throw new Error(`API error ${res.status}`);
+    const data = await res.json();
+    const rows = data.values || [];
+    if(rows.length < 2) throw new Error('Sheet tab appears empty');
+
+    const headers = rows[0].map(h=>h.trim());
+    const dataRows = rows.slice(1).filter(r=>r.some(c=>c&&c.trim())).map(r=>{
+      while(r.length < headers.length) r.push('');
+      return r;
+    });
+
+    const colMap = slate.columnMapping || {};
+    const getNum = (row, key) => { const i=colMap[key]; return i!=null ? parseFloat(row[i])||0 : 0; };
+    const getStr = (row, key) => { const i=colMap[key]; return i!=null ? (row[i]||'').trim() : ''; };
+
+    // Update player data in place — match by id, refresh numeric/odds fields only
+    // Preserves: savedLineups, hiddenIds, groups, manual proj edits (_origProj lock)
+    dataRows.forEach(row => {
+      const idRaw = colMap.id!=null ? row[colMap.id] : '';
+      const idMatch = idRaw.match(/\((\d+)\)/);
+      const id = (idMatch?idMatch[1]:idRaw.trim());
+      const p = slate.players.find(q=>q.id===id);
+      if(!p) return;
+      // Refresh live fields
+      if(colMap.proj!=null)  { const v=parseFloat(row[colMap.proj])||0; if(!p._projLocked) p.proj=v; p._origProj=v; }
+      if(colMap.own!=null)   p.own   = parseFloat(row[colMap.own])||0;
+      if(colMap.salary!=null){ const s=parseFloat((row[colMap.salary]||'').replace(/[^0-9.]/g,''))||0; if(s) p.salary=s; }
+      if(colMap.win!=null)   p.win   = getStr(row,'win');
+      if(colMap.top3!=null)  p.top3  = getStr(row,'top3');
+      if(colMap.top5!=null)  p.top5  = getStr(row,'top5');
+      if(colMap.top10!=null) p.top10 = getStr(row,'top10');
+      if(colMap.rating!=null)p.rating= parseFloat(row[colMap.rating])||null;
+      // UFC odds — re-read by header name
+      if(slate.sport==='ufc'){
+        const get = name => { const i=headers.findIndex(h=>h.toLowerCase()===name.toLowerCase()); return i>=0?(row[i]||'').trim():null; };
+        const getN = name => { const v=get(name); const n=parseFloat(v); return (!isNaN(n)&&n!==0)?n:null; };
+        p.ml=get('ML'); p.itd=get('ITD');
+        ['finish_r1','finish_r2','finish_r3','finish_r4','finish_r5','decision'].forEach(k=>{
+          p[k]=getN(k.replace('_r','_R').replace('finish','Finish').replace('decision','Decision'));
+        });
+        const ssKeys=['55','60','65','70','75','80','85','90','95','100','105','110','115','120','125'];
+        ssKeys.forEach(k=>{ p['ss_'+k]=getN(`SS_${k}plus`); });
+        const tdKeys=['1','2','3','4','5','6'];
+        tdKeys.forEach(k=>{ p['td_'+k]=getN(`TD_${k}plus`); });
+      }
+    });
+
+    imputeMissingRatings(slate);
+    save();
+    renderSlate();
+    if(btn){ btn.textContent='↺ Refresh'; btn.disabled=false; }
+    // Brief success flash
+    if(btn){ btn.style.color='var(--green)'; setTimeout(()=>{ if(btn)btn.style.color='#34a853'; },1500); }
+  } catch(e){
+    if(btn){ btn.textContent='↺ Refresh'; btn.disabled=false; btn.style.color='var(--red)'; setTimeout(()=>{ if(btn)btn.style.color='#34a853'; },2000); }
+    console.error('Sheet refresh failed:', e);
+  }
+}
+
 function openNewSlateModal(){
   parsedCSV={headers:[],rows:[]};colMapping={};
-  document.getElementById('slateName').value='';document.getElementById('slateSport').value='nascar';
-  document.getElementById('uploadFileName').textContent='';document.getElementById('mapperSection').style.display='none';
-  document.getElementById('createSlateBtn').disabled=true;document.getElementById('validationMsg').className='validation-msg';
+  // Reset to path chooser
+  document.getElementById('slatePathChooser').style.display='block';
+  document.getElementById('slatePathChooserFooter').style.display='flex';
+  document.getElementById('slatePathSheetContent').style.display='none';
+  document.getElementById('slatePathManualContent').style.display='none';
+  // Reset manual form
+  document.getElementById('slateName').value='';
+  document.getElementById('slateSport').value='nascar';
+  document.getElementById('uploadFileName').textContent='';
+  document.getElementById('mapperSection').style.display='none';
+  document.getElementById('createSlateBtn').disabled=true;
+  document.getElementById('validationMsg').className='validation-msg';
   document.getElementById('slateModal').classList.remove('hidden');
   document.body.classList.add('modal-open');
 }
 function closeSlateModal(){
   document.getElementById('slateModal').classList.add('hidden');
   document.body.classList.remove('modal-open');
+}
+function backToPathChooser(){
+  document.getElementById('slatePathChooser').style.display='block';
+  document.getElementById('slatePathChooserFooter').style.display='flex';
+  document.getElementById('slatePathSheetContent').style.display='none';
+  document.getElementById('slatePathManualContent').style.display='none';
+}
+function chooseSlatePathManual(){
+  document.getElementById('slatePathChooser').style.display='none';
+  document.getElementById('slatePathChooserFooter').style.display='none';
+  document.getElementById('slatePathManualContent').style.display='block';
+}
+function chooseSlatePathSheet(){
+  document.getElementById('slatePathChooser').style.display='none';
+  document.getElementById('slatePathChooserFooter').style.display='none';
+  document.getElementById('slatePathSheetContent').style.display='block';
+  // Populate the in-modal sheet list
+  fetchSheetSlatesInModal();
+}
+async function fetchSheetSlatesInModal(){
+  const listEl = document.getElementById('slateModalSheetList');
+  listEl.innerHTML = '<div class="sheet-loading">Fetching available slates…</div>';
+  try {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?key=${SHEET_KEY}&fields=sheets.properties`;
+    const res  = await fetch(url);
+    if(!res.ok) throw new Error(`API error ${res.status}`);
+    const data = await res.json();
+    const tabs = (data.sheets||[]).map(s=>s.properties).filter(p=>p.title.trim());
+    if(!tabs.length){ listEl.innerHTML='<div class="sheet-error">No tabs found in sheet.</div>'; return; }
+    listEl.innerHTML = '';
+    tabs.forEach(tab => {
+      const title = tab.title.trim();
+      const sport = detectSportFromTab(title);
+      const item  = document.createElement('div');
+      item.className = 'sheet-slate-item';
+      item.innerHTML = `
+        <div>
+          <div class="sheet-slate-name">${title}</div>
+          <div class="sheet-slate-meta">Click to import</div>
+        </div>
+        <span class="sheet-sport-tag">${sport.toUpperCase()}</span>
+      `;
+      item.onclick = () => importSheetSlate(title, tab.sheetId, sport);
+      listEl.appendChild(item);
+    });
+  } catch(e){
+    listEl.innerHTML = `<div class="sheet-error">Failed to load slates.<br>${e.message}</div>`;
+  }
 }
 
 function onDragOver(e){e.preventDefault();document.getElementById('uploadArea').classList.add('dragover');}
@@ -5034,7 +5342,7 @@ function createSlate(){
     }
   }
 
-  const slate={id:uid(),name,sport,columnMapping:{...colMapping},players,savedLineups:[],currentLineup:[],hiddenIds:[],groups:[]};
+  const slate={id:uid(),name,sport,columnMapping:{...colMapping},players,savedLineups:[],currentLineup:[],hiddenIds:[],groups:[],sheetTab:parsedCSV._fromSheet?name:null};
   imputeMissingRatings(slate);
   slates.push(slate);activeSlateId=slate.id;save();closeSlateModal();renderTopBar();renderSlate();
 }
@@ -5386,103 +5694,159 @@ function refreshSimInputsTab(){
   const btn = document.getElementById('tab-btn-siminputs');
   if(btn) btn.style.display = (slate && slate.sport==='ufc') ? 'block' : 'none';
   if(!slate || slate.sport!=='ufc') return;
-  const sel = document.getElementById('simInputFighterSelect');
-  if(!sel) return;
-  const current = sel.value;
+
   const players = (slate.players||[]).filter(p=>p.salary>0);
-  // Group by fight, show both fighters per fight
   const fights = {};
   players.forEach(p=>{ const f=p.fightNum||0; if(!fights[f])fights[f]=[]; fights[f].push(p); });
-  sel.innerHTML = '<option value="">— Select a fighter —</option>';
-  Object.keys(fights).sort((a,b)=>a-b).forEach(fn=>{
-    const grp = document.createElement('optgroup');
-    grp.label = 'Fight #'+fn;
-    fights[fn].forEach(p=>{
-      const opt = document.createElement('option');
-      opt.value = p.id;
-      opt.textContent = p.name + (p.opp ? ' vs '+p.opp : '');
-      if(p.id===current) opt.selected=true;
-      grp.appendChild(opt);
+
+  // Build options HTML once, reuse for all three selectors
+  function buildOptions(placeholder){
+    let html = `<option value="">${placeholder}</option>`;
+    Object.keys(fights).sort((a,b)=>a-b).forEach(fn=>{
+      html += `<optgroup label="Fight #${fn}">`;
+      fights[fn].forEach(p=>{
+        html += `<option value="${p.id}">${p.name}${p.opp?' vs '+p.opp:''}</option>`;
+      });
+      html += '</optgroup>';
     });
-    sel.appendChild(grp);
+    return html;
+  }
+
+  const configs = [
+    {id:'simInputFighterSelect',  placeholder:'— Select fighter 1 —'},
+    {id:'simInputFighterSelect2', placeholder:'— Compare with fighter 2 (optional) —'},
+    {id:'simInputFighterSelect3', placeholder:'— Add fighter 3 (optional) —'},
+  ];
+
+  configs.forEach(({id, placeholder}) => {
+    const sel = document.getElementById(id);
+    if(!sel) return;
+    const current = sel.value;
+    sel.innerHTML = buildOptions(placeholder);
+    // Restore previous selection if still valid
+    if(current && sel.querySelector(`option[value="${current}"]`)){
+      sel.value = current;
+    }
   });
-  if(current) renderSimInputs();
+
+  renderSimInputs();
 }
 
 function renderSimInputs(){
   const slate = activeSlate(); if(!slate) return;
-  const sel = document.getElementById('simInputFighterSelect');
   const display = document.getElementById('simInputsDisplay');
-  if(!sel||!display) return;
-  const pid = sel.value;
-  if(!pid){ display.innerHTML=''; return; }
-  const p = (slate.players||[]).find(q=>q.id===pid);
-  if(!p){ display.innerHTML=''; return; }
+  if(!display) return;
 
-  function row(label, val, color){
-    const n = parseFloat(val);
-    const fmt = (!isNaN(n)&&val!=null&&val!=='') ? (n>0?'+'+Math.round(n):Math.round(n)) : '—';
-    const prob = (!isNaN(n)&&val!=null&&val!=='') ? (n<0?Math.round((-n)/(-n+100)*100):Math.round(100/(n+100)*100))+'%' : '';
-    const c = color || (fmt==='—'?'var(--muted)':'var(--text)');
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);">
-      <span style="font-size:11px;color:var(--muted);">${label}</span>
-      <div style="display:flex;align-items:center;gap:8px;">
-        ${prob?`<span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">${prob}</span>`:''}
-        <span style="font-family:'DM Mono',monospace;font-size:11px;font-weight:600;color:${c};">${fmt}</span>
-      </div>
-    </div>`;
-  }
+  const ids = ['simInputFighterSelect','simInputFighterSelect2','simInputFighterSelect3']
+    .map(id => { const el=document.getElementById(id); return el?el.value:''; })
+    .filter(v => v);
 
-  function section(title){
-    return `<div style="font-family:'DM Mono',monospace;font-size:10px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;padding:8px 0 4px;">${title}</div>`;
-  }
+  if(!ids.length){ display.innerHTML=''; return; }
+  const fighters = ids.map(id=>(slate.players||[]).find(q=>q.id===id)).filter(Boolean);
+  if(!fighters.length){ display.innerHTML=''; return; }
 
-  let html = `<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:2px;">${p.name}</div>`;
-  html += `<div style="font-size:11px;color:var(--muted);margin-bottom:10px;">vs ${p.opp||'—'} &nbsp;·&nbsp; Fight #${p.fightNum||'—'} &nbsp;·&nbsp; $${(p.salary||0).toLocaleString()}</div>`;
-  if(p._simP50!=null){
-    html += `<div style="display:flex;align-items:center;justify-content:space-between;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:6px;padding:6px 10px;margin-bottom:10px;">`
-      + `<span style="font-size:11px;color:var(--muted);">Sim median score</span>`
-      + `<span style="font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:var(--green);">${p._simP50.toFixed(1)}</span>`
-      + `</div>`;
-  } else {
-    html += `<div style="font-size:10px;color:var(--muted);font-style:italic;margin-bottom:10px;">Run Auto-Gen sims to see projected score</div>`;
-  }
+  const N = fighters.length;
+  const FIGHTER_COLORS = ['var(--accent)','var(--blue)','var(--purple)'];
 
-  html += section('Win odds');
-  html += row('Moneyline', p.ml, 'var(--accent)');
-  html += row('ITD (finish)', p.itd, 'var(--accent2)');
-
-  html += section('Finish by round');
-  html += row('Round 1', p.finish_r1);
-  html += row('Round 2', p.finish_r2);
-  html += row('Round 3', p.finish_r3);
-  if(p.finish_r4!=null) html += row('Round 4', p.finish_r4);
-  if(p.finish_r5!=null) html += row('Round 5', p.finish_r5);
-  html += row('Decision', p.decision);
-
-  const ssFields = [
+  const SS_FIELDS = [
     {k:'ss_35',l:'35+'},{k:'ss_40',l:'40+'},{k:'ss_45',l:'45+'},{k:'ss_50',l:'50+'},
     {k:'ss_55',l:'55+'},{k:'ss_60',l:'60+'},{k:'ss_65',l:'65+'},{k:'ss_70',l:'70+'},
     {k:'ss_75',l:'75+'},{k:'ss_80',l:'80+'},{k:'ss_85',l:'85+'},{k:'ss_90',l:'90+'},
     {k:'ss_95',l:'95+'},{k:'ss_100',l:'100+'},{k:'ss_105',l:'105+'},{k:'ss_110',l:'110+'},
     {k:'ss_115',l:'115+'},{k:'ss_120',l:'120+'},{k:'ss_125',l:'125+'},
-  ].filter(f=>p[f.k]!=null);
-
-  if(ssFields.length){
-    html += section('Sig strikes alternate lines');
-    ssFields.forEach(f=>{ html += row(f.l+' sig strikes', p[f.k], 'var(--blue)'); });
-  }
-
-  const tdFields = [
+  ];
+  const TD_FIELDS = [
     {k:'td_1',l:'1+'},{k:'td_2',l:'2+'},{k:'td_3',l:'3+'},
     {k:'td_4',l:'4+'},{k:'td_5',l:'5+'},{k:'td_6',l:'6+'},
-  ].filter(f=>p[f.k]!=null);
+  ];
 
-  if(tdFields.length){
-    html += section('Takedown alternate lines');
-    tdFields.forEach(f=>{ html += row(f.l+' takedowns', p[f.k], 'var(--purple)'); });
+  function fmtOdds(val){
+    const n = parseFloat(val);
+    if(isNaN(n)||val==null||val==='') return null;
+    const fmt  = n>0 ? '+'+Math.round(n) : String(Math.round(n));
+    const prob = n<0 ? Math.round((-n)/(-n+100)*100)+'%' : Math.round(100/(n+100)*100)+'%';
+    return {n, fmt, prob};
   }
 
+  // Grid template: label col + N value cols
+  const gridCols = `grid-template-columns: minmax(0,1.4fr) ${Array(N).fill('minmax(0,1fr)').join(' ')}`;
+
+  function sectionHdr(title){
+    return `<div style="grid-column:1/-1;font-family:'DM Mono',monospace;font-size:10px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;padding:10px 0 3px;">${title}</div>`;
+  }
+
+  function dataRow(label, vals, color){
+    // Find best (lowest numeric = most favorable)
+    const parsed = vals.map(v=>fmtOdds(v));
+    const nonNull = parsed.map((p,i)=>p?i:-1).filter(i=>i>=0);
+    const bestIdx = nonNull.length>1
+      ? nonNull.reduce((bi,i)=>parsed[i].n < parsed[bi].n ? i : bi, nonNull[0])
+      : -1;
+    let html = `<div style="font-size:11px;color:var(--muted);padding:5px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;overflow:hidden;">
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${label}</span>
+    </div>`;
+    parsed.forEach((p,i)=>{
+      const isBest = i===bestIdx;
+      const bg = isBest ? 'background:rgba(200,240,90,0.07);border-radius:4px;' : '';
+      const c  = color || (p ? FIGHTER_COLORS[i] : 'var(--muted)');
+      html += `<div style="text-align:right;padding:5px 4px;border-bottom:1px solid var(--border);${bg}">`;
+      if(p){
+        html += `<span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);display:block;">${p.prob}</span>`;
+        html += `<span style="font-family:'DM Mono',monospace;font-size:11px;font-weight:700;color:${c};">${p.fmt}</span>`;
+      } else {
+        html += `<span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);">—</span>`;
+      }
+      html += `</div>`;
+    });
+    return html;
+  }
+
+  // Fighter header cards — stacked, wrapping, no truncation
+  let html = `<div style="display:grid;${gridCols};gap:0;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);">`;
+  html += `<div></div>`;
+  fighters.forEach((p,i)=>{
+    html += `<div style="text-align:center;padding:0 3px 0;">
+      <div style="font-size:11px;font-weight:700;color:${FIGHTER_COLORS[i]};line-height:1.3;word-break:break-word;">${p.name}</div>
+      <div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);margin-top:1px;">vs ${p.opp||'—'}</div>
+      <div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);">$${(p.salary||0).toLocaleString()}</div>
+      ${p._simP50!=null?`<div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--green);font-weight:600;margin-top:1px;">Sim ${p._simP50.toFixed(1)}</div>`:''}
+    </div>`;
+  });
+  html += `</div>`;
+
+  // Main grid
+  html += `<div style="display:grid;${gridCols};gap:0;">`;
+
+  // Win odds
+  html += sectionHdr('Win odds');
+  html += dataRow('Moneyline',    fighters.map(p=>p.ml));
+  html += dataRow('ITD (finish)', fighters.map(p=>p.itd));
+
+  // Finish by round
+  const rounds = [
+    {k:'finish_r1',l:'Round 1'},{k:'finish_r2',l:'Round 2'},{k:'finish_r3',l:'Round 3'},
+    {k:'finish_r4',l:'Round 4'},{k:'finish_r5',l:'Round 5'},{k:'decision',l:'Decision'},
+  ].filter(r=>fighters.some(p=>p[r.k]!=null));
+  if(rounds.length){
+    html += sectionHdr('Finish by round');
+    rounds.forEach(r=>{ html += dataRow(r.l, fighters.map(p=>p[r.k])); });
+  }
+
+  // Sig strikes
+  const ssActive = SS_FIELDS.filter(f=>fighters.some(p=>p[f.k]!=null));
+  if(ssActive.length){
+    html += sectionHdr('Sig strikes');
+    ssActive.forEach(f=>{ html += dataRow(f.l+' SS', fighters.map(p=>p[f.k])); });
+  }
+
+  // Takedowns
+  const tdActive = TD_FIELDS.filter(f=>fighters.some(p=>p[f.k]!=null));
+  if(tdActive.length){
+    html += sectionHdr('Takedowns');
+    tdActive.forEach(f=>{ html += dataRow(f.l+' TD', fighters.map(p=>p[f.k])); });
+  }
+
+  html += `</div>`;
   display.innerHTML = html;
 }
 
@@ -5528,6 +5892,8 @@ window.switchTab=function(tab,el){
   if(btn&&labels[tab])btn.textContent=labels[tab];
 };
 </script>
+
+
 
 </body>
 </html>
