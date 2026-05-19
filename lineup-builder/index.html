@@ -1324,7 +1324,7 @@ function detectTeeAMPM(teeVal){
   if(teeVal==null) return '';
   const s = String(teeVal).trim();
   // ISO 8601: 2026-05-07T10:05:00
-  const isoMatch = s.match(/T(\d{2}):(\d{2})/);
+  const isoMatch = s.match(/[T ](\d{1,2}):(\d{2})/);
   if(isoMatch){
     const h = parseInt(isoMatch[1]);
     return h < 12 ? 'AM' : 'PM';
@@ -1345,8 +1345,10 @@ function detectTeeAMPM(teeVal){
 function formatTeeDisplay(teeVal){
   if(teeVal==null) return '—';
   const s = String(teeVal).trim();
+  // Date-only (YYYY-MM-DD) — no time info, show blank
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return '—';
   // ISO 8601: 2026-05-07T10:05:00 or T13:20:00
-  const isoMatch = s.match(/T(\d{2}):(\d{2})/);
+  const isoMatch = s.match(/[T ](\d{1,2}):(\d{2})/);
   if(isoMatch){
     let h=parseInt(isoMatch[1]), m=isoMatch[2];
     const ampm = h<12?'AM':'PM';
