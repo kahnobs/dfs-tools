@@ -5748,6 +5748,12 @@ function renderSimInputs(){
   const N = fighters.length;
   const FIGHTER_COLORS = ['var(--accent)','var(--blue)','var(--purple)'];
 
+  // Check if any selected fighter is missing the extended odds fields
+  // (finish_r1, ss_55, td_1) — signals a stale stored slate
+  const missingOdds = fighters.some(p =>
+    p.finish_r1 == null && p.ss_55 == null && p.td_1 == null
+  );
+
   const SS_FIELDS = [
     {k:'ss_35',l:'35+'},{k:'ss_40',l:'40+'},{k:'ss_45',l:'45+'},{k:'ss_50',l:'50+'},
     {k:'ss_55',l:'55+'},{k:'ss_60',l:'60+'},{k:'ss_65',l:'65+'},{k:'ss_70',l:'70+'},
@@ -5847,6 +5853,18 @@ function renderSimInputs(){
   }
 
   html += `</div>`;
+
+  // If any selected fighter is missing extended odds (finish/SS/TD), show a nudge
+  if(missingOdds){
+    const sl = activeSlate();
+    const msg = sl && sl.sheetTab
+      ? `Hit <strong style="color:var(--text);">↺ Refresh</strong> to reload odds from your sheet.`
+      : `Re-import your CSV to load the full odds.`;
+    html += `<div style="margin-top:10px;padding:9px 12px;background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.25);border-radius:6px;font-size:11px;color:var(--muted);line-height:1.5;">
+      <span style="color:#eab308;font-weight:600;">⚠ Finish / SS / TD odds missing</span> — ${msg} Only Moneyline and ITD are showing.
+    </div>`;
+  }
+
   display.innerHTML = html;
 }
 
@@ -5855,6 +5873,21 @@ loadHistory();
 if(slates.length)activeSlateId=slates[0].id;
 renderTopBar();
 if(activeSlateId)renderSlate();
+
+// Auto-refresh sheet-backed UFC slates that are missing extended odds fields
+// (finish_r1, ss_55, td_1). This happens when a slate was saved before the
+// odds column-scan was added, or after a browser storage clear.
+(function autoRefreshUFCOdds(){
+  const sl = activeSlate();
+  if(!sl || sl.sport !== 'ufc' || !sl.sheetTab) return;
+  const hasOdds = (sl.players||[]).some(p =>
+    p.finish_r1 != null || p.ss_55 != null || p.td_1 != null
+  );
+  if(!hasOdds){
+    // Silently trigger a sheet refresh to repopulate odds fields
+    refreshFromSheet();
+  }
+})();
 
 // ── MOBILE PANEL TOGGLE ──────────────────────────────────────
 function setMobilePanel(panel){
