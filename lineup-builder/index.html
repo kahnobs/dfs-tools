@@ -2435,6 +2435,7 @@ function renderGroupRulesSummary(){
     // Default UFC to optimize by projection
     const opt = document.getElementById('genOptimize');
     if(opt && !opt.value) opt.value = 'proj';
+    toggleBlendRow();
     // Default no-oppose to on
     const noOpp = document.getElementById('genUfcNoOppose');
     if(noOpp && !noOpp._initialized){ noOpp.checked = true; noOpp._initialized = true; renderUfcExclusions(); }
@@ -2697,6 +2698,7 @@ function switchGenMode(mode){
   // Update generate button label
   const btn = document.getElementById('genBtn');
   if(btn) btn.textContent = mode==='simulate' ? '🎲 Run Simulation' : '⚡ Generate Lineups';
+  toggleBlendRow();
 }
 
 function toggleNascarSimMode(){
