@@ -596,32 +596,35 @@ html { overscroll-behavior-y: contain; }
   .sim-tooltip-chart {
     position: relative;
     display: flex;
-    gap: 6px;
-    margin-bottom: 8px;
+    gap: 4px;
+    margin-bottom: 6px;
   }
+  /* Y-axis: sits beside the bars, aligned to bar height only (no padding for x-axis) */
   .sim-tooltip-yaxis {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
     align-items: flex-end;
-    padding-bottom: 18px; /* room for x-axis labels */
+    height: 140px; /* matches bars-wrap exactly */
     flex-shrink: 0;
+    padding: 0;
   }
   .sim-tooltip-ylabel {
     font-family: 'DM Mono', monospace;
-    font-size: 8px;
-    color: rgba(255,255,255,0.35);
+    font-size: 7px;
+    color: rgba(255,255,255,0.30);
     line-height: 1;
   }
   .sim-tooltip-plot {
     flex: 1;
     display: flex;
     flex-direction: column;
+    gap: 0;
   }
   .sim-tooltip-bars-wrap {
-    flex: 1;
     position: relative;
-    height: 180px;
+    height: 140px;
+    flex-shrink: 0;
   }
   .sim-tooltip-gridlines {
     position: absolute;
@@ -651,27 +654,22 @@ html { overscroll-behavior-y: contain; }
     opacity: 0.75;
   }
   .sim-tooltip-bar.peak { opacity: 1; }
+  /* X-axis: score labels only, no extra axis title */
   .sim-tooltip-xaxis {
     display: flex;
     justify-content: space-between;
-    margin-top: 3px;
-    height: 14px;
+    margin-top: 4px;
+    height: 10px;
   }
   .sim-tooltip-xlabel {
     font-family: 'DM Mono', monospace;
-    font-size: 8px;
-    color: rgba(255,255,255,0.35);
+    font-size: 7px;
+    color: rgba(255,255,255,0.30);
     text-align: center;
     line-height: 1;
   }
   .sim-tooltip-axis-title {
-    font-family: 'DM Mono', monospace;
-    font-size: 8px;
-    color: rgba(255,255,255,0.25);
-    text-align: center;
-    text-transform: uppercase;
-    letter-spacing: .06em;
-    margin-top: 1px;
+    display: none; /* removed — x-axis values are self-explanatory */
   }
   .sim-tooltip-percentiles {
     display: grid;
@@ -6249,7 +6247,7 @@ function showSimTooltip(el, dist) {
   // Position: prefer above the element, flip below if near top of viewport
   const rect = el.getBoundingClientRect();
   const tipW = 280;
-  const tipH = 270; // approximate
+  const tipH = 240; // approximate
 
   let left = rect.left + rect.width / 2 - tipW / 2;
   let top  = rect.top - tipH - 8;
