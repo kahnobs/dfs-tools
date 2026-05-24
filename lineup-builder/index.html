@@ -567,136 +567,6 @@ html { overscroll-behavior-y: contain; }
   .topbar-dropdown-item.accent:hover { color:var(--accent); }
   .topbar-dropdown-divider { height:1px; background:var(--border); margin:4px 0; }
   .topbar-dropdown-label { padding:6px 14px 3px; font-family:'DM Mono',monospace; font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
-
-  /* ── Sim Distribution Tooltip ──────────────────────────────────────────── */
-  #simDistTooltip {
-    position: fixed;
-    z-index: 99999;
-    background: #1a1d24;
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 8px;
-    padding: 10px 12px 8px;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.12s ease;
-    box-shadow: 0 6px 28px rgba(0,0,0,0.80), 0 1px 0 rgba(255,255,255,0.04) inset;
-    min-width: 200px;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-  #simDistTooltip.visible { opacity: 1; }
-  .sim-tooltip-title {
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    margin-bottom: 7px;
-  }
-  .sim-tooltip-chart {
-    position: relative;
-    display: flex;
-    gap: 4px;
-    margin-bottom: 6px;
-  }
-  /* Y-axis: sits beside the bars, aligned to bar height only (no padding for x-axis) */
-  .sim-tooltip-yaxis {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    align-items: flex-end;
-    height: 140px; /* matches bars-wrap exactly */
-    flex-shrink: 0;
-    padding: 0;
-  }
-  .sim-tooltip-ylabel {
-    font-family: 'DM Mono', monospace;
-    font-size: 7px;
-    color: rgba(255,255,255,0.30);
-    line-height: 1;
-  }
-  .sim-tooltip-plot {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-  }
-  .sim-tooltip-bars-wrap {
-    position: relative;
-    height: 140px;
-    flex-shrink: 0;
-  }
-  .sim-tooltip-gridlines {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    pointer-events: none;
-  }
-  .sim-tooltip-gridline {
-    width: 100%;
-    height: 1px;
-    background: rgba(255,255,255,0.07);
-  }
-  .sim-tooltip-hist {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: flex-end;
-    gap: 2px;
-  }
-  .sim-tooltip-bar {
-    flex: 1;
-    background: linear-gradient(to top, #1a7a3a, #2ecc71);
-    border-radius: 2px 2px 0 0;
-    min-height: 2px;
-    opacity: 0.75;
-  }
-  .sim-tooltip-bar.peak { opacity: 1; }
-  /* X-axis: score labels only, no extra axis title */
-  .sim-tooltip-xaxis {
-    position: relative;
-    margin-top: 4px;
-    height: 10px;
-  }
-  .sim-tooltip-xlabel {
-    font-family: 'DM Mono', monospace;
-    font-size: 7px;
-    color: rgba(255,255,255,0.30);
-    text-align: center;
-    line-height: 1;
-  }
-  .sim-tooltip-axis-title {
-    display: none; /* removed — x-axis values are self-explanatory */
-  }
-  .sim-tooltip-percentiles {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 2px;
-    margin-top: 2px;
-    padding-top: 6px;
-    border-top: 1px solid rgba(255,255,255,0.07);
-  }
-  .sim-tooltip-pct {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 1px;
-  }
-  .sim-tooltip-pct-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 7px;
-    color: var(--muted);
-    text-transform: uppercase;
-  }
-  .sim-tooltip-pct-val {
-    font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--text);
-  }
-  .sim-tooltip-pct-val.median { color: var(--green); }
 </style>
 </head>
 <body>
@@ -960,7 +830,7 @@ html { overscroll-behavior-y: contain; }
             <div style="display:flex;gap:8px;margin-bottom:8px;">
               <div style="flex:1;">
                 <div style="font-size:10px;color:var(--muted);margin-bottom:3px;">Total Laps</div>
-                <input type="number" id="nascarTotalLaps" value="100" min="30" max="600"
+                <input type="number" id="nascarTotalLaps" value="100" min="30" max="600" onchange="(function(){ const s=activeSlate(); if(s){ s._nascarLaps=parseInt(this.value)||100; save(); } }).call(this)"
                   style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--accent);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
               </div>
               <div style="flex:1;">
@@ -1200,7 +1070,15 @@ html { overscroll-behavior-y: contain; }
     </div>
     <div class="modal-sub" id="previewModalSub" style="margin-bottom:8px;"></div>
     <div id="previewFilterBadge" onclick="filterPreviewByPlayer(previewPlayerFilter)" style="display:none;margin-bottom:8px;padding:5px 10px;background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.3);border-radius:5px;font-size:11px;color:var(--purple);cursor:pointer;"></div>
-    <div id="previewFilterBtns" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
+    <div id="previewFilterBtns" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;"></div>
+    <div id="previewSortBar" style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
+      <span style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;">SORT:</span>
+      <button class="preview-sort-btn active" data-sort="default" onclick="setPreviewSort('default',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--accent);background:rgba(245,197,24,.1);color:var(--accent);cursor:pointer;">Default</button>
+      <button class="preview-sort-btn" data-sort="sim" onclick="setPreviewSort('sim',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;">Sim</button>
+      <button class="preview-sort-btn" data-sort="proj" onclick="setPreviewSort('proj',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;">Proj</button>
+      <button class="preview-sort-btn" data-sort="rating" onclick="setPreviewSort('rating',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;">Rating</button>
+      <button class="preview-sort-btn" data-sort="own" onclick="setPreviewSort('own',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;">Own%</button>
+    </div>
 
     <!-- two-column body -->
     <div id="previewModalBody" style="display:grid;grid-template-columns:1fr 300px;gap:14px;min-height:0;overflow:hidden;">
@@ -1679,6 +1557,17 @@ function renderSlate(){
   const uab=document.getElementById('unhideAllBtn');
   if(uab) uab.style.display=nh>0?'':'none';
   renderPool(); renderLineup(); renderSaved(); renderExposure(); renderGroups(); renderGroupRulesSummary(); refreshSimInputsTab();
+
+  // Restore persisted NASCAR track type and laps after render
+  if(slate.sport==='nascar' && slate._nascarTrackType){
+    const typeToLaps = {road:'100', intermediate:'300', short:'500', superspeedway:'188'};
+    const targetLaps = typeToLaps[slate._nascarTrackType];
+    document.querySelectorAll('.nascar-track-btn').forEach(b=>{
+      b.classList.toggle('active', b.dataset.laps === targetLaps);
+    });
+    const lapsInput = document.getElementById('nascarTotalLaps');
+    if(lapsInput && slate._nascarLaps) lapsInput.value = slate._nascarLaps;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1959,12 +1848,7 @@ function renderPool(){
         if(f.key==='_simP50'){
           const sv = p._simP50;
           if(sv==null) return `<div class="cell-mono ${f.cls}" style="color:var(--muted)">—</div>`;
-          const hasDist = p._simDist != null;
-          // Store dist on global map keyed by player id — avoids inline JSON quote collision
-          if(hasDist) window._simDistMap = window._simDistMap||{}; if(hasDist) window._simDistMap[p.id] = p._simDist;
-          return `<div class="cell-mono ${f.cls}" style="color:var(--green);${hasDist?'cursor:default;':''}"
-            ${hasDist ? `onmouseenter="showSimTooltipById(this,'${p.id}')" onmouseleave="hideSimTooltip()"` : ''}
-          >${sv.toFixed(1)}</div>`;
+          return `<div class="cell-mono ${f.cls}" style="color:var(--green);">${sv.toFixed(1)}</div>`;
         }
         if(f.key==='rating'){
           const rv=parseFloat(p.rating);
@@ -1987,12 +1871,7 @@ function renderPool(){
         ${!isGroupEdit&&dots?`<div class="grp-dots">${dots}</div>`:''}
       </div>
       ${(_hasUFCSim||false) && !mobile
-        ? (p._simP50!=null
-            ? (()=>{ window._simDistMap=window._simDistMap||{}; if(p._simDist) window._simDistMap[p.id]=p._simDist;
-                return `<div class="cell-mono col-r" style="color:var(--green);font-weight:600;${p._simDist?'cursor:default;':''}"
-                  ${p._simDist ? `onmouseenter="showSimTooltipById(this,'${p.id}')" onmouseleave="hideSimTooltip()"` : ''}
-                >${p._simP50.toFixed(1)}</div>`; })()
-            : `<div class="cell-mono col-r" style="color:var(--muted);font-weight:600;">—</div>`)
+        ? `<div class="cell-mono col-r" style="color:${p._simP50!=null?'var(--green)':'var(--muted)'};font-weight:600;">${p._simP50!=null?p._simP50.toFixed(1):'—'}</div>`
         : ''}
       <div class="cell-sal col-r" style="${mobile?'font-size:11px;':''}">${fmt(p.salary)}</div>
       ${mobile
@@ -2871,6 +2750,9 @@ function setNascarTrack(type, btn){
   const laps = btn.dataset.laps;
   const lapsInput = document.getElementById('nascarTotalLaps');
   if(lapsInput) lapsInput.value = laps;
+  // Persist to slate so it survives refresh
+  const slate = activeSlate();
+  if(slate){ slate._nascarTrackType = type; slate._nascarLaps = parseInt(laps); save(); }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3230,20 +3112,18 @@ function runUFCSimsNew(pool, numSims, salaryCap, groups, noOppose, minSal){
     }
   }
 
-  // Compute per-fighter median and distribution for pool display
+  // Compute per-fighter median for pool display
   const medianScoreById = {};
-  const distById = {};
   pool.forEach(p=>{
     const arr = fighterAllScores[p.id].slice().sort((a,b)=>a-b);
     medianScoreById[p.id] = arr.length>0 ? arr[Math.floor(arr.length*0.5)] : 0;
-    distById[p.id] = buildSimDist(fighterAllScores[p.id], 'ufc');
   });
 
   // Convert freq map to sorted array
   const ranked = Array.from(lineupFreq.values())
     .sort((a,b)=>b.count-a.count || b.totalScore-a.totalScore);
 
-  return {ranked, medianScoreById, distById, winProb, totalSims: numSims};
+  return {ranked, medianScoreById, winProb, totalSims: numSims};
 }
 
 async function runUFCSimGen(){
@@ -3287,15 +3167,12 @@ async function runUFCSimGen(){
 
   if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return; }
 
-  const {ranked, medianScoreById, distById, winProb, totalSims} = runUFCSimsNew(
+  const {ranked, medianScoreById, winProb, totalSims} = runUFCSimsNew(
     pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal
   );
 
-  // Store per-fighter median and distribution for pool display
-  pool.forEach(p=>{
-    p._simP50  = medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null;
-    p._simDist = distById[p.id] || null;
-  });
+  // Store per-fighter median for pool display
+  pool.forEach(p=>{ p._simP50 = medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null; });
   if(typeof renderPool==='function') renderPool();
 
   log(`${ranked.length} unique optimal lineups found across ${totalSims.toLocaleString()} sims.`);
@@ -3966,8 +3843,7 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
     // equally split between floor and ceiling, p75 as the bridge.
     const composite = (avg*0.40 + p75*0.30 + p90*0.30) * (1 - ownPenalty);
 
-    const dist = buildSimDist(simScores[i], 'nascar');
-    return { player:p, avg, p50, p75, p90, composite, dist };
+    return { player:p, avg, p50, p75, p90, composite };
   });
 }
 
@@ -4022,7 +3898,6 @@ async function runNascarSimGen(){
   simResults.forEach(r=>{
     r.player._simP50       = r.p50!=null ? Math.round(r.p50*10)/10 : null;
     r.player._simComposite = r.composite;
-    r.player._simDist      = r.dist || null;
   });
   if(typeof renderPool==='function') renderPool();
   log(`Sim scores ready. Building lineups...`);
@@ -4190,13 +4065,26 @@ async function runNascarSimGen(){
 
     if(!filled.length){ alert('No lineups passed selection.'); done(); return; }
 
-    const finalLineups = filled.map(x=>{
+    let finalLineups = filled.map(x=>{
       const l = [...x.lu];
       l._simAvg    = x.score.toFixed(1);
       l._simWinAvg = x.score.toFixed(1);
       l._simWinRate= '—';
       return l;
     });
+
+    // Min exposure enforcement — same logic as AutoGen
+    const nascarMinOverrides = slate.playerMinOverrides || {};
+    if(Object.keys(nascarMinOverrides).some(id => nascarMinOverrides[id] > 0)){
+      // Build candidate pool from all generated lineups (not just selected)
+      const allNascarCandidates = candidates.map(x => {
+        const l = [...x.lu];
+        l._simAvg = x.score.toFixed(1);
+        return l;
+      });
+      const nascarScoreFn = l => l.reduce((s,p)=>s+(p._simComposite||0),0);
+      finalLineups = enforceMinExposure(finalLineups, allNascarCandidates, nascarMinOverrides, nascarScoreFn, log);
+    }
 
     const avgScore = filled.reduce((s,x)=>s+x.score,0)/filled.length;
     log(`Done! ${filled.length} lineups selected. Avg composite: ${avgScore.toFixed(1)}`);
@@ -4209,6 +4097,69 @@ async function runNascarSimGen(){
   runChunk();
 }
 
+
+// ── enforceMinExposure ────────────────────────────────────────────────────────
+// Post-selection pass: for each player with a minimum exposure target, check
+// if they've hit it. If not, find the best-scoring candidate lineups containing
+// that player (not already in the final set) and replace the worst-scoring
+// lineups in the final set that don't contain them.
+// Players are processed in order of "most lineups still needed" so the most
+// constrained players get priority when there's overlap.
+// Returns the (potentially modified) finalLineups array and logs what changed.
+function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, logFn){
+  const playersWithMin = Object.keys(minOverrides).filter(id => minOverrides[id] > 0);
+  if(!playersWithMin.length) return finalLineups;
+
+  const result = [...finalLineups]; // work on a copy
+
+  // Sort by most lineups needed first
+  const needs = playersWithMin.map(id => {
+    const minCount = Math.ceil(minOverrides[id] / 100 * result.length);
+    const curCount = result.filter(l => l.some(p => p.id === id)).length;
+    return { id, minCount, needed: Math.max(0, minCount - curCount) };
+  }).filter(x => x.needed > 0)
+    .sort((a, b) => b.needed - a.needed);
+
+  if(!needs.length) return result;
+
+  needs.forEach(({ id, minCount, needed }) => {
+    const curCount = result.filter(l => l.some(p => p.id === id)).length;
+    const stillNeeded = minCount - curCount;
+    if(stillNeeded <= 0) return;
+
+    // Best unused candidate lineups containing this player
+    const usedKeys = new Set(result.map(l => l.map(p=>p.id).sort().join(',')));
+    const withPlayer = candidatePool
+      .filter(l => {
+        const key = l.map(p=>p.id).sort().join(',');
+        return l.some(p => p.id === id) && !usedKeys.has(key);
+      })
+      .map(l => ({ l, score: scoreFn(l) }))
+      .sort((a, b) => b.score - a.score);
+
+    let replaced = 0;
+    for(let n = 0; n < stillNeeded && withPlayer.length > 0; n++){
+      const replacement = withPlayer.shift();
+      // Find worst-scored lineup in result that doesn't contain this player
+      let worstIdx = -1, worstScore = Infinity;
+      result.forEach((l, li) => {
+        if(l.some(p => p.id === id)) return; // skip — already has this player
+        const s = scoreFn(l);
+        if(s < worstScore){ worstScore = s; worstIdx = li; }
+      });
+      if(worstIdx >= 0){
+        result[worstIdx] = replacement.l;
+        replaced++;
+      }
+    }
+
+    if(replaced > 0 && logFn){
+      logFn(`Min exposure: inserted ${replaced} lineup${replaced>1?'s':''} for player ${id} to reach ${minCount}/${result.length} (${minOverrides[id]}%)`);
+    }
+  });
+
+  return result;
+}
 
 async function runAutoGen(){
   const slate=activeSlate();if(!slate)return;
@@ -4604,37 +4555,12 @@ async function runAutoGen(){
     // Shuffle so archetypes are interleaved rather than all bombers first, all non-bombers last
     for(let i=finalLineups.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[finalLineups[i],finalLineups[j]]=[finalLineups[j],finalLineups[i]];}
 
-    // Min exposure enforcement: for any player with a per-player minimum,
-    // ensure they appear in at least that many lineups.
-    const playersWithMin = pool.filter(p=>minOverrides[p.id]!=null && minOverrides[p.id]>0);
-    if(playersWithMin.length > 0){
-      playersWithMin.forEach(p=>{
-        const minCount = Math.ceil(minOverrides[p.id]/100 * finalLineups.length);
-        const curCount = finalLineups.filter(l=>l.some(x=>x.id===p.id)).length;
-        if(curCount >= minCount) return;
-        const needed = minCount - curCount;
-        // Find candidates from the generated pool that contain this player, not already in final
-        const finalKeys = new Set(finalLineups.map(l=>lineupKey(l.map(x=>x.id))));
-        const withPlayer = scoredValid
-          .filter(x=>x.lineup.some(x2=>x2.id===p.id) && !finalKeys.has(lineupKey(x.lineup.map(x2=>x2.id))))
-          .sort((a,b)=>b.score-a.score);
-        for(let n=0; n<needed && withPlayer.length>0; n++){
-          const replacement = withPlayer.shift();
-          // Find lowest-scored lineup in final that doesn't contain this player
-          let worstIdx = -1, worstScore = Infinity;
-          finalLineups.forEach((l,li)=>{
-            if(l.some(x=>x.id===p.id)) return;
-            const s = lineupScore(l, pool, optimizeBy, groups, blendWeights);
-            if(s < worstScore){ worstScore=s; worstIdx=li; }
-          });
-          if(worstIdx >= 0){
-            finalLineups[worstIdx] = replacement.lineup;
-          }
-        }
-      });
-    }
+    // Min exposure enforcement via shared helper
+    const allCandidateLineups = scoredValid.map(x => x.lineup);
+    const scoreFnAutoGen = l => lineupScore(l, pool, optimizeBy, groups, blendWeights);
+    const enforcedLineups = enforceMinExposure(finalLineups, allCandidateLineups, minOverrides, scoreFnAutoGen, log);
 
-    const final = finalLineups;
+    const final = enforcedLineups;
 
     // Keep intent tags as the source of truth for display/filtering.
     // _archetypeTag = the archetype this lineup was BUILT for (not inferred from composition).
@@ -4676,9 +4602,23 @@ async function runAutoGen(){
 // ═══════════════════════════════════════════════════════════
 // PREVIEW MODAL
 // ═══════════════════════════════════════════════════════════
+let previewSortMode = 'default';
+
+function setPreviewSort(mode, btn){
+  previewSortMode = mode;
+  document.querySelectorAll('.preview-sort-btn').forEach(b=>{
+    const isActive = b.dataset.sort === mode;
+    b.style.borderColor  = isActive ? 'var(--accent)' : 'var(--border)';
+    b.style.background   = isActive ? 'rgba(245,197,24,.1)' : 'none';
+    b.style.color        = isActive ? 'var(--accent)' : 'var(--muted)';
+  });
+  renderPreviewLineupsList();
+}
+
 function openPreviewModal(lineups, optimizeBy){
   previewLineups=lineups;
   previewFilter=null;
+  previewSortMode='default';
   const slate=activeSlate();if(!slate)return;
   document.getElementById('previewModalSub').textContent=`${lineups.length} lineups generated. Select which to add to your saved lineups.`;
   previewPlayerFilter = null;
@@ -4724,6 +4664,13 @@ function openPreviewModal(lineups, optimizeBy){
     filterBtns.innerHTML='';
   }
 
+  // Reset sort to Default on each new open
+  document.querySelectorAll('.preview-sort-btn').forEach(b=>{
+    const isDefault = b.dataset.sort === 'default';
+    b.style.borderColor = isDefault ? 'var(--accent)' : 'var(--border)';
+    b.style.background  = isDefault ? 'rgba(245,197,24,.1)' : 'none';
+    b.style.color       = isDefault ? 'var(--accent)' : 'var(--muted)';
+  });
   renderPreviewLineupsList();
   document.getElementById('previewModal').classList.remove('hidden');
   document.body.classList.add('modal-open');
@@ -4744,7 +4691,36 @@ function renderPreviewLineupsList(){
   const slate=activeSlate();if(!slate)return;
   const hasProj=!!slate.columnMapping?.proj,hasRtg=!!slate.columnMapping?.rating;
   // Apply player filter if active
-  const allLineups = getFilteredLineups();
+  let allLineups = getFilteredLineups();
+
+  // Apply sort — 'default' preserves original generation order
+  if(previewSortMode && previewSortMode !== 'default'){
+    allLineups = [...allLineups].sort((a, b) => {
+      if(previewSortMode === 'sim'){
+        const sa = a.every(p=>p._simP50!=null) ? a.reduce((s,p)=>s+(p._simP50||0),0) : -Infinity;
+        const sb = b.every(p=>p._simP50!=null) ? b.reduce((s,p)=>s+(p._simP50||0),0) : -Infinity;
+        return sb - sa;
+      }
+      if(previewSortMode === 'proj'){
+        const pa = a.reduce((s,p)=>s+(parseFloat(p.proj)||0),0);
+        const pb = b.reduce((s,p)=>s+(parseFloat(p.proj)||0),0);
+        return pb - pa;
+      }
+      if(previewSortMode === 'rating'){
+        const ra = a.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
+        const rb = b.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
+        return rb - ra;
+      }
+      if(previewSortMode === 'own'){
+        // Sort by total team ownership ascending (lower own = more leverage)
+        const oa = a.reduce((s,p)=>s+(parseFloat(p.own)||0),0);
+        const ob = b.reduce((s,p)=>s+(parseFloat(p.own)||0),0);
+        return oa - ob;
+      }
+      return 0;
+    });
+  }
+
   const lineups = previewPlayerFilter
     ? allLineups.filter(l=>l.some(p=>p.id===previewPlayerFilter))
     : allLineups;
@@ -6101,190 +6077,6 @@ window.switchTab=function(tab,el){
 </script>
 
 
-
-
-<!-- ── Sim Distribution Tooltip ─────────────────────────────────────────── -->
-<div id="simDistTooltip">
-  <div class="sim-tooltip-title">Score Distribution</div>
-  <div class="sim-tooltip-chart" id="simTooltipChart">
-    <div class="sim-tooltip-yaxis" id="simTooltipYAxis"></div>
-    <div class="sim-tooltip-plot">
-      <div class="sim-tooltip-bars-wrap">
-        <div class="sim-tooltip-gridlines" id="simTooltipGridlines"></div>
-        <div class="sim-tooltip-hist" id="simTooltipHist"></div>
-      </div>
-      <div class="sim-tooltip-xaxis" id="simTooltipXAxis"></div>
-      <div class="sim-tooltip-axis-title">Fantasy Points</div>
-    </div>
-  </div>
-  <div class="sim-tooltip-percentiles" id="simTooltipPcts"></div>
-</div>
-
-<script>
-// ── buildSimDist: bucket raw scores into histogram + key percentiles ────────
-// Uses a fixed domain per sport so distributions are comparable across drivers.
-// Outliers beyond the domain are clamped into the edge bins rather than dropped.
-const SIM_DIST_DOMAIN = {
-  nascar: { domainMin: -20, domainMax: 160 },
-  ufc:    { domainMin:   0, domainMax: 140 },
-};
-
-function buildSimDist(scoresArr, sport) {
-  if (!scoresArr || scoresArr.length === 0) return null;
-  const sorted = scoresArr.slice().sort((a, b) => a - b);
-  const n = sorted.length;
-  const pct = f => sorted[Math.min(Math.floor(n * f), n - 1)];
-
-  // Percentiles always use raw scores (not clamped) for accurate representation
-  const p10 = pct(0.10);
-  const p25 = pct(0.25);
-  const p50 = pct(0.50);
-  const p75 = pct(0.75);
-  const p90 = pct(0.90);
-
-  // Fixed domain per sport; fall back to data range if sport unknown
-  const domain = SIM_DIST_DOMAIN[sport];
-  const domainMin = domain ? domain.domainMin : sorted[0];
-  const domainMax = domain ? domain.domainMax : sorted[n - 1];
-
-  // 20 equal-width bins across the fixed domain
-  const NUM_BINS = 20;
-  const bins = new Array(NUM_BINS).fill(0);
-  const domainRange = domainMax - domainMin;
-  sorted.forEach(s => {
-    // Clamp outliers into the first/last bin rather than dropping them
-    const clamped = Math.max(domainMin, Math.min(domainMax, s));
-    const bi = Math.min(Math.floor(((clamped - domainMin) / domainRange) * NUM_BINS), NUM_BINS - 1);
-    bins[bi]++;
-  });
-
-  return { bins, domainMin, domainMax, p10, p25, p50, p75, p90 };
-}
-
-// ── Tooltip show/hide ────────────────────────────────────────────────────────
-let _simTipTimeout = null;
-
-function showSimTooltipById(el, pid) {
-  const dist = (window._simDistMap || {})[pid];
-  showSimTooltip(el, dist);
-}
-
-function showSimTooltip(el, dist) {
-  if (!dist) return;
-  clearTimeout(_simTipTimeout);
-
-  const tip  = document.getElementById('simDistTooltip');
-  const hist = document.getElementById('simTooltipHist');
-  const pcts = document.getElementById('simTooltipPcts');
-  if (!tip || !hist || !pcts) return;
-
-  // ── Histogram bars ──────────────────────────────────────────────────────
-  const total   = dist.bins.reduce((s, b) => s + b, 0) || 1;
-  const freqs   = dist.bins.map(b => b / total);          // fraction 0–1
-  const maxFreq = Math.max(...freqs, 0.001);
-  const maxBin  = Math.max(...dist.bins, 1);
-
-  hist.innerHTML = dist.bins.map((count, i) => {
-    const heightPct = Math.max((count / maxBin) * 100, 2);
-    const isPeak = count === maxBin;
-    return `<div class="sim-tooltip-bar${isPeak ? ' peak' : ''}" style="height:${heightPct}%"></div>`;
-  }).join('');
-
-  // ── Y-axis labels (frequency %) ─────────────────────────────────────────
-  const yAxis = document.getElementById('simTooltipYAxis');
-  const gridEl = document.getElementById('simTooltipGridlines');
-  if (yAxis) {
-    // Pick nice round tick values: 0, then up to 3 ticks evenly spaced to maxFreq
-    const maxPct   = maxFreq * 100;
-    const tickStep = maxPct <= 5  ? 2.5
-                   : maxPct <= 10 ? 5
-                   : maxPct <= 20 ? 5
-                   : 10;
-    const numTicks = Math.floor(maxPct / tickStep);
-    const ticks = [];
-    for (let t = numTicks; t >= 0; t--) ticks.push(t * tickStep);
-
-    yAxis.innerHTML = ticks.map(t =>
-      `<span class="sim-tooltip-ylabel">${t % 1 === 0 ? t : t.toFixed(1)}%</span>`
-    ).join('');
-
-    // Gridlines — one per tick
-    if (gridEl) {
-      gridEl.innerHTML = ticks.map(() =>
-        `<div class="sim-tooltip-gridline"></div>`
-      ).join('');
-    }
-  }
-
-  // ── X-axis labels (score values) ────────────────────────────────────────
-  // Generate nice round tick values (e.g. -20, 0, 20, 40...) independent of
-  // bin boundaries, then position each label as a % across the domain.
-  const xAxis = document.getElementById('simTooltipXAxis');
-  if (xAxis) {
-    const domainRange = dist.domainMax - dist.domainMin;
-    // Pick a round step that yields ~5-8 ticks across the domain.
-    // Candidate steps: 1,2,5,10,20,25,50,100... pick the smallest that
-    // keeps tick count <= 8 so labels don't crowd.
-    const candidates = [1,2,5,10,20,25,50,100,200];
-    const niceStep = candidates.find(s => Math.floor(domainRange / s) <= 9) || 20;
-
-    // Build tick values: multiples of niceStep that fall within the domain
-    const firstTick = Math.ceil(dist.domainMin / niceStep) * niceStep;
-    const ticks = [];
-    for (let t = firstTick; t <= dist.domainMax; t += niceStep) {
-      ticks.push(Math.round(t)); // round to avoid float drift e.g. 19.999...
-    }
-
-    // Position each label as an absolute % left within the x-axis container
-    xAxis.style.position = 'relative';
-    xAxis.innerHTML = ticks.map(t => {
-      const pct = ((t - dist.domainMin) / domainRange) * 100;
-      return `<span class="sim-tooltip-xlabel" style="position:absolute;left:${pct}%;transform:translateX(-50%);">${t}</span>`;
-    }).join('');
-  }
-
-  // Build percentile pills
-  const fmt = v => v == null ? '—' : (Number.isInteger(v) ? v : v.toFixed(1));
-  const percentiles = [
-    { label: 'P10',  val: dist.p10,  cls: '' },
-    { label: 'P25',  val: dist.p25,  cls: '' },
-    { label: 'Med',  val: dist.p50,  cls: 'median' },
-    { label: 'P75',  val: dist.p75,  cls: '' },
-    { label: 'P90',  val: dist.p90,  cls: '' },
-  ];
-  pcts.innerHTML = percentiles.map(({ label, val, cls }) => `
-    <div class="sim-tooltip-pct">
-      <span class="sim-tooltip-pct-label">${label}</span>
-      <span class="sim-tooltip-pct-val ${cls}">${fmt(val)}</span>
-    </div>
-  `).join('');
-
-  // Position: prefer above the element, flip below if near top of viewport
-  const rect = el.getBoundingClientRect();
-  const tipW = 280;
-  const tipH = 240; // approximate
-
-  let left = rect.left + rect.width / 2 - tipW / 2;
-  let top  = rect.top - tipH - 8;
-
-  // Clamp horizontally
-  left = Math.max(8, Math.min(left, window.innerWidth - tipW - 8));
-  // Flip below if not enough room above
-  if (top < 8) top = rect.bottom + 8;
-
-  tip.style.left = left + 'px';
-  tip.style.top  = top  + 'px';
-  tip.style.minWidth = tipW + 'px';
-  tip.classList.add('visible');
-}
-
-function hideSimTooltip() {
-  _simTipTimeout = setTimeout(() => {
-    const tip = document.getElementById('simDistTooltip');
-    if (tip) tip.classList.remove('visible');
-  }, 80);
-}
-</script>
 
 </body>
 </html>
