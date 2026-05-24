@@ -4731,10 +4731,12 @@ function renderPreviewLineupsList(){
     const rtg=lineup.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
     const simTotal = lineup.every(p=>p._simP50!=null)
       ? lineup.reduce((s,p)=>s+(p._simP50||0),0) : null;
+    const ownTotal = lineup.reduce((s,p)=>s+(parseFloat(p.own)||0),0);
     const stats=[];
     if(hasProj)stats.push(`<span class="preview-stat"><span class="preview-stat-lbl">Proj</span>${proj.toFixed(2)}</span>`);
     if(hasRtg)stats.push(`<span class="preview-stat"><span class="preview-stat-lbl">Rtg</span>${rtg.toFixed(1)}</span>`);
     if(simTotal!=null)stats.push(`<span class="preview-stat" style="color:var(--green);"><span class="preview-stat-lbl" style="color:var(--green);opacity:.7;">Sim</span>${simTotal.toFixed(1)}</span>`);
+    if(ownTotal>0)stats.push(`<span class="preview-stat" style="color:var(--muted);"><span class="preview-stat-lbl" style="color:var(--muted);opacity:.7;">Own</span>${ownTotal.toFixed(1)}%</span>`);
     // Archetype tag
     const arcGroup = lineup._archetypeTag ? (slate2.groups||[]).find(g=>g.id===lineup._archetypeTag) : null;
     const waveTag = lineup._waveTag;
