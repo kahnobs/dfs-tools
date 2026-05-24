@@ -3671,14 +3671,14 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
     //   fast cars work through traffic. Fraction varies by track type:
     //   superspeedway 15% (drafting chaos, grid irrelevant quickly),
     //   short 20% (lots of position changes, fast cars get through fast),
-    //   road 25%, intermediate 20% (matched to short — pass rates at 1.5mi
-    //   ovals are higher than assumed; finish position is the better predictor).
+    //   road 25%, intermediate 15% (reduced — pass rates at 1.5mi ovals are
+    //   higher than assumed; finish position is the better predictor of laps led).
     // Phase 2 (late): finish position dominates — best cars are now at the
     //   front competing for laps led.
     const EARLY_FRAC = isSuper ? 0.15
                      : trackType==='short'        ? 0.20
                      : trackType==='road'         ? 0.25
-                     : 0.20; // intermediate — reduced from 0.30
+                     : 0.15; // intermediate — reduced from 0.30
     const earlyLaps = Math.round(greenLaps * EARLY_FRAC);
     const lateLaps  = greenLaps - earlyLaps;
 
@@ -3689,8 +3689,9 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
     // top 10 of win odds is eligible for laps led even if they finish outside
     // the top LEADERS by finish position. Their inclusion weight scales by
     // both factors — best odds + best grid = strongest weight, weakest combo
-    // = lightest weight. This prevents a Ty Gibbs (P2 start, top-5 win odds)
-    // from being completely excluded in sims where he happens to finish P9.
+    // = lightest weight. This prevents a strong contender (e.g. P2 start,
+    // top-5 win odds) from being completely excluded in sims where they
+    // happen to finish just outside the top LEADERS.
     const winOddsSorted = [...survivorDrawnFinal]
       .filter(d => d.p._nPWin > 0)
       .sort((a,b) => b.p._nPWin - a.p._nPWin);
@@ -3702,8 +3703,6 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
     );
 
     const baseLapLeaders = survivorDrawnFinal.slice(0, Math.min(LEADERS, numSurvivors));
-    // Merge — grid qualifiers join at reduced weight (they earned laps early,
-    // not necessarily late), deduped against base slice
     const baseSet = new Set(baseLapLeaders.map(d => d.p.id));
     const lapLeaders = [
       ...baseLapLeaders,
@@ -3726,8 +3725,8 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
         // weight and the weakest combo gets ~20% weight.
         const isQualifier = li >= baseLapLeaders.length;
         if(isQualifier){
-          const gridRank = d.p._nGrid; // 1=best, 10=weakest qualifier
-          const oddsRank = winOddsSorted.findIndex(x => x.p === d.p) + 1; // 1=best
+          const gridRank = d.p._nGrid;
+          const oddsRank = winOddsSorted.findIndex(x => x.p === d.p) + 1;
           const qualScale = Math.max(0.20, 1 - (gridRank + oddsRank - 2) / 18);
           return (earlyW * earlyLaps + lateW * lateLaps * 0.25) * skillW * qualScale;
         }
