@@ -567,6 +567,135 @@ html { overscroll-behavior-y: contain; }
   .topbar-dropdown-item.accent:hover { color:var(--accent); }
   .topbar-dropdown-divider { height:1px; background:var(--border); margin:4px 0; }
   .topbar-dropdown-label { padding:6px 14px 3px; font-family:'DM Mono',monospace; font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
+  /* ── Sim Distribution Tooltip ──────────────────────────────────────────── */
+  #simDistTooltip {
+    position: fixed;
+    z-index: 99999;
+    background: #1a1d24;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    padding: 10px 12px 8px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    box-shadow: 0 6px 28px rgba(0,0,0,0.80), 0 1px 0 rgba(255,255,255,0.04) inset;
+    min-width: 200px;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  #simDistTooltip.visible { opacity: 1; }
+  .sim-tooltip-title {
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    margin-bottom: 7px;
+  }
+  .sim-tooltip-chart {
+    position: relative;
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+  /* Y-axis: sits beside the bars, aligned to bar height only (no padding for x-axis) */
+  .sim-tooltip-yaxis {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: flex-end;
+    height: 140px; /* matches bars-wrap exactly */
+    flex-shrink: 0;
+    padding: 0;
+  }
+  .sim-tooltip-ylabel {
+    font-family: 'DM Mono', monospace;
+    font-size: 7px;
+    color: rgba(255,255,255,0.30);
+    line-height: 1;
+  }
+  .sim-tooltip-plot {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .sim-tooltip-bars-wrap {
+    position: relative;
+    height: 140px;
+    flex-shrink: 0;
+  }
+  .sim-tooltip-gridlines {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+  .sim-tooltip-gridline {
+    width: 100%;
+    height: 1px;
+    background: rgba(255,255,255,0.07);
+  }
+  .sim-tooltip-hist {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+  }
+  .sim-tooltip-bar {
+    flex: 1;
+    background: linear-gradient(to top, #1a7a3a, #2ecc71);
+    border-radius: 2px 2px 0 0;
+    min-height: 2px;
+    opacity: 0.75;
+  }
+  .sim-tooltip-bar.peak { opacity: 1; }
+  /* X-axis: score labels only, no extra axis title */
+  .sim-tooltip-xaxis {
+    position: relative;
+    margin-top: 4px;
+    height: 10px;
+  }
+  .sim-tooltip-xlabel {
+    font-family: 'DM Mono', monospace;
+    font-size: 7px;
+    color: rgba(255,255,255,0.30);
+    text-align: center;
+    line-height: 1;
+  }
+  .sim-tooltip-axis-title {
+    display: none; /* removed — x-axis values are self-explanatory */
+  }
+  .sim-tooltip-percentiles {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 2px;
+    margin-top: 2px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.07);
+  }
+  .sim-tooltip-pct {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+  }
+  .sim-tooltip-pct-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 7px;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  .sim-tooltip-pct-val {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .sim-tooltip-pct-val.median { color: var(--green); }
 </style>
 </head>
 <body>
@@ -1848,7 +1977,11 @@ function renderPool(){
         if(f.key==='_simP50'){
           const sv = p._simP50;
           if(sv==null) return `<div class="cell-mono ${f.cls}" style="color:var(--muted)">—</div>`;
-          return `<div class="cell-mono ${f.cls}" style="color:var(--green);">${sv.toFixed(1)}</div>`;
+          const hasDist = p._simDist != null;
+          if(hasDist){ window._simDistMap = window._simDistMap||{}; window._simDistMap[p.id] = p._simDist; }
+          return `<div class="cell-mono ${f.cls}" style="color:var(--green);${hasDist?'cursor:default;':''}"
+            ${hasDist ? `onmouseenter="showSimTooltipById(this,'${p.id}')" onmouseleave="hideSimTooltip()"` : ''}
+          >${sv.toFixed(1)}</div>`;
         }
         if(f.key==='rating'){
           const rv=parseFloat(p.rating);
@@ -1871,7 +2004,12 @@ function renderPool(){
         ${!isGroupEdit&&dots?`<div class="grp-dots">${dots}</div>`:''}
       </div>
       ${(_hasUFCSim||false) && !mobile
-        ? `<div class="cell-mono col-r" style="color:${p._simP50!=null?'var(--green)':'var(--muted)'};font-weight:600;">${p._simP50!=null?p._simP50.toFixed(1):'—'}</div>`
+        ? (p._simP50!=null
+            ? (()=>{ window._simDistMap=window._simDistMap||{}; if(p._simDist) window._simDistMap[p.id]=p._simDist;
+                return `<div class="cell-mono col-r" style="color:var(--green);font-weight:600;${p._simDist?'cursor:default;':''}"
+                  ${p._simDist ? `onmouseenter="showSimTooltipById(this,'${p.id}')" onmouseleave="hideSimTooltip()"` : ''}
+                >${p._simP50.toFixed(1)}</div>`; })()
+            : `<div class="cell-mono col-r" style="color:var(--muted);font-weight:600;">—</div>`)
         : ''}
       <div class="cell-sal col-r" style="${mobile?'font-size:11px;':''}">${fmt(p.salary)}</div>
       ${mobile
@@ -3112,18 +3250,20 @@ function runUFCSimsNew(pool, numSims, salaryCap, groups, noOppose, minSal){
     }
   }
 
-  // Compute per-fighter median for pool display
+  // Compute per-fighter median and distribution for pool display
   const medianScoreById = {};
+  const distById = {};
   pool.forEach(p=>{
     const arr = fighterAllScores[p.id].slice().sort((a,b)=>a-b);
     medianScoreById[p.id] = arr.length>0 ? arr[Math.floor(arr.length*0.5)] : 0;
+    distById[p.id] = buildSimDist(fighterAllScores[p.id], 'ufc');
   });
 
   // Convert freq map to sorted array
   const ranked = Array.from(lineupFreq.values())
     .sort((a,b)=>b.count-a.count || b.totalScore-a.totalScore);
 
-  return {ranked, medianScoreById, winProb, totalSims: numSims};
+  return {ranked, medianScoreById, distById, winProb, totalSims: numSims};
 }
 
 async function runUFCSimGen(){
@@ -3171,8 +3311,11 @@ async function runUFCSimGen(){
     pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal
   );
 
-  // Store per-fighter median for pool display
-  pool.forEach(p=>{ p._simP50 = medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null; });
+  // Store per-fighter median and distribution for pool display
+  pool.forEach(p=>{
+    p._simP50  = medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null;
+    p._simDist = distById[p.id] || null;
+  });
   if(typeof renderPool==='function') renderPool();
 
   log(`${ranked.length} unique optimal lineups found across ${totalSims.toLocaleString()} sims.`);
@@ -3843,7 +3986,8 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
     // equally split between floor and ceiling, p75 as the bridge.
     const composite = (avg*0.40 + p75*0.30 + p90*0.30) * (1 - ownPenalty);
 
-    return { player:p, avg, p50, p75, p90, composite };
+    const dist = buildSimDist(simScores[i], 'nascar');
+    return { player:p, avg, p50, p75, p90, composite, dist };
   });
 }
 
@@ -3898,6 +4042,7 @@ async function runNascarSimGen(){
   simResults.forEach(r=>{
     r.player._simP50       = r.p50!=null ? Math.round(r.p50*10)/10 : null;
     r.player._simComposite = r.composite;
+    r.player._simDist      = r.dist || null;
   });
   if(typeof renderPool==='function') renderPool();
   log(`Sim scores ready. Building lineups...`);
@@ -6078,6 +6223,188 @@ window.switchTab=function(tab,el){
 };
 </script>
 
+<!-- ── Sim Distribution Tooltip ─────────────────────────────────────────── -->
+<div id="simDistTooltip">
+  <div class="sim-tooltip-title">Score Distribution</div>
+  <div class="sim-tooltip-chart" id="simTooltipChart">
+    <div class="sim-tooltip-yaxis" id="simTooltipYAxis"></div>
+    <div class="sim-tooltip-plot">
+      <div class="sim-tooltip-bars-wrap">
+        <div class="sim-tooltip-gridlines" id="simTooltipGridlines"></div>
+        <div class="sim-tooltip-hist" id="simTooltipHist"></div>
+      </div>
+      <div class="sim-tooltip-xaxis" id="simTooltipXAxis"></div>
+      <div class="sim-tooltip-axis-title">Fantasy Points</div>
+    </div>
+  </div>
+  <div class="sim-tooltip-percentiles" id="simTooltipPcts"></div>
+</div>
+
+<script>
+// ── buildSimDist: bucket raw scores into histogram + key percentiles ────────
+// Uses a fixed domain per sport so distributions are comparable across drivers.
+// Outliers beyond the domain are clamped into the edge bins rather than dropped.
+const SIM_DIST_DOMAIN = {
+  nascar: { domainMin: -20, domainMax: 160 },
+  ufc:    { domainMin:   0, domainMax: 140 },
+};
+
+function buildSimDist(scoresArr, sport) {
+  if (!scoresArr || scoresArr.length === 0) return null;
+  const sorted = scoresArr.slice().sort((a, b) => a - b);
+  const n = sorted.length;
+  const pct = f => sorted[Math.min(Math.floor(n * f), n - 1)];
+
+  // Percentiles always use raw scores (not clamped) for accurate representation
+  const p10 = pct(0.10);
+  const p25 = pct(0.25);
+  const p50 = pct(0.50);
+  const p75 = pct(0.75);
+  const p90 = pct(0.90);
+
+  // Fixed domain per sport; fall back to data range if sport unknown
+  const domain = SIM_DIST_DOMAIN[sport];
+  const domainMin = domain ? domain.domainMin : sorted[0];
+  const domainMax = domain ? domain.domainMax : sorted[n - 1];
+
+  // 20 equal-width bins across the fixed domain
+  const NUM_BINS = 20;
+  const bins = new Array(NUM_BINS).fill(0);
+  const domainRange = domainMax - domainMin;
+  sorted.forEach(s => {
+    // Clamp outliers into the first/last bin rather than dropping them
+    const clamped = Math.max(domainMin, Math.min(domainMax, s));
+    const bi = Math.min(Math.floor(((clamped - domainMin) / domainRange) * NUM_BINS), NUM_BINS - 1);
+    bins[bi]++;
+  });
+
+  return { bins, domainMin, domainMax, p10, p25, p50, p75, p90 };
+}
+
+// ── Tooltip show/hide ────────────────────────────────────────────────────────
+let _simTipTimeout = null;
+
+function showSimTooltipById(el, pid) {
+  const dist = (window._simDistMap || {})[pid];
+  showSimTooltip(el, dist);
+}
+
+function showSimTooltip(el, dist) {
+  if (!dist) return;
+  clearTimeout(_simTipTimeout);
+
+  const tip  = document.getElementById('simDistTooltip');
+  const hist = document.getElementById('simTooltipHist');
+  const pcts = document.getElementById('simTooltipPcts');
+  if (!tip || !hist || !pcts) return;
+
+  // ── Histogram bars ──────────────────────────────────────────────────────
+  const total   = dist.bins.reduce((s, b) => s + b, 0) || 1;
+  const freqs   = dist.bins.map(b => b / total);          // fraction 0–1
+  const maxFreq = Math.max(...freqs, 0.001);
+  const maxBin  = Math.max(...dist.bins, 1);
+
+  hist.innerHTML = dist.bins.map((count, i) => {
+    const heightPct = Math.max((count / maxBin) * 100, 2);
+    const isPeak = count === maxBin;
+    return `<div class="sim-tooltip-bar${isPeak ? ' peak' : ''}" style="height:${heightPct}%"></div>`;
+  }).join('');
+
+  // ── Y-axis labels (frequency %) ─────────────────────────────────────────
+  const yAxis = document.getElementById('simTooltipYAxis');
+  const gridEl = document.getElementById('simTooltipGridlines');
+  if (yAxis) {
+    // Pick nice round tick values: 0, then up to 3 ticks evenly spaced to maxFreq
+    const maxPct   = maxFreq * 100;
+    const tickStep = maxPct <= 5  ? 2.5
+                   : maxPct <= 10 ? 5
+                   : maxPct <= 20 ? 5
+                   : 10;
+    const numTicks = Math.floor(maxPct / tickStep);
+    const ticks = [];
+    for (let t = numTicks; t >= 0; t--) ticks.push(t * tickStep);
+
+    yAxis.innerHTML = ticks.map(t =>
+      `<span class="sim-tooltip-ylabel">${t % 1 === 0 ? t : t.toFixed(1)}%</span>`
+    ).join('');
+
+    // Gridlines — one per tick
+    if (gridEl) {
+      gridEl.innerHTML = ticks.map(() =>
+        `<div class="sim-tooltip-gridline"></div>`
+      ).join('');
+    }
+  }
+
+  // ── X-axis labels (score values) ────────────────────────────────────────
+  // Generate nice round tick values (e.g. -20, 0, 20, 40...) independent of
+  // bin boundaries, then position each label as a % across the domain.
+  const xAxis = document.getElementById('simTooltipXAxis');
+  if (xAxis) {
+    const domainRange = dist.domainMax - dist.domainMin;
+    // Pick a round step that yields ~5-8 ticks across the domain.
+    // Candidate steps: 1,2,5,10,20,25,50,100... pick the smallest that
+    // keeps tick count <= 8 so labels don't crowd.
+    const candidates = [1,2,5,10,20,25,50,100,200];
+    const niceStep = candidates.find(s => Math.floor(domainRange / s) <= 9) || 20;
+
+    // Build tick values: multiples of niceStep that fall within the domain
+    const firstTick = Math.ceil(dist.domainMin / niceStep) * niceStep;
+    const ticks = [];
+    for (let t = firstTick; t <= dist.domainMax; t += niceStep) {
+      ticks.push(Math.round(t)); // round to avoid float drift e.g. 19.999...
+    }
+
+    // Position each label as an absolute % left within the x-axis container
+    xAxis.style.position = 'relative';
+    xAxis.innerHTML = ticks.map(t => {
+      const pct = ((t - dist.domainMin) / domainRange) * 100;
+      return `<span class="sim-tooltip-xlabel" style="position:absolute;left:${pct}%;transform:translateX(-50%);">${t}</span>`;
+    }).join('');
+  }
+
+  // Build percentile pills
+  const fmt = v => v == null ? '—' : (Number.isInteger(v) ? v : v.toFixed(1));
+  const percentiles = [
+    { label: 'P10',  val: dist.p10,  cls: '' },
+    { label: 'P25',  val: dist.p25,  cls: '' },
+    { label: 'Med',  val: dist.p50,  cls: 'median' },
+    { label: 'P75',  val: dist.p75,  cls: '' },
+    { label: 'P90',  val: dist.p90,  cls: '' },
+  ];
+  pcts.innerHTML = percentiles.map(({ label, val, cls }) => `
+    <div class="sim-tooltip-pct">
+      <span class="sim-tooltip-pct-label">${label}</span>
+      <span class="sim-tooltip-pct-val ${cls}">${fmt(val)}</span>
+    </div>
+  `).join('');
+
+  // Position: prefer above the element, flip below if near top of viewport
+  const rect = el.getBoundingClientRect();
+  const tipW = 280;
+  const tipH = 240; // approximate
+
+  let left = rect.left + rect.width / 2 - tipW / 2;
+  let top  = rect.top - tipH - 8;
+
+  // Clamp horizontally
+  left = Math.max(8, Math.min(left, window.innerWidth - tipW - 8));
+  // Flip below if not enough room above
+  if (top < 8) top = rect.bottom + 8;
+
+  tip.style.left = left + 'px';
+  tip.style.top  = top  + 'px';
+  tip.style.minWidth = tipW + 'px';
+  tip.classList.add('visible');
+}
+
+function hideSimTooltip() {
+  _simTipTimeout = setTimeout(() => {
+    const tip = document.getElementById('simDistTooltip');
+    if (tip) tip.classList.remove('visible');
+  }, 80);
+}
+</script>
 
 
 </body>
