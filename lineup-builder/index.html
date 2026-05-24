@@ -3671,29 +3671,66 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
     //   fast cars work through traffic. Fraction varies by track type:
     //   superspeedway 15% (drafting chaos, grid irrelevant quickly),
     //   short 20% (lots of position changes, fast cars get through fast),
-    //   road 25%, intermediate 30% (harder to pass, grid advantage persists).
+    //   road 25%, intermediate 20% (matched to short — pass rates at 1.5mi
+    //   ovals are higher than assumed; finish position is the better predictor).
     // Phase 2 (late): finish position dominates — best cars are now at the
     //   front competing for laps led.
     const EARLY_FRAC = isSuper ? 0.15
                      : trackType==='short'        ? 0.20
                      : trackType==='road'         ? 0.25
-                     : 0.30; // intermediate default
+                     : 0.20; // intermediate — reduced from 0.30
     const earlyLaps = Math.round(greenLaps * EARLY_FRAC);
     const lateLaps  = greenLaps - earlyLaps;
 
     // Stochastic decay rate centered on track-specific value ± range
     const lapDecayRate = llDecayCenter + (Math.random()*2-1) * llDecayRange;
 
-    const lapLeaders = survivorDrawnFinal.slice(0, Math.min(LEADERS, numSurvivors));
+    // Grid+odds qualifier: any surviving driver starting top 10 AND in the
+    // top 10 of win odds is eligible for laps led even if they finish outside
+    // the top LEADERS by finish position. Their inclusion weight scales by
+    // both factors — best odds + best grid = strongest weight, weakest combo
+    // = lightest weight. This prevents a Ty Gibbs (P2 start, top-5 win odds)
+    // from being completely excluded in sims where he happens to finish P9.
+    const winOddsSorted = [...survivorDrawnFinal]
+      .filter(d => d.p._nPWin > 0)
+      .sort((a,b) => b.p._nPWin - a.p._nPWin);
+    const top10WinSet = new Set(winOddsSorted.slice(0, 10).map(d => d.p.id));
+    const gridQualifiers = survivorDrawnFinal.filter(d =>
+      d.p._nGrid <= 10 &&
+      top10WinSet.has(d.p.id) &&
+      d.finishPos > LEADERS  // only matters if they wouldn't already be in the slice
+    );
+
+    const baseLapLeaders = survivorDrawnFinal.slice(0, Math.min(LEADERS, numSurvivors));
+    // Merge — grid qualifiers join at reduced weight (they earned laps early,
+    // not necessarily late), deduped against base slice
+    const baseSet = new Set(baseLapLeaders.map(d => d.p.id));
+    const lapLeaders = [
+      ...baseLapLeaders,
+      ...gridQualifiers.filter(d => !baseSet.has(d.p.id))
+    ];
+
     if(lapLeaders.length > 0){
       // Skill rank dampens laps led for lucky backmarkers throughout both phases
-      const lapWeights = lapLeaders.map(d=>{
+      const lapWeights = lapLeaders.map((d, li) => {
         const skillW   = Math.exp(-0.15*(d.p._nSkillRank-1));
 
         // Early phase: grid position drives who leads
         const earlyW   = Math.exp(-lapDecayRate*(d.p._nGrid-1));
         // Late phase: finish position drives who leads
         const lateW    = Math.exp(-lapDecayRate*(d.finishPos-1));
+
+        // Grid qualifiers (finish outside top LEADERS) get reduced late weight —
+        // they led early but faded, so their late-phase contribution is minor.
+        // Scale by both grid rank and win odds rank so the best combo gets full
+        // weight and the weakest combo gets ~20% weight.
+        const isQualifier = li >= baseLapLeaders.length;
+        if(isQualifier){
+          const gridRank = d.p._nGrid; // 1=best, 10=weakest qualifier
+          const oddsRank = winOddsSorted.findIndex(x => x.p === d.p) + 1; // 1=best
+          const qualScale = Math.max(0.20, 1 - (gridRank + oddsRank - 2) / 18);
+          return (earlyW * earlyLaps + lateW * lateLaps * 0.25) * skillW * qualScale;
+        }
 
         return (earlyW * earlyLaps + lateW * lateLaps) * skillW;
       });
@@ -3702,7 +3739,9 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
         d.lapsLed = Math.round((lapWeights[i]/totalLapW)*greenLaps);
       });
     }
-    survivorDrawnFinal.slice(LEADERS).forEach(d=>{ d.lapsLed=0; });
+    // Zero out everyone not in the combined lap leaders pool
+    const lapLeaderSet = new Set(lapLeaders.map(d => d.p.id));
+    survivorDrawnFinal.forEach(d=>{ if(!lapLeaderSet.has(d.p.id)) d.lapsLed=0; });
 
     // ── 8. Redistribute incident drivers' expected laps to surviving leaders ──
     // A strong driver who crashes early would have led laps — those laps
