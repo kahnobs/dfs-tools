@@ -4748,22 +4748,47 @@ async function runAutoGen(){
 // PREVIEW MODAL
 // ═══════════════════════════════════════════════════════════
 let previewSortMode = 'default';
+let previewSortDir  = 'desc'; // 'desc' or 'asc'
 
 function setPreviewSort(mode, btn){
-  previewSortMode = mode;
-  document.querySelectorAll('.preview-sort-btn').forEach(b=>{
-    const isActive = b.dataset.sort === mode;
-    b.style.borderColor  = isActive ? 'var(--accent)' : 'var(--border)';
-    b.style.background   = isActive ? 'rgba(245,197,24,.1)' : 'none';
-    b.style.color        = isActive ? 'var(--accent)' : 'var(--muted)';
-  });
+  if(mode === 'default'){
+    previewSortMode = 'default';
+    previewSortDir  = 'desc';
+  } else if(previewSortMode === mode){
+    // Same field clicked again — cycle: desc → asc → default
+    if(previewSortDir === 'desc'){
+      previewSortDir = 'asc';
+    } else {
+      previewSortMode = 'default';
+      previewSortDir  = 'desc';
+    }
+  } else {
+    // New field — start descending
+    previewSortMode = mode;
+    previewSortDir  = 'desc';
+  }
+  _updatePreviewSortBtns();
   renderPreviewLineupsList();
+}
+
+function _updatePreviewSortBtns(){
+  document.querySelectorAll('.preview-sort-btn').forEach(b=>{
+    const isActive = b.dataset.sort === previewSortMode;
+    b.style.borderColor = isActive ? 'var(--accent)' : 'var(--border)';
+    b.style.background  = isActive ? 'rgba(245,197,24,.1)' : 'none';
+    b.style.color       = isActive ? 'var(--accent)' : 'var(--muted)';
+    // Show direction arrow on active non-default button
+    const baseLabel = {default:'Default', sim:'Sim', proj:'Proj', rating:'Rating', own:'Own%'}[b.dataset.sort] || b.dataset.sort;
+    const arrow = isActive && previewSortMode !== 'default' ? (previewSortDir === 'desc' ? ' ↓' : ' ↑') : '';
+    b.textContent = baseLabel + arrow;
+  });
 }
 
 function openPreviewModal(lineups, optimizeBy){
   previewLineups=lineups;
   previewFilter=null;
   previewSortMode='default';
+  previewSortDir='desc';
   const slate=activeSlate();if(!slate)return;
   document.getElementById('previewModalSub').textContent=`${lineups.length} lineups generated. Select which to add to your saved lineups.`;
   previewPlayerFilter = null;
@@ -4810,12 +4835,7 @@ function openPreviewModal(lineups, optimizeBy){
   }
 
   // Reset sort to Default on each new open
-  document.querySelectorAll('.preview-sort-btn').forEach(b=>{
-    const isDefault = b.dataset.sort === 'default';
-    b.style.borderColor = isDefault ? 'var(--accent)' : 'var(--border)';
-    b.style.background  = isDefault ? 'rgba(245,197,24,.1)' : 'none';
-    b.style.color       = isDefault ? 'var(--accent)' : 'var(--muted)';
-  });
+  _updatePreviewSortBtns();
   renderPreviewLineupsList();
   document.getElementById('previewModal').classList.remove('hidden');
   document.body.classList.add('modal-open');
@@ -4840,27 +4860,27 @@ function renderPreviewLineupsList(){
 
   // Apply sort — 'default' preserves original generation order
   if(previewSortMode && previewSortMode !== 'default'){
+    const dir = previewSortDir === 'asc' ? 1 : -1; // desc = -1 (b-a), asc = 1 (a-b)
     allLineups = [...allLineups].sort((a, b) => {
       if(previewSortMode === 'sim'){
         const sa = a.every(p=>p._simP50!=null) ? a.reduce((s,p)=>s+(p._simP50||0),0) : -Infinity;
         const sb = b.every(p=>p._simP50!=null) ? b.reduce((s,p)=>s+(p._simP50||0),0) : -Infinity;
-        return sb - sa;
+        return dir * (sa - sb);
       }
       if(previewSortMode === 'proj'){
         const pa = a.reduce((s,p)=>s+(parseFloat(p.proj)||0),0);
         const pb = b.reduce((s,p)=>s+(parseFloat(p.proj)||0),0);
-        return pb - pa;
+        return dir * (pa - pb);
       }
       if(previewSortMode === 'rating'){
         const ra = a.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
         const rb = b.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
-        return rb - ra;
+        return dir * (ra - rb);
       }
       if(previewSortMode === 'own'){
-        // Sort by total team ownership ascending (lower own = more leverage)
         const oa = a.reduce((s,p)=>s+(parseFloat(p.own)||0),0);
         const ob = b.reduce((s,p)=>s+(parseFloat(p.own)||0),0);
-        return oa - ob;
+        return dir * (oa - ob);
       }
       return 0;
     });
