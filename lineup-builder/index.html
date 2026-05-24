@@ -656,8 +656,7 @@ html { overscroll-behavior-y: contain; }
   .sim-tooltip-bar.peak { opacity: 1; }
   /* X-axis: score labels only, no extra axis title */
   .sim-tooltip-xaxis {
-    display: flex;
-    justify-content: space-between;
+    position: relative;
     margin-top: 4px;
     height: 10px;
   }
@@ -3237,7 +3236,7 @@ function runUFCSimsNew(pool, numSims, salaryCap, groups, noOppose, minSal){
   pool.forEach(p=>{
     const arr = fighterAllScores[p.id].slice().sort((a,b)=>a-b);
     medianScoreById[p.id] = arr.length>0 ? arr[Math.floor(arr.length*0.5)] : 0;
-    distById[p.id] = buildSimDist(fighterAllScores[p.id]);
+    distById[p.id] = buildSimDist(fighterAllScores[p.id], 'ufc');
   });
 
   // Convert freq map to sorted array
@@ -3967,7 +3966,7 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
     // equally split between floor and ceiling, p75 as the bridge.
     const composite = (avg*0.40 + p75*0.30 + p90*0.30) * (1 - ownPenalty);
 
-    const dist = buildSimDist(simScores[i]);
+    const dist = buildSimDist(simScores[i], 'nascar');
     return { player:p, avg, p50, p75, p90, composite, dist };
   });
 }
@@ -6123,32 +6122,43 @@ window.switchTab=function(tab,el){
 
 <script>
 // ── buildSimDist: bucket raw scores into histogram + key percentiles ────────
-// Called once per driver after sims finish. Stores a compact object on the
-// player so renderPool() can attach it to the hover handler without re-sorting.
-function buildSimDist(scoresArr) {
+// Uses a fixed domain per sport so distributions are comparable across drivers.
+// Outliers beyond the domain are clamped into the edge bins rather than dropped.
+const SIM_DIST_DOMAIN = {
+  nascar: { domainMin: -20, domainMax: 160 },
+  ufc:    { domainMin:   0, domainMax: 140 },
+};
+
+function buildSimDist(scoresArr, sport) {
   if (!scoresArr || scoresArr.length === 0) return null;
   const sorted = scoresArr.slice().sort((a, b) => a - b);
   const n = sorted.length;
   const pct = f => sorted[Math.min(Math.floor(n * f), n - 1)];
 
-  const min = sorted[0];
-  const max = sorted[n - 1];
+  // Percentiles always use raw scores (not clamped) for accurate representation
   const p10 = pct(0.10);
   const p25 = pct(0.25);
   const p50 = pct(0.50);
   const p75 = pct(0.75);
   const p90 = pct(0.90);
 
-  // 20 equal-width bins across [min, max]
+  // Fixed domain per sport; fall back to data range if sport unknown
+  const domain = SIM_DIST_DOMAIN[sport];
+  const domainMin = domain ? domain.domainMin : sorted[0];
+  const domainMax = domain ? domain.domainMax : sorted[n - 1];
+
+  // 20 equal-width bins across the fixed domain
   const NUM_BINS = 20;
   const bins = new Array(NUM_BINS).fill(0);
-  const range = max - min || 1;
+  const domainRange = domainMax - domainMin;
   sorted.forEach(s => {
-    const bi = Math.min(Math.floor(((s - min) / range) * NUM_BINS), NUM_BINS - 1);
+    // Clamp outliers into the first/last bin rather than dropping them
+    const clamped = Math.max(domainMin, Math.min(domainMax, s));
+    const bi = Math.min(Math.floor(((clamped - domainMin) / domainRange) * NUM_BINS), NUM_BINS - 1);
     bins[bi]++;
   });
 
-  return { bins, min, max, p10, p25, p50, p75, p90 };
+  return { bins, domainMin, domainMax, p10, p25, p50, p75, p90 };
 }
 
 // ── Tooltip show/hide ────────────────────────────────────────────────────────
@@ -6207,25 +6217,30 @@ function showSimTooltip(el, dist) {
   }
 
   // ── X-axis labels (score values) ────────────────────────────────────────
+  // Generate nice round tick values (e.g. -20, 0, 20, 40...) independent of
+  // bin boundaries, then position each label as a % across the domain.
   const xAxis = document.getElementById('simTooltipXAxis');
   if (xAxis) {
-    const range   = dist.max - dist.min || 1;
-    const NUM_BINS = dist.bins.length;
-    // Show ~5 evenly-spaced labels
-    const step = Math.max(1, Math.floor(NUM_BINS / 5));
-    const labelIdxs = [];
-    for (let i = 0; i < NUM_BINS; i += step) labelIdxs.push(i);
-    if (labelIdxs[labelIdxs.length - 1] !== NUM_BINS - 1) labelIdxs.push(NUM_BINS - 1);
+    const domainRange = dist.domainMax - dist.domainMin;
+    // Pick a round step that yields ~5-8 ticks across the domain.
+    // Candidate steps: 1,2,5,10,20,25,50,100... pick the smallest that
+    // keeps tick count <= 8 so labels don't crowd.
+    const candidates = [1,2,5,10,20,25,50,100,200];
+    const niceStep = candidates.find(s => Math.floor(domainRange / s) <= 9) || 20;
 
-    // Build sparse array: label text at certain positions, empty at others
-    // Use flexbox space-between — only emit labels at chosen indices
-    // To keep flex spacing, emit all NUM_BINS slots but hide non-label ones
-    const labels = dist.bins.map((_, i) => {
-      const scoreVal = Math.round(dist.min + (i / NUM_BINS) * range);
-      const show = labelIdxs.includes(i);
-      return `<span class="sim-tooltip-xlabel" style="${show ? '' : 'visibility:hidden'}">${scoreVal}</span>`;
-    });
-    xAxis.innerHTML = labels.join('');
+    // Build tick values: multiples of niceStep that fall within the domain
+    const firstTick = Math.ceil(dist.domainMin / niceStep) * niceStep;
+    const ticks = [];
+    for (let t = firstTick; t <= dist.domainMax; t += niceStep) {
+      ticks.push(Math.round(t)); // round to avoid float drift e.g. 19.999...
+    }
+
+    // Position each label as an absolute % left within the x-axis container
+    xAxis.style.position = 'relative';
+    xAxis.innerHTML = ticks.map(t => {
+      const pct = ((t - dist.domainMin) / domainRange) * 100;
+      return `<span class="sim-tooltip-xlabel" style="position:absolute;left:${pct}%;transform:translateX(-50%);">${t}</span>`;
+    }).join('');
   }
 
   // Build percentile pills
