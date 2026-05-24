@@ -621,7 +621,7 @@ html { overscroll-behavior-y: contain; }
   .sim-tooltip-bars-wrap {
     flex: 1;
     position: relative;
-    height: 110px;
+    height: 180px;
   }
   .sim-tooltip-gridlines {
     position: absolute;
@@ -676,7 +676,10 @@ html { overscroll-behavior-y: contain; }
   .sim-tooltip-percentiles {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    gap: 3px;
+    gap: 2px;
+    margin-top: 2px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.07);
   }
   .sim-tooltip-pct {
     display: flex;
@@ -686,13 +689,13 @@ html { overscroll-behavior-y: contain; }
   }
   .sim-tooltip-pct-label {
     font-family: 'DM Mono', monospace;
-    font-size: 8px;
+    font-size: 7px;
     color: var(--muted);
     text-transform: uppercase;
   }
   .sim-tooltip-pct-val {
     font-family: 'DM Mono', monospace;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     color: var(--text);
   }
@@ -6246,7 +6249,7 @@ function showSimTooltip(el, dist) {
   // Position: prefer above the element, flip below if near top of viewport
   const rect = el.getBoundingClientRect();
   const tipW = 280;
-  const tipH = 220; // approximate
+  const tipH = 270; // approximate
 
   let left = rect.left + rect.width / 2 - tipW / 2;
   let top  = rect.top - tipH - 8;
