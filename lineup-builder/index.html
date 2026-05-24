@@ -593,22 +593,86 @@ html { overscroll-behavior-y: contain; }
     letter-spacing: .08em;
     margin-bottom: 7px;
   }
+  .sim-tooltip-chart {
+    position: relative;
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .sim-tooltip-yaxis {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding-bottom: 18px; /* room for x-axis labels */
+    flex-shrink: 0;
+  }
+  .sim-tooltip-ylabel {
+    font-family: 'DM Mono', monospace;
+    font-size: 8px;
+    color: rgba(255,255,255,0.35);
+    line-height: 1;
+  }
+  .sim-tooltip-plot {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  .sim-tooltip-bars-wrap {
+    flex: 1;
+    position: relative;
+    height: 72px;
+  }
+  .sim-tooltip-gridlines {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+  .sim-tooltip-gridline {
+    width: 100%;
+    height: 1px;
+    background: rgba(255,255,255,0.07);
+  }
   .sim-tooltip-hist {
+    position: absolute;
+    inset: 0;
     display: flex;
     align-items: flex-end;
     gap: 2px;
-    height: 44px;
-    margin-bottom: 8px;
   }
   .sim-tooltip-bar {
     flex: 1;
-    background: var(--accent);
-    opacity: 0.55;
+    background: linear-gradient(to top, #1a7a3a, #2ecc71);
     border-radius: 2px 2px 0 0;
     min-height: 2px;
-    transition: opacity 0.1s;
+    opacity: 0.75;
   }
   .sim-tooltip-bar.peak { opacity: 1; }
+  .sim-tooltip-xaxis {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 3px;
+    height: 14px;
+  }
+  .sim-tooltip-xlabel {
+    font-family: 'DM Mono', monospace;
+    font-size: 8px;
+    color: rgba(255,255,255,0.35);
+    text-align: center;
+    line-height: 1;
+  }
+  .sim-tooltip-axis-title {
+    font-family: 'DM Mono', monospace;
+    font-size: 8px;
+    color: rgba(255,255,255,0.25);
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    margin-top: 1px;
+  }
   .sim-tooltip-percentiles {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -6042,7 +6106,17 @@ window.switchTab=function(tab,el){
 <!-- ── Sim Distribution Tooltip ─────────────────────────────────────────── -->
 <div id="simDistTooltip">
   <div class="sim-tooltip-title">Score Distribution</div>
-  <div class="sim-tooltip-hist" id="simTooltipHist"></div>
+  <div class="sim-tooltip-chart" id="simTooltipChart">
+    <div class="sim-tooltip-yaxis" id="simTooltipYAxis"></div>
+    <div class="sim-tooltip-plot">
+      <div class="sim-tooltip-bars-wrap">
+        <div class="sim-tooltip-gridlines" id="simTooltipGridlines"></div>
+        <div class="sim-tooltip-hist" id="simTooltipHist"></div>
+      </div>
+      <div class="sim-tooltip-xaxis" id="simTooltipXAxis"></div>
+      <div class="sim-tooltip-axis-title">Fantasy Points</div>
+    </div>
+  </div>
   <div class="sim-tooltip-percentiles" id="simTooltipPcts"></div>
 </div>
 
@@ -6093,13 +6167,65 @@ function showSimTooltip(el, dist) {
   const pcts = document.getElementById('simTooltipPcts');
   if (!tip || !hist || !pcts) return;
 
-  // Build histogram bars
-  const maxBin = Math.max(...dist.bins, 1);
+  // ── Histogram bars ──────────────────────────────────────────────────────
+  const total   = dist.bins.reduce((s, b) => s + b, 0) || 1;
+  const freqs   = dist.bins.map(b => b / total);          // fraction 0–1
+  const maxFreq = Math.max(...freqs, 0.001);
+  const maxBin  = Math.max(...dist.bins, 1);
+
   hist.innerHTML = dist.bins.map((count, i) => {
-    const heightPct = Math.max((count / maxBin) * 100, 4);
+    const heightPct = Math.max((count / maxBin) * 100, 2);
     const isPeak = count === maxBin;
     return `<div class="sim-tooltip-bar${isPeak ? ' peak' : ''}" style="height:${heightPct}%"></div>`;
   }).join('');
+
+  // ── Y-axis labels (frequency %) ─────────────────────────────────────────
+  const yAxis = document.getElementById('simTooltipYAxis');
+  const gridEl = document.getElementById('simTooltipGridlines');
+  if (yAxis) {
+    // Pick nice round tick values: 0, then up to 3 ticks evenly spaced to maxFreq
+    const maxPct   = maxFreq * 100;
+    const tickStep = maxPct <= 5  ? 2.5
+                   : maxPct <= 10 ? 5
+                   : maxPct <= 20 ? 5
+                   : 10;
+    const numTicks = Math.floor(maxPct / tickStep);
+    const ticks = [];
+    for (let t = numTicks; t >= 0; t--) ticks.push(t * tickStep);
+
+    yAxis.innerHTML = ticks.map(t =>
+      `<span class="sim-tooltip-ylabel">${t % 1 === 0 ? t : t.toFixed(1)}%</span>`
+    ).join('');
+
+    // Gridlines — one per tick
+    if (gridEl) {
+      gridEl.innerHTML = ticks.map(() =>
+        `<div class="sim-tooltip-gridline"></div>`
+      ).join('');
+    }
+  }
+
+  // ── X-axis labels (score values) ────────────────────────────────────────
+  const xAxis = document.getElementById('simTooltipXAxis');
+  if (xAxis) {
+    const range   = dist.max - dist.min || 1;
+    const NUM_BINS = dist.bins.length;
+    // Show ~5 evenly-spaced labels
+    const step = Math.max(1, Math.floor(NUM_BINS / 5));
+    const labelIdxs = [];
+    for (let i = 0; i < NUM_BINS; i += step) labelIdxs.push(i);
+    if (labelIdxs[labelIdxs.length - 1] !== NUM_BINS - 1) labelIdxs.push(NUM_BINS - 1);
+
+    // Build sparse array: label text at certain positions, empty at others
+    // Use flexbox space-between — only emit labels at chosen indices
+    // To keep flex spacing, emit all NUM_BINS slots but hide non-label ones
+    const labels = dist.bins.map((_, i) => {
+      const scoreVal = Math.round(dist.min + (i / NUM_BINS) * range);
+      const show = labelIdxs.includes(i);
+      return `<span class="sim-tooltip-xlabel" style="${show ? '' : 'visibility:hidden'}">${scoreVal}</span>`;
+    });
+    xAxis.innerHTML = labels.join('');
+  }
 
   // Build percentile pills
   const fmt = v => v == null ? '—' : (Number.isInteger(v) ? v : v.toFixed(1));
@@ -6119,8 +6245,8 @@ function showSimTooltip(el, dist) {
 
   // Position: prefer above the element, flip below if near top of viewport
   const rect = el.getBoundingClientRect();
-  const tipW = 212;
-  const tipH = 130; // approximate
+  const tipW = 260;
+  const tipH = 185; // approximate
 
   let left = rect.left + rect.width / 2 - tipW / 2;
   let top  = rect.top - tipH - 8;
