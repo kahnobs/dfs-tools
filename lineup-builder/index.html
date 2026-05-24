@@ -621,7 +621,7 @@ html { overscroll-behavior-y: contain; }
   .sim-tooltip-bars-wrap {
     flex: 1;
     position: relative;
-    height: 72px;
+    height: 110px;
   }
   .sim-tooltip-gridlines {
     position: absolute;
@@ -6245,8 +6245,8 @@ function showSimTooltip(el, dist) {
 
   // Position: prefer above the element, flip below if near top of viewport
   const rect = el.getBoundingClientRect();
-  const tipW = 260;
-  const tipH = 185; // approximate
+  const tipW = 280;
+  const tipH = 220; // approximate
 
   let left = rect.left + rect.width / 2 - tipW / 2;
   let top  = rect.top - tipH - 8;
