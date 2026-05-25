@@ -972,6 +972,20 @@ html { overscroll-behavior-y: contain; }
                 </div>
               </div>
             </div>
+            <div style="margin-bottom:8px;">
+              <div style="font-size:10px;color:var(--muted);margin-bottom:5px;">Optimization Mode</div>
+              <div style="display:flex;gap:4px;">
+                <button id="simOptMedian" onclick="setNascarSimOpt('median',this)"
+                  class="nascar-track-btn active"
+                  style="flex:1;text-align:center;">Median</button>
+                <button id="simOptGPP" onclick="setNascarSimOpt('gpp',this)"
+                  class="nascar-track-btn"
+                  style="flex:1;text-align:center;">GPP Composite</button>
+              </div>
+              <div id="simOptDesc" style="font-size:9px;color:var(--muted);margin-top:4px;line-height:1.4;">
+                Median (P50): balanced, equal weight to floor and ceiling.
+              </div>
+            </div>
             <div style="padding:6px 8px;background:rgba(232,66,26,.07);border:1px solid rgba(232,66,26,.2);border-radius:5px;font-size:9px;color:var(--muted);line-height:1.5;">
               Requires <span style="color:var(--accent2);font-weight:600;">WIN</span>, <span style="color:var(--accent2);font-weight:600;">TOP5</span>, <span style="color:var(--accent2);font-weight:600;">TOP10</span> odds and <span style="color:var(--accent2);font-weight:600;">Grid</span> mapped. <span style="color:var(--accent2);font-weight:600;">Proj Finish</span> recommended.
             </div>
@@ -1562,8 +1576,10 @@ function slateFieldsBase(slate){
   if(cm.top5)   f.push({key:'top5',  label:'Top5',  cls:'col-r'});
   if(cm.top10)  f.push({key:'top10', label:'Top10', cls:'col-r'});
   // Show sim-derived p50 projection for NASCAR slates after sims have been run
-  if(slate.sport==='nascar' && (slate.players||[]).some(p=>p._simP50!=null))
-    f.push({key:'_simP50', label:'Sim', cls:'col-r'});
+  if(slate.sport==='nascar' && (slate.players||[]).some(p=>p._simP50!=null)){
+    const simLabel = (slate._nascarSimOpt==='gpp') ? 'SIM★' : 'Sim';
+    f.push({key:'_simP50', label:simLabel, cls:'col-r'});
+  }
   // UFC sim score shown left of salary column — not in right fields
   if(cm.cut)    f.push({key:'cut',   label:'Cut',   cls:'col-r'});
   f.push({key:'minExp', label:'Min%', cls:'col-c', inline:true});
@@ -1687,7 +1703,11 @@ function renderSlate(){
   if(uab) uab.style.display=nh>0?'':'none';
   renderPool(); renderLineup(); renderSaved(); renderExposure(); renderGroups(); renderGroupRulesSummary(); refreshSimInputsTab();
 
-  // Restore persisted NASCAR track type and laps after render
+  // Restore persisted NASCAR track type, laps, and sim opt mode after render
+  if(slate.sport==='nascar' && slate._nascarSimOpt){
+    const optBtn = document.getElementById(slate._nascarSimOpt === 'gpp' ? 'simOptGPP' : 'simOptMedian');
+    if(optBtn) setNascarSimOpt(slate._nascarSimOpt, optBtn);
+  }
   if(slate.sport==='nascar' && slate._nascarTrackType){
     const typeToLaps = {road:'100', intermediate:'300', short:'500', superspeedway:'188'};
     const targetLaps = typeToLaps[slate._nascarTrackType];
@@ -1975,13 +1995,14 @@ function renderPool(){
           return renderOddsCell(p[f.key], f.cls, slate, f.key);
         }
         if(f.key==='_simP50'){
-          const sv = p._simP50;
-          if(sv==null) return `<div class="cell-mono ${f.cls}" style="color:var(--muted)">—</div>`;
+          if(p._simP50==null) return `<div class="cell-mono ${f.cls}" style="color:var(--muted)">—</div>`;
+          // Display composite score (median or GPP depending on mode)
+          const displayVal = (p._simComposite!=null) ? p._simComposite : p._simP50;
           const hasDist = p._simDist != null;
           if(hasDist){ window._simDistMap = window._simDistMap||{}; window._simDistMap[p.id] = p._simDist; }
           return `<div class="cell-mono ${f.cls}" style="color:var(--green);${hasDist?'cursor:default;':''}"
             ${hasDist ? `onmouseenter="showSimTooltipById(this,'${p.id}')" onmouseleave="hideSimTooltip()"` : ''}
-          >${sv.toFixed(1)}</div>`;
+          >${displayVal.toFixed(1)}</div>`;
         }
         if(f.key==='rating'){
           const rv=parseFloat(p.rating);
@@ -2880,6 +2901,19 @@ function switchGenMode(mode){
 
 function toggleNascarSimMode(){
   // Legacy toggle — now handled by switchGenMode
+}
+
+function setNascarSimOpt(mode, btn){
+  document.querySelectorAll('#simOptMedian,#simOptGPP').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const slate = activeSlate();
+  if(slate){ slate._nascarSimOpt = mode; save(); }
+  const desc = document.getElementById('simOptDesc');
+  if(desc){
+    desc.textContent = mode === 'gpp'
+      ? 'GPP Composite (0.15×P50 + 0.30×P75 + 0.55×P90): ceiling-skewed, rewards high-upside plays.'
+      : 'Median (P50): balanced, equal weight to floor and ceiling.';
+  }
 }
 
 function setNascarTrack(type, btn){
@@ -3984,10 +4018,13 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
 
     // Composite: floor (avg) + consistency bridge (p75) + ceiling (p90)
     // equally split between floor and ceiling, p75 as the bridge.
-    const composite = (avg*0.40 + p75*0.30 + p90*0.30) * (1 - ownPenalty);
+    // composite is always stored for both modes — caller picks which to use
+    const medianComposite = p50;
+    const gppComposite    = (p50*0.15 + p75*0.30 + p90*0.55) * (1 - ownPenalty);
+    const composite = gppComposite; // passed through; caller selects mode
 
     const dist = buildSimDist(simScores[i], 'nascar');
-    return { player:p, avg, p50, p75, p90, composite, dist };
+    return { player:p, avg, p50, p75, p90, composite, medianComposite, gppComposite, dist };
   });
 }
 
@@ -4039,11 +4076,14 @@ async function runNascarSimGen(){
 
   // Step 1: run sims, get composite scores
   const simResults = runNascarSims(fullField, numSims, totalLaps, trackType);
+  // Pick composite mode from slate setting (default: median)
+  const simOptMode = slate._nascarSimOpt || 'median';
   simResults.forEach(r=>{
     r.player._simP50       = r.p50!=null ? Math.round(r.p50*10)/10 : null;
-    r.player._simComposite = r.composite;
+    r.player._simComposite = simOptMode === 'gpp' ? r.gppComposite : r.medianComposite;
     r.player._simDist      = r.dist || null;
   });
+  log(`Sim mode: ${simOptMode === 'gpp' ? 'GPP Composite (0.15×P50 + 0.30×P75 + 0.55×P90)' : 'Median (P50)'}`);
   if(typeof renderPool==='function') renderPool();
   log(`Sim scores ready. Building lineups...`);
   await new Promise(r=>setTimeout(r,0));
@@ -4863,8 +4903,9 @@ function renderPreviewLineupsList(){
     const dir = previewSortDir === 'asc' ? 1 : -1; // desc = -1 (b-a), asc = 1 (a-b)
     allLineups = [...allLineups].sort((a, b) => {
       if(previewSortMode === 'sim'){
-        const sa = a.every(p=>p._simP50!=null) ? a.reduce((s,p)=>s+(p._simP50||0),0) : -Infinity;
-        const sb = b.every(p=>p._simP50!=null) ? b.reduce((s,p)=>s+(p._simP50||0),0) : -Infinity;
+        // Sort by composite (whichever mode was used to build)
+        const sa = a.every(p=>p._simP50!=null) ? a.reduce((s,p)=>s+(p._simComposite||p._simP50||0),0) : -Infinity;
+        const sb = b.every(p=>p._simP50!=null) ? b.reduce((s,p)=>s+(p._simComposite||p._simP50||0),0) : -Infinity;
         return dir * (sa - sb);
       }
       if(previewSortMode === 'proj'){
@@ -4895,7 +4936,7 @@ function renderPreviewLineupsList(){
     const proj=lineup.reduce((s,p)=>s+(parseFloat(p.proj)||0),0);
     const rtg=lineup.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
     const simTotal = lineup.every(p=>p._simP50!=null)
-      ? lineup.reduce((s,p)=>s+(p._simP50||0),0) : null;
+      ? lineup.reduce((s,p)=>s+(p._simComposite||p._simP50||0),0) : null;
     const ownTotal = lineup.reduce((s,p)=>s+(parseFloat(p.own)||0),0);
     const stats=[];
     if(hasProj)stats.push(`<span class="preview-stat"><span class="preview-stat-lbl">Proj</span>${proj.toFixed(2)}</span>`);
@@ -4963,7 +5004,7 @@ function renderPreviewExposure(){
   const avgRtg = hasRtg ? (selectedLineups.reduce((s,l)=>s+l.filter(p=>p.rating!=null).reduce((s2,p)=>s2+(parseFloat(p.rating)||0),0),0)/total).toFixed(1) : null;
   const avgSal = (selectedLineups.reduce((s,l)=>s+l.reduce((s2,p)=>s2+(p.salary||0),0),0)/total);
   const hasSimScores = selectedLineups.some(l=>l.some(p=>p._simP50!=null));
-  const avgSim = hasSimScores ? (selectedLineups.reduce((s,l)=>s+l.reduce((s2,p)=>s2+(p._simP50||0),0),0)/total).toFixed(1) : null;
+  const avgSim = hasSimScores ? (selectedLineups.reduce((s,l)=>s+l.reduce((s2,p)=>s2+(p._simComposite||p._simP50||0),0),0)/total).toFixed(1) : null;
 
   const statsHTML = `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;padding:7px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;">
     <div style="font-family:'Bebas Neue',sans-serif;font-size:11px;letter-spacing:.8px;color:var(--muted);margin-bottom:2px;">Lineup Set Averages</div>
