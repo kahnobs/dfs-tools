@@ -1280,8 +1280,8 @@ const AUTO_MAP = {
   name:   /^(name|player|driver|golfer|fighter)$/i,
   salary: /^(salary|sal)$/i,
   id:     /^(id|playerid|player[\s_]?id|name \+ id|dkid|dfs[\s_]?id)$/i,
-  proj:   /^(avg[\s_]?proj|average[\s_]?proj|proj|projection|fpts?|fantasy|my[\s_]?proj|avgpointspergame|avg[\s_]?pts|ss[\s_]?proj)$/i,
-  own:    /^(avg[\s_]?own|average[\s_]?own|own|ownership|own ?%|my[\s_]?own|ss[\s_]?own)$/i,
+  proj:   /^(proj|projection|fpts?|fantasy|my[\s_]?proj|avgpointspergame|avg[\s_]?pts|ss[\s_]?proj)$/i,
+  own:    /^(own|ownership|own ?%|my[\s_]?own|ss[\s_]?own)$/i,
   rating: /^(rating|rtg|score|(average[\s_]?)?rating)$/i,
   start:  /^(start|seed|rank|pos|position|start[\s_]?pos|starting[\s_]?position|grid[\s_]?pos|starting[\s_]?pos|grid|tee|tee[\s_]?time|teetime|fight[\s_]?#?|fight[\s_]?num)$/i,
   team:   /^(team|teamabbrev|matchup|game)$/i,
@@ -1298,7 +1298,29 @@ const AUTO_MAP = {
   projFinish: /^(proj[\s_]?finish|projected[\s_]?finish|finish[\s_]?proj|proj[\s_]?pos|projected[\s_]?pos)$/i,
 };
 
-const GROUP_COLORS = ['#f5c518','#e8421a','#22c55e','#3b82f6','#a855f7','#f97316','#ec4899','#14b8a6'];
+// Columns that should win over normal AUTO_MAP matches when present.
+// Scanned first — if a header matches here it claims the role before the normal pass runs.
+const PRIORITY_MAP = {
+  proj: /^(avg[\s_]?proj|average[\s_]?proj)$/i,
+  own:  /^(avg[\s_]?own|average[\s_]?own)$/i,
+};
+
+// Two-pass auto-mapper: priority columns (Average Proj/Own) are claimed first,
+// then normal AUTO_MAP fills in anything not yet assigned.
+function applyAutoMap(headers, mapping) {
+  // Pass 1: priority matches
+  headers.forEach((h, i) => {
+    for(const [role, rx] of Object.entries(PRIORITY_MAP)){
+      if(rx.test(h.trim()) && mapping[role] == null){ mapping[role] = i; break; }
+    }
+  });
+  // Pass 2: normal matches (skip roles already claimed by priority pass)
+  headers.forEach((h, i) => {
+    for(const [role, rx] of Object.entries(AUTO_MAP)){
+      if(rx.test(h.trim()) && mapping[role] == null){ mapping[role] = i; break; }
+    }
+  });
+} = ['#f5c518','#e8421a','#22c55e','#3b82f6','#a855f7','#f97316','#ec4899','#14b8a6'];
 
 let slates = [];
 let activeSlateId = null;
@@ -5273,11 +5295,7 @@ function autoMapColumns(sport){
   // Mirror exactly what processFile() does after parsing:
   // 1. Reset colMapping, 2. Auto-detect via AUTO_MAP, 3. Build mapper UI
   colMapping = {};
-  parsedCSV.headers.forEach((h, i) => {
-    for(const [role, rx] of Object.entries(AUTO_MAP)){
-      if(rx.test(h.trim()) && colMapping[role] == null){ colMapping[role] = i; break; }
-    }
-  });
+  applyAutoMap(parsedCSV.headers, colMapping);
   document.getElementById('mapperSection').style.display = 'block';
   buildMapper();
 }
@@ -5454,10 +5472,7 @@ function processFile(file){
     parsedCSV.headers=parse(lines[0]);
     parsedCSV.rows=lines.slice(1).filter(l=>l.trim()).map(l=>parse(l));
     colMapping={};
-    // auto-detect
-    parsedCSV.headers.forEach((h,i)=>{
-      for(const[role,rx]of Object.entries(AUTO_MAP)){if(rx.test(h.trim())&&colMapping[role]==null){colMapping[role]=i;break;}}
-    });
+    applyAutoMap(parsedCSV.headers, colMapping);
     buildMapper();
   };
   reader.readAsText(file);
@@ -5770,13 +5785,9 @@ function handleUpdatePoolFile(file){
     }).filter(r=>r.some(c=>c));
     updateParsedCSV = {headers, rows};
 
-    // Auto-map using same AUTO_MAP patterns
+    // Auto-map using priority + normal pass
     updateColMapping = {};
-    headers.forEach((h,i)=>{
-      for(const[role,rx] of Object.entries(AUTO_MAP)){
-        if(rx.test(h.trim()) && updateColMapping[role]==null){ updateColMapping[role]=i; break; }
-      }
-    });
+    applyAutoMap(headers, updateColMapping);
 
     document.getElementById('updatePoolStatus').textContent = `Loaded ${rows.length} rows, ${headers.length} columns.`;
     document.getElementById('updatePoolDropZone').style.display='none';
