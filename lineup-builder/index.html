@@ -1265,7 +1265,13 @@ const OPTIONAL_ROLES = [
   {value:'top3',       label:'Top 3 Odds'},
   {value:'top5',       label:'Top 5 Odds'},
   {value:'top10',      label:'Top 10 Odds'},
+  {value:'top20',      label:'Top 20 Odds'},
+  {value:'top40',      label:'Top 40 Odds'},
   {value:'cut',        label:'Make Cut Odds'},
+  {value:'ssProj',     label:'SS Proj'},
+  {value:'ssOwn',      label:'SS Own'},
+  {value:'rrgProj',    label:'RRG Proj'},
+  {value:'rrgOwn',     label:'RRG Own'},
   {value:'projFinish', label:'Projected Finish (NASCAR)'},
 ];
 const ALL_ROLES = [...REQUIRED_ROLES, ...OPTIONAL_ROLES];
@@ -1274,8 +1280,8 @@ const AUTO_MAP = {
   name:   /^(name|player|driver|golfer|fighter)$/i,
   salary: /^(salary|sal)$/i,
   id:     /^(id|playerid|player[\s_]?id|name \+ id|dkid|dfs[\s_]?id)$/i,
-  proj:   /^(proj|projection|fpts?|fantasy|my[\s_]?proj|avgpointspergame|avg[\s_]?pts|ss[\s_]?proj)$/i,
-  own:    /^(own|ownership|own ?%|my[\s_]?own|ss[\s_]?own)$/i,
+  proj:   /^(avg[\s_]?proj|average[\s_]?proj|proj|projection|fpts?|fantasy|my[\s_]?proj|avgpointspergame|avg[\s_]?pts|ss[\s_]?proj)$/i,
+  own:    /^(avg[\s_]?own|average[\s_]?own|own|ownership|own ?%|my[\s_]?own|ss[\s_]?own)$/i,
   rating: /^(rating|rtg|score|(average[\s_]?)?rating)$/i,
   start:  /^(start|seed|rank|pos|position|start[\s_]?pos|starting[\s_]?position|grid[\s_]?pos|starting[\s_]?pos|grid|tee|tee[\s_]?time|teetime|fight[\s_]?#?|fight[\s_]?num)$/i,
   team:   /^(team|teamabbrev|matchup|game)$/i,
@@ -1286,6 +1292,8 @@ const AUTO_MAP = {
   top3:   /^(top[\s_]?3([\s_]?odds?)?|t3)$/i,
   top5:   /^(top[\s_]?5([\s_]?odds?)?|t5)$/i,
   top10:  /^(top[\s_]?10([\s_]?odds?)?|t10)$/i,
+  top20:  /^(top[\s_]?20([\s_]?odds?)?|t20)$/i,
+  top40:  /^(top[\s_]?40([\s_]?odds?)?|t40)$/i,
   cut:        /^(cut|make[\s_]?cut|make[\s_]?the[\s_]?cut)$/i,
   projFinish: /^(proj[\s_]?finish|projected[\s_]?finish|finish[\s_]?proj|proj[\s_]?pos|projected[\s_]?pos)$/i,
 };
@@ -1561,6 +1569,8 @@ function slateFieldsBase(slate){
   if(cm.top3)   f.push({key:'top3',  label:'Top3',  cls:'col-r'});
   if(cm.top5)   f.push({key:'top5',  label:'Top5',  cls:'col-r'});
   if(cm.top10)  f.push({key:'top10', label:'Top10', cls:'col-r'});
+  if(cm.top20)  f.push({key:'top20', label:'Top20', cls:'col-r'});
+  if(cm.top40)  f.push({key:'top40', label:'Top40', cls:'col-r'});
   // Show sim-derived p50 projection for NASCAR slates after sims have been run
   if(slate.sport==='nascar' && (slate.players||[]).some(p=>p._simP50!=null))
     f.push({key:'_simP50', label:'Sim', cls:'col-r'});
@@ -1610,7 +1620,7 @@ function gridTemplate(fields){
   fields.forEach(f=>{
     if(f.key==='proj')  cols.push('56px');
     else if(f.key==='value') cols.push('38px');
-    else if(f.key==='ml'||f.key==='itd'||f.key==='win'||f.key==='top3'||f.key==='top5'||f.key==='top10'||f.key==='cut') cols.push('48px');
+    else if(f.key==='ml'||f.key==='itd'||f.key==='win'||f.key==='top3'||f.key==='top5'||f.key==='top10'||f.key==='top20'||f.key==='top40'||f.key==='cut') cols.push('48px');
     else if(f.key==='minExp'||f.key==='maxExp') cols.push('50px');
     else cols.push(f.key==='team'?'56px':'44px');
   });
@@ -1822,7 +1832,7 @@ function getSortedPlayers(){
         if(aVal !== bVal) return dir*(aVal - bVal);
         return (b.salary||0) - (a.salary||0);
       }
-      if(sortKey==='ml'||sortKey==='itd'||sortKey==='win'||sortKey==='top3'||sortKey==='top5'||sortKey==='top10'||sortKey==='cut'){
+      if(sortKey==='ml'||sortKey==='itd'||sortKey==='win'||sortKey==='top3'||sortKey==='top5'||sortKey==='top10'||sortKey==='top20'||sortKey==='top40'||sortKey==='cut'){
         const pa=impliedProb(a[sortKey])||0;
         const pb=impliedProb(b[sortKey])||0;
         return dir*(pb-pa);
@@ -1971,7 +1981,7 @@ function renderPool(){
            </div>
          </div>`;
        }
-        if(f.key==='ml'||f.key==='itd'||f.key==='win'||f.key==='top3'||f.key==='top5'||f.key==='top10'||f.key==='cut'){
+        if(f.key==='ml'||f.key==='itd'||f.key==='win'||f.key==='top3'||f.key==='top5'||f.key==='top10'||f.key==='top20'||f.key==='top40'||f.key==='cut'){
           return renderOddsCell(p[f.key], f.cls, slate, f.key);
         }
         if(f.key==='_simP50'){
@@ -5330,6 +5340,8 @@ async function refreshFromSheet(){
       if(colMap.top3!=null)  p.top3  = getStr(row,'top3');
       if(colMap.top5!=null)  p.top5  = getStr(row,'top5');
       if(colMap.top10!=null) p.top10 = getStr(row,'top10');
+      if(colMap.top20!=null) p.top20 = getStr(row,'top20');
+      if(colMap.top40!=null) p.top40 = getStr(row,'top40');
       if(colMap.rating!=null)p.rating= parseFloat(row[colMap.rating])||null;
       // UFC odds — re-read by header name
       if(slate.sport==='ufc'){
@@ -5596,6 +5608,8 @@ function createSlate(){
     if(colMapping.top3!=null)  p.top3=(row[colMapping.top3]||'').trim();
     if(colMapping.top5!=null)  p.top5=(row[colMapping.top5]||'').trim();
     if(colMapping.top10!=null) p.top10=(row[colMapping.top10]||'').trim();
+    if(colMapping.top20!=null) p.top20=(row[colMapping.top20]||'').trim();
+    if(colMapping.top40!=null) p.top40=(row[colMapping.top40]||'').trim();
     if(colMapping.projFinish!=null) p.projFinish=parseInt(row[colMapping.projFinish])||null;
     if(colMapping.cut!=null)   p.cut=(row[colMapping.cut]||'').trim();
 
@@ -5787,6 +5801,8 @@ function renderUpdatePoolMapper(){
     win:   {label:'Win Odds',     required:false},
     top5:  {label:'Top 5 Odds',   required:false},
     top10: {label:'Top 10 Odds',  required:false},
+    top20: {label:'Top 20 Odds',  required:false},
+    top40: {label:'Top 40 Odds',  required:false},
     cut:   {label:'Make Cut Odds',required:false},
   };
 
@@ -5874,6 +5890,8 @@ function applyPoolUpdate(){
     if(cm.top3!=null)  p.top3=(row[cm.top3]||'').trim();
     if(cm.top5!=null)  p.top5=(row[cm.top5]||'').trim();
     if(cm.top10!=null) p.top10=(row[cm.top10]||'').trim();
+    if(cm.top20!=null) p.top20=(row[cm.top20]||'').trim();
+    if(cm.top40!=null) p.top40=(row[cm.top40]||'').trim();
     if(cm.projFinish!=null) p.projFinish=parseInt(row[cm.projFinish])||null;
     if(cm.cut!=null)   p.cut=(row[cm.cut]||'').trim();
     delete newDataByName[key]; // mark consumed
@@ -5898,6 +5916,8 @@ function applyPoolUpdate(){
     if(cm.top3!=null)  p.top3=(row[cm.top3]||'').trim();
     if(cm.top5!=null)  p.top5=(row[cm.top5]||'').trim();
     if(cm.top10!=null) p.top10=(row[cm.top10]||'').trim();
+    if(cm.top20!=null) p.top20=(row[cm.top20]||'').trim();
+    if(cm.top40!=null) p.top40=(row[cm.top40]||'').trim();
     if(cm.projFinish!=null) p.projFinish=parseInt(row[cm.projFinish])||null;
     if(cm.cut!=null)   p.cut=(row[cm.cut]||'').trim();
     slate.players.push(p);
