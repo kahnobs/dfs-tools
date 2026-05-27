@@ -1320,7 +1320,9 @@ function applyAutoMap(headers, mapping) {
       if(rx.test(h.trim()) && mapping[role] == null){ mapping[role] = i; break; }
     }
   });
-} = ['#f5c518','#e8421a','#22c55e','#3b82f6','#a855f7','#f97316','#ec4899','#14b8a6'];
+}
+
+const GROUP_COLORS = ['#f5c518','#e8421a','#22c55e','#3b82f6','#a855f7','#f97316','#ec4899','#14b8a6'];
 
 let slates = [];
 let activeSlateId = null;
