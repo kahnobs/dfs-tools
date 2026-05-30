@@ -3098,8 +3098,19 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
   if(ssCDF){
     ss = Math.max(0, Math.round(ssCDF(ssCap)));
   } else {
-    const baseSS = 35 + tier * 45;
-    ss = Math.round(baseSS * (ssCap/130) * (0.5 + Math.random() * 0.9));
+    // Fallback: use SS O/U line as the distribution anchor if available,
+    // otherwise fall back to salary-tier estimate.
+    // The O/U line is the market's expected SS count — treat it as the mean
+    // of a right-skewed distribution, scaled by available fight time.
+    let baseSS;
+    if(fighter.ss_ou){
+      const ouLine = parseFloat(fighter.ss_ou); // e.g. "35.5 (-130)" → 35.5
+      baseSS = isNaN(ouLine) ? (35 + tier * 45) : ouLine;
+    } else {
+      baseSS = 35 + tier * 45;
+    }
+    ss = Math.round(baseSS * (ssCap / 130) * (0.5 + Math.random() * 0.9));
+    ss = Math.max(0, Math.min(ssCap, ss));
   }
 
   // Sample takedowns capped by duration
@@ -3107,7 +3118,18 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
   if(tdCDF){
     td = Math.max(0, Math.round(tdCDF(tdCap)));
   } else {
-    td = Math.round(tier * 3 * (tdCap/10) * Math.random());
+    // Fallback: use TD O/U line as the anchor if available.
+    // The O/U line number (e.g. 1.5 from "1.5 (-115)") is the market's expected
+    // TD count — use it to scale the distribution rather than relying on salary tier.
+    let baseTD;
+    if(fighter.td_ou){
+      const ouLine = parseFloat(fighter.td_ou); // e.g. "1.5 (-115)" → 1.5
+      baseTD = isNaN(ouLine) ? (tier * 3) : ouLine;
+    } else {
+      baseTD = tier * 3;
+    }
+    td = Math.round(baseTD * (tdCap / 10) * (0.4 + Math.random() * 0.9));
+    td = Math.max(0, Math.min(tdCap, td));
   }
 
   // Control time derived from takedowns: each TD averages ~45-90s of control
@@ -5375,6 +5397,8 @@ async function refreshFromSheet(){
         ssKeys.forEach(k=>{ p['ss_'+k]=getN(`SS_${k}plus`); });
         const tdKeys=['1','2','3','4','5','6'];
         tdKeys.forEach(k=>{ p['td_'+k]=getN(`TD_${k}plus`); });
+        p.ss_ou=get('SS O/U')||null;
+        p.td_ou=get('TD O/U')||null;
       }
     });
 
@@ -5503,6 +5527,7 @@ function buildMapper(){
     'ss_55plus','ss_60plus','ss_65plus','ss_70plus','ss_75plus','ss_80plus','ss_85plus','ss_90plus',
     'ss_95plus','ss_100plus','ss_105plus','ss_110plus','ss_115plus','ss_120plus','ss_125plus',
     'td_1plus','td_2plus','td_3plus','td_4plus','td_5plus','td_6plus',
+    'ss o/u','td o/u',
   ]);
   const isUFCUpload = document.getElementById('slateSport')?.value === 'ufc';
 
@@ -5666,6 +5691,8 @@ function createSlate(){
       p.td_4 = getNum('TD_4plus');
       p.td_5 = getNum('TD_5plus');
       p.td_6 = getNum('TD_6plus');
+      p.ss_ou = get('SS O/U') || null;
+      p.td_ou = get('TD O/U') || null;
     }
 
     players.push(p);
