@@ -3187,14 +3187,39 @@ function buildFightPairs(pool){
 // Given per-fighter scores for one sim, greedily pick the best 6-fighter lineup
 // within salary cap, respecting group rules and no-oppose setting.
 function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
-  // Branch-and-bound knapsack: finds the true optimal 6-fighter combo,
-  // not just the greedy top-scorers-first selection.
   const candidates = pool
     .map(p=>({p, score: simScore[p.id]||0, sal: p.salary||0}))
     .sort((a,b)=>b.score-a.score);
 
   const hasGroups = groups && groups.length > 0;
-  const NODE_LIMIT = 8000;
+
+  // Pre-satisfy minimum group requirements before searching.
+  // For each group with ruleMin > 0, find the top-scoring group members
+  // and lock them as required starters. This ensures the search always
+  // starts from a valid base rather than wasting nodes on invalid branches.
+  const locked = []; // candidates that must be in every lineup
+  const lockedIds = new Set();
+  if(hasGroups){
+    for(const g of groups){
+      const min = g.ruleMin || 0;
+      if(min <= 0) continue;
+      const groupMembers = candidates.filter(c => (g.playerIds||[]).includes(c.p.id));
+      // Already have enough locked from this group?
+      const alreadyInGroup = locked.filter(c => (g.playerIds||[]).includes(c.p.id)).length;
+      const need = min - alreadyInGroup;
+      if(need <= 0) continue;
+      // Pick top-scoring group members not already locked
+      const toAdd = groupMembers.filter(c => !lockedIds.has(c.p.id)).slice(0, need);
+      toAdd.forEach(c => { locked.push(c); lockedIds.add(c.p.id); });
+    }
+  }
+
+  // Build initial chosen array from locked players
+  const initChosen = [...locked];
+  const initSal = initChosen.reduce((s,c)=>s+c.sal, 0);
+  if(initSal > salaryCap) return null; // locked players alone exceed cap
+
+  const NODE_LIMIT = 12000;
   let nodes = 0;
   let bestScore = -Infinity;
   let bestLineup = null;
@@ -3202,7 +3227,9 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
   function upperBound(idx, slots, salLeft, curScore){
     let score=curScore, s=slots;
     for(let i=idx; i<candidates.length && s>0; i++){
-      if(candidates[i].sal<=salLeft){ score+=candidates[i].score; s--; }
+      if(!lockedIds.has(candidates[i].p.id) && candidates[i].sal<=salLeft){
+        score+=candidates[i].score; s--;
+      }
     }
     return score;
   }
@@ -3211,8 +3238,7 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
     if(nodes >= NODE_LIMIT) return;
     nodes++;
     if(chosen.length===6){
-      const sal=salUsed;
-      if(sal>=(minSal||0) && sal<=salaryCap){
+      if(salUsed>=(minSal||0) && salUsed<=salaryCap){
         if(!hasGroups || checkGroupRules(chosen)){
           if(curScore>bestScore){ bestScore=curScore; bestLineup=chosen.map(c=>c.p); }
         }
@@ -3220,12 +3246,13 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
       return;
     }
     const slotsLeft=6-chosen.length;
-    if(candidates.length-idx<slotsLeft) return;
+    if(candidates.length-idx < slotsLeft) return;
     if(upperBound(idx,slotsLeft,salaryCap-salUsed,curScore)<=bestScore) return;
 
     for(let i=idx; i<candidates.length; i++){
       if(nodes >= NODE_LIMIT) return;
       const c=candidates[i];
+      if(lockedIds.has(c.p.id)) continue; // already in chosen via locked
       if(noOppose){
         const conflict=chosen.some(x=>x.p.opp===c.p.name||(c.p.opp&&c.p.opp===x.p.name));
         if(conflict) continue;
@@ -3236,6 +3263,7 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
       if(slotsAfter>0){
         let cheapSum=0, cheapCount=0;
         for(let j=i+1; j<candidates.length && cheapCount<slotsAfter; j++){
+          if(lockedIds.has(candidates[j].p.id)) continue;
           if(!noOppose || !chosen.some(x=>x.p.opp===candidates[j].p.name||(candidates[j].p.opp&&candidates[j].p.opp===x.p.name))){
             cheapSum+=candidates[j].sal; cheapCount++;
           }
@@ -3248,11 +3276,17 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
     }
   }
 
-  search(0, [], 0, 0);
+  // Start search from locked base
+  const lockedScore = initChosen.reduce((s,c)=>s+c.score, 0);
+  search(0, [...initChosen], initSal, lockedScore);
+
+  // Greedy fallback: satisfies both min and max group rules
   if(!bestLineup){
-    const lineup=[]; let salUsed=0;
+    const lineup = [...initChosen];
+    let salUsed = initSal;
     for(const c of candidates){
       if(lineup.length===6) break;
+      if(lockedIds.has(c.p.id)) continue;
       if(noOppose&&lineup.some(x=>x.p.opp===c.p.name||(c.p.opp&&c.p.opp===x.p.name))) continue;
       if(salUsed+c.sal>salaryCap) continue;
       lineup.push(c); salUsed+=c.sal;
