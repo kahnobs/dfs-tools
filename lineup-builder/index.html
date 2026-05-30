@@ -2894,7 +2894,7 @@ function stepRule(gid, field, delta){
 }
 
 // Current gen mode: 'optimize' or 'simulate'
-let _genMode = 'optimize';
+let _genMode = 'simulate';
 
 function switchGenMode(mode){
   _genMode = mode;
@@ -3363,7 +3363,7 @@ async function runUFCSimGen(){
 
   if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return; }
 
-  const {ranked, medianScoreById, winProb, totalSims} = runUFCSimsNew(
+  const {ranked, medianScoreById, distById, winProb, totalSims} = runUFCSimsNew(
     pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal
   );
 
