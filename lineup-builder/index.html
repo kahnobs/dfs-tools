@@ -2953,9 +2953,6 @@ function vigRemovedWinProb(mlA, mlB){
 // Given a fighter's alternate lines [{threshold, prob}], fit a discrete CDF.
 // Returns a sampler function that draws a value, optionally capped by maxVal (duration constraint).
 function buildCDF(points, ouLine){
-  // ouLine: optional O/U anchor. When the first alternate threshold is much higher
-  // than the O/U line (e.g. Menifield SS O/U=18.5 but first line at 55+),
-  // the below-threshold region samples around the O/U line instead of uniformly.
   if(!points || points.length === 0) return null;
   points = points.slice().sort((a,b)=>a.threshold - b.threshold);
   const buckets = [];
@@ -2974,9 +2971,7 @@ function buildCDF(points, ouLine){
     const r = Math.random() * total;
     if(r < belowMass){
       const cap = maxVal != null ? Math.min(points[0].threshold, maxVal) : points[0].threshold;
-      if(useAnchor){
-        return Math.min(cap, ouLine * (0.6 + Math.random() * 0.8));
-      }
+      if(useAnchor) return Math.min(cap, ouLine * (0.6 + Math.random() * 0.8));
       return Math.random() * cap;
     }
     let acc = belowMass;
@@ -3192,6 +3187,8 @@ function buildFightPairs(pool){
 // Given per-fighter scores for one sim, greedily pick the best 6-fighter lineup
 // within salary cap, respecting group rules and no-oppose setting.
 function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
+  // Branch-and-bound knapsack: finds the true optimal 6-fighter combo,
+  // not just the greedy top-scorers-first selection.
   const candidates = pool
     .map(p=>({p, score: simScore[p.id]||0, sal: p.salary||0}))
     .sort((a,b)=>b.score-a.score);
@@ -3252,21 +3249,17 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
   }
 
   search(0, [], 0, 0);
-
   if(!bestLineup){
-    const lineup = [];
-    let salUsed = 0;
+    const lineup=[]; let salUsed=0;
     for(const c of candidates){
-      if(lineup.length === 6) break;
-      if(noOppose && lineup.some(x=>x.p.opp===c.p.name||(c.p.opp&&c.p.opp===x.p.name))) continue;
-      if(salUsed + c.sal > salaryCap) continue;
-      lineup.push(c);
-      salUsed += c.sal;
-      if(hasGroups && !checkGroupRules(lineup)){ lineup.pop(); salUsed -= c.sal; }
+      if(lineup.length===6) break;
+      if(noOppose&&lineup.some(x=>x.p.opp===c.p.name||(c.p.opp&&c.p.opp===x.p.name))) continue;
+      if(salUsed+c.sal>salaryCap) continue;
+      lineup.push(c); salUsed+=c.sal;
+      if(hasGroups&&!checkGroupRules(lineup)){lineup.pop();salUsed-=c.sal;}
     }
-    if(lineup.length === 6 && salUsed >= (minSal||0)) bestLineup = lineup.map(c=>c.p);
+    if(lineup.length===6&&salUsed>=(minSal||0)) bestLineup=lineup.map(c=>c.p);
   }
-
   return bestLineup;
 }
 
@@ -3339,7 +3332,6 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     }
   }
 
-  // Compute per-fighter score stats and distribution (visible only)
   const medianScoreById = {};
   const distById = {};
   visiblePool.forEach(p=>{
@@ -3348,11 +3340,10 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     distById[p.id] = buildSimDist(fighterAllScores[p.id], 'ufc');
   });
 
-  // Rank lineups by composite: 0.4×P80 + 0.35×avg + 0.25×P20
   const ranked = Array.from(lineupFreq.values()).map(e => {
-    const sorted = e.scores.slice().sort((a,b)=>a-b);
-    e.p80      = sorted[Math.min(Math.floor(sorted.length*0.80), sorted.length-1)] || 0;
-    e.p20      = sorted[Math.max(Math.floor(sorted.length*0.20), 0)] || 0;
+    const s = e.scores.slice().sort((a,b)=>a-b);
+    e.p80 = s[Math.min(Math.floor(s.length*0.80), s.length-1)] || 0;
+    e.p20 = s[Math.max(Math.floor(s.length*0.20), 0)] || 0;
     e.avgScore = e.totalScore / e.count;
     e.composite = 0.4*e.p80 + 0.35*e.avgScore + 0.25*e.p20;
     return e;
@@ -3407,19 +3398,16 @@ async function runUFCSimGen(){
     fullPool, pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal
   );
 
-  // Store per-fighter composite score (0.4×P80 + 0.35×avg + 0.25×P20) for pool display.
-  // This replaces raw median — composite reflects ceiling-weighted expectation
-  // which is more meaningful for GPP than median alone.
+  // SIM column shows composite score (0.4xP80 + 0.35xavg + 0.25xP20) — ceiling-weighted
   pool.forEach(p=>{
     const arr = fighterAllScores[p.id]?.slice().sort((a,b)=>a-b) || [];
     if(arr.length > 0){
       const p80 = arr[Math.min(Math.floor(arr.length*0.80), arr.length-1)];
       const p20 = arr[Math.max(Math.floor(arr.length*0.20), 0)];
       const avg = arr.reduce((s,v)=>s+v,0) / arr.length;
-      const composite = 0.4*p80 + 0.35*avg + 0.25*p20;
-      p._simP50  = Math.round(composite * 10) / 10;
+      p._simP50 = Math.round((0.4*p80 + 0.35*avg + 0.25*p20) * 10) / 10;
     } else {
-      p._simP50  = medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null;
+      p._simP50 = medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null;
     }
     p._simDist = distById[p.id] || null;
   });
