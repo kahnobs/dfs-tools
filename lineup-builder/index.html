@@ -3246,7 +3246,7 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
 // ── UFC SIMULATION-FIRST ENGINE ───────────────────────────────
 // For each sim: sample fight outcomes → score all fighters → pick optimal lineup.
 // After N sims: aggregate lineup frequencies → select top lineups by count + diversity.
-function runUFCSimsNew(pool, numSims, salaryCap, groups, noOppose, minSal){
+async function runUFCSimsNew(pool, numSims, salaryCap, groups, noOppose, minSal){
   const pairs = buildFightPairs(pool);
 
   // Precompute vig-removed win probs and CDFs.
@@ -3271,7 +3271,12 @@ function runUFCSimsNew(pool, numSims, salaryCap, groups, noOppose, minSal){
   // Lineup frequency map: key → {lineup, count, totalScore}
   const lineupFreq = new Map();
 
+  const CHUNK = 100;
   for(let s=0; s<numSims; s++){
+    if(s > 0 && s % CHUNK === 0){
+      await new Promise(r=>setTimeout(r,0));
+      if(window._genCancelled) break;
+    }
     // Step 1: sample fight outcomes
     const simWinner={}, simRound={};
     pairs.forEach(({a,b})=>{
@@ -3363,7 +3368,7 @@ async function runUFCSimGen(){
 
   if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return; }
 
-  const {ranked, medianScoreById, distById, winProb, totalSims} = runUFCSimsNew(
+  const {ranked, medianScoreById, distById, winProb, totalSims} = await runUFCSimsNew(
     pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal
   );
 
