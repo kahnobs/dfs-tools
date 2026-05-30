@@ -3244,7 +3244,7 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
 
   search(0, [], 0, 0);
 
-  // Greedy fallback if node limit hit before finding valid lineup
+  // Greedy fallback if node limit hit before finding a valid lineup
   if(!bestLineup){
     const lineup = [];
     let salUsed = 0;
@@ -3330,8 +3330,9 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
       const e = lineupFreq.get(key);
       e.count++;
       e.totalScore+=total;
+      e.scores.push(total);
     } else {
-      lineupFreq.set(key, {lineup:optimal, count:1, totalScore:total, key});
+      lineupFreq.set(key, {lineup:optimal, count:1, totalScore:total, scores:[total], key});
     }
   }
 
@@ -3344,9 +3345,17 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     distById[p.id] = buildSimDist(fighterAllScores[p.id], 'ufc');
   });
 
-  // Convert freq map to sorted array
-  const ranked = Array.from(lineupFreq.values())
-    .sort((a,b)=>b.count-a.count || b.totalScore-a.totalScore);
+  // Compute P80 (ceiling score) for each lineup and rank by it.
+  // GPP contests are won by ceiling, not median frequency — a lineup that scores
+  // 220 pts in 8% of sims beats one that scores 140 pts in 25% of sims.
+  // P80 = the score this lineup achieves in its best 20% of appearances.
+  const ranked = Array.from(lineupFreq.values()).map(e => {
+    const sorted = e.scores.slice().sort((a,b)=>a-b);
+    const p80idx = Math.floor(sorted.length * 0.80);
+    e.p80 = sorted[Math.min(p80idx, sorted.length-1)] || 0;
+    e.avgScore = e.totalScore / e.count;
+    return e;
+  }).sort((a,b) => b.p80 - a.p80 || b.count - a.count);
 
   return {ranked, medianScoreById, distById, winProb, totalSims: numSims};
 }
@@ -3444,10 +3453,11 @@ async function runUFCSimGen(){
         if(sim>maxSim) maxSim=sim;
       }
 
-      // Score = frequency (normalized) × diversity penalty
-      // 0.7 weight on frequency, 0.3 on diversity
-      const normFreq = x.count / (ranked[0]?.count||1);
-      const val = 0.7*normFreq + 0.3*(1-maxSim);
+      // Score = P80 ceiling (normalized) + diversity bonus.
+      // Weighting ceiling 70% surfaces lineups with big upside in upset/finish
+      // universes rather than the chalk lineup that wins the most average sims.
+      const normP80 = x.p80 / (ranked[0]?.p80||1);
+      const val = 0.7*normP80 + 0.3*(1-maxSim);
       if(val>bestVal){ bestVal=val; bestIdx=ri; }
     }
 
@@ -3472,7 +3482,7 @@ async function runUFCSimGen(){
     const avgScore = x.totalScore/x.count;
     l._simAvg     = avgScore.toFixed(1);
     l._simWinRate = ((x.count/totalSims)*100).toFixed(1);
-    l._simWinAvg  = avgScore.toFixed(1);
+    l._simWinAvg  = x.p80.toFixed(1);  // show P80 ceiling as the headline score
     return l;
   });
 
