@@ -2952,7 +2952,11 @@ function vigRemovedWinProb(mlA, mlB){
 // ── CDF FITTING ──────────────────────────────────────────────
 // Given a fighter's alternate lines [{threshold, prob}], fit a discrete CDF.
 // Returns a sampler function that draws a value, optionally capped by maxVal (duration constraint).
-function buildCDF(points){
+function buildCDF(points, ouLine){
+  // ouLine: optional O/U line anchor (e.g. 18.5 for Menifield's SS O/U).
+  // When provided, the below-threshold region samples around the O/U line
+  // rather than uniformly from 0 to threshold — this fixes low-volume fighters
+  // whose alternate lines start at 55+ but whose expected output is only ~18.
   if(!points || points.length === 0) return null;
   points = points.slice().sort((a,b)=>a.threshold - b.threshold);
   const buckets = [];
@@ -2966,10 +2970,21 @@ function buildCDF(points){
   const belowMass = Math.max(0, 1 - points[0].prob);
   const total = buckets.reduce((s,b)=>s+b.mass,0) + belowMass;
 
+  // If we have an O/U anchor and the first threshold is well above it,
+  // use the anchor to shape the below-threshold distribution.
+  // Sample as: anchor * (0.6 + random*0.8) — same spread as the fallback formula,
+  // but anchored at the O/U line rather than uniform 0-to-threshold.
+  const useAnchor = ouLine != null && ouLine > 0 && points[0].threshold > ouLine * 1.5;
+
   return function sampleFromCDF(maxVal){
     const r = Math.random() * total;
     if(r < belowMass){
       const cap = maxVal != null ? Math.min(points[0].threshold, maxVal) : points[0].threshold;
+      if(useAnchor){
+        // Anchor-based sample: concentrated around O/U line, capped by fight duration
+        const anchorCap = Math.min(ouLine * 1.8, cap);
+        return Math.min(cap, ouLine * (0.6 + Math.random() * 0.8));
+      }
       return Math.random() * cap;
     }
     let acc = belowMass;
@@ -2995,7 +3010,8 @@ function extractSSCDF(p){
     {threshold:110,ml:p.ss_110},{threshold:115,ml:p.ss_115},{threshold:120,ml:p.ss_120},
     {threshold:125,ml:p.ss_125},
   ].filter(pt=>pt.ml!=null).map(pt=>({threshold:pt.threshold, prob:mlToProb(pt.ml)}));
-  return buildCDF(pts);
+  const ouLine = p.ss_ou ? parseFloat(p.ss_ou) : null;
+  return buildCDF(pts, ouLine);
 }
 
 function extractTDCDF(p){
@@ -3003,7 +3019,8 @@ function extractTDCDF(p){
     {threshold:1,ml:p.td_1},{threshold:2,ml:p.td_2},{threshold:3,ml:p.td_3},
     {threshold:4,ml:p.td_4},{threshold:5,ml:p.td_5},{threshold:6,ml:p.td_6},
   ].filter(pt=>pt.ml!=null).map(pt=>({threshold:pt.threshold, prob:mlToProb(pt.ml)}));
-  return buildCDF(pts);
+  const ouLine = p.td_ou ? parseFloat(p.td_ou) : null;
+  return buildCDF(pts, ouLine);
 }
 
 // ── FIGHT OUTCOME SAMPLER ─────────────────────────────────────
@@ -3339,9 +3356,7 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     distById[p.id] = buildSimDist(fighterAllScores[p.id], 'ufc');
   });
 
-  // Rank by composite score: 0.5×P80 + 0.3×avg + 0.2×P20
-  // Heavily weights ceiling for GPP upside, still rewards consistent scorers,
-  // and penalizes lineups with a terrible floor.
+  // Rank by composite: 0.5×P80 + 0.3×avg + 0.2×P20
   const ranked = Array.from(lineupFreq.values()).map(e => {
     const sorted = e.scores.slice().sort((a,b)=>a-b);
     e.p80      = sorted[Math.min(Math.floor(sorted.length * 0.80), sorted.length-1)] || 0;
@@ -3447,7 +3462,6 @@ async function runUFCSimGen(){
         if(sim>maxSim) maxSim=sim;
       }
 
-      // Score = composite (normalized) + diversity bonus
       const normComposite = x.composite / (ranked[0]?.composite||1);
       const val = 0.7*normComposite + 0.3*(1-maxSim);
       if(val>bestVal){ bestVal=val; bestIdx=ri; }
