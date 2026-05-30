@@ -3334,10 +3334,19 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
 
   const medianScoreById = {};
   const distById = {};
+  const compositeScoreById = {};
   visiblePool.forEach(p=>{
     const arr = fighterAllScores[p.id].slice().sort((a,b)=>a-b);
     medianScoreById[p.id] = arr.length>0 ? arr[Math.floor(arr.length*0.5)] : 0;
     distById[p.id] = buildSimDist(fighterAllScores[p.id], 'ufc');
+    if(arr.length > 0){
+      const p80 = arr[Math.min(Math.floor(arr.length*0.80), arr.length-1)];
+      const p20 = arr[Math.max(Math.floor(arr.length*0.20), 0)];
+      const avg = arr.reduce((s,v)=>s+v,0) / arr.length;
+      compositeScoreById[p.id] = Math.round((0.4*p80 + 0.35*avg + 0.25*p20) * 10) / 10;
+    } else {
+      compositeScoreById[p.id] = medianScoreById[p.id];
+    }
   });
 
   const ranked = Array.from(lineupFreq.values()).map(e => {
@@ -3349,7 +3358,7 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     return e;
   }).sort((a,b) => b.composite - a.composite || b.count - a.count);
 
-  return {ranked, medianScoreById, distById, winProb, totalSims: numSims};
+  return {ranked, medianScoreById, compositeScoreById, distById, winProb, totalSims: numSims};
 }
 
 async function runUFCSimGen(){
@@ -3394,21 +3403,13 @@ async function runUFCSimGen(){
 
   if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return; }
 
-  const {ranked, medianScoreById, distById, winProb, totalSims} = await runUFCSimsNew(
+  const {ranked, medianScoreById, compositeScoreById, distById, winProb, totalSims} = await runUFCSimsNew(
     fullPool, pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal
   );
 
   // SIM column shows composite score (0.4xP80 + 0.35xavg + 0.25xP20) — ceiling-weighted
   pool.forEach(p=>{
-    const arr = fighterAllScores[p.id]?.slice().sort((a,b)=>a-b) || [];
-    if(arr.length > 0){
-      const p80 = arr[Math.min(Math.floor(arr.length*0.80), arr.length-1)];
-      const p20 = arr[Math.max(Math.floor(arr.length*0.20), 0)];
-      const avg = arr.reduce((s,v)=>s+v,0) / arr.length;
-      p._simP50 = Math.round((0.4*p80 + 0.35*avg + 0.25*p20) * 10) / 10;
-    } else {
-      p._simP50 = medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null;
-    }
+    p._simP50 = compositeScoreById[p.id] ?? (medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null);
     p._simDist = distById[p.id] || null;
   });
   if(typeof renderPool==='function') renderPool();
