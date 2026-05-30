@@ -3109,7 +3109,7 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
     } else {
       baseSS = 35 + tier * 45;
     }
-    ss = Math.round(baseSS * (ssCap / 130) * (0.5 + Math.random() * 0.9));
+    ss = Math.round(baseSS * (ssCap / 130) * (0.6 + Math.random() * 0.8));
     ss = Math.max(0, Math.min(ssCap, ss));
   }
 
@@ -3128,7 +3128,7 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
     } else {
       baseTD = tier * 3;
     }
-    td = Math.round(baseTD * (tdCap / 10) * (0.4 + Math.random() * 0.9));
+    td = Math.round(baseTD * (tdCap / 10) * (0.5 + Math.random() * 1.0));
     td = Math.max(0, Math.min(tdCap, td));
   }
 
@@ -3271,11 +3271,11 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
 // For each sim: sample fight outcomes → score all fighters → pick optimal lineup.
 // After N sims: aggregate lineup frequencies → select top lineups by count + diversity.
 async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, noOppose, minSal){
-  // fullPool: all fighters incl. hidden — used for fight pairing and outcome sampling
-  // visiblePool: hidden fighters excluded — used for lineup building and median display
   const pairs = buildFightPairs(fullPool);
 
-  // Precompute vig-removed win probs and CDFs for ALL fighters (incl. hidden).
+  // Precompute vig-removed win probs and CDFs.
+  // vigRemovedWinProb normalizes the two fighters' raw implied probs to sum to 1.0,
+  // removing the book's margin before using them as simulation probabilities.
   const winProb = {};
   pairs.forEach(({a,b})=>{
     const mlA = parseFloat(a.ml)||0, mlB = b?(parseFloat(b.ml)||0):0;
@@ -3288,7 +3288,7 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   const ssCDFById = {}, tdCDFById = {};
   fullPool.forEach(p=>{ ssCDFById[p.id]=extractSSCDF(p); tdCDFById[p.id]=extractTDCDF(p); });
 
-  // Per-fighter score tracking — only for visible players (for median display)
+  // Per-fighter score tracking for median display
   const fighterAllScores = {};
   visiblePool.forEach(p=>{ fighterAllScores[p.id]=[]; });
 
@@ -3310,7 +3310,7 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
       simRound[a.id]=outcome.round; if(b) simRound[b.id]=outcome.round;
     });
 
-    // Step 2: score ALL fighters (incl. hidden) so opponents have correct win/loss context
+    // Step 2: score ALL fighters (incl. hidden) so opponents have correct context
     const simScore={};
     fullPool.forEach(p=>{
       const won   = simWinner[p.id]!==undefined ? simWinner[p.id] : true;
@@ -3320,7 +3320,7 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
       if(fighterAllScores[p.id] !== undefined) fighterAllScores[p.id].push(sc);
     });
 
-    // Step 3: pick optimal lineup from VISIBLE players only
+    // Step 3: pick optimal lineup from visible players only
     const optimal = pickOptimalLineup(simScore, visiblePool, salaryCap, groups, noOppose, minSal);
     if(!optimal) continue;
 
@@ -3361,8 +3361,6 @@ async function runUFCSimGen(){
   const groups     = slate.groups||[];
   const hidden     = slate.hiddenIds||[];
   const pool       = (slate.players||[]).filter(p=>!hidden.includes(p.id)&&p.salary>0);
-  // Full pool includes hidden players so they're accounted for in fight pairing/outcome sampling.
-  // Hidden players won't appear in lineups — they're excluded inside runUFCSimsNew via visiblePool.
   const fullPool   = (slate.players||[]).filter(p=>p.salary>0);
   const overrides  = slate.playerExpOverrides||{};
 
