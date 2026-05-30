@@ -3341,9 +3341,8 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     distById[p.id] = buildSimDist(fighterAllScores[p.id], 'ufc');
     if(arr.length > 0){
       const p80 = arr[Math.min(Math.floor(arr.length*0.80), arr.length-1)];
-      const p20 = arr[Math.max(Math.floor(arr.length*0.20), 0)];
       const avg = arr.reduce((s,v)=>s+v,0) / arr.length;
-      compositeScoreById[p.id] = Math.round((0.4*p80 + 0.35*avg + 0.25*p20) * 10) / 10;
+      compositeScoreById[p.id] = Math.round((0.6*p80 + 0.4*avg) * 10) / 10;
     } else {
       compositeScoreById[p.id] = medianScoreById[p.id];
     }
@@ -3352,9 +3351,8 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   const ranked = Array.from(lineupFreq.values()).map(e => {
     const s = e.scores.slice().sort((a,b)=>a-b);
     e.p80 = s[Math.min(Math.floor(s.length*0.80), s.length-1)] || 0;
-    e.p20 = s[Math.max(Math.floor(s.length*0.20), 0)] || 0;
     e.avgScore = e.totalScore / e.count;
-    e.composite = 0.4*e.p80 + 0.35*e.avgScore + 0.25*e.p20;
+    e.composite = 0.6*e.p80 + 0.4*e.avgScore;
     return e;
   }).sort((a,b) => b.composite - a.composite || b.count - a.count);
 
@@ -3407,7 +3405,7 @@ async function runUFCSimGen(){
     fullPool, pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal
   );
 
-  // SIM column shows composite score (0.4xP80 + 0.35xavg + 0.25xP20) — ceiling-weighted
+  // SIM column shows composite score (0.6xP80 + 0.4xavg) — ceiling-weighted, no floor double-count
   pool.forEach(p=>{
     p._simP50 = compositeScoreById[p.id] ?? (medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null);
     p._simDist = distById[p.id] || null;
