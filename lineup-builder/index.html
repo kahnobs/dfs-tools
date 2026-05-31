@@ -4042,28 +4042,39 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
     ];
 
     if(lapLeaders.length > 0){
-      // Skill rank dampens laps led for lucky backmarkers throughout both phases
+      // Laps led weight: use win probability directly as the primary signal,
+      // not skill rank. Win prob already captures the market's view of who
+      // dominates — a 25% win-prob driver should lead dramatically more laps
+      // than a 9% win-prob driver, not just marginally more.
+      // skillRank is kept as a dampener for lucky backmarkers who finish well
+      // but whose odds don't support true dominance.
       const lapWeights = lapLeaders.map((d, li) => {
-        const skillW   = Math.exp(-0.15*(d.p._nSkillRank-1));
+        // Win-prob based dominance weight: exponential so big favorites get
+        // a much larger share. Use sqrt to prevent one driver eating everything.
+        const pWin = d.p._nPWin || 0.001;
+        const winW = Math.sqrt(pWin);
+
+        // Skill rank dampener — prevents lucky low-odds finishers from
+        // getting outsized laps led. Steeper than before (0.25 vs 0.15)
+        // to ensure odds-based weight is the primary differentiator.
+        const skillW = Math.exp(-0.25*(d.p._nSkillRank-1));
 
         // Early phase: grid position drives who leads
-        const earlyW   = Math.exp(-lapDecayRate*(d.p._nGrid-1));
+        const earlyW = Math.exp(-lapDecayRate*(d.p._nGrid-1));
         // Late phase: finish position drives who leads
-        const lateW    = Math.exp(-lapDecayRate*(d.finishPos-1));
+        const lateW  = Math.exp(-lapDecayRate*(d.finishPos-1));
 
-        // Grid qualifiers (finish outside top LEADERS) get reduced late weight —
-        // they led early but faded, so their late-phase contribution is minor.
-        // Scale by both grid rank and win odds rank so the best combo gets full
-        // weight and the weakest combo gets ~20% weight.
+        // Combined: win prob sets the ceiling, skill rank dampens flukes,
+        // grid/finish drive phase-specific allocation
         const isQualifier = li >= baseLapLeaders.length;
         if(isQualifier){
           const gridRank = d.p._nGrid;
           const oddsRank = winOddsSorted.findIndex(x => x.p === d.p) + 1;
           const qualScale = Math.max(0.20, 1 - (gridRank + oddsRank - 2) / 18);
-          return (earlyW * earlyLaps + lateW * lateLaps * 0.25) * skillW * qualScale;
+          return (earlyW * earlyLaps + lateW * lateLaps * 0.25) * skillW * winW * qualScale;
         }
 
-        return (earlyW * earlyLaps + lateW * lateLaps) * skillW;
+        return (earlyW * earlyLaps + lateW * lateLaps) * skillW * winW;
       });
       const totalLapW = lapWeights.reduce((s,w)=>s+w,0);
       lapLeaders.forEach((d,i)=>{
@@ -4083,18 +4094,16 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
     // Only top-skilled drivers benefit from redistribution — a backmarker
     // crashing doesn't free up meaningful laps for the leader.
     if(survivorDrawnFinal.length > 0){
-      const allSkillW = pool.reduce((s,p)=>s+Math.exp(-0.65*(p._nSkillRank-1)),0);
+      // Use win probability for redistribution weight — same rationale as laps led:
+      // a dominant driver crashing frees up more laps for the next-best odds driver.
+      const allWinW = pool.reduce((s,p)=>s+Math.sqrt(p._nPWin||0.001),0);
       incidentDrivers.forEach(d=>{
-        const incSkillW = Math.exp(-0.65*(d.p._nSkillRank-1));
-        // Only redistribute for drivers with meaningful laps led probability
-        // (top-half of skill distribution — incSkillW > median)
-        if(incSkillW < 0.05) return; // backmarkers: no meaningful laps to redistribute
-        // Expected laps this driver would have led (their share of the pre-crash period)
-        const expectedLapsLed = Math.round((incSkillW/allSkillW) * greenLaps * (1-d.exit));
+        const incWinW = Math.sqrt(d.p._nPWin||0.001);
+        if(incWinW/allWinW < 0.03) return; // skip true backmarkers
+        const expectedLapsLed = Math.round((incWinW/allWinW) * greenLaps * (1-d.exit));
         if(expectedLapsLed <= 0) return;
-        // Give to top 3 finishers, weighted by their skill
         const recipients = survivorDrawnFinal.slice(0, Math.min(3, numSurvivors));
-        const recWeights = recipients.map(r=>Math.exp(-0.65*(r.p._nSkillRank-1)));
+        const recWeights = recipients.map(r=>Math.sqrt(r.p._nPWin||0.001));
         const totalRecW = recWeights.reduce((s,w)=>s+w,0);
         if(totalRecW > 0){
           recipients.forEach((r,ri)=>{
@@ -4102,7 +4111,6 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
           });
         }
       });
-      // Cap each driver at 90% of green flag laps (winner rarely leads every lap)
       survivorDrawnFinal.forEach(d=>{
         d.lapsLed = Math.min(d.lapsLed, Math.round(greenLaps*0.90));
       });
@@ -4368,6 +4376,23 @@ async function runNascarSimGen(){
     globalOutCap[p.id] = Math.ceil(target * pct / 100);
   });
 
+  // Global composite floor — computed from global (not bucket-specific) composites
+  // so the floor is consistent across all buckets regardless of bucket quality.
+  // Sort pool by global composite, greedily pick top 6 within salary cap to
+  // estimate the best possible lineup score, then set floor at 78% of that.
+  const globalSorted = [...pool].sort((a,b)=>(b._simComposite||0)-(a._simComposite||0));
+  let _gFloorSal=0, _gFloorScore=0;
+  const _gFloorPicked = new Set();
+  for(const p of globalSorted){
+    if(_gFloorPicked.size>=6) break;
+    if(_gFloorSal+(p.salary||0)>maxSal) continue;
+    _gFloorPicked.add(p.id);
+    _gFloorSal+=(p.salary||0);
+    _gFloorScore+=(p._simComposite||0);
+  }
+  const GLOBAL_FLOOR = _gFloorScore * 0.78;
+  log(`Global composite floor: ${GLOBAL_FLOOR.toFixed(1)} (78% of est. best ${_gFloorScore.toFixed(1)})`);
+
   for(const bucket of buckets){
     if(window._genCancelled){ log('Cancelled.'); done(); return; }
 
@@ -4439,13 +4464,12 @@ async function runNascarSimGen(){
       score: lu.reduce((s,p)=>s+(bucket.driverComposites[p.id]||0),0),
     })).sort((a,b)=>b.score-a.score);
 
-    const topScore = candidates[0].score || 1;
-    // Composite floor: reject lineups below 78% of this bucket's best score.
-    // Prevents garbage lineups when diversity pressure exhausts good options.
-    const FLOOR = topScore * 0.78;
+    const topScore = candidates[0]?.score || 1;
+    // Use global composite floor so weak buckets can't select garbage lineups
+    // that would never survive in a stronger bucket.
     const selSets  = [];
     const filled   = [];
-    const remaining = [...candidates].filter(x => x.score >= FLOOR);
+    const remaining = [...candidates].filter(x => x.score >= GLOBAL_FLOOR);
 
     // Dynamic diversity weight: larger buckets need less diversity pressure
     // since we expect more overlap when covering 30 Hamlin lineups vs 8.
