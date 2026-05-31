@@ -1187,6 +1187,7 @@ html { overscroll-behavior-y: contain; }
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
       <div class="modal-title">Generated Lineups</div>
       <div style="display:flex;align-items:center;gap:8px;">
+        <button id="previewSaveTopBtn" onclick="addSelectedToSaved()" style="display:none;background:var(--purple);color:#fff;border:none;padding:5px 14px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;" onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'">Add Selected to Saved</button>
         <div style="position:relative;">
           <button id="historyPickerBtn" onclick="toggleHistoryPicker()" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:5px 12px;border-radius:5px;font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="if(!document.getElementById('historyPickerMenu').classList.contains('open')){this.style.borderColor='var(--border)';this.style.color='var(--muted)'}">⏱ Past Sets</button>
           <div id="historyPickerMenu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--surface);border:1px solid var(--border);border-radius:8px;min-width:220px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.4);overflow:hidden;" class="">
@@ -1373,9 +1374,23 @@ function addToHistory(slateId, label, lineups){
   const entry = {id:uid(), label:fullLabel, ts:Date.now(), lineups: lineups.map(l=>{
     const ids = l.map(p=>p.id);
     ids._archetypeTag = l._archetypeTag||null;
-    ids._waveTag = l._waveTag||null;
+    ids._waveTag      = l._waveTag||null;
+    ids._bucketId     = l._bucketId||null;
+    ids._bucketName   = l._bucketName||null;
+    ids._bucketIsField= l._bucketIsField||false;
     return ids;
   })};
+  // Save bucket metadata so Scenarios tab works when restoring this set
+  if(window._lastNascarBuckets && lineups.some(l=>l._bucketId)){
+    entry._nascarBuckets  = window._lastNascarBuckets.map(b=>({
+      id: b.id, playerName: b.playerName, isField: b.isField,
+      simCount: b.simCount, frequency: b.frequency,
+      allocatedLineups: b.allocatedLineups,
+      // Store composites as [id, value] pairs — pool objects aren't serialisable
+      driverComposites: Object.entries(b.driverComposites||{}),
+    }));
+    entry._nascarPoolIds = (window._lastNascarPool||[]).map(p=>p.id);
+  }
   lineupHistory[slateId].unshift(entry);
   if(lineupHistory[slateId].length > MAX_HISTORY){
     const trimmed = lineupHistory[slateId].slice(0,MAX_HISTORY);
@@ -1419,16 +1434,34 @@ function deleteHistorySet(id){
   saveHistory();renderHistory();
 }
 
+function _restoreNascarBucketsFromHistory(set, slate){
+  if(!set._nascarBuckets || !set._nascarPoolIds){ window._lastNascarBuckets=null; window._lastNascarPool=null; return; }
+  // Reconstruct bucket objects — re-inflate driverComposites from stored pairs
+  window._lastNascarBuckets = set._nascarBuckets.map(b=>({
+    ...b,
+    driverComposites: Object.fromEntries(b.driverComposites||[]),
+  }));
+  // Reconstruct pool from stored IDs (players may have been updated since save)
+  window._lastNascarPool = set._nascarPoolIds
+    .map(id=>playerById(slate,id))
+    .filter(Boolean);
+}
+
 function previewHistorySet(id){
   const slate=activeSlate();if(!slate)return;
   const set=(lineupHistory[slate.id]||[]).find(s=>s.id===id);if(!set)return;
   // Reconstruct lineup objects from stored IDs
   const lineups=set.lineups.map(ids=>{
     const lineup=ids.map(pid=>playerById(slate,pid)).filter(Boolean);
-    lineup._archetypeTag = ids._archetypeTag||null;
-    lineup._waveTag = ids._waveTag||null;
+    lineup._archetypeTag  = ids._archetypeTag||null;
+    lineup._waveTag       = ids._waveTag||null;
+    lineup._bucketId      = ids._bucketId||null;
+    lineup._bucketName    = ids._bucketName||null;
+    lineup._bucketIsField = ids._bucketIsField||false;
     return lineup;
   });
+  // Restore NASCAR bucket metadata for the Scenarios tab
+  _restoreNascarBucketsFromHistory(set, slate);
   openPreviewModal(lineups, 'blend');
 }
 
@@ -4407,9 +4440,17 @@ async function runNascarSimGen(){
     })).sort((a,b)=>b.score-a.score);
 
     const topScore = candidates[0].score || 1;
+    // Composite floor: reject lineups below 78% of this bucket's best score.
+    // Prevents garbage lineups when diversity pressure exhausts good options.
+    const FLOOR = topScore * 0.78;
     const selSets  = [];
     const filled   = [];
-    const remaining = [...candidates];
+    const remaining = [...candidates].filter(x => x.score >= FLOOR);
+
+    // Dynamic diversity weight: larger buckets need less diversity pressure
+    // since we expect more overlap when covering 30 Hamlin lineups vs 8.
+    // Scale from 0.35 (small bucket ≤8) down to 0.20 (large bucket ≥25).
+    const divWeight = Math.max(0.20, 0.35 - (bucket.allocatedLineups - 8) * (0.15/17));
 
     while(filled.length < bucket.allocatedLineups && remaining.length > 0){
       let bestI=-1, bestV=-Infinity;
@@ -4422,13 +4463,14 @@ async function runNascarSimGen(){
           return cap<target&&(globalExpCount[p.id]||0)>=cap;
         });
         if(overExp) continue;
-        // Jaccard vs last 8 selected within this bucket
+        // Jaccard vs last 4 selected within this bucket (was 8 — reduced to
+        // avoid boxing the algorithm into bad corners in large buckets)
         let maxJ=0;
-        for(const s of selSets.slice(-8)){
+        for(const s of selSets.slice(-4)){
           let sh=0; ids.forEach(id=>{ if(s.has(id)) sh++; });
           maxJ=Math.max(maxJ,sh/(ids.size+s.size-sh));
         }
-        const v=0.65*(x.score/topScore)+0.35*(1-maxJ);
+        const v=(1-divWeight)*(x.score/topScore)+divWeight*(1-maxJ);
         if(v>bestV){bestV=v;bestI=i;}
       }
       if(bestI===-1) break;
@@ -5253,6 +5295,10 @@ function openPreviewModal(lineups, optimizeBy){
     filterBtns.innerHTML='';
   }
 
+  // Show top save button
+  const topSaveBtn = document.getElementById('previewSaveTopBtn');
+  if(topSaveBtn) topSaveBtn.style.display = 'inline-block';
+
   // Show Scenarios button only for NASCAR sim-generated lineup sets
   const scenBtn = document.getElementById('previewScenariosBtn');
   const hasBuckets = window._lastNascarBuckets && lineups.some(l=>l._bucketId);
@@ -5540,10 +5586,15 @@ function loadHistorySetIntoPreview(id){
   const set=(lineupHistory[slate.id]||[]).find(s=>s.id===id);if(!set)return;
   const lineups=set.lineups.map(ids=>{
     const lineup=ids.map(pid=>playerById(slate,pid)).filter(Boolean);
-    lineup._archetypeTag = ids._archetypeTag||null;
-    lineup._waveTag = ids._waveTag||null;
+    lineup._archetypeTag  = ids._archetypeTag||null;
+    lineup._waveTag       = ids._waveTag||null;
+    lineup._bucketId      = ids._bucketId||null;
+    lineup._bucketName    = ids._bucketName||null;
+    lineup._bucketIsField = ids._bucketIsField||false;
     return lineup;
   });
+  // Restore NASCAR bucket metadata for the Scenarios tab
+  _restoreNascarBucketsFromHistory(set, slate);
   document.getElementById('historyPickerMenu').style.display='none';
   openPreviewModal(lineups,'blend');
 }
