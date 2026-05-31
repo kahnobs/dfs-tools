@@ -4127,44 +4127,68 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
 
 // ═══════════════════════════════════════════════════════════
 // NASCAR SCENARIO BUCKETING ENGINE
-// Clusters 10k sims by who was the top scorer, computes
+// Clusters sims by who was the top scorer, computes
 // per-bucket driver composites, allocates lineup counts.
+// No field bucket — all lineups belong to a named scenario.
 // ═══════════════════════════════════════════════════════════
 function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target){
   const numSims = simTopScorer.length;
-  const MIN_THRESHOLD = 0.03; // bucket must represent ≥3% of sims
-  const MIN_SIM_COUNT = Math.max(60, Math.round(numSims * 0.02));
+  const MIN_THRESHOLD = 0.02; // bucket must represent ≥2% of sims
 
   // ── Count how often each driver was top scorer ──────────────
   const countById = {};
   simTopScorer.forEach(s=>{ if(s.id) countById[s.id] = (countById[s.id]||0) + 1; });
 
   // ── Identify named buckets (≥ threshold) ───────────────────
+  // No field bucket — sims that don't clear the threshold are
+  // redistributed proportionally across named buckets.
   const named = Object.entries(countById)
-    .filter(([,cnt]) => cnt >= MIN_SIM_COUNT && cnt/numSims >= MIN_THRESHOLD)
+    .filter(([,cnt]) => cnt/numSims >= MIN_THRESHOLD)
     .sort((a,b) => b[1]-a[1]); // most frequent first
+
+  if(!named.length){
+    // Extreme edge case: no driver cleared 2% — use top 5 by count
+    Object.entries(countById)
+      .sort((a,b)=>b[1]-a[1])
+      .slice(0,5)
+      .forEach(e=>named.push(e));
+  }
 
   const namedIds = new Set(named.map(([id])=>id));
 
-  // ── Assign each sim to bucket or field ──────────────────────
-  // Also build index: bucketId → [simIndices]
+  // ── Assign each sim to its named bucket ─────────────────────
+  // Sims whose top scorer didn't clear the threshold are assigned
+  // to whichever named bucket driver scored highest in that sim.
   const bucketSimIndices = {};
   namedIds.forEach(id => { bucketSimIndices[id] = []; });
-  bucketSimIndices['__field__'] = [];
+
+  // Build a quick id→pool-index map for fast lookup
+  const poolIdxMap = new Map(pool.map((p,i)=>[p.id,i]));
 
   simTopScorer.forEach((s, si) => {
-    const bucket = namedIds.has(s.id) ? s.id : '__field__';
-    bucketSimIndices[bucket].push(si);
+    if(namedIds.has(s.id)){
+      // Top scorer is a named bucket driver — assign directly
+      bucketSimIndices[s.id].push(si);
+    } else {
+      // Top scorer didn't clear threshold — find which named bucket
+      // driver scored highest in this sim and assign there
+      let bestId = null, bestScore = -Infinity;
+      namedIds.forEach(id => {
+        const pi = poolIdxMap.get(id);
+        if(pi == null) return;
+        const score = simScoreArrays[pi][si];
+        if(score > bestScore){ bestScore = score; bestId = id; }
+      });
+      if(bestId) bucketSimIndices[bestId].push(si);
+    }
   });
 
   // ── Build per-bucket driver composites ──────────────────────
-  // For each bucket, compute composite using ONLY sims in that bucket.
-  // This naturally suppresses LL competitors in a given driver's bucket.
   function buildBucketComposites(simIndices){
     const composites = {};
     const maxOwn = Math.max(...pool.map(p => p._nOwn||0)) || 1;
     pool.forEach((p, pi) => {
-      if(!simIndices.length) { composites[p.id] = 0; return; }
+      if(!simIndices.length){ composites[p.id] = 0; return; }
       const scores = simIndices.map(si => simScoreArrays[pi][si]);
       scores.sort((a,b)=>a-b);
       const n = scores.length;
@@ -4178,17 +4202,17 @@ function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target){
   }
 
   // ── Allocate lineups proportionally (largest remainder) ─────
-  const allBucketIds = [...namedIds, '__field__'];
-  const rawCounts = allBucketIds.map(id => ({
+  // Proportion is based on assigned sim count (which includes
+  // redistributed sims), so allocation naturally reflects how
+  // dominant each named driver is across all race outcomes.
+  const totalAssigned = named.reduce((s,[id])=>s+(bucketSimIndices[id].length),0);
+  const rawCounts = named.map(([id]) => ({
     id,
-    exact: (bucketSimIndices[id].length / numSims) * target
+    exact: (bucketSimIndices[id].length / totalAssigned) * target
   }));
 
-  // Floor allocation
   rawCounts.forEach(b => { b.allocated = Math.max(1, Math.floor(b.exact)); });
-  let allocated = rawCounts.reduce((s,b)=>s+b.allocated, 0);
-  // Distribute remainder by largest fractional part
-  const remainder = target - allocated;
+  const remainder = target - rawCounts.reduce((s,b)=>s+b.allocated, 0);
   rawCounts
     .map((b,i)=>({i, frac: b.exact - Math.floor(b.exact)}))
     .sort((a,b)=>b.frac-a.frac)
@@ -4196,21 +4220,19 @@ function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target){
     .forEach(({i})=>{ rawCounts[i].allocated++; });
 
   // ── Build final bucket objects ───────────────────────────────
-  const buckets = rawCounts.map(({id, allocated, exact}) => {
+  return rawCounts.map(({id, allocated}) => {
     const simIndices = bucketSimIndices[id];
-    const player = id !== '__field__' ? pool.find(p=>p.id===id) : null;
+    const player = pool.find(p=>p.id===id);
     return {
       id,
-      isField: id === '__field__',
-      playerName: player ? player.name : 'Field / No Clear Dominator',
+      isField: false,
+      playerName: player ? player.name : id,
       simCount: simIndices.length,
       frequency: simIndices.length / numSims,
       allocatedLineups: allocated,
       driverComposites: buildBucketComposites(simIndices),
     };
   }).filter(b => b.allocatedLineups > 0);
-
-  return buckets;
 }
 
 async function runNascarSimGen(){
@@ -4293,7 +4315,7 @@ async function runNascarSimGen(){
 
   log(`${buckets.length} scenario buckets:`);
   buckets.forEach(b=>{
-    log(`  ${b.isField ? '🌀 Field' : '🏁 ' + b.playerName}: ${b.simCount} sims (${(b.frequency*100).toFixed(1)}%) → ${b.allocatedLineups} lineups`);
+    log(`  🏁 ${b.playerName}: ${b.simCount} sims (${(b.frequency*100).toFixed(1)}%) → ${b.allocatedLineups} lineups`);
   });
 
   await new Promise(r=>setTimeout(r,0));
@@ -5047,9 +5069,9 @@ function renderPreviewScenarios(){
     const pct = (b.frequency*100).toFixed(1);
     const barW = Math.round(b.frequency*100);
     const icon = b.isField ? '🌀' : '🏁';
-    const color = b.isField ? 'var(--blue)' : 'var(--accent2)';
-    const borderColor = b.isField ? 'rgba(59,130,246,.3)' : 'rgba(232,66,26,.3)';
-    const bgColor = b.isField ? 'rgba(59,130,246,.06)' : 'rgba(232,66,26,.06)';
+    const color = 'var(--accent2)';
+    const borderColor = 'rgba(232,66,26,.3)';
+    const bgColor = 'rgba(232,66,26,.06)';
 
     // Top pairings within this bucket's lineups (who appears most with the bucket driver)
     const pairingCount = {};
@@ -5118,31 +5140,26 @@ function renderPreviewScenarios(){
 
   // ── Section 2: Coverage matrix ────────────────────────────────────────────
   // Show per-driver exposure across buckets — highlights cannibalization fix
-  const namedBuckets = buckets.filter(b=>!b.isField);
-  if(namedBuckets.length && pool && pool.length){
-    // Only show drivers who appear in at least one lineup
+  if(buckets.length && pool && pool.length){
     const driversInPlay = (pool||[]).filter(p=>lineups.some(l=>l.some(x=>x.id===p.id)));
     const topDrivers = driversInPlay
       .sort((a,b)=>(b._simComposite||0)-(a._simComposite||0))
       .slice(0,12);
 
-    if(topDrivers.length && namedBuckets.length){
+    if(topDrivers.length){
       html += `<div style="margin-top:8px;"><div style="font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:1px;color:var(--text);margin-bottom:8px;">Coverage Matrix <span style="font-size:10px;font-family:'DM Mono',monospace;color:var(--muted);font-weight:400;letter-spacing:0;">% exposure per scenario bucket</span></div>`;
       html += `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:10px;">`;
-      // Header row
       html += `<tr><th style="text-align:left;padding:4px 6px;font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);border-bottom:1px solid var(--border);font-weight:400;">Driver</th>`;
-      namedBuckets.forEach(b=>{
+      buckets.forEach(b=>{
         const shortName = b.playerName.split(' ').slice(-1)[0];
         html += `<th style="text-align:center;padding:4px 4px;font-family:'DM Mono',monospace;font-size:9px;color:var(--accent2);border-bottom:1px solid var(--border);font-weight:600;min-width:52px;">${shortName}</th>`;
       });
-      const fieldBucket = buckets.find(b=>b.isField);
-      if(fieldBucket) html += `<th style="text-align:center;padding:4px 4px;font-family:'DM Mono',monospace;font-size:9px;color:var(--blue);border-bottom:1px solid var(--border);font-weight:600;min-width:44px;">Field</th>`;
       html += `</tr>`;
 
       topDrivers.forEach(p=>{
         html += `<tr>`;
         html += `<td style="padding:4px 6px;font-size:11px;font-weight:600;border-bottom:1px solid rgba(255,255,255,.04);white-space:nowrap;">${p.name}</td>`;
-        namedBuckets.forEach(b=>{
+        buckets.forEach(b=>{
           const bucketLUs = lineups.filter(l=>l._bucketId===b.id);
           const expInBucket = bucketLUs.filter(l=>l.some(x=>x.id===p.id)).length;
           const expPct = bucketLUs.length ? Math.round(expInBucket/bucketLUs.length*100) : 0;
@@ -5156,16 +5173,6 @@ function renderPreviewScenarios(){
             <span style="font-family:'DM Mono',monospace;font-size:10px;color:${col};font-weight:${expPct>0?600:400};">${expPct>0?expPct+'%':'—'}</span>
           </td>`;
         });
-        if(fieldBucket){
-          const fLUs = lineups.filter(l=>l._bucketId==='__field__');
-          const fExp = fLUs.length ? Math.round(fLUs.filter(l=>l.some(x=>x.id===p.id)).length/fLUs.length*100) : 0;
-          let fc='var(--muted)', fb='transparent';
-          if(fExp>=70){ fb='rgba(59,130,246,.12)'; fc='var(--blue)'; }
-          else if(fExp>=40){ fc='var(--blue)'; }
-          html += `<td style="text-align:center;padding:4px 4px;border-bottom:1px solid rgba(255,255,255,.04);background:${fb};">
-            <span style="font-family:'DM Mono',monospace;font-size:10px;color:${fc};font-weight:${fExp>0?600:400};">${fExp>0?fExp+'%':'—'}</span>
-          </td>`;
-        }
         html += `</tr>`;
       });
       html += `</table></div></div>`;
@@ -5174,23 +5181,21 @@ function renderPreviewScenarios(){
 
   // ── Section 3: Sim distribution bar chart ─────────────────────────────────
   html += `<div style="margin-top:16px;"><div style="font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:1px;color:var(--text);margin-bottom:8px;">Sim Outcome Distribution</div>`;
-  html += `<div style="font-size:10px;color:var(--muted);margin-bottom:8px;">How often each driver was the top scorer across all simulations.</div>`;
+  html += `<div style="font-size:10px;color:var(--muted);margin-bottom:8px;">How often each driver was the top scorer across all simulations. Sims below the 2% threshold are redistributed to the closest named bucket.</div>`;
 
-  // Bar chart — sort by sim count desc, show top 15
   const chartBuckets = [...buckets].sort((a,b)=>b.simCount-a.simCount);
   const maxSimCount = chartBuckets[0]?.simCount||1;
   chartBuckets.forEach(b=>{
     const barW = Math.round((b.simCount/maxSimCount)*100);
     const pct = (b.frequency*100).toFixed(1);
-    const color = b.isField ? 'var(--blue)' : 'var(--accent2)';
-    const label = b.isField ? '🌀 Field' : b.playerName.split(' ').slice(-1)[0];
+    const label = b.playerName.split(' ').slice(-1)[0];
     html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">
       <div style="font-size:10px;font-weight:600;color:var(--text);width:90px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${b.playerName}">${label}</div>
       <div style="flex:1;background:var(--surface2);border-radius:3px;height:14px;overflow:hidden;">
-        <div style="width:${barW}%;height:100%;background:${color};border-radius:3px;opacity:.8;"></div>
+        <div style="width:${barW}%;height:100%;background:var(--accent2);border-radius:3px;opacity:.8;"></div>
       </div>
       <div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);width:38px;text-align:right;">${pct}%</div>
-      <div style="font-family:'DM Mono',monospace;font-size:9px;color:${color};width:26px;text-align:right;font-weight:600;">${b.allocatedLineups}L</div>
+      <div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--accent2);width:26px;text-align:right;font-weight:600;">${b.allocatedLineups}L</div>
     </div>`;
   });
   html += `</div>`;
@@ -5341,7 +5346,7 @@ function renderPreviewLineupsList(){
     const bucketIsField = lineup._bucketIsField;
     const arcTag = arcGroup ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${arcGroup.color}22;color:${arcGroup.color};border:1px solid ${arcGroup.color}44;margin-left:4px;">${arcGroup.name}</span>` : '';
     const wTag = waveTag ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${waveTag==='am'?'rgba(34,197,94,.15)':'rgba(245,197,24,.15)'};color:${waveTag==='am'?'var(--green)':'var(--accent)'};border:1px solid ${waveTag==='am'?'rgba(34,197,94,.3)':'rgba(245,197,24,.3)'};margin-left:4px;">${waveTag==='am'?'AM':'PM'}</span>` : '';
-    const bTag = bucketName ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${bucketIsField?'rgba(59,130,246,.1)':'rgba(232,66,26,.1)'};color:${bucketIsField?'var(--blue)':'var(--accent2)'};border:1px solid ${bucketIsField?'rgba(59,130,246,.3)':'rgba(232,66,26,.3)'};margin-left:4px;">${bucketIsField?'🌀 Field':'🏁 '+bucketName.split(' ').slice(-1)[0]}</span>` : '';
+    const bTag = bucketName ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(232,66,26,.1);color:var(--accent2);border:1px solid rgba(232,66,26,.3);margin-left:4px;">🏁 ${bucketName.split(' ').slice(-1)[0]}</span>` : '';
 
     // Find original index in full previewLineups array for checkbox id
     const origIdx = previewLineups.indexOf(lineup);
