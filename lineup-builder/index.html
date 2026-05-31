@@ -1200,13 +1200,16 @@ html { overscroll-behavior-y: contain; }
     <div class="modal-sub" id="previewModalSub" style="margin-bottom:8px;"></div>
     <div id="previewFilterBadge" onclick="filterPreviewByPlayer(previewPlayerFilter)" style="display:none;margin-bottom:8px;padding:5px 10px;background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.3);border-radius:5px;font-size:11px;color:var(--purple);cursor:pointer;"></div>
     <div id="previewFilterBtns" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;"></div>
-    <div id="previewSortBar" style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
+    <div id="previewSortBar" style="display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
       <span style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;">SORT:</span>
       <button class="preview-sort-btn active" data-sort="default" onclick="setPreviewSort('default',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--accent);background:rgba(245,197,24,.1);color:var(--accent);cursor:pointer;">Default</button>
       <button class="preview-sort-btn" data-sort="sim" onclick="setPreviewSort('sim',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;">Sim</button>
       <button class="preview-sort-btn" data-sort="proj" onclick="setPreviewSort('proj',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;">Proj</button>
       <button class="preview-sort-btn" data-sort="rating" onclick="setPreviewSort('rating',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;">Rating</button>
       <button class="preview-sort-btn" data-sort="own" onclick="setPreviewSort('own',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;">Own%</button>
+      <div style="margin-left:auto;">
+        <button id="previewScenariosBtn" onclick="togglePreviewScenarios()" style="display:none;font-size:10px;font-family:'DM Mono',monospace;padding:2px 10px;border-radius:4px;border:1px solid rgba(232,66,26,.4);background:rgba(232,66,26,.08);color:var(--accent2);cursor:pointer;transition:all .15s;">🏁 Scenarios</button>
+      </div>
     </div>
 
     <!-- two-column body -->
@@ -1214,7 +1217,9 @@ html { overscroll-behavior-y: contain; }
       <!-- lineups list -->
       <div style="display:flex;flex-direction:column;overflow:hidden;">
         <div style="overflow-y:auto;flex:1;" id="previewLineupsList"></div>
-        <div class="preview-actions" style="margin-top:8px;flex-shrink:0;">
+        <!-- Scenarios panel — shown instead of lineup list when active -->
+        <div id="previewScenariosPanel" style="display:none;overflow-y:auto;flex:1;"></div>
+        <div class="preview-actions" style="margin-top:8px;flex-shrink:0;" id="previewActions">
           <button class="btn-select-all" onclick="toggleSelectAll()">Select All</button>
           <button class="btn-add-selected" id="addSelectedBtn" onclick="addSelectedToSaved()">Add Selected to Saved</button>
         </div>
@@ -1338,6 +1343,7 @@ let colMapping = {};
 let previewLineups = [];
 let previewPlayerFilter = null; // player ID to filter lineups by, null = show all
 let previewFilter = null; // null = all, or archetypeGroupId
+let _previewScenariosActive = false;
 
 function setPreviewFilter(gid){
   previewFilter = gid;
@@ -3862,6 +3868,8 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
   const sumLapsLed     = new Array(FIELD).fill(0);
 
   const simScores      = pool.map(()=>[]);
+  // Per-sim top scorer ID — used by bucket engine in runNascarSimGen
+  const simTopScorer   = new Array(numSims);
 
 
   for(let s=0; s<numSims; s++){
@@ -4083,40 +4091,127 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
     // ── 10. Score every driver ────────────────────────────────────────────
     const allDrawn = [...survivorDrawnFinal, ...incidentDrivers];
 
+    let simBestScore = -Infinity;
+    let simBestId    = null;
     allDrawn.forEach(d=>{
       const idx   = pool.indexOf(d.p);
       const score = nascarCalcScore(d.p._nGrid, d.finishPos, d.lapsLed||0, d.fastestLaps||0);
       sumScore[idx]  += score;
       sumLapsLed[idx]+= d.lapsLed||0;
       simScores[idx].push(score);
+      if(score > simBestScore){ simBestScore = score; simBestId = d.p.id; }
     });
+    // Record top scorer for this sim
+    simTopScorer[s] = { id: simBestId, score: simBestScore };
   }
 
   // ── Build per-driver results ──────────────────────────────────────────────
-  return pool.map((p,i)=>{
+  const driverResults = pool.map((p,i)=>{
     const avg    = sumScore[i]/numSims;
     const sorted = simScores[i].slice().sort((a,b)=>a-b);
     const p50    = sorted[Math.floor(sorted.length*0.50)];
     const p75    = sorted[Math.floor(sorted.length*0.75)];
     const p90    = sorted[Math.floor(sorted.length*0.90)];
-    // dominatorEV removed — dominator outcomes are already captured inside
-    // avg and p90; double-counting them was inflating grid-pole drivers unfairly.
 
-    // Ownership penalty: max 2% haircut for the highest-owned player.
-    // Acts as a pure tiebreaker toward leverage — never large enough to
-    // override a genuine sim edge.
     const maxOwn    = Math.max(...pool.map(q=>q._nOwn||0)) || 1;
     const ownPenalty= ((p._nOwn||0) / maxOwn) * 0.02;
-
-    // Composite: floor (avg) + consistency bridge (p75) + ceiling (p90)
-    // equally split between floor and ceiling, p75 as the bridge.
     const composite = (avg*0.40 + p75*0.30 + p90*0.30) * (1 - ownPenalty);
 
     const dist = buildSimDist(simScores[i], 'nascar');
     return { player:p, avg, p50, p75, p90, composite, dist };
   });
+
+  return { driverResults, simTopScorer, simScoreArrays: simScores };
 }
 
+
+// ═══════════════════════════════════════════════════════════
+// NASCAR SCENARIO BUCKETING ENGINE
+// Clusters 10k sims by who was the top scorer, computes
+// per-bucket driver composites, allocates lineup counts.
+// ═══════════════════════════════════════════════════════════
+function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target){
+  const numSims = simTopScorer.length;
+  const MIN_THRESHOLD = 0.03; // bucket must represent ≥3% of sims
+  const MIN_SIM_COUNT = Math.max(60, Math.round(numSims * 0.02));
+
+  // ── Count how often each driver was top scorer ──────────────
+  const countById = {};
+  simTopScorer.forEach(s=>{ if(s.id) countById[s.id] = (countById[s.id]||0) + 1; });
+
+  // ── Identify named buckets (≥ threshold) ───────────────────
+  const named = Object.entries(countById)
+    .filter(([,cnt]) => cnt >= MIN_SIM_COUNT && cnt/numSims >= MIN_THRESHOLD)
+    .sort((a,b) => b[1]-a[1]); // most frequent first
+
+  const namedIds = new Set(named.map(([id])=>id));
+
+  // ── Assign each sim to bucket or field ──────────────────────
+  // Also build index: bucketId → [simIndices]
+  const bucketSimIndices = {};
+  namedIds.forEach(id => { bucketSimIndices[id] = []; });
+  bucketSimIndices['__field__'] = [];
+
+  simTopScorer.forEach((s, si) => {
+    const bucket = namedIds.has(s.id) ? s.id : '__field__';
+    bucketSimIndices[bucket].push(si);
+  });
+
+  // ── Build per-bucket driver composites ──────────────────────
+  // For each bucket, compute composite using ONLY sims in that bucket.
+  // This naturally suppresses LL competitors in a given driver's bucket.
+  function buildBucketComposites(simIndices){
+    const composites = {};
+    const maxOwn = Math.max(...pool.map(p => p._nOwn||0)) || 1;
+    pool.forEach((p, pi) => {
+      if(!simIndices.length) { composites[p.id] = 0; return; }
+      const scores = simIndices.map(si => simScoreArrays[pi][si]);
+      scores.sort((a,b)=>a-b);
+      const n = scores.length;
+      const avg = scores.reduce((s,v)=>s+v,0)/n;
+      const p75 = scores[Math.floor(n*0.75)];
+      const p90 = scores[Math.floor(n*0.90)];
+      const ownPenalty = ((p._nOwn||0)/maxOwn)*0.02;
+      composites[p.id] = (avg*0.40 + p75*0.30 + p90*0.30) * (1 - ownPenalty);
+    });
+    return composites;
+  }
+
+  // ── Allocate lineups proportionally (largest remainder) ─────
+  const allBucketIds = [...namedIds, '__field__'];
+  const rawCounts = allBucketIds.map(id => ({
+    id,
+    exact: (bucketSimIndices[id].length / numSims) * target
+  }));
+
+  // Floor allocation
+  rawCounts.forEach(b => { b.allocated = Math.max(1, Math.floor(b.exact)); });
+  let allocated = rawCounts.reduce((s,b)=>s+b.allocated, 0);
+  // Distribute remainder by largest fractional part
+  const remainder = target - allocated;
+  rawCounts
+    .map((b,i)=>({i, frac: b.exact - Math.floor(b.exact)}))
+    .sort((a,b)=>b.frac-a.frac)
+    .slice(0, Math.max(0, remainder))
+    .forEach(({i})=>{ rawCounts[i].allocated++; });
+
+  // ── Build final bucket objects ───────────────────────────────
+  const buckets = rawCounts.map(({id, allocated, exact}) => {
+    const simIndices = bucketSimIndices[id];
+    const player = id !== '__field__' ? pool.find(p=>p.id===id) : null;
+    return {
+      id,
+      isField: id === '__field__',
+      playerName: player ? player.name : 'Field / No Clear Dominator',
+      simCount: simIndices.length,
+      frequency: simIndices.length / numSims,
+      allocatedLineups: allocated,
+      driverComposites: buildBucketComposites(simIndices),
+    };
+  }).filter(b => b.allocatedLineups > 0);
+
+  return buckets;
+}
 
 async function runNascarSimGen(){
   const slate     = activeSlate(); if(!slate) return;
@@ -4134,9 +4229,7 @@ async function runNascarSimGen(){
   ) : 'road';
   const groups    = slate.groups||[];
   const hiddenSet = new Set(slate.hiddenIds||[]);
-  // Full field for the race sim — hidden drivers still occupy finish positions
   const fullField = (slate.players||[]).filter(p=>p.salary>0);
-  // Lineup pool excludes hidden drivers
   const pool      = fullField.filter(p=>!hiddenSet.has(p.id));
   const overrides = slate.playerExpOverrides||{};
 
@@ -4163,209 +4256,212 @@ async function runNascarSimGen(){
   await new Promise(r=>setTimeout(r,0));
   if(window._genCancelled){ log('Cancelled.'); done(); return; }
 
-  // Step 1: run sims, get composite scores
-  const simResults = runNascarSims(fullField, numSims, totalLaps, trackType);
-  simResults.forEach(r=>{
+  // ── Step 1: Run sims ──────────────────────────────────────────────────────
+  const { driverResults, simTopScorer, simScoreArrays } = runNascarSims(fullField, numSims, totalLaps, trackType);
+
+  // Attach sim metadata to players for pool display
+  driverResults.forEach(r=>{
     r.player._simP50       = r.p50!=null ? Math.round(r.p50*10)/10 : null;
     r.player._simComposite = r.composite;
     r.player._simDist      = r.dist || null;
   });
   if(typeof renderPool==='function') renderPool();
-  log(`Sim scores ready. Building lineups...`);
+  log(`Sim scores ready. Bucketing race scenarios...`);
   await new Promise(r=>setTimeout(r,0));
   if(window._genCancelled){ log('Cancelled.'); done(); return; }
 
-  // Step 2: generate unique salary-legal lineups using weighted random sampling.
-  //
-  // At each slot, perform a weighted random draw (not greedy max) from available
-  // drivers. This is the key to diversity — different draws produce different lineups
-  // naturally. Weight = composite score with noise. Drivers with negative composite
-  // (BJ McLeod style) get weight 0 and are never selected.
-  //
-  // We generate as many unique lineups as we can in the available attempts,
-  // then the selection step picks the best target-count with Jaccard diversity.
+  // ── Step 2: Bucket sims by top scorer ────────────────────────────────────
+  // Only pool drivers are eligible for bucket labels (hidden drivers excluded)
+  const poolIdSet = new Set(pool.map(p=>p.id));
+  const poolSimTopScorer = simTopScorer.map(s => ({
+    ...s,
+    id: poolIdSet.has(s.id) ? s.id : null
+  }));
 
-  const scores = {};
-  pool.forEach(p=>{ scores[p.id] = Math.max(0, p._simComposite||0); });
+  // Build simScoreArrays indexed to pool (not fullField)
+  // driverResults is already indexed to fullField; match by player id
+  const poolSimScoreArrays = pool.map(p=>{
+    const idx = fullField.findIndex(q=>q.id===p.id);
+    return idx>=0 ? simScoreArrays[idx] : new Array(numSims).fill(0);
+  });
 
-  // Pre-sort cheapest available (ascending) for cap feasibility check
-  const cheapest = [...pool].sort((a,b)=>(a.salary||0)-(b.salary||0));
-  // Build id→index map for O(1) lookup
-  const poolIdx = new Map(pool.map((p,i)=>[p.id,i]));
-  const cheapestIdx = new Map(cheapest.map((p,i)=>[p.id,i]));
+  const buckets = bucketSimsByDriver(pool, poolSimTopScorer, poolSimScoreArrays, target);
 
-  const generated = [];
-  const seenKeys  = new Set((slate.savedLineups||[]).map(l=>lineupKey(l)));
+  // Store bucket metadata on the lineup array for the Scenarios tab
+  window._lastNascarBuckets = buckets;
+  window._lastNascarPool    = pool;
 
-  // How many attempts — keep going until we have plenty or hit a hard limit
-  const WANT = Math.max(target * 50, 2000);
-  const MAX_ATTEMPTS = WANT * 10;
-  let attempts = 0;
+  log(`${buckets.length} scenario buckets:`);
+  buckets.forEach(b=>{
+    log(`  ${b.isField ? '🌀 Field' : '🏁 ' + b.playerName}: ${b.simCount} sims (${(b.frequency*100).toFixed(1)}%) → ${b.allocatedLineups} lineups`);
+  });
 
-  const runChunk = async () => {
+  await new Promise(r=>setTimeout(r,0));
+  if(window._genCancelled){ log('Cancelled.'); done(); return; }
+
+  // ── Step 3: Generate candidates per bucket ────────────────────────────────
+  const cheapest  = [...pool].sort((a,b)=>(a.salary||0)-(b.salary||0));
+  const poolIdx   = new Map(pool.map((p,i)=>[p.id,i]));
+  const globalSeenKeys = new Set((slate.savedLineups||[]).map(l=>lineupKey(l)));
+  const allFinalLineups = [];
+
+  // Per-player global exposure cap
+  const globalExpCount = {};
+  const globalOutCap   = {};
+  pool.forEach(p=>{
+    const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
+    globalOutCap[p.id] = Math.ceil(target * pct / 100);
+  });
+
+  for(const bucket of buckets){
     if(window._genCancelled){ log('Cancelled.'); done(); return; }
 
-    const chunkEnd = Math.min(attempts + 1000, MAX_ATTEMPTS);
+    const WANT_CANDIDATES = Math.max(bucket.allocatedLineups * 60, 800);
+    const MAX_ATT = WANT_CANDIDATES * 8;
+    const bucketGenerated = [];
+    const bucketSeenKeys  = new Set(globalSeenKeys);
+    let attempts = 0;
 
-    while(attempts < chunkEnd){
+    // Build weight array from bucket-specific composites (not global)
+    const baseWeights = pool.map(p => Math.max(0, bucket.driverComposites[p.id]||0));
+
+    while(bucketGenerated.length < WANT_CANDIDATES && attempts < MAX_ATT){
       attempts++;
-
-      // Draw fresh noisy weights for this attempt — fully independent each time
-      const noise = 0.60; // enough randomness to explore the full combination space
+      const noise = 0.60;
       const w = new Float64Array(pool.length);
-      for(let i=0; i<pool.length; i++){
-        w[i] = scores[pool[i].id] * (1 + (Math.random()*2-1)*noise);
-        if(w[i] < 0) w[i] = 0;
+      for(let i=0;i<pool.length;i++){
+        w[i] = baseWeights[i] * (1 + (Math.random()*2-1)*noise);
+        if(w[i]<0) w[i]=0;
       }
 
-      // Build lineup: weighted random draw at each slot (not greedy)
-      const lineup = []; const usedIdx = new Set(); let salUsed = 0; let failed = false;
-
-      for(let slot=0; slot<6; slot++){
-        const slotsLeft = 5 - slot;
-
-        // Compute per-driver eligibility and weights for this slot
-        let totalW = 0;
-        const eligible = [];
-        for(let i=0; i<pool.length; i++){
-          if(usedIdx.has(i) || w[i]<=0) continue;
-          const p = pool[i];
-          const newSal = salUsed + (p.salary||0);
-          if(newSal > maxSal) continue;
-          // Check we can still fill remaining slots within cap using cheapest available
-          if(slotsLeft > 0){
-            let cheapSum=0, cheapCnt=0;
-            for(let j=0; j<cheapest.length && cheapCnt<slotsLeft; j++){
-              const c = cheapest[j];
-              const ci = poolIdx.get(c.id);
-              if(!usedIdx.has(ci) && c.id!==p.id && w[ci]>0){
-                cheapSum+=c.salary||0; cheapCnt++;
-              }
+      const lineup=[]; const usedIdx=new Set(); let salUsed=0; let failed=false;
+      for(let slot=0;slot<6;slot++){
+        const slotsLeft=5-slot;
+        let totalW=0;
+        const eligible=[];
+        for(let i=0;i<pool.length;i++){
+          if(usedIdx.has(i)||w[i]<=0) continue;
+          const p=pool[i];
+          const newSal=salUsed+(p.salary||0);
+          if(newSal>maxSal) continue;
+          if(slotsLeft>0){
+            let cheapSum=0,cheapCnt=0;
+            for(let j=0;j<cheapest.length&&cheapCnt<slotsLeft;j++){
+              const c=cheapest[j];
+              const ci=poolIdx.get(c.id);
+              if(!usedIdx.has(ci)&&c.id!==p.id&&w[ci]>0){cheapSum+=c.salary||0;cheapCnt++;}
             }
-            if(cheapCnt<slotsLeft || newSal+cheapSum>maxSal) continue;
+            if(cheapCnt<slotsLeft||newSal+cheapSum>maxSal) continue;
           }
-          eligible.push(i);
-          totalW += w[i];
+          eligible.push(i); totalW+=w[i];
         }
-
-        if(eligible.length===0 || totalW<=0){ failed=true; break; }
-
-        // Weighted random draw
-        let r = Math.random() * totalW;
-        let picked = eligible[eligible.length-1];
-        for(const i of eligible){
-          r -= w[i];
-          if(r <= 0){ picked=i; break; }
-        }
-
-        lineup.push(pool[picked]);
-        usedIdx.add(picked);
-        salUsed += pool[picked].salary||0;
+        if(eligible.length===0||totalW<=0){failed=true;break;}
+        let r=Math.random()*totalW;
+        let picked=eligible[eligible.length-1];
+        for(const i of eligible){r-=w[i];if(r<=0){picked=i;break;}}
+        lineup.push(pool[picked]); usedIdx.add(picked); salUsed+=pool[picked].salary||0;
       }
 
-      if(failed || lineup.length<6) continue;
-      const sal = lineup.reduce((s,p)=>s+(p.salary||0),0);
+      if(failed||lineup.length<6) continue;
+      const sal=lineup.reduce((s,p)=>s+(p.salary||0),0);
       if(sal<minSal||sal>maxSal) continue;
       if(groups.length&&!checkGroupRules(lineup,groups)) continue;
-      const key = lineupKey(lineup.map(p=>p.id));
-      if(seenKeys.has(key)) continue;
-
-      generated.push(lineup);
-      seenKeys.add(key);
-      if(generated.length >= WANT) break;
+      const key=lineupKey(lineup.map(p=>p.id));
+      if(bucketSeenKeys.has(key)) continue;
+      bucketGenerated.push(lineup);
+      bucketSeenKeys.add(key);
+      globalSeenKeys.add(key);
     }
 
-    if(generated.length < WANT && attempts < MAX_ATTEMPTS && !window._genCancelled){
-      await new Promise(r=>setTimeout(r,0));
-      return runChunk();
+    if(!bucketGenerated.length){
+      log(`  ⚠ No candidates for ${bucket.playerName} — skipping`);
+      continue;
     }
 
-    log(`${generated.length} unique lineups generated in ${attempts.toLocaleString()} attempts.`);
-    if(!generated.length){ alert('No valid lineups generated.'); done(); return; }
-
-    // Step 3: score all candidates by composite sum, select with Jaccard diversity
-    const candidates = generated.map(lu=>({
+    // ── Step 4: Select best lineups from this bucket via Jaccard diversity ──
+    const candidates = bucketGenerated.map(lu=>({
       lu,
-      score: lu.reduce((s,p)=>s+(p._simComposite||0), 0),
+      score: lu.reduce((s,p)=>s+(bucket.driverComposites[p.id]||0),0),
     })).sort((a,b)=>b.score-a.score);
 
-    const topScore  = candidates[0].score || 1;
-    const expCount  = {};
-    const selSets   = [];
-    const filled    = [];
+    const topScore = candidates[0].score || 1;
+    const selSets  = [];
+    const filled   = [];
     const remaining = [...candidates];
 
-    // Per-player output cap
-    const outCap = {};
-    pool.forEach(p=>{
-      const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
-      outCap[p.id] = Math.ceil(target * pct / 100);
-    });
-
-    while(filled.length < target && remaining.length > 0){
+    while(filled.length < bucket.allocatedLineups && remaining.length > 0){
       let bestI=-1, bestV=-Infinity;
-
-      for(let i=0; i<remaining.length; i++){
-        const x = remaining[i];
-        const ids = new Set(x.lu.map(p=>p.id));
-
-        // Exposure cap
-        const overExp = x.lu.some(p=>{
-          const cap = outCap[p.id];
-          return cap < target && (expCount[p.id]||0) >= cap;
+      for(let i=0;i<remaining.length;i++){
+        const x=remaining[i];
+        const ids=new Set(x.lu.map(p=>p.id));
+        // Global exposure cap check
+        const overExp=x.lu.some(p=>{
+          const cap=globalOutCap[p.id];
+          return cap<target&&(globalExpCount[p.id]||0)>=cap;
         });
         if(overExp) continue;
-
-        // Jaccard vs last 8 selected
+        // Jaccard vs last 8 selected within this bucket
         let maxJ=0;
         for(const s of selSets.slice(-8)){
           let sh=0; ids.forEach(id=>{ if(s.has(id)) sh++; });
-          maxJ=Math.max(maxJ, sh/(ids.size+s.size-sh));
+          maxJ=Math.max(maxJ,sh/(ids.size+s.size-sh));
         }
-
-        const v = 0.70*(x.score/topScore) + 0.30*(1-maxJ);
-        if(v>bestV){ bestV=v; bestI=i; }
+        const v=0.65*(x.score/topScore)+0.35*(1-maxJ);
+        if(v>bestV){bestV=v;bestI=i;}
       }
-
       if(bestI===-1) break;
-      const chosen = remaining.splice(bestI,1)[0];
-      chosen.lu.forEach(p=>{ expCount[p.id]=(expCount[p.id]||0)+1; });
+      const chosen=remaining.splice(bestI,1)[0];
+      chosen.lu.forEach(p=>{ globalExpCount[p.id]=(globalExpCount[p.id]||0)+1; });
       selSets.push(new Set(chosen.lu.map(p=>p.id)));
-      filled.push(chosen);
+      // Tag lineup with bucket info for the Scenarios tab
+      const l=[...chosen.lu];
+      l._bucketId       = bucket.id;
+      l._bucketName     = bucket.playerName;
+      l._bucketIsField  = bucket.isField;
+      l._simWinAvg      = chosen.score.toFixed(1);
+      l._simAvg         = chosen.score.toFixed(1);
+      l._simWinRate     = '—';
+      filled.push(l);
     }
 
-    if(!filled.length){ alert('No lineups passed selection.'); done(); return; }
+    log(`  ✓ ${bucket.playerName}: ${filled.length}/${bucket.allocatedLineups} lineups built`);
+    allFinalLineups.push(...filled);
+  }
 
-    let finalLineups = filled.map(x=>{
-      const l = [...x.lu];
-      l._simAvg    = x.score.toFixed(1);
-      l._simWinAvg = x.score.toFixed(1);
-      l._simWinRate= '—';
-      return l;
-    });
+  if(!allFinalLineups.length){
+    alert('No lineups generated. Try relaxing exposure or salary rules.');
+    done(); return;
+  }
 
-    // Min exposure enforcement — same logic as AutoGen
-    const nascarMinOverrides = slate.playerMinOverrides || {};
-    if(Object.keys(nascarMinOverrides).some(id => nascarMinOverrides[id] > 0)){
-      // Build candidate pool from all generated lineups (not just selected)
-      const allNascarCandidates = candidates.map(x => {
-        const l = [...x.lu];
-        l._simAvg = x.score.toFixed(1);
-        return l;
-      });
-      const nascarScoreFn = l => l.reduce((s,p)=>s+(p._simComposite||0),0);
-      finalLineups = enforceMinExposure(finalLineups, allNascarCandidates, nascarMinOverrides, nascarScoreFn, log);
-    }
+  // ── Step 5: Min exposure enforcement ─────────────────────────────────────
+  const nascarMinOverrides = slate.playerMinOverrides||{};
+  let finalLineups = allFinalLineups;
+  if(Object.keys(nascarMinOverrides).some(id=>nascarMinOverrides[id]>0)){
+    const allCandidates = allFinalLineups.map(l=>{ const c=[...l]; c._simAvg=l._simAvg; return c; });
+    const scoreFn = l => l.reduce((s,p)=>s+(p._simComposite||0),0);
+    finalLineups = enforceMinExposure(finalLineups, allCandidates, nascarMinOverrides, scoreFn, log);
+  }
 
-    const avgScore = filled.reduce((s,x)=>s+x.score,0)/filled.length;
-    log(`Done! ${filled.length} lineups selected. Avg composite: ${avgScore.toFixed(1)}`);
-    const now=new Date();
-    addToHistory(slate.id,`${finalLineups.length} lineups (sim) @ ${now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`,finalLineups);
-    done();
-    openPreviewModal(finalLineups,'proj');
-  };
+  // ── Step 6: Interleave buckets for preview variety ────────────────────────
+  // Rather than all Hamlin lineups then all Reddick lineups, interleave them
+  // so the preview shows a mix bucket-by-bucket.
+  const interleaved = [];
+  const byBucket = {};
+  finalLineups.forEach(l=>{ const k=l._bucketId||'__field__'; (byBucket[k]=byBucket[k]||[]).push(l); });
+  const bucketQueues = Object.values(byBucket);
+  let anyLeft = true;
+  while(anyLeft){
+    anyLeft=false;
+    bucketQueues.forEach(q=>{ if(q.length){interleaved.push(q.shift());anyLeft=true;} });
+  }
 
-  runChunk();
+  const avgScore = interleaved.reduce((s,l)=>s+(parseFloat(l._simWinAvg)||0),0)/interleaved.length;
+  log(`Done! ${interleaved.length} lineups across ${buckets.length} scenario buckets. Avg composite: ${avgScore.toFixed(1)}`);
+
+  const now=new Date();
+  addToHistory(slate.id,`${interleaved.length} lineups (sim) @ ${now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`,interleaved);
+  done();
+  openPreviewModal(interleaved,'proj');
 }
 
 
@@ -4910,6 +5006,198 @@ function _updatePreviewSortBtns(){
   });
 }
 
+// ═══════════════════════════════════════════════════════════
+// SCENARIOS TAB (NASCAR sim preview)
+// ═══════════════════════════════════════════════════════════
+function togglePreviewScenarios(){
+  _previewScenariosActive = !_previewScenariosActive;
+  const sp  = document.getElementById('previewScenariosPanel');
+  const ll  = document.getElementById('previewLineupsList');
+  const pa  = document.getElementById('previewActions');
+  const btn = document.getElementById('previewScenariosBtn');
+  if(_previewScenariosActive){
+    if(sp) sp.style.display='block';
+    if(ll) ll.style.display='none';
+    if(pa) pa.style.display='none';
+    if(btn){ btn.textContent='✕ Back to Lineups'; btn.style.background='rgba(232,66,26,.18)'; btn.style.color='var(--accent2)'; }
+    renderPreviewScenarios();
+  } else {
+    if(sp) sp.style.display='none';
+    if(ll) ll.style.display='';
+    if(pa) pa.style.display='';
+    if(btn){ btn.textContent='🏁 Scenarios'; btn.style.background='rgba(232,66,26,.08)'; btn.style.color='var(--accent2)'; }
+  }
+}
+
+function renderPreviewScenarios(){
+  const panel = document.getElementById('previewScenariosPanel');
+  if(!panel) return;
+  const buckets  = window._lastNascarBuckets;
+  const pool     = window._lastNascarPool;
+  const lineups  = previewLineups;
+  if(!buckets || !buckets.length){ panel.innerHTML='<div style="padding:20px;color:var(--muted);font-size:12px;">No scenario data available. Run the NASCAR simulation to see this view.</div>'; return; }
+
+  const totalLineups = lineups.length;
+
+  // ── Section 1: Bucket summary cards ──────────────────────────────────────
+  let html = `<div style="padding:12px 0 8px;"><div style="font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:1px;color:var(--text);margin-bottom:10px;">Race Scenario Coverage</div>`;
+
+  buckets.forEach(b=>{
+    const bucketLineups = lineups.filter(l=>l._bucketId===b.id);
+    const pct = (b.frequency*100).toFixed(1);
+    const barW = Math.round(b.frequency*100);
+    const icon = b.isField ? '🌀' : '🏁';
+    const color = b.isField ? 'var(--blue)' : 'var(--accent2)';
+    const borderColor = b.isField ? 'rgba(59,130,246,.3)' : 'rgba(232,66,26,.3)';
+    const bgColor = b.isField ? 'rgba(59,130,246,.06)' : 'rgba(232,66,26,.06)';
+
+    // Top pairings within this bucket's lineups (who appears most with the bucket driver)
+    const pairingCount = {};
+    if(!b.isField && bucketLineups.length){
+      bucketLineups.forEach(l=>{
+        l.forEach(p=>{ if(p.id!==b.id){ pairingCount[p.name]=(pairingCount[p.name]||0)+1; } });
+      });
+    }
+    const topPairings = Object.entries(pairingCount)
+      .sort((a,b)=>b[1]-a[1])
+      .slice(0,5)
+      .map(([name,cnt])=>`<span style="font-size:9px;padding:1px 6px;border-radius:10px;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text);white-space:nowrap;">${name} <span style="color:var(--muted);">${cnt}x</span></span>`)
+      .join('');
+
+    // Top value plays — drivers in this bucket with elevated bucket composite vs global
+    const valueDrivers = (pool||[])
+      .map(p=>({
+        p,
+        lift: (b.driverComposites[p.id]||0) - (p._simComposite||0)
+      }))
+      .filter(x=>x.lift>2 && x.p.id!==b.id)
+      .sort((a,z)=>z.lift-a.lift)
+      .slice(0,3)
+      .map(x=>`<span style="font-size:9px;padding:1px 6px;border-radius:10px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25);color:var(--green);white-space:nowrap;">↑ ${x.p.name}</span>`)
+      .join('');
+
+    // Suppressed drivers — lower composite in this bucket vs global
+    const suppressedDrivers = (pool||[])
+      .map(p=>({
+        p,
+        drop: (p._simComposite||0) - (b.driverComposites[p.id]||0)
+      }))
+      .filter(x=>x.drop>3 && x.p.id!==b.id)
+      .sort((a,z)=>z.drop-a.drop)
+      .slice(0,3)
+      .map(x=>`<span style="font-size:9px;padding:1px 6px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);color:var(--red);white-space:nowrap;">↓ ${x.p.name}</span>`)
+      .join('');
+
+    html += `
+    <div style="background:${bgColor};border:1px solid ${borderColor};border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:14px;">${icon}</span>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:${color};">${b.playerName}</div>
+            <div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);margin-top:1px;">Top scorer in ${b.simCount.toLocaleString()} sims · ${pct}% of races</div>
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:${color};line-height:1;">${bucketLineups.length}</div>
+          <div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);">lineups</div>
+        </div>
+      </div>
+      <!-- frequency bar -->
+      <div style="background:var(--surface2);border-radius:3px;height:4px;margin-bottom:8px;overflow:hidden;">
+        <div style="width:${barW}%;height:100%;background:${color};border-radius:3px;transition:width .4s;"></div>
+      </div>
+      ${topPairings ? `<div style="margin-bottom:5px;"><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;">Key pairings </span>${topPairings}</div>` : ''}
+      ${valueDrivers||suppressedDrivers ? `<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+        ${valueDrivers?`<span style="font-family:'DM Mono',monospace;font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;">Elevated:</span>${valueDrivers}`:''}
+        ${suppressedDrivers?`<span style="font-family:'DM Mono',monospace;font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-left:4px;">Suppressed:</span>${suppressedDrivers}`:''}
+      </div>` : ''}
+    </div>`;
+  });
+  html += `</div>`;
+
+  // ── Section 2: Coverage matrix ────────────────────────────────────────────
+  // Show per-driver exposure across buckets — highlights cannibalization fix
+  const namedBuckets = buckets.filter(b=>!b.isField);
+  if(namedBuckets.length && pool && pool.length){
+    // Only show drivers who appear in at least one lineup
+    const driversInPlay = (pool||[]).filter(p=>lineups.some(l=>l.some(x=>x.id===p.id)));
+    const topDrivers = driversInPlay
+      .sort((a,b)=>(b._simComposite||0)-(a._simComposite||0))
+      .slice(0,12);
+
+    if(topDrivers.length && namedBuckets.length){
+      html += `<div style="margin-top:8px;"><div style="font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:1px;color:var(--text);margin-bottom:8px;">Coverage Matrix <span style="font-size:10px;font-family:'DM Mono',monospace;color:var(--muted);font-weight:400;letter-spacing:0;">% exposure per scenario bucket</span></div>`;
+      html += `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:10px;">`;
+      // Header row
+      html += `<tr><th style="text-align:left;padding:4px 6px;font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);border-bottom:1px solid var(--border);font-weight:400;">Driver</th>`;
+      namedBuckets.forEach(b=>{
+        const shortName = b.playerName.split(' ').slice(-1)[0];
+        html += `<th style="text-align:center;padding:4px 4px;font-family:'DM Mono',monospace;font-size:9px;color:var(--accent2);border-bottom:1px solid var(--border);font-weight:600;min-width:52px;">${shortName}</th>`;
+      });
+      const fieldBucket = buckets.find(b=>b.isField);
+      if(fieldBucket) html += `<th style="text-align:center;padding:4px 4px;font-family:'DM Mono',monospace;font-size:9px;color:var(--blue);border-bottom:1px solid var(--border);font-weight:600;min-width:44px;">Field</th>`;
+      html += `</tr>`;
+
+      topDrivers.forEach(p=>{
+        html += `<tr>`;
+        html += `<td style="padding:4px 6px;font-size:11px;font-weight:600;border-bottom:1px solid rgba(255,255,255,.04);white-space:nowrap;">${p.name}</td>`;
+        namedBuckets.forEach(b=>{
+          const bucketLUs = lineups.filter(l=>l._bucketId===b.id);
+          const expInBucket = bucketLUs.filter(l=>l.some(x=>x.id===p.id)).length;
+          const expPct = bucketLUs.length ? Math.round(expInBucket/bucketLUs.length*100) : 0;
+          const isBucketDriver = p.id===b.id;
+          let bg='transparent', col='var(--muted)';
+          if(isBucketDriver){ bg='rgba(232,66,26,.15)'; col='var(--accent2)'; }
+          else if(expPct>=70){ bg='rgba(34,197,94,.12)'; col='var(--green)'; }
+          else if(expPct>=40){ bg='rgba(245,197,24,.08)'; col='var(--accent)'; }
+          else if(expPct>0){ col='var(--muted)'; }
+          html += `<td style="text-align:center;padding:4px 4px;border-bottom:1px solid rgba(255,255,255,.04);background:${bg};">
+            <span style="font-family:'DM Mono',monospace;font-size:10px;color:${col};font-weight:${expPct>0?600:400};">${expPct>0?expPct+'%':'—'}</span>
+          </td>`;
+        });
+        if(fieldBucket){
+          const fLUs = lineups.filter(l=>l._bucketId==='__field__');
+          const fExp = fLUs.length ? Math.round(fLUs.filter(l=>l.some(x=>x.id===p.id)).length/fLUs.length*100) : 0;
+          let fc='var(--muted)', fb='transparent';
+          if(fExp>=70){ fb='rgba(59,130,246,.12)'; fc='var(--blue)'; }
+          else if(fExp>=40){ fc='var(--blue)'; }
+          html += `<td style="text-align:center;padding:4px 4px;border-bottom:1px solid rgba(255,255,255,.04);background:${fb};">
+            <span style="font-family:'DM Mono',monospace;font-size:10px;color:${fc};font-weight:${fExp>0?600:400};">${fExp>0?fExp+'%':'—'}</span>
+          </td>`;
+        }
+        html += `</tr>`;
+      });
+      html += `</table></div></div>`;
+    }
+  }
+
+  // ── Section 3: Sim distribution bar chart ─────────────────────────────────
+  html += `<div style="margin-top:16px;"><div style="font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:1px;color:var(--text);margin-bottom:8px;">Sim Outcome Distribution</div>`;
+  html += `<div style="font-size:10px;color:var(--muted);margin-bottom:8px;">How often each driver was the top scorer across all simulations.</div>`;
+
+  // Bar chart — sort by sim count desc, show top 15
+  const chartBuckets = [...buckets].sort((a,b)=>b.simCount-a.simCount);
+  const maxSimCount = chartBuckets[0]?.simCount||1;
+  chartBuckets.forEach(b=>{
+    const barW = Math.round((b.simCount/maxSimCount)*100);
+    const pct = (b.frequency*100).toFixed(1);
+    const color = b.isField ? 'var(--blue)' : 'var(--accent2)';
+    const label = b.isField ? '🌀 Field' : b.playerName.split(' ').slice(-1)[0];
+    html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">
+      <div style="font-size:10px;font-weight:600;color:var(--text);width:90px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${b.playerName}">${label}</div>
+      <div style="flex:1;background:var(--surface2);border-radius:3px;height:14px;overflow:hidden;">
+        <div style="width:${barW}%;height:100%;background:${color};border-radius:3px;opacity:.8;"></div>
+      </div>
+      <div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);width:38px;text-align:right;">${pct}%</div>
+      <div style="font-family:'DM Mono',monospace;font-size:9px;color:${color};width:26px;text-align:right;font-weight:600;">${b.allocatedLineups}L</div>
+    </div>`;
+  });
+  html += `</div>`;
+
+  panel.innerHTML = html;
+}
+
 function openPreviewModal(lineups, optimizeBy){
   previewLineups=lineups;
   previewFilter=null;
@@ -4959,6 +5247,24 @@ function openPreviewModal(lineups, optimizeBy){
     filterBtns.style.display='none';
     filterBtns.innerHTML='';
   }
+
+  // Show Scenarios button only for NASCAR sim-generated lineup sets
+  const scenBtn = document.getElementById('previewScenariosBtn');
+  const hasBuckets = window._lastNascarBuckets && lineups.some(l=>l._bucketId);
+  if(scenBtn){
+    scenBtn.style.display = hasBuckets ? 'inline-block' : 'none';
+    scenBtn.textContent = '🏁 Scenarios';
+    scenBtn.style.background = 'rgba(232,66,26,.08)';
+    scenBtn.style.color = 'var(--accent2)';
+  }
+  // Always reset scenarios view when opening modal
+  _previewScenariosActive = false;
+  const sp = document.getElementById('previewScenariosPanel');
+  const ll = document.getElementById('previewLineupsList');
+  const pa = document.getElementById('previewActions');
+  if(sp) sp.style.display='none';
+  if(ll) ll.style.display='';
+  if(pa) pa.style.display='';
 
   // Reset sort to Default on each new open
   _updatePreviewSortBtns();
@@ -5031,14 +5337,17 @@ function renderPreviewLineupsList(){
     // Archetype tag
     const arcGroup = lineup._archetypeTag ? (slate2.groups||[]).find(g=>g.id===lineup._archetypeTag) : null;
     const waveTag = lineup._waveTag;
+    const bucketName = lineup._bucketName;
+    const bucketIsField = lineup._bucketIsField;
     const arcTag = arcGroup ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${arcGroup.color}22;color:${arcGroup.color};border:1px solid ${arcGroup.color}44;margin-left:4px;">${arcGroup.name}</span>` : '';
     const wTag = waveTag ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${waveTag==='am'?'rgba(34,197,94,.15)':'rgba(245,197,24,.15)'};color:${waveTag==='am'?'var(--green)':'var(--accent)'};border:1px solid ${waveTag==='am'?'rgba(34,197,94,.3)':'rgba(245,197,24,.3)'};margin-left:4px;">${waveTag==='am'?'AM':'PM'}</span>` : '';
+    const bTag = bucketName ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${bucketIsField?'rgba(59,130,246,.1)':'rgba(232,66,26,.1)'};color:${bucketIsField?'var(--blue)':'var(--accent2)'};border:1px solid ${bucketIsField?'rgba(59,130,246,.3)':'rgba(232,66,26,.3)'};margin-left:4px;">${bucketIsField?'🌀 Field':'🏁 '+bucketName.split(' ').slice(-1)[0]}</span>` : '';
 
     // Find original index in full previewLineups array for checkbox id
     const origIdx = previewLineups.indexOf(lineup);
     return `<div class="preview-lineup-card">
       <div class="preview-lineup-top">
-        <div style="display:flex;align-items:center;gap:4px;"><div class="preview-lineup-num">Lineup ${origIdx+1}</div>${arcTag}${wTag}</div>
+        <div style="display:flex;align-items:center;gap:4px;"><div class="preview-lineup-num">Lineup ${origIdx+1}</div>${arcTag}${wTag}${bTag}</div>
         <div style="display:flex;align-items:center;gap:8px">
           <div class="preview-lineup-meta">${fmt(sal)}</div>
           <input type="checkbox" class="preview-check" id="pc${origIdx}" checked onchange="renderPreviewExposure()">
