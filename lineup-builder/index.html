@@ -4174,7 +4174,7 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
 // ═══════════════════════════════════════════════════════════
 function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target){
   const numSims = simTopScorer.length;
-  const MIN_THRESHOLD = 0.02; // bucket must represent ≥2% of sims
+  const MIN_THRESHOLD = 0.05; // bucket must represent ≥5% of sims
 
   // ── Count how often each driver was top scorer ──────────────
   const countById = {};
@@ -5247,7 +5247,7 @@ function renderPreviewScenarios(){
 
   // ── Section 3: Sim distribution bar chart ─────────────────────────────────
   html += `<div style="margin-top:16px;"><div style="font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:1px;color:var(--text);margin-bottom:8px;">Sim Outcome Distribution</div>`;
-  html += `<div style="font-size:10px;color:var(--muted);margin-bottom:8px;">How often each driver was the top scorer across all simulations. Sims below the 2% threshold are redistributed to the closest named bucket.</div>`;
+  html += `<div style="font-size:10px;color:var(--muted);margin-bottom:8px;">How often each driver was the top scorer across all simulations. Sims below the 5% threshold are redistributed to the closest named bucket.</div>`;
 
   const chartBuckets = [...buckets].sort((a,b)=>b.simCount-a.simCount);
   const maxSimCount = chartBuckets[0]?.simCount||1;
