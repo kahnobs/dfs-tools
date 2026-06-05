@@ -3129,8 +3129,6 @@ function winBonus(round){
 // CDFs, capped by fight duration. This enforces the key insight: early finish
 // = win bonus + low volume; decision = no finish bonus + high volume opportunity.
 function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
-  const sal  = fighter.salary || 8000;
-  const tier = Math.max(0, Math.min(1, (sal - 6400) / (9800 - 6400)));
   // Detect 5-round fight: fighter has R4 or R5 finish odds
   const is5Round = fighter.finish_r4 != null || fighter.finish_r5 != null;
   const ssCap = ssCapForRound(round, is5Round);
@@ -3142,17 +3140,18 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
     ss = Math.max(0, Math.round(ssCDF(ssCap)));
   } else {
     // Fallback: use SS O/U line as the distribution anchor if available,
-    // otherwise fall back to salary-tier estimate.
-    // The O/U line is the market's expected SS count — treat it as the mean
-    // of a right-skewed distribution, scaled by available fight time.
+    // otherwise derive from simulated outcome.
+    // ssCap already encodes fight duration (cumulative SS ceiling for rounds fought),
+    // so it's a natural anchor — no salary proxy needed.
+    // Winners land ~55% of total strikes; losers ~45%, with random spread around each.
     let baseSS;
     if(fighter.ss_ou){
-      const ouLine = parseFloat(fighter.ss_ou); // e.g. "35.5 (-130)" → 35.5
-      baseSS = isNaN(ouLine) ? (35 + tier * 45) : ouLine;
+      const ouLine = parseFloat(fighter.ss_ou);
+      baseSS = isNaN(ouLine) ? (ssCap * (won ? 0.55 : 0.45)) : ouLine;
     } else {
-      baseSS = 35 + tier * 45;
+      baseSS = ssCap * (won ? 0.55 : 0.45);
     }
-    ss = Math.round(baseSS * (ssCap / 130) * (0.6 + Math.random() * 0.8));
+    ss = Math.round(baseSS * (0.7 + Math.random() * 0.6));
     ss = Math.max(0, Math.min(ssCap, ss));
   }
 
@@ -3161,17 +3160,17 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
   if(tdCDF){
     td = Math.max(0, Math.round(tdCDF(tdCap)));
   } else {
-    // Fallback: use TD O/U line as the anchor if available.
-    // The O/U line number (e.g. 1.5 from "1.5 (-115)") is the market's expected
-    // TD count — use it to scale the distribution rather than relying on salary tier.
+    // Fallback: use TD O/U line as the anchor if available,
+    // otherwise derive from simulated outcome.
+    // tdCap encodes rounds fought; winners attempt and land more TDs.
     let baseTD;
     if(fighter.td_ou){
-      const ouLine = parseFloat(fighter.td_ou); // e.g. "1.5 (-115)" → 1.5
-      baseTD = isNaN(ouLine) ? (tier * 3) : ouLine;
+      const ouLine = parseFloat(fighter.td_ou);
+      baseTD = isNaN(ouLine) ? (tdCap * (won ? 0.45 : 0.30)) : ouLine;
     } else {
-      baseTD = tier * 3;
+      baseTD = tdCap * (won ? 0.45 : 0.30);
     }
-    td = Math.round(baseTD * (tdCap / 10) * (0.5 + Math.random() * 1.0));
+    td = Math.round(baseTD * (0.5 + Math.random() * 1.0));
     td = Math.max(0, Math.min(tdCap, td));
   }
 
