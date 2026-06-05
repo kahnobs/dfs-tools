@@ -823,6 +823,8 @@ html { overscroll-behavior-y: contain; }
               <option value="saved">Order saved</option>
               <option value="proj_desc">Proj ↓</option>
               <option value="proj_asc">Proj ↑</option>
+              <option value="sim_desc">Sim ↓</option>
+              <option value="sim_asc">Sim ↑</option>
               <option value="sal_desc">Salary ↓</option>
               <option value="sal_asc">Salary ↑</option>
             </select>
@@ -2225,16 +2227,20 @@ function renderSaved(){
     const sal=players.reduce((s,p)=>s+(p.salary||0),0);
     const proj=players.reduce((s,p)=>s+(parseFloat(p.proj)||0),0);
     const rtg=players.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
-    return {lineup, i, players, sal, proj, rtg};
+    const simScore = parseFloat(lineup._simWinAvg) || null;
+    return {lineup, i, players, sal, proj, rtg, simScore};
   });
   if(sortBy==='proj_desc') entries.sort((a,b)=>b.proj-a.proj);
   else if(sortBy==='proj_asc') entries.sort((a,b)=>a.proj-b.proj);
   else if(sortBy==='sal_desc') entries.sort((a,b)=>b.sal-a.sal);
   else if(sortBy==='sal_asc') entries.sort((a,b)=>a.sal-b.sal);
-  list.innerHTML=entries.map(({i,players,sal,proj,rtg})=>{
+  else if(sortBy==='sim_desc') entries.sort((a,b)=>(b.simScore||0)-(a.simScore||0));
+  else if(sortBy==='sim_asc') entries.sort((a,b)=>(a.simScore||0)-(b.simScore||0));
+  list.innerHTML=entries.map(({i,players,sal,proj,rtg,lineup,simScore})=>{
     const stats=[];
     if(hasProj)stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Proj</span>${proj.toFixed(2)}</span>`);
     if(hasRtg)stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Rtg</span>${rtg.toFixed(1)}</span>`);
+    if(simScore!=null)stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Sim</span>${simScore}</span>`);
     return `<div class="saved-lineup" id="saved-${i}">
       <div class="saved-top"><div class="saved-num">Lineup #${i+1}</div>
       <div class="saved-actions"><div class="saved-sal">${fmt(sal)}</div><button class="saved-load" onclick="loadLineup(${i})">↑ Edit</button><button class="saved-del" onclick="deleteLineup(${i})">✕</button></div></div>
@@ -5679,7 +5685,11 @@ function addSelectedToSaved(){
     const key=lineupKey(lineup.map(p=>p.id));
     if(existingKeys.has(key)){skipped++;return;}
     existingKeys.add(key);
-    slate.savedLineups.push(lineup.map(p=>p.id));
+    const ids = lineup.map(p=>p.id);
+    if(lineup._simAvg)     ids._simAvg     = lineup._simAvg;
+    if(lineup._simWinRate) ids._simWinRate = lineup._simWinRate;
+    if(lineup._simWinAvg)  ids._simWinAvg  = lineup._simWinAvg;
+    slate.savedLineups.push(ids);
     added++;
   });
   save();closePreviewModal();renderSaved();renderExposure();renderPool();
