@@ -818,6 +818,14 @@ html { overscroll-behavior-y: contain; }
             <div class="saved-count" id="savedCount">0 saved</div>
           </div>
           <div style="display:flex;gap:6px;align-items:center;">
+            <select id="savedSortSelect" onchange="const s=activeSlate();if(s){s._savedSort=this.value;save();}renderSaved();"
+              style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 7px;border-radius:5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;outline:none;">
+              <option value="saved">Order saved</option>
+              <option value="proj_desc">Proj ↓</option>
+              <option value="proj_asc">Proj ↑</option>
+              <option value="sal_desc">Salary ↓</option>
+              <option value="sal_asc">Salary ↑</option>
+            </select>
             <button onclick="clearSavedLineups()" id="clearSavedBtn" style="background:none;border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;display:none;" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">Clear All</button>
             <button class="btn-export" id="exportBtn" onclick="exportCSV()" disabled>Export CSV</button>
           </div>
@@ -2204,14 +2212,26 @@ function renderSaved(){
   document.getElementById('exportBtn').disabled=lineups.length===0;
   const clearBtn = document.getElementById('clearSavedBtn');
   if(clearBtn) clearBtn.style.display = lineups.length > 0 ? '' : 'none';
+  // Sync sort dropdown to persisted value
+  const sortSel = document.getElementById('savedSortSelect');
+  const sortBy = slate._savedSort || 'saved';
+  if(sortSel) sortSel.value = sortBy;
   const list=document.getElementById('savedList');
   if(!lineups.length){list.innerHTML='<div class="empty-saved">No lineups saved yet.</div>';return;}
   const hasProj=!!slate.columnMapping?.proj,hasRtg=!!slate.columnMapping?.rating;
-  list.innerHTML=lineups.map((lineup,i)=>{
+  // Build display entries with their original index preserved (needed for edit/delete)
+  let entries = lineups.map((lineup,i)=>{
     const players=lineup.map(id=>playerById(slate,id)).filter(Boolean);
     const sal=players.reduce((s,p)=>s+(p.salary||0),0);
     const proj=players.reduce((s,p)=>s+(parseFloat(p.proj)||0),0);
     const rtg=players.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
+    return {lineup, i, players, sal, proj, rtg};
+  });
+  if(sortBy==='proj_desc') entries.sort((a,b)=>b.proj-a.proj);
+  else if(sortBy==='proj_asc') entries.sort((a,b)=>a.proj-b.proj);
+  else if(sortBy==='sal_desc') entries.sort((a,b)=>b.sal-a.sal);
+  else if(sortBy==='sal_asc') entries.sort((a,b)=>a.sal-b.sal);
+  list.innerHTML=entries.map(({i,players,sal,proj,rtg})=>{
     const stats=[];
     if(hasProj)stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Proj</span>${proj.toFixed(2)}</span>`);
     if(hasRtg)stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Rtg</span>${rtg.toFixed(1)}</span>`);
