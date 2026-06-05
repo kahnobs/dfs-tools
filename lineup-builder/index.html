@@ -876,11 +876,11 @@ html { overscroll-behavior-y: contain; }
 
         <!-- Mode sub-tabs -->
         <div style="display:flex;gap:2px;margin-bottom:12px;background:var(--surface2);border-radius:8px;padding:3px;">
-          <button id="modeTabOptimize" onclick="switchGenMode('optimize')"
+          <button id="modeTabOptimize" onclick="switchGenMode('optimize',true)"
             style="flex:1;padding:6px 0;font-size:11px;font-weight:600;border:none;border-radius:6px;cursor:pointer;background:var(--surface);color:var(--text);font-family:'DM Sans',sans-serif;">
             ⚡ Optimize
           </button>
-          <button id="modeTabSimulate" onclick="switchGenMode('simulate')"
+          <button id="modeTabSimulate" onclick="switchGenMode('simulate',true)"
             style="flex:1;padding:6px 0;font-size:11px;font-weight:600;border:none;border-radius:6px;cursor:pointer;background:transparent;color:var(--muted);font-family:'DM Sans',sans-serif;">
             🎲 Simulate
           </button>
@@ -1724,9 +1724,6 @@ function switchSlate(id){
   // Reset UFC-specific session state so it doesn't bleed between slates
   ufcExcludedFights = new Set();
   ufc5RoundFights   = new Set();
-  // Reset sim mode init flag so the correct default mode is set for the new slate
-  const simTab = document.getElementById('modeTabSimulate');
-  if(simTab) simTab._modeInitialized = false;
   renderTopBar();
   renderSlate();
 }
@@ -2656,14 +2653,17 @@ function renderGroupRulesSummary(){
   const simTab = document.getElementById('modeTabSimulate');
   const hasSimulation = slate.sport==='ufc' || slate.sport==='nascar';
   if(simTab) simTab.style.display = hasSimulation ? '' : 'none';
-  // Only set the default mode when the tab is first initialized or when switching
-  // to a sport that doesn't support the current mode. Never override a manual choice.
-  if(!simTab?._modeInitialized){
-    if(simTab) simTab._modeInitialized = true;
-    if(hasSimulation) switchGenMode('simulate');
-    else switchGenMode('optimize');
-  } else if(!hasSimulation && _genMode === 'simulate'){
-    // PGA slate: simulate tab hidden, force back to optimize
+  // Default mode per slate: simulate for UFC/NASCAR, optimize for PGA.
+  // Use the slate's own id to detect a sport change vs. a manual toggle within the same slate.
+  // If the user manually switches mode within a slate we record it on the slate object so
+  // switching away and back preserves their choice; but on a *fresh* slate (no stored mode)
+  // we always default to the sport-appropriate mode.
+  if(slate._genModeOverride){
+    // User has manually set a mode for this slate — honour it.
+    switchGenMode(slate._genModeOverride);
+  } else if(hasSimulation){
+    switchGenMode('simulate');
+  } else {
     switchGenMode('optimize');
   }
   const nascarSection = document.getElementById('nascarSection');
@@ -2935,8 +2935,11 @@ function stepRule(gid, field, delta){
 // Current gen mode: 'optimize' or 'simulate'
 let _genMode = 'simulate';
 
-function switchGenMode(mode){
+function switchGenMode(mode, manual=false){
   _genMode = mode;
+  // If the user manually clicked a tab, record their choice on the active slate
+  // so switching away and back preserves it.
+  if(manual){ const s=activeSlate(); if(s){ s._genModeOverride=mode; save(); } }
   const optBtn = document.getElementById('modeTabOptimize');
   const simBtn = document.getElementById('modeTabSimulate');
   const optSettings = document.getElementById('optimizeSettings');
