@@ -2272,7 +2272,7 @@ function renderSaved(){
   const ufcWinProb={};
   if(isUfc&&hasMl){
     const byFight={};
-    pool.forEach(p=>{const f=p.fight||p.fightId||p.bout||'unknown';(byFight[f]=byFight[f]||[]).push(p);});
+    pool.forEach(p=>{const f=p.fightNum||p.fight||p.fightId||p.bout||'unknown';(byFight[f]=byFight[f]||[]).push(p);});
     Object.values(byFight).forEach(fighters=>{
       const total=fighters.reduce((s,p)=>s+(nascarMlToProb(p.ml)||0),0)||1;
       fighters.forEach(p=>{ufcWinProb[p.id]=(nascarMlToProb(p.ml)||0)/total;});
