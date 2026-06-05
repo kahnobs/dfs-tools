@@ -2654,12 +2654,9 @@ function renderGroupRulesSummary(){
   const hasSimulation = slate.sport==='ufc' || slate.sport==='nascar';
   if(simTab) simTab.style.display = hasSimulation ? '' : 'none';
   // Default mode per slate: simulate for UFC/NASCAR, optimize for PGA.
-  // Use the slate's own id to detect a sport change vs. a manual toggle within the same slate.
-  // If the user manually switches mode within a slate we record it on the slate object so
-  // switching away and back preserves their choice; but on a *fresh* slate (no stored mode)
-  // we always default to the sport-appropriate mode.
+  // Honour a manual override the user has set on this slate; otherwise default
+  // to the sport-appropriate mode every time we switch to this slate.
   if(slate._genModeOverride){
-    // User has manually set a mode for this slate — honour it.
     switchGenMode(slate._genModeOverride);
   } else if(hasSimulation){
     switchGenMode('simulate');
@@ -2705,6 +2702,12 @@ function renderGroupRulesSummary(){
     waveSection.style.display = showWave ? 'block' : 'none';
   }
 
+  // Always hide archetype section for non-PGA slates — must happen before the
+  // early return below so an empty-groups UFC slate doesn't leave it visible
+  // from a prior PGA render.
+  const arcSec = document.getElementById('archetypeSection');
+  if(arcSec) arcSec.style.display = (slate.sport === 'pga') ? '' : 'none';
+
   const el=document.getElementById('groupRulesSummary');
   if(!groups.length){el.textContent='No groups defined yet.';return;}
   el.innerHTML=groups.map(g=>{
@@ -2731,12 +2734,10 @@ function renderGroupRulesSummary(){
     return `<div style="margin-bottom:4px;padding:4px 6px;background:var(--surface2);border-radius:4px;border-left:3px solid ${g.color}"><span style="color:var(--text);font-size:11px;">${lines.join(' · ')}</span><span style="color:var(--muted);font-size:10px;margin-left:6px;">(${(g.playerIds||[]).length} players)</span></div>`;
   }).join('');
 
-  // Archetype sliders
+  // Archetype sliders — section visibility already set above; just populate if PGA
   const archetypes = groups.filter(g=>g.isArchetype && (g.playerIds||[]).length > 0);
-  const arcSec = document.getElementById('archetypeSection');
   const arcSliders = document.getElementById('archetypeSliders');
-  if(!arcSec||!arcSliders)return;
-  if(!archetypes.length || slate.sport !== 'pga'){ arcSec.style.display='none'; return; }
+  if(!arcSliders || !archetypes.length || slate.sport !== 'pga') return;
   arcSec.style.display='block';
   arcSliders.innerHTML = archetypes.map(g=>{
     const pct = g.archetypePct||0;
@@ -2937,8 +2938,6 @@ let _genMode = 'simulate';
 
 function switchGenMode(mode, manual=false){
   _genMode = mode;
-  // If the user manually clicked a tab, record their choice on the active slate
-  // so switching away and back preserves it.
   if(manual){ const s=activeSlate(); if(s){ s._genModeOverride=mode; save(); } }
   const optBtn = document.getElementById('modeTabOptimize');
   const simBtn = document.getElementById('modeTabSimulate');
