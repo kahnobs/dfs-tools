@@ -825,7 +825,6 @@ html { overscroll-behavior-y: contain; }
                 <option value="proj">Proj</option>
                 <option value="sim">Sim</option>
                 <option value="win">Win%</option>
-                <option value="finish">Finish%</option>
                 <option value="top5">Top5%</option>
                 <option value="top10">Top10%</option>
                 <option value="top20">Top20%</option>
@@ -2206,7 +2205,7 @@ function loadLineup(idx){
 
 function deleteLineup(idx){
   const slate=activeSlate();if(!slate)return;
-  const lk = lineupKey(slate.savedLineups[idx]||[]);
+  const lk=lineupKey(slate.savedLineups[idx]||[]);
   slate.savedLineups.splice(idx,1);
   if(slate._lineupMeta) delete slate._lineupMeta[lk];
   save();renderSaved();renderExposure();renderPool();
@@ -2218,23 +2217,20 @@ function clearSavedLineups(){
   if(!confirm(`Clear all ${n} saved lineups? This cannot be undone.`))return;
   slate.savedLineups=[];slate._lineupMeta={};save();renderSaved();renderExposure();renderPool();
 }
-
 function applySavedSort(){
-  const metric = document.getElementById('savedSortMetric')?.value || 'saved';
-  const dir = document.getElementById('savedSortDir')?.textContent === '↓' ? 'desc' : 'asc';
-  // Map generic metric names to sport-specific sort keys
-  const slate = activeSlate();
-  const isUfc = slate?.sport === 'ufc';
-  let resolvedMetric = metric;
-  if(metric === 'win')    resolvedMetric = isUfc ? 'ml'  : 'win';
-  if(metric === 'finish') resolvedMetric = 'itd';
-  const sortBy = resolvedMetric === 'saved' ? 'saved' : `${resolvedMetric}_${dir}`;
-  if(slate){ slate._savedSort = sortBy; save(); }
+  const metric=document.getElementById('savedSortMetric')?.value||'saved';
+  const dir=document.getElementById('savedSortDir')?.textContent==='↓'?'desc':'asc';
+  const slate=activeSlate();
+  const isUfc=slate?.sport==='ufc';
+  let resolved=metric;
+  if(metric==='win') resolved=isUfc?'ml':'win';
+  const sortBy=resolved==='saved'?'saved':`${resolved}_${dir}`;
+  if(slate){slate._savedSort=sortBy;save();}
   renderSaved();
 }
 function toggleSavedSortDir(){
-  const btn = document.getElementById('savedSortDir'); if(!btn) return;
-  btn.textContent = btn.textContent === '↓' ? '↑' : '↓';
+  const btn=document.getElementById('savedSortDir');if(!btn)return;
+  btn.textContent=btn.textContent==='↓'?'↑':'↓';
   applySavedSort();
 }
 function renderSaved(){
@@ -2242,72 +2238,60 @@ function renderSaved(){
   const lineups=slate.savedLineups||[];
   document.getElementById('savedCount').textContent=lineups.length+' saved';
   document.getElementById('exportBtn').disabled=lineups.length===0;
-  const clearBtn = document.getElementById('clearSavedBtn');
-  if(clearBtn) clearBtn.style.display = lineups.length > 0 ? '' : 'none';
-  // Sync sort controls to persisted value
-  const sortBy = slate._savedSort || 'saved';
-  const sortMetricEl = document.getElementById('savedSortMetric');
-  const sortDirEl = document.getElementById('savedSortDir');
+  const clearBtn=document.getElementById('clearSavedBtn');
+  if(clearBtn) clearBtn.style.display=lineups.length>0?'':'none';
+  const sortBy=slate._savedSort||'saved';
+  const sortMetricEl=document.getElementById('savedSortMetric');
+  const sortDirEl=document.getElementById('savedSortDir');
   if(sortMetricEl){
-    const rawMetric = sortBy === 'saved' ? 'saved' : sortBy.replace(/_desc$|_asc$/,'');
-    const dir = sortBy.endsWith('_asc') ? '↑' : '↓';
-    // Reverse sport-specific remapping for display
-    const isUfc = slate.sport === 'ufc';
-    let displayMetric = rawMetric;
-    if(rawMetric === 'ml')  displayMetric = 'win';   // UFC win equity shows as "Win%"
-    if(rawMetric === 'itd') displayMetric = 'finish';
-    sortMetricEl.value = displayMetric;
-    if(sortDirEl) sortDirEl.textContent = dir;
-    if(sortDirEl) sortDirEl.style.visibility = displayMetric === 'saved' ? 'hidden' : 'visible';
+    const rawMetric=sortBy==='saved'?'saved':sortBy.replace(/_desc$|_asc$/,'');
+    const displayMetric=rawMetric==='ml'?'win':rawMetric;
+    sortMetricEl.value=displayMetric;
+    if(sortDirEl){
+      sortDirEl.textContent=sortBy.endsWith('_asc')?'↑':'↓';
+      sortDirEl.style.visibility=displayMetric==='saved'?'hidden':'visible';
+    }
   }
   const list=document.getElementById('savedList');
   if(!lineups.length){list.innerHTML='<div class="empty-saved">No lineups saved yet.</div>';return;}
   const hasProj=!!slate.columnMapping?.proj, hasRtg=!!slate.columnMapping?.rating;
   const hasWin=!!slate.columnMapping?.win, hasTop5=!!slate.columnMapping?.top5;
   const hasTop10=!!slate.columnMapping?.top10, hasTop20=!!slate.columnMapping?.top20;
-  const hasMl=!!slate.columnMapping?.ml, hasItd=!!slate.columnMapping?.itd;
-  const isUfc = slate.sport==='ufc';
-
-  // ── Vig removal ───────────────────────────────────────────
-  // For each odds category, sum raw implied probs across the entire player pool
-  // to get the overround divisor. Dividing each player's raw prob by that total
-  // puts all lineup equity numbers on a true 0-100% scale.
-  const pool = slate.players||[];
-  const vigDiv = {
-    win:   hasWin   ? pool.reduce((s,p)=>s+(nascarMlToProb(p.win)||0),  0) : 1,
-    top5:  hasTop5  ? pool.reduce((s,p)=>s+(nascarMlToProb(p.top5)||0), 0) : 1,
-    top10: hasTop10 ? pool.reduce((s,p)=>s+(nascarMlToProb(p.top10)||0),0) : 1,
-    top20: hasTop20 ? pool.reduce((s,p)=>s+(nascarMlToProb(p.top20)||0),0) : 1,
-    // UFC: each fight has exactly 2 fighters so the natural overround per fight is ~1.04-1.06.
-    // Sum ML probs across the full pool then divide by number of fights to get per-fight overround,
-    // but it's simpler and equivalent to just sum across all fighters and use that as the divisor
-    // since each fight contributes equally and lineups span multiple fights.
-    ml:    hasMl    ? pool.reduce((s,p)=>s+(nascarMlToProb(p.ml)||0),   0) : 1,
-    itd:   hasItd   ? pool.reduce((s,p)=>s+(nascarMlToProb(p.itd)||0),  0) : 1,
+  const hasMl=!!slate.columnMapping?.ml;
+  const isUfc=slate.sport==='ufc';
+  const pool=slate.players||[];
+  const meta=slate._lineupMeta||{};
+  // Vig removal for PGA/NASCAR: divide by sum of raw implied probs across full field
+  const vigDiv={
+    win:   hasWin  ?Math.max(0.01,pool.reduce((s,p)=>s+(nascarMlToProb(p.win)||0),  0)):1,
+    top5:  hasTop5 ?Math.max(0.01,pool.reduce((s,p)=>s+(nascarMlToProb(p.top5)||0), 0)):1,
+    top10: hasTop10?Math.max(0.01,pool.reduce((s,p)=>s+(nascarMlToProb(p.top10)||0),0)):1,
+    top20: hasTop20?Math.max(0.01,pool.reduce((s,p)=>s+(nascarMlToProb(p.top20)||0),0)):1,
   };
-  // Guard against degenerate cases (missing odds for most players)
-  const safeDiv = k => Math.max(vigDiv[k], 0.01);
-
-  const meta = slate._lineupMeta || {};
-  // Build display entries with their original index preserved (needed for edit/delete)
-  let entries = lineups.map((lineup,i)=>{
+  // UFC win equity: vig-remove per fight so each bout sums to 100%, then average across lineup
+  const ufcWinProb={};
+  if(isUfc&&hasMl){
+    const byFight={};
+    pool.forEach(p=>{const f=p.fight||p.fightId||p.bout||'unknown';(byFight[f]=byFight[f]||[]).push(p);});
+    Object.values(byFight).forEach(fighters=>{
+      const total=fighters.reduce((s,p)=>s+(nascarMlToProb(p.ml)||0),0)||1;
+      fighters.forEach(p=>{ufcWinProb[p.id]=(nascarMlToProb(p.ml)||0)/total;});
+    });
+  }
+  let entries=lineups.map((lineup,i)=>{
     const players=lineup.map(id=>playerById(slate,id)).filter(Boolean);
     const sal=players.reduce((s,p)=>s+(p.salary||0),0);
     const proj=players.reduce((s,p)=>s+(parseFloat(p.proj)||0),0);
     const rtg=players.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
-    const lk = lineupKey(lineup);
-    const simScore = parseFloat(meta[lk]?.simWinAvg) || null;
-    // Vig-adjusted equity: each player's raw prob divided by the field overround for that market
-    const winEq   = hasWin   ? players.reduce((s,p)=>s+((nascarMlToProb(p.win)||0)  /safeDiv('win')),  0)*100 : null;
-    const top5Eq  = hasTop5  ? players.reduce((s,p)=>s+((nascarMlToProb(p.top5)||0) /safeDiv('top5')), 0)*100 : null;
-    const top10Eq = hasTop10 ? players.reduce((s,p)=>s+((nascarMlToProb(p.top10)||0)/safeDiv('top10')),0)*100 : null;
-    const top20Eq = hasTop20 ? players.reduce((s,p)=>s+((nascarMlToProb(p.top20)||0)/safeDiv('top20')),0)*100 : null;
-    // UFC-specific: vig-adjusted ML win equity and ITD (finish) equity
-    const mlEq    = isUfc && hasMl  ? players.reduce((s,p)=>s+((nascarMlToProb(p.ml)||0) /safeDiv('ml')), 0)*100 : null;
-    const itdEq   = isUfc && hasItd ? players.reduce((s,p)=>s+((nascarMlToProb(p.itd)||0)/safeDiv('itd')),0)*100 : null;
-    return {lineup, i, players, sal, proj, rtg, simScore, winEq, top5Eq, top10Eq, top20Eq, mlEq, itdEq};
+    const lk=lineupKey(lineup);
+    const simScore=parseFloat(meta[lk]?.simWinAvg)||parseFloat(lineup._simWinAvg)||null;
+    const winEq  =hasWin  ?players.reduce((s,p)=>s+(nascarMlToProb(p.win)||0)/vigDiv.win,  0)*100:null;
+    const top5Eq =hasTop5 ?players.reduce((s,p)=>s+(nascarMlToProb(p.top5)||0)/vigDiv.top5, 0)*100:null;
+    const top10Eq=hasTop10?players.reduce((s,p)=>s+(nascarMlToProb(p.top10)||0)/vigDiv.top10,0)*100:null;
+    const top20Eq=hasTop20?players.reduce((s,p)=>s+(nascarMlToProb(p.top20)||0)/vigDiv.top20,0)*100:null;
+    const mlEq=isUfc&&hasMl?(players.reduce((s,p)=>s+(ufcWinProb[p.id]||0),0)/Math.max(1,players.length))*100:null;
+    return {lineup,i,players,sal,proj,rtg,simScore,winEq,top5Eq,top10Eq,top20Eq,mlEq};
   });
-
   if(sortBy==='proj_desc')    entries.sort((a,b)=>b.proj-a.proj);
   else if(sortBy==='proj_asc')    entries.sort((a,b)=>a.proj-b.proj);
   else if(sortBy==='sal_desc')    entries.sort((a,b)=>b.sal-a.sal);
@@ -2316,24 +2300,20 @@ function renderSaved(){
   else if(sortBy==='sim_asc')     entries.sort((a,b)=>(a.simScore||0)-(b.simScore||0));
   else if(sortBy==='win_desc')    entries.sort((a,b)=>(b.winEq||0)-(a.winEq||0));
   else if(sortBy==='win_asc')     entries.sort((a,b)=>(a.winEq||0)-(b.winEq||0));
+  else if(sortBy==='ml_desc')     entries.sort((a,b)=>(b.mlEq||0)-(a.mlEq||0));
+  else if(sortBy==='ml_asc')      entries.sort((a,b)=>(a.mlEq||0)-(b.mlEq||0));
   else if(sortBy==='top5_desc')   entries.sort((a,b)=>(b.top5Eq||0)-(a.top5Eq||0));
   else if(sortBy==='top5_asc')    entries.sort((a,b)=>(a.top5Eq||0)-(b.top5Eq||0));
   else if(sortBy==='top10_desc')  entries.sort((a,b)=>(b.top10Eq||0)-(a.top10Eq||0));
   else if(sortBy==='top10_asc')   entries.sort((a,b)=>(a.top10Eq||0)-(b.top10Eq||0));
   else if(sortBy==='top20_desc')  entries.sort((a,b)=>(b.top20Eq||0)-(a.top20Eq||0));
   else if(sortBy==='top20_asc')   entries.sort((a,b)=>(a.top20Eq||0)-(b.top20Eq||0));
-  else if(sortBy==='ml_desc')     entries.sort((a,b)=>(b.mlEq||0)-(a.mlEq||0));
-  else if(sortBy==='ml_asc')      entries.sort((a,b)=>(a.mlEq||0)-(b.mlEq||0));
-  else if(sortBy==='itd_desc')    entries.sort((a,b)=>(b.itdEq||0)-(a.itdEq||0));
-  else if(sortBy==='itd_asc')     entries.sort((a,b)=>(a.itdEq||0)-(b.itdEq||0));
-
-  list.innerHTML=entries.map(({i,players,sal,proj,rtg,lineup,simScore,winEq,top5Eq,top10Eq,top20Eq,mlEq,itdEq})=>{
+  list.innerHTML=entries.map(({i,players,sal,proj,rtg,simScore,winEq,top5Eq,top10Eq,top20Eq,mlEq})=>{
     const stats=[];
     if(hasProj)        stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Proj</span>${proj.toFixed(2)}</span>`);
     if(hasRtg)         stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Rtg</span>${rtg.toFixed(1)}</span>`);
     if(simScore!=null) stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Sim</span>${simScore}</span>`);
     if(mlEq!=null)     stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Win%</span>${mlEq.toFixed(1)}%</span>`);
-    if(itdEq!=null)    stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Finish%</span>${itdEq.toFixed(1)}%</span>`);
     if(winEq!=null)    stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Win%</span>${winEq.toFixed(1)}%</span>`);
     if(top5Eq!=null)   stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top5%</span>${top5Eq.toFixed(1)}%</span>`);
     if(top10Eq!=null)  stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top10%</span>${top10Eq.toFixed(1)}%</span>`);
@@ -2346,7 +2326,6 @@ function renderSaved(){
     </div>`;
   }).join('');
 }
-
 function exportCSV(){
   const slate=activeSlate();if(!slate)return;
   const cfg=SPORT_CFG[slate.sport]||SPORT_CFG.nascar;
@@ -5784,16 +5763,9 @@ function addSelectedToSaved(){
     existingKeys.add(key);
     const ids = lineup.map(p=>p.id);
     slate.savedLineups.push(ids);
-    // Persist sim metadata in a serialization-safe parallel lookup keyed by lineup content.
-    // Array properties are silently dropped by JSON.stringify, so we can't store on the array.
-    if(lineup._simAvg || lineup._simWinAvg){
-      slate._lineupMeta = slate._lineupMeta || {};
-      const lk = lineupKey(ids);
-      slate._lineupMeta[lk] = {
-        simAvg:     lineup._simAvg     || null,
-        simWinRate: lineup._simWinRate || null,
-        simWinAvg:  lineup._simWinAvg  || null,
-      };
+    if(lineup._simAvg||lineup._simWinAvg){
+      slate._lineupMeta=slate._lineupMeta||{};
+      slate._lineupMeta[key]={simAvg:lineup._simAvg||null,simWinRate:lineup._simWinRate||null,simWinAvg:lineup._simWinAvg||null};
     }
     added++;
   });
