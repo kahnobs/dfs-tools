@@ -818,28 +818,22 @@ html { overscroll-behavior-y: contain; }
             <div class="saved-count" id="savedCount">0 saved</div>
           </div>
           <div style="display:flex;gap:6px;align-items:center;">
-            <select id="savedSortSelect" onchange="const s=activeSlate();if(s){s._savedSort=this.value;save();}renderSaved();"
-              style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 7px;border-radius:5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;outline:none;">
-              <option value="saved">Order saved</option>
-              <option value="proj_desc">Proj ↓</option>
-              <option value="proj_asc">Proj ↑</option>
-              <option value="sim_desc">Sim ↓</option>
-              <option value="sim_asc">Sim ↑</option>
-              <option value="win_desc">Win% ↓</option>
-              <option value="win_asc">Win% ↑</option>
-              <option value="top5_desc">Top5% ↓</option>
-              <option value="top5_asc">Top5% ↑</option>
-              <option value="top10_desc">Top10% ↓</option>
-              <option value="top10_asc">Top10% ↑</option>
-              <option value="top20_desc">Top20% ↓</option>
-              <option value="top20_asc">Top20% ↑</option>
-              <option value="ml_desc">ML Win% ↓</option>
-              <option value="ml_asc">ML Win% ↑</option>
-              <option value="itd_desc">Finish% ↓</option>
-              <option value="itd_asc">Finish% ↑</option>
-              <option value="sal_desc">Salary ↓</option>
-              <option value="sal_asc">Salary ↑</option>
-            </select>
+            <div style="display:flex;align-items:center;gap:0;">
+              <select id="savedSortMetric" onchange="applySavedSort();const _m=this.value,_b=document.getElementById('savedSortDir');if(_b)_b.style.visibility=_m==='saved'?'hidden':'visible';"
+                style="background:var(--surface2);border:1px solid var(--border);border-right:none;color:var(--muted);padding:4px 7px;border-radius:5px 0 0 5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;outline:none;">
+                <option value="saved">Order saved</option>
+                <option value="proj">Proj</option>
+                <option value="sim">Sim</option>
+                <option value="win">Win%</option>
+                <option value="finish">Finish%</option>
+                <option value="top5">Top5%</option>
+                <option value="top10">Top10%</option>
+                <option value="top20">Top20%</option>
+                <option value="sal">Salary</option>
+              </select>
+              <button id="savedSortDir" onclick="toggleSavedSortDir()"
+                style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 7px;border-radius:0 5px 5px 0;font-size:11px;font-family:'DM Mono',monospace;cursor:pointer;line-height:1;min-width:26px;text-align:center;">↓</button>
+            </div>
             <button onclick="clearSavedLineups()" id="clearSavedBtn" style="background:none;border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;display:none;" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">Clear All</button>
             <button class="btn-export" id="exportBtn" onclick="exportCSV()" disabled>Export CSV</button>
           </div>
@@ -2219,6 +2213,24 @@ function clearSavedLineups(){
   slate.savedLineups=[];save();renderSaved();renderExposure();renderPool();
 }
 
+function applySavedSort(){
+  const metric = document.getElementById('savedSortMetric')?.value || 'saved';
+  const dir = document.getElementById('savedSortDir')?.textContent === '↓' ? 'desc' : 'asc';
+  // Map generic metric names to sport-specific sort keys
+  const slate = activeSlate();
+  const isUfc = slate?.sport === 'ufc';
+  let resolvedMetric = metric;
+  if(metric === 'win')    resolvedMetric = isUfc ? 'ml'  : 'win';
+  if(metric === 'finish') resolvedMetric = 'itd';
+  const sortBy = resolvedMetric === 'saved' ? 'saved' : `${resolvedMetric}_${dir}`;
+  if(slate){ slate._savedSort = sortBy; save(); }
+  renderSaved();
+}
+function toggleSavedSortDir(){
+  const btn = document.getElementById('savedSortDir'); if(!btn) return;
+  btn.textContent = btn.textContent === '↓' ? '↑' : '↓';
+  applySavedSort();
+}
 function renderSaved(){
   const slate=activeSlate();if(!slate)return;
   const lineups=slate.savedLineups||[];
@@ -2226,10 +2238,22 @@ function renderSaved(){
   document.getElementById('exportBtn').disabled=lineups.length===0;
   const clearBtn = document.getElementById('clearSavedBtn');
   if(clearBtn) clearBtn.style.display = lineups.length > 0 ? '' : 'none';
-  // Sync sort dropdown to persisted value
-  const sortSel = document.getElementById('savedSortSelect');
+  // Sync sort controls to persisted value
   const sortBy = slate._savedSort || 'saved';
-  if(sortSel) sortSel.value = sortBy;
+  const sortMetricEl = document.getElementById('savedSortMetric');
+  const sortDirEl = document.getElementById('savedSortDir');
+  if(sortMetricEl){
+    const rawMetric = sortBy === 'saved' ? 'saved' : sortBy.replace(/_desc$|_asc$/,'');
+    const dir = sortBy.endsWith('_asc') ? '↑' : '↓';
+    // Reverse sport-specific remapping for display
+    const isUfc = slate.sport === 'ufc';
+    let displayMetric = rawMetric;
+    if(rawMetric === 'ml')  displayMetric = 'win';   // UFC win equity shows as "Win%"
+    if(rawMetric === 'itd') displayMetric = 'finish';
+    sortMetricEl.value = displayMetric;
+    if(sortDirEl) sortDirEl.textContent = dir;
+    if(sortDirEl) sortDirEl.style.visibility = displayMetric === 'saved' ? 'hidden' : 'visible';
+  }
   const list=document.getElementById('savedList');
   if(!lineups.length){list.innerHTML='<div class="empty-saved">No lineups saved yet.</div>';return;}
   const hasProj=!!slate.columnMapping?.proj, hasRtg=!!slate.columnMapping?.rating;
