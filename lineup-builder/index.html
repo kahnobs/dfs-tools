@@ -2204,13 +2204,19 @@ function loadLineup(idx){
   renderAll();showToast('Lineup #'+(idx+1)+' loaded!','ok');
 }
 
-function deleteLineup(idx){const slate=activeSlate();if(!slate)return;slate.savedLineups.splice(idx,1);save();renderSaved();renderExposure();renderPool();}
+function deleteLineup(idx){
+  const slate=activeSlate();if(!slate)return;
+  const lk = lineupKey(slate.savedLineups[idx]||[]);
+  slate.savedLineups.splice(idx,1);
+  if(slate._lineupMeta) delete slate._lineupMeta[lk];
+  save();renderSaved();renderExposure();renderPool();
+}
 function clearSavedLineups(){
   const slate=activeSlate();if(!slate)return;
   const n=(slate.savedLineups||[]).length;
   if(!n)return;
   if(!confirm(`Clear all ${n} saved lineups? This cannot be undone.`))return;
-  slate.savedLineups=[];save();renderSaved();renderExposure();renderPool();
+  slate.savedLineups=[];slate._lineupMeta={};save();renderSaved();renderExposure();renderPool();
 }
 
 function applySavedSort(){
@@ -2282,13 +2288,15 @@ function renderSaved(){
   // Guard against degenerate cases (missing odds for most players)
   const safeDiv = k => Math.max(vigDiv[k], 0.01);
 
+  const meta = slate._lineupMeta || {};
   // Build display entries with their original index preserved (needed for edit/delete)
   let entries = lineups.map((lineup,i)=>{
     const players=lineup.map(id=>playerById(slate,id)).filter(Boolean);
     const sal=players.reduce((s,p)=>s+(p.salary||0),0);
     const proj=players.reduce((s,p)=>s+(parseFloat(p.proj)||0),0);
     const rtg=players.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
-    const simScore = parseFloat(lineup._simWinAvg) || null;
+    const lk = lineupKey(lineup);
+    const simScore = parseFloat(meta[lk]?.simWinAvg) || null;
     // Vig-adjusted equity: each player's raw prob divided by the field overround for that market
     const winEq   = hasWin   ? players.reduce((s,p)=>s+((nascarMlToProb(p.win)||0)  /safeDiv('win')),  0)*100 : null;
     const top5Eq  = hasTop5  ? players.reduce((s,p)=>s+((nascarMlToProb(p.top5)||0) /safeDiv('top5')), 0)*100 : null;
@@ -5775,10 +5783,18 @@ function addSelectedToSaved(){
     if(existingKeys.has(key)){skipped++;return;}
     existingKeys.add(key);
     const ids = lineup.map(p=>p.id);
-    if(lineup._simAvg)     ids._simAvg     = lineup._simAvg;
-    if(lineup._simWinRate) ids._simWinRate = lineup._simWinRate;
-    if(lineup._simWinAvg)  ids._simWinAvg  = lineup._simWinAvg;
     slate.savedLineups.push(ids);
+    // Persist sim metadata in a serialization-safe parallel lookup keyed by lineup content.
+    // Array properties are silently dropped by JSON.stringify, so we can't store on the array.
+    if(lineup._simAvg || lineup._simWinAvg){
+      slate._lineupMeta = slate._lineupMeta || {};
+      const lk = lineupKey(ids);
+      slate._lineupMeta[lk] = {
+        simAvg:     lineup._simAvg     || null,
+        simWinRate: lineup._simWinRate || null,
+        simWinAvg:  lineup._simWinAvg  || null,
+      };
+    }
     added++;
   });
   save();closePreviewModal();renderSaved();renderExposure();renderPool();
