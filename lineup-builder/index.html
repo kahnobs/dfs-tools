@@ -825,6 +825,18 @@ html { overscroll-behavior-y: contain; }
               <option value="proj_asc">Proj ↑</option>
               <option value="sim_desc">Sim ↓</option>
               <option value="sim_asc">Sim ↑</option>
+              <option value="win_desc">Win% ↓</option>
+              <option value="win_asc">Win% ↑</option>
+              <option value="top5_desc">Top5% ↓</option>
+              <option value="top5_asc">Top5% ↑</option>
+              <option value="top10_desc">Top10% ↓</option>
+              <option value="top10_asc">Top10% ↑</option>
+              <option value="top20_desc">Top20% ↓</option>
+              <option value="top20_asc">Top20% ↑</option>
+              <option value="ml_desc">ML Win% ↓</option>
+              <option value="ml_asc">ML Win% ↑</option>
+              <option value="itd_desc">Finish% ↓</option>
+              <option value="itd_asc">Finish% ↑</option>
               <option value="sal_desc">Salary ↓</option>
               <option value="sal_asc">Salary ↑</option>
             </select>
@@ -2220,7 +2232,32 @@ function renderSaved(){
   if(sortSel) sortSel.value = sortBy;
   const list=document.getElementById('savedList');
   if(!lineups.length){list.innerHTML='<div class="empty-saved">No lineups saved yet.</div>';return;}
-  const hasProj=!!slate.columnMapping?.proj,hasRtg=!!slate.columnMapping?.rating;
+  const hasProj=!!slate.columnMapping?.proj, hasRtg=!!slate.columnMapping?.rating;
+  const hasWin=!!slate.columnMapping?.win, hasTop5=!!slate.columnMapping?.top5;
+  const hasTop10=!!slate.columnMapping?.top10, hasTop20=!!slate.columnMapping?.top20;
+  const hasMl=!!slate.columnMapping?.ml, hasItd=!!slate.columnMapping?.itd;
+  const isUfc = slate.sport==='ufc';
+
+  // ── Vig removal ───────────────────────────────────────────
+  // For each odds category, sum raw implied probs across the entire player pool
+  // to get the overround divisor. Dividing each player's raw prob by that total
+  // puts all lineup equity numbers on a true 0-100% scale.
+  const pool = slate.players||[];
+  const vigDiv = {
+    win:   hasWin   ? pool.reduce((s,p)=>s+(nascarMlToProb(p.win)||0),  0) : 1,
+    top5:  hasTop5  ? pool.reduce((s,p)=>s+(nascarMlToProb(p.top5)||0), 0) : 1,
+    top10: hasTop10 ? pool.reduce((s,p)=>s+(nascarMlToProb(p.top10)||0),0) : 1,
+    top20: hasTop20 ? pool.reduce((s,p)=>s+(nascarMlToProb(p.top20)||0),0) : 1,
+    // UFC: each fight has exactly 2 fighters so the natural overround per fight is ~1.04-1.06.
+    // Sum ML probs across the full pool then divide by number of fights to get per-fight overround,
+    // but it's simpler and equivalent to just sum across all fighters and use that as the divisor
+    // since each fight contributes equally and lineups span multiple fights.
+    ml:    hasMl    ? pool.reduce((s,p)=>s+(nascarMlToProb(p.ml)||0),   0) : 1,
+    itd:   hasItd   ? pool.reduce((s,p)=>s+(nascarMlToProb(p.itd)||0),  0) : 1,
+  };
+  // Guard against degenerate cases (missing odds for most players)
+  const safeDiv = k => Math.max(vigDiv[k], 0.01);
+
   // Build display entries with their original index preserved (needed for edit/delete)
   let entries = lineups.map((lineup,i)=>{
     const players=lineup.map(id=>playerById(slate,id)).filter(Boolean);
@@ -2228,19 +2265,47 @@ function renderSaved(){
     const proj=players.reduce((s,p)=>s+(parseFloat(p.proj)||0),0);
     const rtg=players.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
     const simScore = parseFloat(lineup._simWinAvg) || null;
-    return {lineup, i, players, sal, proj, rtg, simScore};
+    // Vig-adjusted equity: each player's raw prob divided by the field overround for that market
+    const winEq   = hasWin   ? players.reduce((s,p)=>s+((nascarMlToProb(p.win)||0)  /safeDiv('win')),  0)*100 : null;
+    const top5Eq  = hasTop5  ? players.reduce((s,p)=>s+((nascarMlToProb(p.top5)||0) /safeDiv('top5')), 0)*100 : null;
+    const top10Eq = hasTop10 ? players.reduce((s,p)=>s+((nascarMlToProb(p.top10)||0)/safeDiv('top10')),0)*100 : null;
+    const top20Eq = hasTop20 ? players.reduce((s,p)=>s+((nascarMlToProb(p.top20)||0)/safeDiv('top20')),0)*100 : null;
+    // UFC-specific: vig-adjusted ML win equity and ITD (finish) equity
+    const mlEq    = isUfc && hasMl  ? players.reduce((s,p)=>s+((nascarMlToProb(p.ml)||0) /safeDiv('ml')), 0)*100 : null;
+    const itdEq   = isUfc && hasItd ? players.reduce((s,p)=>s+((nascarMlToProb(p.itd)||0)/safeDiv('itd')),0)*100 : null;
+    return {lineup, i, players, sal, proj, rtg, simScore, winEq, top5Eq, top10Eq, top20Eq, mlEq, itdEq};
   });
-  if(sortBy==='proj_desc') entries.sort((a,b)=>b.proj-a.proj);
-  else if(sortBy==='proj_asc') entries.sort((a,b)=>a.proj-b.proj);
-  else if(sortBy==='sal_desc') entries.sort((a,b)=>b.sal-a.sal);
-  else if(sortBy==='sal_asc') entries.sort((a,b)=>a.sal-b.sal);
-  else if(sortBy==='sim_desc') entries.sort((a,b)=>(b.simScore||0)-(a.simScore||0));
-  else if(sortBy==='sim_asc') entries.sort((a,b)=>(a.simScore||0)-(b.simScore||0));
-  list.innerHTML=entries.map(({i,players,sal,proj,rtg,lineup,simScore})=>{
+
+  if(sortBy==='proj_desc')    entries.sort((a,b)=>b.proj-a.proj);
+  else if(sortBy==='proj_asc')    entries.sort((a,b)=>a.proj-b.proj);
+  else if(sortBy==='sal_desc')    entries.sort((a,b)=>b.sal-a.sal);
+  else if(sortBy==='sal_asc')     entries.sort((a,b)=>a.sal-b.sal);
+  else if(sortBy==='sim_desc')    entries.sort((a,b)=>(b.simScore||0)-(a.simScore||0));
+  else if(sortBy==='sim_asc')     entries.sort((a,b)=>(a.simScore||0)-(b.simScore||0));
+  else if(sortBy==='win_desc')    entries.sort((a,b)=>(b.winEq||0)-(a.winEq||0));
+  else if(sortBy==='win_asc')     entries.sort((a,b)=>(a.winEq||0)-(b.winEq||0));
+  else if(sortBy==='top5_desc')   entries.sort((a,b)=>(b.top5Eq||0)-(a.top5Eq||0));
+  else if(sortBy==='top5_asc')    entries.sort((a,b)=>(a.top5Eq||0)-(b.top5Eq||0));
+  else if(sortBy==='top10_desc')  entries.sort((a,b)=>(b.top10Eq||0)-(a.top10Eq||0));
+  else if(sortBy==='top10_asc')   entries.sort((a,b)=>(a.top10Eq||0)-(b.top10Eq||0));
+  else if(sortBy==='top20_desc')  entries.sort((a,b)=>(b.top20Eq||0)-(a.top20Eq||0));
+  else if(sortBy==='top20_asc')   entries.sort((a,b)=>(a.top20Eq||0)-(b.top20Eq||0));
+  else if(sortBy==='ml_desc')     entries.sort((a,b)=>(b.mlEq||0)-(a.mlEq||0));
+  else if(sortBy==='ml_asc')      entries.sort((a,b)=>(a.mlEq||0)-(b.mlEq||0));
+  else if(sortBy==='itd_desc')    entries.sort((a,b)=>(b.itdEq||0)-(a.itdEq||0));
+  else if(sortBy==='itd_asc')     entries.sort((a,b)=>(a.itdEq||0)-(b.itdEq||0));
+
+  list.innerHTML=entries.map(({i,players,sal,proj,rtg,lineup,simScore,winEq,top5Eq,top10Eq,top20Eq,mlEq,itdEq})=>{
     const stats=[];
-    if(hasProj)stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Proj</span>${proj.toFixed(2)}</span>`);
-    if(hasRtg)stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Rtg</span>${rtg.toFixed(1)}</span>`);
-    if(simScore!=null)stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Sim</span>${simScore}</span>`);
+    if(hasProj)        stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Proj</span>${proj.toFixed(2)}</span>`);
+    if(hasRtg)         stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Rtg</span>${rtg.toFixed(1)}</span>`);
+    if(simScore!=null) stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Sim</span>${simScore}</span>`);
+    if(mlEq!=null)     stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Win%</span>${mlEq.toFixed(1)}%</span>`);
+    if(itdEq!=null)    stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Finish%</span>${itdEq.toFixed(1)}%</span>`);
+    if(winEq!=null)    stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Win%</span>${winEq.toFixed(1)}%</span>`);
+    if(top5Eq!=null)   stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top5%</span>${top5Eq.toFixed(1)}%</span>`);
+    if(top10Eq!=null)  stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top10%</span>${top10Eq.toFixed(1)}%</span>`);
+    if(top20Eq!=null)  stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top20%</span>${top20Eq.toFixed(1)}%</span>`);
     return `<div class="saved-lineup" id="saved-${i}">
       <div class="saved-top"><div class="saved-num">Lineup #${i+1}</div>
       <div class="saved-actions"><div class="saved-sal">${fmt(sal)}</div><button class="saved-load" onclick="loadLineup(${i})">↑ Edit</button><button class="saved-del" onclick="deleteLineup(${i})">✕</button></div></div>
