@@ -967,7 +967,7 @@ html { overscroll-behavior-y: contain; }
                 <div style="display:flex;align-items:center;gap:6px;">
                   <input type="range" min="500" max="10000" step="500" value="2000" id="nascarSimCountSlider"
                     style="flex:1;accent-color:var(--accent2);"
-                    oninput="document.getElementById('nascarSimCountLabel').textContent=this.value">
+                    oninput="document.getElementById('nascarSimCountLabel').textContent=this.value;const _s=activeSlate();if(_s){_s._simCount=parseInt(this.value);save();}">
                   <span id="nascarSimCountLabel" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent2);font-weight:600;min-width:38px;">2000</span>
                 </div>
               </div>
@@ -999,7 +999,7 @@ html { overscroll-behavior-y: contain; }
             </div>
             <input type="range" min="500" max="10000" step="500" value="2000" id="ufcSimCountSlider"
               style="width:100%;accent-color:var(--purple);"
-              oninput="document.getElementById('ufcSimCountLabel').textContent=this.value">
+              oninput="document.getElementById('ufcSimCountLabel').textContent=this.value;const _s=activeSlate();if(_s){_s._simCount=parseInt(this.value);save();}">
             <div style="display:flex;justify-content:space-between;margin-top:2px;margin-bottom:8px;">
               <span style="font-size:9px;color:var(--muted);">Faster</span>
               <span style="font-size:9px;color:var(--muted);">More accurate</span>
@@ -2674,6 +2674,10 @@ function renderGroupRulesSummary(){
         const simSettings = document.getElementById('nascarSimSettings');
         if(simSettings) simSettings.style.display = 'block';
       }
+      // Restore sim count slider + label from saved slate value
+      const nascarSlider = document.getElementById('nascarSimCountSlider');
+      const nascarLabel  = document.getElementById('nascarSimCountLabel');
+      if(nascarSlider && slate._simCount){ nascarSlider.value = slate._simCount; if(nascarLabel) nascarLabel.textContent = slate._simCount; }
     }
   }
   if(slate.sport==='ufc'){
@@ -2694,6 +2698,10 @@ function renderGroupRulesSummary(){
       const simSettings = document.getElementById('ufcSimSettings');
       if(simSettings) simSettings.style.display = 'block';
     }
+    // Restore sim count slider + label from saved slate value
+    const ufcSlider = document.getElementById('ufcSimCountSlider');
+    const ufcLabel  = document.getElementById('ufcSimCountLabel');
+    if(ufcSlider && slate._simCount){ ufcSlider.value = slate._simCount; if(ufcLabel) ufcLabel.textContent = slate._simCount; }
   }
 
   const waveSection = document.getElementById('waveSection');
@@ -3439,7 +3447,7 @@ async function runUFCSimGen(){
   const maxExpPct  = parseInt(document.getElementById('genMaxExp').value)||100;
   const minSal     = parseInt(document.getElementById('genMinSal').value)||0;
   const maxSal     = parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP;
-  const numSims    = parseInt(document.getElementById('ufcSimCountSlider')?.value)||2000;
+  const numSims    = activeSlate()?._simCount || parseInt(document.getElementById('ufcSimCountSlider')?.value) || 2000;
   const groups     = slate.groups||[];
   const hidden     = slate.hiddenIds||[];
   const pool       = (slate.players||[]).filter(p=>!hidden.includes(p.id)&&p.salary>0);
@@ -4284,7 +4292,7 @@ async function runNascarSimGen(){
   const minSal    = parseInt(document.getElementById('genMinSal').value)||0;
   const maxSal    = parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP;
   const totalLaps = parseInt(document.getElementById('nascarTotalLaps')?.value)||300;
-  const numSims   = parseInt(document.getElementById('nascarSimCountSlider')?.value)||2000;
+  const numSims   = activeSlate()?._simCount || parseInt(document.getElementById('nascarSimCountSlider')?.value) || 2000;
   const trackBtn  = document.querySelector('.nascar-track-btn.active');
   const trackType = trackBtn ? (
     trackBtn.dataset.laps==='188' ? 'superspeedway' :
