@@ -990,6 +990,21 @@ html { overscroll-behavior-y: contain; }
             <div style="padding:6px 8px;background:rgba(232,66,26,.07);border:1px solid rgba(232,66,26,.2);border-radius:5px;font-size:9px;color:var(--muted);line-height:1.5;">
               Requires <span style="color:var(--accent2);font-weight:600;">WIN</span>, <span style="color:var(--accent2);font-weight:600;">TOP5</span>, <span style="color:var(--accent2);font-weight:600;">TOP10</span> odds and <span style="color:var(--accent2);font-weight:600;">Grid</span> mapped. <span style="color:var(--accent2);font-weight:600;">Proj Finish</span> recommended.
             </div>
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                <div>
+                  <div style="font-size:10px;font-weight:600;color:var(--text);">Rear Starters</div>
+                  <div style="font-size:9px;color:var(--muted);margin-top:1px;">Drivers starting from the rear (grid pos used for DK scoring only)</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:5px;align-items:center;">
+                <select id="rearStarterSelect" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Sans',sans-serif;outline:none;">
+                  <option value="">— Select driver —</option>
+                </select>
+                <button onclick="addRearStarter()" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 9px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;cursor:pointer;white-space:nowrap;transition:all .15s;" onmouseover="this.style.borderColor='var(--accent2)';this.style.color='var(--accent2)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">+ Add</button>
+              </div>
+              <div id="rearStarterChips" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;"></div>
+            </div>
           </div>
 
           <div class="autogen-section" id="ufcSection" style="display:none;">
@@ -2780,6 +2795,7 @@ function renderGroupRulesSummary(){
       const nascarSlider = document.getElementById('nascarSimCountSlider');
       const nascarLabel  = document.getElementById('nascarSimCountLabel');
       if(nascarSlider && slate._simCount){ nascarSlider.value = slate._simCount; if(nascarLabel) nascarLabel.textContent = slate._simCount; }
+      renderRearStartersUI();
     }
   }
   if(slate.sport==='ufc'){
@@ -3076,6 +3092,60 @@ function setNascarTrack(type, btn){
   // Persist to slate so it survives refresh
   const slate = activeSlate();
   if(slate){ slate._nascarTrackType = type; slate._nascarLaps = parseInt(laps); save(); }
+}
+
+function renderRearStartersUI(){
+  const slate = activeSlate();
+  const sel = document.getElementById('rearStarterSelect');
+  const chips = document.getElementById('rearStarterChips');
+  if(!sel || !chips || !slate) return;
+
+  const rearIds = new Set(slate._rearStarters || []);
+  const players = (slate.players || []).filter(p => p.salary > 0);
+
+  // Rebuild dropdown — only drivers NOT already marked as rear starters
+  sel.innerHTML = '<option value="">— Select driver —</option>';
+  players
+    .filter(p => !rearIds.has(p.id))
+    .sort((a, b) => (parseInt(a.start) || 99) - (parseInt(b.start) || 99))
+    .forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      const grid = parseInt(p.start);
+      opt.textContent = `P${!isNaN(grid) ? grid : '?'} – ${p.name}`;
+      sel.appendChild(opt);
+    });
+
+  // Rebuild chips for current rear starters
+  chips.innerHTML = '';
+  (slate._rearStarters || []).forEach(id => {
+    const p = players.find(q => q.id === id);
+    if(!p) return;
+    const grid = parseInt(p.start);
+    const chip = document.createElement('div');
+    chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:rgba(232,66,26,.12);border:1px solid rgba(232,66,26,.35);border-radius:4px;padding:3px 6px;font-size:10px;font-family:"DM Mono",monospace;color:var(--accent2);';
+    chip.innerHTML = `<span>P${!isNaN(grid) ? grid : '?'} ${p.name}</span><button onclick="removeRearStarter('${id}')" style="background:none;border:none;color:var(--accent2);cursor:pointer;padding:0;font-size:11px;line-height:1;opacity:.7;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.7">✕</button>`;
+    chips.appendChild(chip);
+  });
+}
+
+function addRearStarter(){
+  const slate = activeSlate(); if(!slate || slate.sport !== 'nascar') return;
+  const sel = document.getElementById('rearStarterSelect');
+  if(!sel || !sel.value) return;
+  slate._rearStarters = slate._rearStarters || [];
+  if(!slate._rearStarters.includes(sel.value)){
+    slate._rearStarters.push(sel.value);
+    save();
+  }
+  renderRearStartersUI();
+}
+
+function removeRearStarter(id){
+  const slate = activeSlate(); if(!slate) return;
+  slate._rearStarters = (slate._rearStarters || []).filter(x => x !== id);
+  save();
+  renderRearStartersUI();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3866,7 +3936,7 @@ function nascarCalcScore(startPos, finishPos, lapsLed, fastestLaps){
 //  6. Track-specific decay rates, leader counts, and FL driver counts
 // ─────────────────────────────────────────────────────────────────────────────
 
-function runNascarSims(pool, numSims, totalLaps, trackType){
+function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new Set()){
   const FIELD   = pool.length;
   const isSuper = trackType === 'superspeedway';
 
@@ -3890,6 +3960,10 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
     p._nPTop5  = nascarMlToProb(p.top5);
     p._nPTop10 = nascarMlToProb(p.top10);
     p._nGrid   = parseInt(p.start) || parseInt(p.grid) || 20;
+    // _nLLGrid is the actual on-track start position used for laps-led weighting only.
+    // Rear starters physically begin at the back regardless of qualifying position,
+    // so they cannot lead early laps. _nGrid (qualifying pos) is kept intact for DK scoring.
+    p._nLLGrid = rearStarterSet.has(p.id) ? FIELD : p._nGrid;
     p._nProj   = p.projFinish ? parseInt(p.projFinish) : null;
     p._nOwn    = parseFloat(p.own) || 0;
   });
@@ -4140,7 +4214,7 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
       .sort((a,b) => b.p._nPWin - a.p._nPWin);
     const top10WinSet = new Set(winOddsSorted.slice(0, 10).map(d => d.p.id));
     const gridQualifiers = survivorDrawnFinal.filter(d =>
-      d.p._nGrid <= 10 &&
+      d.p._nLLGrid <= 10 &&
       top10WinSet.has(d.p.id) &&
       d.finishPos > LEADERS  // only matters if they wouldn't already be in the slice
     );
@@ -4170,8 +4244,9 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
         // to ensure odds-based weight is the primary differentiator.
         const skillW = Math.exp(-0.25*(d.p._nSkillRank-1));
 
-        // Early phase: grid position drives who leads
-        const earlyW = Math.exp(-lapDecayRate*(d.p._nGrid-1));
+        // Early phase: actual on-track start position drives who leads early laps.
+        // Rear starters have _nLLGrid = FIELD so their early weight collapses to ~0.
+        const earlyW = Math.exp(-lapDecayRate*(d.p._nLLGrid-1));
         // Late phase: finish position drives who leads
         const lateW  = Math.exp(-lapDecayRate*(d.finishPos-1));
 
@@ -4179,7 +4254,7 @@ function runNascarSims(pool, numSims, totalLaps, trackType){
         // grid/finish drive phase-specific allocation
         const isQualifier = li >= baseLapLeaders.length;
         if(isQualifier){
-          const gridRank = d.p._nGrid;
+          const gridRank = d.p._nLLGrid;
           const oddsRank = winOddsSorted.findIndex(x => x.p === d.p) + 1;
           const qualScale = Math.max(0.20, 1 - (gridRank + oddsRank - 2) / 18);
           return (earlyW * earlyLaps + lateW * lateLaps * 0.25) * skillW * winW * qualScale;
@@ -4431,7 +4506,8 @@ async function runNascarSimGen(){
   if(window._genCancelled){ log('Cancelled.'); done(); return; }
 
   // ── Step 1: Run sims ──────────────────────────────────────────────────────
-  const { driverResults, simTopScorer, simScoreArrays } = runNascarSims(fullField, numSims, totalLaps, trackType);
+  const rearStarterSet = new Set(slate._rearStarters || []);
+  const { driverResults, simTopScorer, simScoreArrays } = runNascarSims(fullField, numSims, totalLaps, trackType, rearStarterSet);
 
   // Attach sim metadata to players for pool display
   driverResults.forEach(r=>{
