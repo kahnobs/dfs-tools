@@ -5204,8 +5204,14 @@ async function runAutoGen(){
         return wMatch && aMatch;
       });
       if(!bucketLineups.length) return;
-      const topProj = Math.max(...bucketLineups.map(x=>x.proj));
-      const quality = bucketLineups.filter(x=>x.proj>=topProj*0.85).sort((a,b)=>b.score-a.score);
+      // Feed the diversity selector a generous, quality-sorted pool. The old hard
+      // "within 15% of the best metric" gate collapsed on skewed metrics (e.g. the
+      // peaked odds composite) and silently capped output far below the request.
+      // Drop only the weakest quartile, but never fewer than this bucket's target —
+      // the diversity selector below already trades quality vs. diversity.
+      const sorted = bucketLineups.slice().sort((a,b)=>b.score-a.score);
+      const keepN = Math.max(q.outputTarget, Math.ceil(sorted.length * 0.75));
+      const quality = sorted.slice(0, keepN);
 
       // Greedy Jaccard diversity selection:
       // Pick lineups one at a time. After each pick, re-score remaining candidates
