@@ -935,17 +935,17 @@ html { overscroll-behavior-y: contain; }
                 <option value="">— choose —</option>
                 <option value="proj">Projection</option>
                 <option value="rating">Rating</option>
-                <option value="blend3">3-Signal Mix (Proj + Model + Odds)</option>
+                <option value="blend3">Equity-Anchored (Proj/Model fill + Odds anchor)</option>
               </select>
             </div>
             <div class="setting-row" id="mixRow" style="display:none;flex-direction:column;gap:8px;align-items:stretch;">
               <div style="display:flex;gap:6px;">
-                <button type="button" class="mix-btn" data-mix="proj"  onclick="setMixPreset('proj',this)">Proj Heavy</button>
-                <button type="button" class="mix-btn" data-mix="model" onclick="setMixPreset('model',this)">Model Heavy</button>
-                <button type="button" class="mix-btn" data-mix="odds"  onclick="setMixPreset('odds',this)">Odds Heavy</button>
+                <button type="button" class="mix-btn" data-mix="proj"  onclick="setMixPreset('proj',this)">Proj Fill</button>
+                <button type="button" class="mix-btn" data-mix="model" onclick="setMixPreset('model',this)">Model Fill</button>
+                <button type="button" class="mix-btn" data-mix="odds"  onclick="setMixPreset('odds',this)">Max Anchor</button>
               </div>
-              <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);text-align:center;" id="mixLabel">Proj 50 · Model 30 · Odds 20</div>
-              <div style="font-size:9px;color:var(--muted);text-align:center;">Model = your Rating column · Odds = de-vigged sportsbook win/top-N</div>
+              <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);text-align:center;" id="mixLabel">Fill 65/35 proj/model · Equity anchor 4.1×</div>
+              <div style="font-size:9px;color:var(--muted);text-align:center;">Proj/model fills lineups; de-vigged win/top-5/top-10 equity anchors the contenders in</div>
             </div>
             <div class="setting-row" id="randomnessRow" style="flex-direction:column;align-items:stretch;gap:6px;">
               <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -2829,7 +2829,7 @@ function renderGroupRulesSummary(){
     // Default PGA to the 3-signal mix (proj + model + odds)
     const opt = document.getElementById('genOptimize');
     if(opt && !opt.value) opt.value = 'blend3';
-    if(!slate._mixPreset) slate._mixPreset = 'proj';
+    if(!slate._mixPreset) slate._mixPreset = 'model'; // default to strong equity anchor
     toggleBlendRow();
   }
 
@@ -2931,18 +2931,22 @@ function toggleBlendRow(){
   }
 }
 
-// ── 3-Signal Mix: outer weights (proj / model / odds), all tunable here ──
-// Defaults reflect a normal week (proj-led). "Model Heavy" leans your rating,
-// "Odds Heavy" leans the market. Edit freely — generation reads these directly.
+// ── Equity-Anchored optimizer ──
+// A lineup's QUALITY = how much win/top-N equity it jams in. proj/model is the
+// FILL metric that optimizes & differentiates around that equity core.
+// Each preset = { proj, model } fill ratio + { anchor } equity-anchor strength.
+// anchor is multiplicative: a player's fill score is multiplied by
+// (1 + anchorStrength * normalizedEquity), so contenders (top of pricing) get
+// pulled into every lineup. Higher anchor = more studs jammed in.
 const MIX_PRESETS = {
-  proj:  { proj:0.50, model:0.30, odds:0.20 },
-  model: { proj:0.20, model:0.45, odds:0.35 },
-  odds:  { proj:0.20, model:0.30, odds:0.50 },
+  proj:  { proj:0.65, model:0.35, anchor:0.45 }, // fill leans projections, moderate anchor
+  model: { proj:0.35, model:0.65, anchor:0.70 }, // fill leans your model, strong anchor
+  odds:  { proj:0.40, model:0.60, anchor:1.00 }, // max anchor — jam the contenders
 };
-// Inner odds composite: how the de-vigged markets combine into one player score.
-// Ceiling-leaning (win/top5 heavy) suits GPPs. Only mapped markets are used;
-// missing ones are dropped and the rest renormalized.
-const ODDS_WEIGHTS = { win:0.35, top5:0.30, top10:0.20, top20:0.15 };
+// anchor (0..1) scales to a multiplicative boost up to ANCHOR_SCALE×. Tunable.
+const ANCHOR_SCALE = 9;
+// De-vigged equity composite used for the anchor — the contention markets.
+const ODDS_WEIGHTS = { win:0.40, top5:0.35, top10:0.25 };
 
 function setMixPreset(key, btn){
   const s=activeSlate(); if(s){ s._mixPreset=key; save(); }
@@ -2951,8 +2955,9 @@ function setMixPreset(key, btn){
 function applyMixPresetUI(key){
   document.querySelectorAll('.mix-btn').forEach(b=>b.classList.toggle('active', b.dataset.mix===key));
   const w=MIX_PRESETS[key]||MIX_PRESETS.proj;
+  const fp=Math.round(w.proj/(w.proj+w.model)*100), fm=100-fp;
   const lbl=document.getElementById('mixLabel');
-  if(lbl) lbl.textContent=`Proj ${Math.round(w.proj*100)} · Model ${Math.round(w.model*100)} · Odds ${Math.round(w.odds*100)}`;
+  if(lbl) lbl.textContent=`Fill ${fp}/${fm} proj/model · Equity anchor ${(w.anchor*ANCHOR_SCALE).toFixed(1)}×`;
 }
 
 // Per-player de-vigged sportsbook composite → p._oddsScore. Returns false if no
@@ -3005,7 +3010,9 @@ function lineupScore(lineup, players, optimizeBy, groups, blendWeights){
   const ids = lineup.map(p=>p.id);
   let score;
   if(optimizeBy==='blend3'){
-    const mw = blendWeights.mw || {proj:1,model:0,odds:0};
+    const fpw = blendWeights.fillProjW!=null ? blendWeights.fillProjW : 1;
+    const fmw = blendWeights.fillModelW!=null ? blendWeights.fillModelW : 0;
+    const aStr = blendWeights.anchorStrength || 0;
     const projs2 = players.map(p=>parseFloat(p.proj)||0);
     const rtgs2  = players.map(p=>parseFloat(p.rating)||0);
     const odds2  = players.map(p=>p._oddsScore||0);
@@ -3014,8 +3021,11 @@ function lineupScore(lineup, players, optimizeBy, groups, blendWeights){
     const minO=Math.min(...odds2), maxO=Math.max(...odds2);
     const nP = p => maxP===minP?1:((parseFloat(p.proj)||0)-minP)/(maxP-minP);
     const nR = p => maxR===minR?1:((parseFloat(p.rating)||0)-minR)/(maxR-minR);
-    const nO = p => maxO===minO?1:((p._oddsScore||0)-minO)/(maxO-minO);
-    score = lineup.reduce((s,p)=> s + nP(p)*mw.proj + nR(p)*mw.model + nO(p)*mw.odds, 0);
+    const nO = p => maxO===minO?0:((p._oddsScore||0)-minO)/(maxO-minO);
+    score = lineup.reduce((s,p)=>{
+      const fill = nP(p)*fpw + nR(p)*fmw;
+      return s + fill*(1 + aStr*nO(p));
+    }, 0);
   } else {
     score = lineup.reduce((s,p)=>s+(parseFloat(p[optimizeBy])||0),0);
   }
@@ -4921,27 +4931,27 @@ async function runAutoGen(){
   const normProj = p => maxProj===minProj ? 1 : ((parseFloat(p.proj)||0)-minProj)/(maxProj-minProj);
   const normRtg  = p => maxRtg===minRtg   ? 1 : ((parseFloat(p.rating)||0)-minRtg)/(maxRtg-minRtg);
 
-  // 3-signal mix: compute de-vigged odds composite + normalizer, and renormalize
-  // the proj/model/odds weights over whichever signals are actually present.
+  // Equity-anchored scoring: fill = proj/model blend; equity = multiplicative anchor.
   const oddsAvailable = ensureOddsScores(pool, slate);
   const oddsArr = pool.map(p=>p._oddsScore||0);
   const minOdds=Math.min(...oddsArr), maxOdds=Math.max(...oddsArr);
-  const normOdds = p => maxOdds===minOdds ? (oddsAvailable?1:0) : (((p._oddsScore||0)-minOdds)/(maxOdds-minOdds));
-  let mw = {
-    proj:  mix.proj  * (slate.columnMapping?.proj   ? 1 : 0),
-    model: mix.model * (slate.columnMapping?.rating  ? 1 : 0),
-    odds:  mix.odds  * (oddsAvailable                ? 1 : 0),
-  };
-  const mwSum = (mw.proj+mw.model+mw.odds) || 1;
-  mw = { proj:mw.proj/mwSum, model:mw.model/mwSum, odds:mw.odds/mwSum };
-  blendWeights.mw = mw;
+  const normOdds = p => maxOdds===minOdds ? 0 : (((p._oddsScore||0)-minOdds)/(maxOdds-minOdds));
+  const hasProjF = !!slate.columnMapping?.proj, hasModelF = !!slate.columnMapping?.rating;
+  const fp = mix.proj * (hasProjF?1:0), fmd = mix.model * (hasModelF?1:0);
+  const fSum = (fp+fmd) || 1;
+  const fillProjW = fp/fSum, fillModelW = fmd/fSum;
+  const anchorStrength = oddsAvailable ? (mix.anchor * ANCHOR_SCALE) : 0;
+  blendWeights.fillProjW = fillProjW;
+  blendWeights.fillModelW = fillModelW;
+  blendWeights.anchorStrength = anchorStrength;
   if(optimizeBy==='blend3'){
-    log(`3-Signal Mix → Proj ${Math.round(mw.proj*100)} / Model ${Math.round(mw.model*100)} / Odds ${Math.round(mw.odds*100)}${oddsAvailable?'':' (no odds mapped — odds leg dropped)'}`);
+    log(`Equity-anchored → fill ${Math.round(fillProjW*100)}/${Math.round(fillModelW*100)} proj/model · equity anchor ${anchorStrength.toFixed(1)}×${oddsAvailable?'':' (no odds mapped — fill only)'}`);
   }
 
   const getBaseScore = p => {
     if(optimizeBy==='blend3'){
-      return normProj(p) * mw.proj + normRtg(p) * mw.model + normOdds(p) * mw.odds;
+      const fill = normProj(p) * fillProjW + normRtg(p) * fillModelW;
+      return fill * (1 + anchorStrength * normOdds(p));
     }
     return (parseFloat(p[optimizeBy])||0);
   };
@@ -5174,13 +5184,21 @@ async function runAutoGen(){
   }
 
   function finalize(){
+    // Salary is a RESTRAINT, not a target: the only hard limit is the cap. Keep every
+    // lineup under the cap, and tag whether it clears the (soft) min-salary floor. The
+    // floor is honored as a preference below — never as a cull that discards your best
+    // plays just for leaving a little salary on the table.
     const valid = generated.filter(lineup=>{
       const sal = lineup.reduce((s,p)=>s+p.salary,0);
-      return sal >= minSal && sal <= maxSal;
+      return sal <= maxSal;
+    });
+    valid.forEach(lineup=>{
+      const sal = lineup.reduce((s,p)=>s+p.salary,0);
+      lineup._aboveFloor = sal >= minSal;
     });
 
     if(!valid.length){
-      log(`No lineups met the salary range $${minSal.toLocaleString()}–$${maxSal.toLocaleString()}. Try widening the range.`);
+      log(`No lineups under the $${maxSal.toLocaleString()} cap. Check player salaries.`);
       document.getElementById('genBtn').disabled=false;
       return;
     }
@@ -5204,14 +5222,17 @@ async function runAutoGen(){
         return wMatch && aMatch;
       });
       if(!bucketLineups.length) return;
-      // Feed the diversity selector a generous, quality-sorted pool. The old hard
-      // "within 15% of the best metric" gate collapsed on skewed metrics (e.g. the
-      // peaked odds composite) and silently capped output far below the request.
-      // Drop only the weakest quartile, but never fewer than this bucket's target —
-      // the diversity selector below already trades quality vs. diversity.
-      const sorted = bucketLineups.slice().sort((a,b)=>b.score-a.score);
-      const keepN = Math.max(q.outputTarget, Math.ceil(sorted.length * 0.75));
-      const quality = sorted.slice(0, keepN);
+      // Soft salary floor: prefer lineups that use the cap, but if there aren't enough
+      // above the floor to meet this bucket's target, backfill with the BEST-scoring
+      // lineups below it. We never sacrifice a top play just to hit a salary number.
+      const byScore = bucketLineups.slice().sort((a,b)=>b.score-a.score);
+      const above = byScore.filter(x=>x.lineup._aboveFloor);
+      const pool2 = above.length >= q.outputTarget ? above : byScore; // byScore already score-sorted
+      // Feed the diversity selector a generous, quality-sorted pool: drop only the
+      // weakest quartile, but never fewer than this bucket's target. The diversity
+      // selector below already trades quality vs. diversity.
+      const keepN = Math.max(q.outputTarget, Math.ceil(pool2.length * 0.75));
+      const quality = pool2.slice(0, keepN);
 
       // Greedy Jaccard diversity selection:
       // Pick lineups one at a time. After each pick, re-score remaining candidates
@@ -5302,7 +5323,8 @@ async function runAutoGen(){
     const botProj = projAvg(final[final.length-1]||[]).toFixed(2);
     const topRtg = rtgAvg(final[0]||[]).toFixed(1);
     const botRtg = rtgAvg(final[final.length-1]||[]).toFixed(1);
-    log(`Done! ${valid.length} valid → ${finalLineups.length} above quality threshold → top ${final.length} returned in ${attempts.toLocaleString()} attempts.`);
+    const aboveFloorCount = valid.filter(l=>l._aboveFloor).length;
+    log(`Done! ${valid.length} under cap (${aboveFloorCount} ≥ $${minSal.toLocaleString()} floor) → ${final.length} returned in ${attempts.toLocaleString()} attempts.`);
     log(`Proj range: ${topProj} → ${botProj} pts | Rating range: ${topRtg} → ${botRtg}`);
     document.getElementById('genBtn').disabled=false;
 
