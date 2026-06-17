@@ -312,6 +312,9 @@ input[type=number].rule-num:focus::-webkit-outer-spin-button{opacity:.6;}
 .btn-generate{width:100%;padding:10px;background:var(--purple);color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;margin-top:4px;}
 .btn-generate:hover{background:#c026d3;}
 .btn-generate:disabled{background:var(--surface2);color:var(--muted);cursor:not-allowed;}
+.mix-btn{flex:1;padding:7px 4px;background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;}
+.mix-btn:hover{color:var(--text);border-color:var(--accent);}
+.mix-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
 .gen-log{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:8px;min-height:36px;max-height:80px;overflow-y:auto;line-height:1.6;}
 
 /* PREVIEW MODAL */
@@ -932,17 +935,17 @@ html { overscroll-behavior-y: contain; }
                 <option value="">— choose —</option>
                 <option value="proj">Projection</option>
                 <option value="rating">Rating</option>
-                <option value="blend">Blend (Proj + Rating)</option>
+                <option value="blend3">3-Signal Mix (Proj + Model + Odds)</option>
               </select>
             </div>
-            <div class="setting-row" id="blendRow" style="display:none;flex-direction:column;gap:6px;align-items:stretch;">
-              <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">Proj</span>
-                <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);" id="blendLabel">50% / 50%</span>
-                <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">Rating</span>
+            <div class="setting-row" id="mixRow" style="display:none;flex-direction:column;gap:8px;align-items:stretch;">
+              <div style="display:flex;gap:6px;">
+                <button type="button" class="mix-btn" data-mix="proj"  onclick="setMixPreset('proj',this)">Proj Heavy</button>
+                <button type="button" class="mix-btn" data-mix="model" onclick="setMixPreset('model',this)">Model Heavy</button>
+                <button type="button" class="mix-btn" data-mix="odds"  onclick="setMixPreset('odds',this)">Odds Heavy</button>
               </div>
-              <input type="range" id="blendSlider" min="0" max="100" value="50" style="width:100%;accent-color:var(--accent);" oninput="updateBlendLabel(this.value)">
-              <div style="font-size:10px;color:var(--muted);text-align:center;">Slide left for Projection, right for Rating</div>
+              <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);text-align:center;" id="mixLabel">Proj 50 · Model 30 · Odds 20</div>
+              <div style="font-size:9px;color:var(--muted);text-align:center;">Model = your Rating column · Odds = de-vigged sportsbook win/top-N</div>
             </div>
             <div class="setting-row" id="randomnessRow" style="flex-direction:column;align-items:stretch;gap:6px;">
               <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -2822,6 +2825,14 @@ function renderGroupRulesSummary(){
     if(ufcSlider && slate._simCount){ ufcSlider.value = slate._simCount; if(ufcLabel) ufcLabel.textContent = slate._simCount; }
   }
 
+  if(slate.sport==='pga'){
+    // Default PGA to the 3-signal mix (proj + model + odds)
+    const opt = document.getElementById('genOptimize');
+    if(opt && !opt.value) opt.value = 'blend3';
+    if(!slate._mixPreset) slate._mixPreset = 'proj';
+    toggleBlendRow();
+  }
+
   const waveSection = document.getElementById('waveSection');
   if(waveSection){
     const showWave = slate.sport==='pga' && slate.columnMapping?.start;
@@ -2913,15 +2924,51 @@ function updateUnconstrainedPct(){
 
 function toggleBlendRow(){
   const v=document.getElementById('genOptimize').value;
-  document.getElementById('blendRow').style.display=v==='blend'?'flex':'none';
-}
-function updateBlendLabel(val){
-  const projPct=100-parseInt(val);
-  const rtgPct=parseInt(val);
-  document.getElementById('blendLabel').textContent=projPct+'% / '+rtgPct+'%';
+  const mr=document.getElementById('mixRow');
+  if(mr){
+    mr.style.display=v==='blend3'?'flex':'none';
+    if(v==='blend3'){ const s=activeSlate(); applyMixPresetUI(s?._mixPreset||'proj'); }
+  }
 }
 
+// ── 3-Signal Mix: outer weights (proj / model / odds), all tunable here ──
+// Defaults reflect a normal week (proj-led). "Model Heavy" leans your rating,
+// "Odds Heavy" leans the market. Edit freely — generation reads these directly.
+const MIX_PRESETS = {
+  proj:  { proj:0.50, model:0.30, odds:0.20 },
+  model: { proj:0.20, model:0.45, odds:0.35 },
+  odds:  { proj:0.20, model:0.30, odds:0.50 },
+};
+// Inner odds composite: how the de-vigged markets combine into one player score.
+// Ceiling-leaning (win/top5 heavy) suits GPPs. Only mapped markets are used;
+// missing ones are dropped and the rest renormalized.
+const ODDS_WEIGHTS = { win:0.35, top5:0.30, top10:0.20, top20:0.15 };
 
+function setMixPreset(key, btn){
+  const s=activeSlate(); if(s){ s._mixPreset=key; save(); }
+  applyMixPresetUI(key);
+}
+function applyMixPresetUI(key){
+  document.querySelectorAll('.mix-btn').forEach(b=>b.classList.toggle('active', b.dataset.mix===key));
+  const w=MIX_PRESETS[key]||MIX_PRESETS.proj;
+  const lbl=document.getElementById('mixLabel');
+  if(lbl) lbl.textContent=`Proj ${Math.round(w.proj*100)} · Model ${Math.round(w.model*100)} · Odds ${Math.round(w.odds*100)}`;
+}
+
+// Per-player de-vigged sportsbook composite → p._oddsScore. Returns false if no
+// odds markets are mapped (caller renormalizes the mix to drop the odds leg).
+function ensureOddsScores(pool, slate){
+  const cm=slate.columnMapping||{};
+  const markets=['win','top5','top10','top20'].filter(k=>cm[k] && ODDS_WEIGHTS[k]>0);
+  if(!markets.length){ pool.forEach(p=>{p._oddsScore=0;}); return false; }
+  const fieldSum={};
+  markets.forEach(k=> fieldSum[k]=Math.max(0.01, pool.reduce((s,p)=>s+(nascarMlToProb(p[k])||0),0)) );
+  const wTot=markets.reduce((s,k)=>s+ODDS_WEIGHTS[k],0)||1;
+  pool.forEach(p=>{
+    p._oddsScore=markets.reduce((s,k)=> s + (ODDS_WEIGHTS[k]/wTot)*((nascarMlToProb(p[k])||0)/fieldSum[k]), 0);
+  });
+  return true;
+}
 
 function setPlayerExpOverride(pid, val){
   const slate=activeSlate();if(!slate)return;
@@ -2957,15 +3004,18 @@ function scorePlayer(p, optimizeBy, groups){
 function lineupScore(lineup, players, optimizeBy, groups, blendWeights){
   const ids = lineup.map(p=>p.id);
   let score;
-  if(optimizeBy==='blend'){
-    const {projW, rtgW} = blendWeights;
+  if(optimizeBy==='blend3'){
+    const mw = blendWeights.mw || {proj:1,model:0,odds:0};
     const projs2 = players.map(p=>parseFloat(p.proj)||0);
     const rtgs2  = players.map(p=>parseFloat(p.rating)||0);
+    const odds2  = players.map(p=>p._oddsScore||0);
     const minP=Math.min(...projs2),maxP=Math.max(...projs2);
     const minR=Math.min(...rtgs2), maxR=Math.max(...rtgs2);
+    const minO=Math.min(...odds2), maxO=Math.max(...odds2);
     const nP = p => maxP===minP?1:((parseFloat(p.proj)||0)-minP)/(maxP-minP);
     const nR = p => maxR===minR?1:((parseFloat(p.rating)||0)-minR)/(maxR-minR);
-    score = lineup.reduce((s,p)=> s + nP(p)*projW + nR(p)*rtgW, 0);
+    const nO = p => maxO===minO?1:((p._oddsScore||0)-minO)/(maxO-minO);
+    score = lineup.reduce((s,p)=> s + nP(p)*mw.proj + nR(p)*mw.model + nO(p)*mw.odds, 0);
   } else {
     score = lineup.reduce((s,p)=>s+(parseFloat(p[optimizeBy])||0),0);
   }
@@ -4811,7 +4861,8 @@ async function runAutoGen(){
     if(slate.sport==='ufc') return runUFCSimGen();
     if(slate.sport==='nascar') return runNascarSimGen();
   }
-  const optimizeBy=document.getElementById('genOptimize').value;
+  let optimizeBy=document.getElementById('genOptimize').value;
+  if(optimizeBy==='blend') optimizeBy='blend3'; // legacy 2-way blend → 3-signal mix
   if(!optimizeBy && _genMode!=='simulate'){alert('Please select an optimization metric.');return;}
   const target=parseInt(document.getElementById('genCount').value)||20;
   const maxExpPct=parseInt(document.getElementById('genMaxExp').value)||100;
@@ -4820,16 +4871,15 @@ async function runAutoGen(){
   const maxSal=parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP;
    ufcNoOpposeGlobal = slate.sport==='ufc' && (document.getElementById('genUfcNoOppose')?.checked||false);
 
-  // blend weights
-  const blendSliderVal = parseInt(document.getElementById('blendSlider').value)||50;
-  const projW = (100 - blendSliderVal) / 100;
-  const rtgW  = blendSliderVal / 100;
-  const blendWeights = { projW, rtgW };
+  // 3-signal mix weights (proj/model/odds) from the active preset toggle
+  const mixPreset = slate._mixPreset || 'proj';
+  const mix = MIX_PRESETS[mixPreset] || MIX_PRESETS.proj;
+  const blendWeights = { mix };
 
-  if(optimizeBy==='blend'){
+  if(optimizeBy==='blend3'){
     const hasProjField=!!(slate.columnMapping?.proj);
     const hasRtgField=!!(slate.columnMapping?.rating);
-    if(!hasProjField||!hasRtgField){alert('Blend mode requires both Projection and Rating columns to be mapped.');document.getElementById('genBtn').disabled=false;return;}
+    if(!hasProjField && !hasRtgField){alert('3-Signal Mix needs at least a Projection or Rating column mapped.');document.getElementById('genBtn').disabled=false;return;}
   }
 
   const el=document.getElementById('genLog');
@@ -4871,9 +4921,27 @@ async function runAutoGen(){
   const normProj = p => maxProj===minProj ? 1 : ((parseFloat(p.proj)||0)-minProj)/(maxProj-minProj);
   const normRtg  = p => maxRtg===minRtg   ? 1 : ((parseFloat(p.rating)||0)-minRtg)/(maxRtg-minRtg);
 
+  // 3-signal mix: compute de-vigged odds composite + normalizer, and renormalize
+  // the proj/model/odds weights over whichever signals are actually present.
+  const oddsAvailable = ensureOddsScores(pool, slate);
+  const oddsArr = pool.map(p=>p._oddsScore||0);
+  const minOdds=Math.min(...oddsArr), maxOdds=Math.max(...oddsArr);
+  const normOdds = p => maxOdds===minOdds ? (oddsAvailable?1:0) : (((p._oddsScore||0)-minOdds)/(maxOdds-minOdds));
+  let mw = {
+    proj:  mix.proj  * (slate.columnMapping?.proj   ? 1 : 0),
+    model: mix.model * (slate.columnMapping?.rating  ? 1 : 0),
+    odds:  mix.odds  * (oddsAvailable                ? 1 : 0),
+  };
+  const mwSum = (mw.proj+mw.model+mw.odds) || 1;
+  mw = { proj:mw.proj/mwSum, model:mw.model/mwSum, odds:mw.odds/mwSum };
+  blendWeights.mw = mw;
+  if(optimizeBy==='blend3'){
+    log(`3-Signal Mix → Proj ${Math.round(mw.proj*100)} / Model ${Math.round(mw.model*100)} / Odds ${Math.round(mw.odds*100)}${oddsAvailable?'':' (no odds mapped — odds leg dropped)'}`);
+  }
+
   const getBaseScore = p => {
-    if(optimizeBy==='blend'){
-      return normProj(p) * projW + normRtg(p) * rtgW;
+    if(optimizeBy==='blend3'){
+      return normProj(p) * mw.proj + normRtg(p) * mw.model + normOdds(p) * mw.odds;
     }
     return (parseFloat(p[optimizeBy])||0);
   };
