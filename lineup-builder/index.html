@@ -831,6 +831,7 @@ html { overscroll-behavior-y: contain; }
                 <option value="top5">Top5%</option>
                 <option value="top10">Top10%</option>
                 <option value="top20">Top20%</option>
+                <option value="own">Own%</option>
                 <option value="sal">Salary</option>
               </select>
               <button id="savedSortDir" onclick="toggleSavedSortDir()"
@@ -949,9 +950,9 @@ html { overscroll-behavior-y: contain; }
               <div style="border-top:1px solid var(--border);margin-top:4px;padding-top:8px;display:flex;flex-direction:column;gap:6px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                   <span class="setting-label">Leverage <span style="color:var(--muted);font-weight:400;">(fade chalk)</span></span>
-                  <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);" id="leverageLabel">40</span>
+                  <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);" id="leverageLabel">10</span>
                 </div>
-                <input type="range" id="leverageSlider" min="0" max="100" value="40" style="width:100%;accent-color:var(--accent);" oninput="document.getElementById('leverageLabel').textContent=this.value;const _s=activeSlate();if(_s){_s._leverage=parseInt(this.value);save();}">
+                <input type="range" id="leverageSlider" min="0" max="100" value="10" style="width:100%;accent-color:var(--accent);" oninput="document.getElementById('leverageLabel').textContent=this.value;const _s=activeSlate();if(_s){_s._leverage=parseInt(this.value);save();}">
                 <div style="display:flex;justify-content:space-between;">
                   <span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">0 = pure ceiling (chalk)</span>
                   <span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">100 = max contrarian</span>
@@ -962,9 +963,9 @@ html { overscroll-behavior-y: contain; }
             <div class="setting-row" id="randomnessRow" style="flex-direction:column;align-items:stretch;gap:6px;">
               <div style="display:flex;justify-content:space-between;align-items:center;">
                 <span class="setting-label">Randomness</span>
-                <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);" id="randomnessLabel">25</span>
+                <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);" id="randomnessLabel">10</span>
               </div>
-              <input type="range" id="randomnessSlider" min="1" max="99" value="25" style="width:100%;accent-color:var(--accent);" oninput="document.getElementById('randomnessLabel').textContent=this.value">
+              <input type="range" id="randomnessSlider" min="1" max="99" value="10" style="width:100%;accent-color:var(--accent);" oninput="document.getElementById('randomnessLabel').textContent=this.value">
               <div style="display:flex;justify-content:space-between;">
                 <span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">Low (more optimal)</span>
                 <span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">High (more variance)</span>
@@ -2288,6 +2289,7 @@ function renderSaved(){
   const hasWin=!!slate.columnMapping?.win, hasTop5=!!slate.columnMapping?.top5;
   const hasTop10=!!slate.columnMapping?.top10, hasTop20=!!slate.columnMapping?.top20;
   const hasMl=!!slate.columnMapping?.ml;
+  const hasOwn=!!slate.columnMapping?.own;
   const isUfc=slate.sport==='ufc';
   const pool=slate.players||[];
   const meta=slate._lineupMeta||{};
@@ -2320,7 +2322,8 @@ function renderSaved(){
     const top10Eq=hasTop10?players.reduce((s,p)=>s+(nascarMlToProb(p.top10)||0)/vigDiv.top10,0)*100:null;
     const top20Eq=hasTop20?players.reduce((s,p)=>s+(nascarMlToProb(p.top20)||0)/vigDiv.top20,0)*100:null;
     const mlEq=isUfc&&hasMl?(players.reduce((s,p)=>s+(ufcWinProb[p.id]||0),0)/Math.max(1,players.length))*100:null;
-    return {lineup,i,players,sal,proj,rtg,simScore,winEq,top5Eq,top10Eq,top20Eq,mlEq};
+    const own=hasOwn?players.reduce((s,p)=>s+(parseFloat(p.own)||0),0):null;
+    return {lineup,i,players,sal,proj,rtg,simScore,winEq,top5Eq,top10Eq,top20Eq,mlEq,own};
   });
   if(sortBy==='proj_desc')    entries.sort((a,b)=>b.proj-a.proj);
   else if(sortBy==='proj_asc')    entries.sort((a,b)=>a.proj-b.proj);
@@ -2338,7 +2341,9 @@ function renderSaved(){
   else if(sortBy==='top10_asc')   entries.sort((a,b)=>(a.top10Eq||0)-(b.top10Eq||0));
   else if(sortBy==='top20_desc')  entries.sort((a,b)=>(b.top20Eq||0)-(a.top20Eq||0));
   else if(sortBy==='top20_asc')   entries.sort((a,b)=>(a.top20Eq||0)-(b.top20Eq||0));
-  list.innerHTML=entries.map(({i,players,sal,proj,rtg,simScore,winEq,top5Eq,top10Eq,top20Eq,mlEq})=>{
+  else if(sortBy==='own_desc')    entries.sort((a,b)=>(b.own||0)-(a.own||0));
+  else if(sortBy==='own_asc')     entries.sort((a,b)=>(a.own||0)-(b.own||0));
+  list.innerHTML=entries.map(({i,players,sal,proj,rtg,simScore,winEq,top5Eq,top10Eq,top20Eq,mlEq,own})=>{
     const stats=[];
     if(hasProj)        stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Proj</span>${proj.toFixed(2)}</span>`);
     if(hasRtg)         stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Rtg</span>${rtg.toFixed(1)}</span>`);
@@ -2348,6 +2353,7 @@ function renderSaved(){
     if(top5Eq!=null)   stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top5%</span>${top5Eq.toFixed(1)}%</span>`);
     if(top10Eq!=null)  stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top10%</span>${top10Eq.toFixed(1)}%</span>`);
     if(top20Eq!=null)  stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top20%</span>${top20Eq.toFixed(1)}%</span>`);
+    if(own!=null)      stats.push(`<span class="saved-stat" style="color:var(--muted);"><span class="saved-stat-lbl" style="opacity:.7;">Own</span>${own.toFixed(1)}%</span>`);
     return `<div class="saved-lineup" id="saved-${i}">
       <div class="saved-top"><div class="saved-num">Lineup #${i+1}</div>
       <div class="saved-actions"><div class="saved-sal">${fmt(sal)}</div><button class="saved-load" onclick="loadLineup(${i})">↑ Edit</button><button class="saved-del" onclick="deleteLineup(${i})">✕</button></div></div>
@@ -2846,7 +2852,7 @@ function renderGroupRulesSummary(){
     else if(slate._mixPreset==='odds') slate._mixPreset='market';
     if(!slate._mixPreset || !MIX_PRESETS[slate._mixPreset]) slate._mixPreset = 'balanced'; // default
     const levSl = document.getElementById('leverageSlider');
-    if(levSl){ const lv = (slate._leverage!=null ? slate._leverage : 40); levSl.value = lv; const ll=document.getElementById('leverageLabel'); if(ll) ll.textContent = lv; }
+    if(levSl){ const lv = (slate._leverage!=null ? slate._leverage : 10); levSl.value = lv; const ll=document.getElementById('leverageLabel'); if(ll) ll.textContent = lv; }
     toggleBlendRow();
   }
 
@@ -3045,9 +3051,12 @@ function lineupScore(lineup, players, optimizeBy, groups, blendWeights){
     const nO = p => maxO===minO?0:((p._oddsScore||0)-minO)/(maxO-minO);
     // Same leverage fade as the build, so ranking/selection optimizes the leverage-adjusted objective.
     const levStr = blendWeights.leverageStrength || 0;
-    const owns2 = players.map(p=>parseFloat(p.own)||0);
+    const ownReal2 = players.map(p=>parseFloat(p.own)).filter(v=>!isNaN(v));
+    const avgOw = ownReal2.length ? ownReal2.reduce((s,v)=>s+v,0)/ownReal2.length : 0;
+    const ownOf2 = p => { const v=parseFloat(p.own); return isNaN(v) ? avgOw : v; };
+    const owns2 = players.map(ownOf2);
     const minOw=Math.min(...owns2), maxOw=Math.max(...owns2);
-    const nOw = p => maxOw===minOw?0:((parseFloat(p.own)||0)-minOw)/(maxOw-minOw);
+    const nOw = p => maxOw===minOw?0:((ownOf2(p)-minOw)/(maxOw-minOw));
     score = lineup.reduce((s,p)=>{
       const q = nO(p)*wEq + nR(p)*wMod + nP(p)*wPrj;
       return s + (levStr>0 ? q*(1 - levStr*nOw(p)) : q);
@@ -4944,10 +4953,6 @@ async function runAutoGen(){
   // Sort pool by blended score for greedy seeding
   const randomness = parseInt(document.getElementById('randomnessSlider').value) / 100;
 
-  // Pool average rating for fallback reference (used in scoring)
-  const validRatings = pool.filter(p=>p.rating!=null).map(p=>parseFloat(p.rating)||0);
-  const avgRating = validRatings.length ? validRatings.reduce((s,v)=>s+v,0)/validRatings.length : 0;
-
   // Score a single player — exclude rating component if they have no rating
   // Normalize proj and rating to 0-1 within the pool so weights are honest
   const projs = pool.map(p=>parseFloat(p.proj)||0);
@@ -4978,9 +4983,14 @@ async function runAutoGen(){
   // score — a low-owned LONGSHOT (low quality, ~no fade) still can't beat a faded
   // stud, but an under-owned mid-tier contender can. Tunable 0..1 via the slider.
   const ownAvailable = !!slate.columnMapping?.own;
-  const ownArr = pool.map(p=>parseFloat(p.own)||0);
+  // Missing ownership → treat as the field average (neutral), never 0. A blank cell read
+  // as 0% would normalize to the bottom and wrongly mark that golfer as a max-leverage play.
+  const ownReal = pool.map(p=>parseFloat(p.own)).filter(v=>!isNaN(v));
+  const avgOwn = ownReal.length ? ownReal.reduce((s,v)=>s+v,0)/ownReal.length : 0;
+  const ownOf = p => { const v=parseFloat(p.own); return isNaN(v) ? avgOwn : v; };
+  const ownArr = pool.map(ownOf);
   const minOwn=Math.min(...ownArr), maxOwn=Math.max(...ownArr);
-  const normOwn = p => maxOwn===minOwn ? 0 : (((parseFloat(p.own)||0)-minOwn)/(maxOwn-minOwn));
+  const normOwn = p => maxOwn===minOwn ? 0 : ((ownOf(p)-minOwn)/(maxOwn-minOwn));
   const MAX_LEV = 0.55;
   const levSliderVal = parseInt(document.getElementById('leverageSlider')?.value);
   const leverageStrength = (optimizeBy==='blend3' && ownAvailable && !isNaN(levSliderVal))
