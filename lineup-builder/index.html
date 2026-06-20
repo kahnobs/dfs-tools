@@ -3554,7 +3554,7 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
     nodes++;
     if(chosen.length===6){
       if(salUsed>=(minSal||0) && salUsed<=salaryCap){
-        if(!hasGroups || checkGroupRules(chosen)){
+        if(!hasGroups || checkGroupRules(chosen.map(c=>c.p), groups)){
           if(curScore>bestScore){ bestScore=curScore; bestLineup=chosen.map(c=>c.p); }
         }
       }
@@ -3605,7 +3605,7 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
       if(noOppose&&lineup.some(x=>x.p.opp===c.p.name||(c.p.opp&&c.p.opp===x.p.name))) continue;
       if(salUsed+c.sal>salaryCap) continue;
       lineup.push(c); salUsed+=c.sal;
-      if(hasGroups&&!checkGroupRules(lineup)){lineup.pop();salUsed-=c.sal;}
+      if(hasGroups&&!checkGroupRules(lineup.map(c=>c.p), groups)){lineup.pop();salUsed-=c.sal;}
     }
     if(lineup.length===6&&salUsed>=(minSal||0)) bestLineup=lineup.map(c=>c.p);
   }
