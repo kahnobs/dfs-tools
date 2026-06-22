@@ -1007,6 +1007,18 @@ html { overscroll-behavior-y: contain; }
               Requires <span style="color:var(--accent2);font-weight:600;">WIN</span>, <span style="color:var(--accent2);font-weight:600;">TOP5</span>, <span style="color:var(--accent2);font-weight:600;">TOP10</span> odds and <span style="color:var(--accent2);font-weight:600;">Grid</span> mapped. <span style="color:var(--accent2);font-weight:600;">Proj Finish</span> recommended.
             </div>
             <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <span class="setting-label">Leverage <span style="color:var(--muted);font-weight:400;">(fade chalk scenarios)</span></span>
+                <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent2);" id="nascarLeverageLabel">30</span>
+              </div>
+              <input type="range" id="nascarLeverageSlider" min="0" max="100" value="30" style="width:100%;accent-color:var(--accent2);" oninput="document.getElementById('nascarLeverageLabel').textContent=this.value;const _s=activeSlate();if(_s){_s._nascarLeverage=parseInt(this.value);save();}">
+              <div style="display:flex;justify-content:space-between;">
+                <span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">0 = most likely (chalk)</span>
+                <span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">100 = max leverage</span>
+              </div>
+              <div style="font-size:9px;color:var(--muted);text-align:center;margin-top:4px;">Tilts lineups toward under-owned scenarios &amp; uniqueness. Needs an <span style="color:var(--accent2);">Own%</span> column mapped.</div>
+            </div>
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
                 <div>
                   <div style="font-size:10px;font-weight:600;color:var(--text);">Rear Starters</div>
@@ -2816,6 +2828,10 @@ function renderGroupRulesSummary(){
       const nascarSlider = document.getElementById('nascarSimCountSlider');
       const nascarLabel  = document.getElementById('nascarSimCountLabel');
       if(nascarSlider && slate._simCount){ nascarSlider.value = slate._simCount; if(nascarLabel) nascarLabel.textContent = slate._simCount; }
+      // Restore leverage slider + label
+      const nLevSl = document.getElementById('nascarLeverageSlider');
+      const nLevLb = document.getElementById('nascarLeverageLabel');
+      if(nLevSl){ const lv = (slate._nascarLeverage!=null ? slate._nascarLeverage : 30); nLevSl.value = lv; if(nLevLb) nLevLb.textContent = lv; }
       renderRearStartersUI();
     }
   }
@@ -4063,6 +4079,32 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
     p._nOwn    = parseFloat(p.own) || 0;
   });
 
+  // ── De-vig each odds tier ────────────────────────────────────────────────
+  // Raw moneyline implied probs carry the book's margin: a full-field win
+  // market sums to ~1.2–1.35, not 1.0. That overround inflates every driver's
+  // finishing equity and — because vig is heavier on longshots (favorite-
+  // longshot bias) — distorts the RELATIVE standing the sim samples from.
+  // Since bucket allocation now keys off how often each driver is the top
+  // scorer, those frequencies must come from honest probabilities.
+  // Proportional (multiplicative) method: scale real, mapped probs in each
+  // tier so the field sums to that tier's fair total (Win→1, Top3→3, Top5→5,
+  // Top10→10). Only real values are de-vigged here; missing tiers are filled
+  // by extrapolation below off these corrected anchors.
+  (function devigTiers(){
+    const tiers = [['_nPWin',1.0,'Win'],['_nPTop3',3.0,'Top3'],['_nPTop5',5.0,'Top5'],['_nPTop10',10.0,'Top10']];
+    const removed = [];
+    tiers.forEach(([key, fair, lbl])=>{
+      let sum=0, n=0;
+      pool.forEach(p=>{ if(p[key]!=null){ sum+=p[key]; n++; } });
+      if(n<2 || sum<=0) return;             // need a real market to normalize against
+      const overround = sum / fair;          // e.g. win sum 1.28 → 1.28 overround
+      if(overround <= 1.001) return;          // already fair / no vig to remove
+      pool.forEach(p=>{ if(p[key]!=null){ p[key] = Math.max(0.0005, Math.min(0.999, p[key]/overround)); } });
+      removed.push(`${lbl} −${((overround-1)*100).toFixed(0)}%`);
+    });
+    if(removed.length && typeof log==='function') log(`De-vig applied: ${removed.join(', ')}`);
+  })();
+
   // ── Determine which odds tiers are available across the field ────────────
   const fieldHasTop3  = pool.some(p=>p._nPTop3  != null);
   const fieldHasTop5  = pool.some(p=>p._nPTop5  != null);
@@ -4453,9 +4495,11 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
 // per-bucket driver composites, allocates lineup counts.
 // No field bucket — all lineups belong to a named scenario.
 // ═══════════════════════════════════════════════════════════
-function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target){
+function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target, leverageStrength = 0){
   const numSims = simTopScorer.length;
   const MIN_THRESHOLD = 0.05; // bucket must represent ≥5% of sims
+  const s = Math.max(0, Math.min(1, leverageStrength)); // 0 = pure frequency, 1 = full leverage tilt
+  const OWN_FLOOR = 0.02; // 2% ownership floor so a near-zero-owned driver can't dominate allocation
 
   // ── Count how often each driver was top scorer ──────────────
   const countById = {};
@@ -4523,18 +4567,55 @@ function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target){
     return composites;
   }
 
-  // ── Allocate lineups proportionally (largest remainder) ─────
-  // Proportion is based on assigned sim count (which includes
-  // redistributed sims), so allocation naturally reflects how
-  // dominant each named driver is across all race outcomes.
-  const totalAssigned = named.reduce((s,[id])=>s+(bucketSimIndices[id].length),0);
-  const rawCounts = named.map(([id]) => ({
+  // ── Allocate lineups: frequency tilted by leverage ──────────
+  // Base weight is the assigned-sim share (how often this driver is the
+  // centerpiece across all race outcomes). We then tilt by how UNDER-OWNED
+  // that centerpiece is. When a chalk favorite is the top scorer the whole
+  // field already has him, so winning that scenario barely moves you up;
+  // when a low-owned driver is the centerpiece, few opponents share him and
+  // that's where tournaments are won.
+  //
+  // Per-bucket tilt = (1/ownF)^s, where ownF is centerpiece ownership and s
+  // is the leverage slider (0→1). Derivation: pure-frequency target is freq;
+  // full-leverage target is freq/ownF (equity ÷ duplication). The geometric
+  // interpolation freq^(1−s)·(freq/ownF)^s reduces to freq·(1/ownF)^s — so
+  // the tilt is purely ownership-driven and s=0 reproduces the old behavior.
+  const ownData = {};
+  const maxOwnRaw = Math.max(...pool.map(p => p._nOwn||0));
+  const ownAvailable = maxOwnRaw > 0 && s > 0;
+  const fieldAvgOwnF = (() => {
+    const owned = pool.map(p=>p._nOwn||0).filter(v=>v>0);
+    return owned.length ? (owned.reduce((a,b)=>a+b,0)/owned.length)/100 : OWN_FLOOR;
+  })();
+
+  named.forEach(([id]) => {
+    const player = pool.find(p=>p.id===id);
+    const ownPct = player ? (player._nOwn||0) : 0;
+    const ownF   = Math.max(OWN_FLOOR, (ownPct>0 ? ownPct/100 : fieldAvgOwnF));
+    const freq   = bucketSimIndices[id].length / numSims;
+    const tilt   = ownAvailable ? Math.pow(1/ownF, s) : 1;
+    ownData[id]  = { ownPct, ownF, freq, tilt };
+  });
+
+  // Normalize tilt so the mean is 1 across buckets — this makes the tilt a
+  // pure redistribution (it shifts lineups between scenarios without inflating
+  // the total) and gives an interpretable "×N more/fewer lineups than frequency
+  // alone" number for the Scenarios tab.
+  const meanTilt = named.reduce((a,[id])=>a+ownData[id].tilt,0) / (named.length||1);
+  named.forEach(([id])=>{ ownData[id].relTilt = meanTilt>0 ? ownData[id].tilt/meanTilt : 1; });
+
+  const weighted = named.map(([id]) => ({
     id,
-    exact: (bucketSimIndices[id].length / totalAssigned) * target
+    weight: (bucketSimIndices[id].length / numSims) * ownData[id].relTilt
+  }));
+  const totalWeight = weighted.reduce((a,b)=>a+b.weight,0) || 1;
+  const rawCounts = weighted.map(({id, weight}) => ({
+    id,
+    exact: (weight / totalWeight) * target
   }));
 
   rawCounts.forEach(b => { b.allocated = Math.max(1, Math.floor(b.exact)); });
-  const remainder = target - rawCounts.reduce((s,b)=>s+b.allocated, 0);
+  const remainder = target - rawCounts.reduce((s2,b)=>s2+b.allocated, 0);
   rawCounts
     .map((b,i)=>({i, frac: b.exact - Math.floor(b.exact)}))
     .sort((a,b)=>b.frac-a.frac)
@@ -4545,13 +4626,18 @@ function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target){
   return rawCounts.map(({id, allocated}) => {
     const simIndices = bucketSimIndices[id];
     const player = pool.find(p=>p.id===id);
+    const od = ownData[id] || {};
     return {
       id,
       isField: false,
       playerName: player ? player.name : id,
       simCount: simIndices.length,
       frequency: simIndices.length / numSims,
+      centerpieceOwn: od.ownPct != null ? od.ownPct : 0,
+      leverageTilt: od.relTilt != null ? od.relTilt : 1,
+      ownApplied: ownAvailable,
       allocatedLineups: allocated,
+      simIndices,                       // exposed for ceiling/leverage scoring in the gen step
       driverComposites: buildBucketComposites(simIndices),
     };
   }).filter(b => b.allocatedLineups > 0);
@@ -4630,15 +4716,28 @@ async function runNascarSimGen(){
     return idx>=0 ? simScoreArrays[idx] : new Array(numSims).fill(0);
   });
 
-  const buckets = bucketSimsByDriver(pool, poolSimTopScorer, poolSimScoreArrays, target);
+  // Leverage strength (0–100 slider → 0–1). Drives both bucket allocation and
+  // within-bucket lineup selection. Requires Own% mapped to have any effect.
+  const levSliderEl = document.getElementById('nascarLeverageSlider');
+  const leverageStrength = (parseInt(levSliderEl?.value) || 0) / 100;
+  const ownMapped = pool.some(p => (parseFloat(p.own)||0) > 0);
+  if(leverageStrength > 0 && !ownMapped){
+    log(`⚠ Leverage ${Math.round(leverageStrength*100)} set but no Own% column mapped — running on frequency only.`);
+  } else if(leverageStrength > 0){
+    log(`Leverage ${Math.round(leverageStrength*100)}/100 → tilting allocation & selection toward under-owned scenarios.`);
+  }
+
+  const buckets = bucketSimsByDriver(pool, poolSimTopScorer, poolSimScoreArrays, target, ownMapped ? leverageStrength : 0);
 
   // Store bucket metadata on the lineup array for the Scenarios tab
   window._lastNascarBuckets = buckets;
   window._lastNascarPool    = pool;
+  window._lastNascarLeverage = ownMapped ? leverageStrength : 0;
 
   log(`${buckets.length} scenario buckets:`);
   buckets.forEach(b=>{
-    log(`  🏁 ${b.playerName}: ${b.simCount} sims (${(b.frequency*100).toFixed(1)}%) → ${b.allocatedLineups} lineups`);
+    const levTag = (b.ownApplied && b.leverageTilt) ? `  [own ${b.centerpieceOwn.toFixed(0)}% · ${b.leverageTilt>=1?'↑':'↓'}${b.leverageTilt.toFixed(2)}×]` : '';
+    log(`  🏁 ${b.playerName}: ${b.simCount} sims (${(b.frequency*100).toFixed(1)}%) → ${b.allocatedLineups} lineups${levTag}`);
   });
 
   await new Promise(r=>setTimeout(r,0));
@@ -4674,6 +4773,41 @@ async function runNascarSimGen(){
   }
   const GLOBAL_FLOOR = _gFloorScore * 0.78;
   log(`Global composite floor: ${GLOBAL_FLOOR.toFixed(1)} (78% of est. best ${_gFloorScore.toFixed(1)})`);
+
+  // ── Leverage-aware selection helpers ──────────────────────────────────────
+  // ceiling = a ceiling-leaning percentile of the lineup's TOTAL DK score taken
+  // across exactly the sims in this bucket (the real 6-man joint, not a sum of
+  // marginal composites). This answers "how big does this lineup go when this
+  // scenario actually plays out." Sampled to a cap for speed on large sim runs.
+  const CEIL_SIM_CAP = 800;
+  const sampleSimIndices = (idxArr) => {
+    if(idxArr.length <= CEIL_SIM_CAP) return idxArr;
+    const stride = idxArr.length / CEIL_SIM_CAP;
+    const out = [];
+    for(let k=0;k<CEIL_SIM_CAP;k++) out.push(idxArr[Math.floor(k*stride)]);
+    return out;
+  };
+  const lineupCeiling = (lu, sampledSims) => {
+    const idxs = lu.map(p=>poolIdx.get(p.id)).filter(i=>i!=null);
+    const totals = sampledSims.map(si => {
+      let t=0; for(const pi of idxs) t += (poolSimScoreArrays[pi][si]||0); return t;
+    });
+    totals.sort((a,b)=>a-b);
+    const n = totals.length || 1;
+    const p50 = totals[Math.floor(n*0.50)] || 0;
+    const p85 = totals[Math.floor(n*0.85)] || 0;
+    return p50*0.30 + p85*0.70; // ceiling-leaning, GPP-appropriate
+  };
+  // Field-average ownership fraction — used to impute missing Own% so a driver
+  // with no projection isn't treated as max-leverage (mirrors the PGA builder).
+  const _ownVals = pool.map(p=>parseFloat(p.own)||0).filter(v=>v>0);
+  const fieldAvgOwnF = _ownVals.length ? (_ownVals.reduce((a,b)=>a+b,0)/_ownVals.length)/100 : 0;
+  const lineupChalk = (lu) => lu.reduce((s,p)=>{
+    const o = parseFloat(p.own)||0;
+    return s + (o>0 ? o/100 : fieldAvgOwnF);
+  }, 0);
+  const MAX_FADE = 0.60; // chalkiest lineup loses at most 60% of its ceiling at leverage 100
+
 
   for(const bucket of buckets){
     if(window._genCancelled){ log('Cancelled.'); done(); return; }
@@ -4740,18 +4874,37 @@ async function runNascarSimGen(){
       continue;
     }
 
-    // ── Step 4: Select best lineups from this bucket via Jaccard diversity ──
+    // ── Step 4: Select best lineups — ceiling, faded by leverage, + diversity ──
+    // score (composite sum) is kept only as the quality gate vs GLOBAL_FLOOR.
+    // Ranking is by ceiling × leverage-fade × diversity.
     const candidates = bucketGenerated.map(lu=>({
       lu,
       score: lu.reduce((s,p)=>s+(bucket.driverComposites[p.id]||0),0),
     })).sort((a,b)=>b.score-a.score);
 
-    const topScore = candidates[0]?.score || 1;
-    // Use global composite floor so weak buckets can't select garbage lineups
-    // that would never survive in a stronger bucket.
     const selSets  = [];
     const filled   = [];
     const remaining = [...candidates].filter(x => x.score >= GLOBAL_FLOOR);
+
+    // Compute ceiling + cumulative ownership for survivors, then normalize chalk
+    // across this candidate set so the fade is relative (chalkiest → max fade,
+    // most unique → none). At leverage 0, or with no Own% mapped, fade is 0 and
+    // selection is pure ceiling — already an upgrade over sum-of-composites.
+    const sampledSims = sampleSimIndices(bucket.simIndices || []);
+    remaining.forEach(x=>{
+      x.ceiling = lineupCeiling(x.lu, sampledSims);
+      x.chalk   = lineupChalk(x.lu);
+    });
+    const chalkVals = remaining.map(x=>x.chalk);
+    const minChalk = chalkVals.length ? Math.min(...chalkVals) : 0;
+    const maxChalk = chalkVals.length ? Math.max(...chalkVals) : 1;
+    const chalkRange = (maxChalk - minChalk) || 1;
+    const fadeStrength = bucket.ownApplied ? leverageStrength : 0;
+    remaining.forEach(x=>{
+      x.normChalk = (x.chalk - minChalk) / chalkRange;
+      x.levScore  = x.ceiling * (1 - MAX_FADE * fadeStrength * x.normChalk);
+    });
+    const topLev = remaining.reduce((m,x)=>Math.max(m, x.levScore||0), 0) || 1;
 
     // Dynamic diversity weight: larger buckets need less diversity pressure
     // since we expect more overlap when covering 30 Hamlin lineups vs 8.
@@ -4776,7 +4929,7 @@ async function runNascarSimGen(){
           let sh=0; ids.forEach(id=>{ if(s.has(id)) sh++; });
           maxJ=Math.max(maxJ,sh/(ids.size+s.size-sh));
         }
-        const v=(1-divWeight)*(x.score/topScore)+divWeight*(1-maxJ);
+        const v=(1-divWeight)*((x.levScore||0)/topLev)+divWeight*(1-maxJ);
         if(v>bestV){bestV=v;bestI=i;}
       }
       if(bestI===-1) break;
@@ -4790,6 +4943,9 @@ async function runNascarSimGen(){
       l._bucketIsField  = bucket.isField;
       l._simWinAvg      = chosen.score.toFixed(1);
       l._simAvg         = chosen.score.toFixed(1);
+      l._simCeiling     = chosen.ceiling!=null ? chosen.ceiling.toFixed(1) : null;
+      l._simLev         = chosen.levScore!=null ? chosen.levScore.toFixed(1) : null;
+      l._chalkSum       = chosen.chalk!=null ? (chosen.chalk*100).toFixed(0) : null;
       l._simWinRate     = '—';
       filled.push(l);
     }
@@ -4807,7 +4963,7 @@ async function runNascarSimGen(){
   const nascarMinOverrides = slate.playerMinOverrides||{};
   let finalLineups = allFinalLineups;
   if(Object.keys(nascarMinOverrides).some(id=>nascarMinOverrides[id]>0)){
-    const allCandidates = allFinalLineups.map(l=>{ const c=[...l]; c._simAvg=l._simAvg; return c; });
+    const allCandidates = allFinalLineups.map(l=>{ const c=[...l]; c._simAvg=l._simAvg; c._simCeiling=l._simCeiling; c._simLev=l._simLev; c._chalkSum=l._chalkSum; c._bucketId=l._bucketId; c._bucketName=l._bucketName; return c; });
     const scoreFn = l => l.reduce((s,p)=>s+(p._simComposite||0),0);
     finalLineups = enforceMinExposure(finalLineups, allCandidates, nascarMinOverrides, scoreFn, log);
   }
@@ -5555,6 +5711,18 @@ function renderPreviewScenarios(){
       <div style="background:var(--surface2);border-radius:3px;height:4px;margin-bottom:8px;overflow:hidden;">
         <div style="width:${barW}%;height:100%;background:${color};border-radius:3px;transition:width .4s;"></div>
       </div>
+      ${b.ownApplied ? (()=>{
+        const own = (b.centerpieceOwn||0).toFixed(0);
+        const tilt = b.leverageTilt||1;
+        const up = tilt >= 1.02, down = tilt <= 0.98;
+        const tcol = up ? 'var(--green)' : down ? 'var(--accent2)' : 'var(--muted)';
+        const arrow = up ? '↑' : down ? '↓' : '·';
+        const tlabel = up ? 'leverage gained lineups' : down ? 'chalk faded down' : 'neutral';
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);">Own <span style="color:var(--text);font-weight:600;">${own}%</span></span>
+          <span style="font-family:'DM Mono',monospace;font-size:9px;color:${tcol};font-weight:600;" title="${tlabel}">Lev ${arrow}${tilt.toFixed(2)}×</span>
+        </div>`;
+      })() : ''}
       ${topPairings ? `<div style="margin-bottom:5px;"><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;">Key pairings </span>${topPairings}</div>` : ''}
       ${valueDrivers||suppressedDrivers ? `<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
         ${valueDrivers?`<span style="font-family:'DM Mono',monospace;font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;">Elevated:</span>${valueDrivers}`:''}
@@ -5606,8 +5774,16 @@ function renderPreviewScenarios(){
   }
 
   // ── Section 3: Sim distribution bar chart ─────────────────────────────────
+  const levOn = window._lastNascarLeverage || 0;
   html += `<div style="margin-top:16px;"><div style="font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:1px;color:var(--text);margin-bottom:8px;">Sim Outcome Distribution</div>`;
-  html += `<div style="font-size:10px;color:var(--muted);margin-bottom:8px;">How often each driver was the top scorer across all simulations. Sims below the 5% threshold are redistributed to the closest named bucket.</div>`;
+  html += `<div style="font-size:10px;color:var(--muted);margin-bottom:8px;">How often each driver was the top scorer. Bar = raw frequency; <span style="color:var(--accent2);">L</span> = lineups allocated.${levOn>0?` Leverage <span style="color:var(--accent2);font-weight:600;">${Math.round(levOn*100)}</span> tilts lineups from chalk scenarios (<span style="color:var(--accent2);">↓</span>) toward under-owned ones (<span style="color:var(--green);">↑</span>).`:' Leverage off — allocation is pure frequency.'}</div>`;
+  html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+    <div style="width:90px;flex-shrink:0;"></div><div style="flex:1;"></div>
+    <div style="font-family:'DM Mono',monospace;font-size:8px;color:var(--muted);width:38px;text-align:right;text-transform:uppercase;">Freq</div>
+    ${levOn>0?`<div style="font-family:'DM Mono',monospace;font-size:8px;color:var(--muted);width:34px;text-align:right;text-transform:uppercase;">Own</div>
+    <div style="font-family:'DM Mono',monospace;font-size:8px;color:var(--muted);width:40px;text-align:right;text-transform:uppercase;">Lev</div>`:''}
+    <div style="font-family:'DM Mono',monospace;font-size:8px;color:var(--accent2);width:26px;text-align:right;text-transform:uppercase;">Out</div>
+  </div>`;
 
   const chartBuckets = [...buckets].sort((a,b)=>b.simCount-a.simCount);
   const maxSimCount = chartBuckets[0]?.simCount||1;
@@ -5615,12 +5791,17 @@ function renderPreviewScenarios(){
     const barW = Math.round((b.simCount/maxSimCount)*100);
     const pct = (b.frequency*100).toFixed(1);
     const label = b.playerName.split(' ').slice(-1)[0];
+    const tilt = b.leverageTilt||1;
+    const tcol = tilt>=1.02?'var(--green)':tilt<=0.98?'var(--accent2)':'var(--muted)';
+    const tarrow = tilt>=1.02?'↑':tilt<=0.98?'↓':'';
     html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">
       <div style="font-size:10px;font-weight:600;color:var(--text);width:90px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${b.playerName}">${label}</div>
       <div style="flex:1;background:var(--surface2);border-radius:3px;height:14px;overflow:hidden;">
         <div style="width:${barW}%;height:100%;background:var(--accent2);border-radius:3px;opacity:.8;"></div>
       </div>
       <div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);width:38px;text-align:right;">${pct}%</div>
+      ${(levOn>0 && b.ownApplied)?`<div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);width:34px;text-align:right;">${(b.centerpieceOwn||0).toFixed(0)}%</div>
+      <div style="font-family:'DM Mono',monospace;font-size:9px;color:${tcol};width:40px;text-align:right;font-weight:600;">${tarrow}${tilt.toFixed(2)}×</div>`:(levOn>0?`<div style="width:34px;"></div><div style="width:40px;"></div>`:'')}
       <div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--accent2);width:26px;text-align:right;font-weight:600;">${b.allocatedLineups}L</div>
     </div>`;
   });
@@ -5768,6 +5949,7 @@ function renderPreviewLineupsList(){
     if(hasProj)stats.push(`<span class="preview-stat"><span class="preview-stat-lbl">Proj</span>${proj.toFixed(2)}</span>`);
     if(hasRtg)stats.push(`<span class="preview-stat"><span class="preview-stat-lbl">Rtg</span>${rtg.toFixed(1)}</span>`);
     if(simTotal!=null)stats.push(`<span class="preview-stat" style="color:var(--green);"><span class="preview-stat-lbl" style="color:var(--green);opacity:.7;">Sim</span>${simTotal.toFixed(1)}</span>`);
+    if(lineup._simCeiling!=null)stats.push(`<span class="preview-stat" style="color:var(--accent2);"><span class="preview-stat-lbl" style="color:var(--accent2);opacity:.7;">Ceil</span>${lineup._simCeiling}</span>`);
     if(ownTotal>0)stats.push(`<span class="preview-stat" style="color:var(--muted);"><span class="preview-stat-lbl" style="color:var(--muted);opacity:.7;">Own</span>${ownTotal.toFixed(1)}%</span>`);
     // Archetype tag
     const arcGroup = lineup._archetypeTag ? (slate2.groups||[]).find(g=>g.id===lineup._archetypeTag) : null;
