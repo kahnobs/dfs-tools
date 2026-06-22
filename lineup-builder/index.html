@@ -4802,7 +4802,14 @@ async function runNascarSimGen(){
   // with no projection isn't treated as max-leverage (mirrors the PGA builder).
   const _ownVals = pool.map(p=>parseFloat(p.own)||0).filter(v=>v>0);
   const fieldAvgOwnF = _ownVals.length ? (_ownVals.reduce((a,b)=>a+b,0)/_ownVals.length)/100 : 0;
-  const lineupChalk = (lu) => lu.reduce((s,p)=>{
+  // Cumulative ownership of a lineup, used as the duplication/fade proxy.
+  // The bucket centerpiece (exemptId) is the thesis of that scenario — we want
+  // leverage to differentiate the SUPPORTING cast around him, not fade him out
+  // of his own bucket for being chalk. So his ownership is excluded from the sum.
+  // Lineups that don't roster the centerpiece get no exemption, which naturally
+  // pulls the centerpiece into his own bucket's lineups.
+  const lineupChalk = (lu, exemptId) => lu.reduce((s,p)=>{
+    if(exemptId && p.id === exemptId) return s;
     const o = parseFloat(p.own)||0;
     return s + (o>0 ? o/100 : fieldAvgOwnF);
   }, 0);
@@ -4893,7 +4900,7 @@ async function runNascarSimGen(){
     const sampledSims = sampleSimIndices(bucket.simIndices || []);
     remaining.forEach(x=>{
       x.ceiling = lineupCeiling(x.lu, sampledSims);
-      x.chalk   = lineupChalk(x.lu);
+      x.chalk   = lineupChalk(x.lu, bucket.id);
     });
     const chalkVals = remaining.map(x=>x.chalk);
     const minChalk = chalkVals.length ? Math.min(...chalkVals) : 0;
