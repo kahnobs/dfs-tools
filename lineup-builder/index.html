@@ -4687,9 +4687,13 @@ async function runNascarSimGen(){
   const rearStarterSet = new Set(slate._rearStarters || []);
   const { driverResults, simTopScorer, simScoreArrays } = runNascarSims(fullField, numSims, totalLaps, trackType, rearStarterSet);
 
-  // Attach sim metadata to players for pool display
+  // Attach sim metadata to players for pool display.
+  // The "Sim" column shows _simP50, so we feed it the COMPOSITE (the ceiling-
+  // weighted score that actually drives bucketing, the floor, and selection) —
+  // matching the PGA path and making the displayed score track exposure. The
+  // true median stays available in the sim-distribution hover tooltip via _simDist.
   driverResults.forEach(r=>{
-    r.player._simP50       = r.p50!=null ? Math.round(r.p50*10)/10 : null;
+    r.player._simP50       = r.composite!=null ? Math.round(r.composite*10)/10 : null;
     r.player._simComposite = r.composite;
     r.player._simDist      = r.dist || null;
   });
