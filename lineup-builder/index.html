@@ -3916,8 +3916,13 @@ const NASCAR_INCIDENT_DIST = {
   road:         [[0.245,0,0],[0.455,1,2],[0.120,6,7],[0.105,8,9],[0.075,9,9]],
   intermediate: [[0.083,0,0],[0.303,1,2],[0.165,3,5],[0.167,6,7],[0.108,8,9],[0.108,10,11],[0.068,12,17]],
   short:        [[0.115,0,0],[0.270,1,2],[0.115,3,5],[0.250,6,7],[0.145,8,9],[0.105,10,10]],
-  superspeedway:[[0.035,0,0],[0.059,1,2],[0.059,3,5],[0.079,6,7],[0.024,8,8],[0.037,9,9],
-                 [0.037,11,11],[0.055,12,12],[0.037,13,13],[0.037,14,14],[0.037,15,15],[0.031,16,24]]
+  // superspeedway probs renormalized to sum to 1.0 (originally summed to 0.527,
+  // which forced ~47% of sims to a fallback of exactly 16 wrecks and inflated
+  // mean attrition to ~12 cars). Renormalizing preserves the intended heavy tail
+  // and brings mean attrition to ~9.7 cars/race. (Tail shape unverified vs real
+  // caution data — a candidate for future calibration.)
+  superspeedway:[[0.0664,0,0],[0.1120,1,2],[0.1120,3,5],[0.1499,6,7],[0.0455,8,8],[0.0702,9,9],
+                 [0.0702,11,11],[0.1044,12,12],[0.0702,13,13],[0.0702,14,14],[0.0702,15,15],[0.0588,16,24]]
 };
 
 // Accident exit timing — what fraction of race is completed before crash
@@ -3956,6 +3961,26 @@ function nascarDrawExitTiming(trackType){
   } else {
     return mid + Math.random() * (hi - mid);
   }
+}
+
+// Multi-car wreck clustering by track type. soloP = fraction of incident events
+// that are single-car (spins, mechanical, individual mistakes); the rest are
+// multi-car "racing incidents" / the big one, whose size is drawn from `sizes`
+// ([prob, lo, hi]). Superspeedways pack up and wreck big; road/short courses see
+// more solo offs but still produce 2–4 car contact (e.g. the SVG/Zilisch/Hill
+// road-course wreck). These shape the JOINT distribution only — total attrition
+// per race is still set by NASCAR_INCIDENT_DIST, so calibration is unchanged.
+const NASCAR_WRECK_CLUSTER = {
+  road:         { soloP:0.45, sizes:[[0.55,2,2],[0.30,3,3],[0.15,4,4]] },
+  short:        { soloP:0.42, sizes:[[0.45,2,2],[0.30,3,3],[0.15,4,4],[0.10,5,5]] },
+  intermediate: { soloP:0.40, sizes:[[0.42,2,2],[0.28,3,3],[0.16,4,5],[0.14,6,6]] },
+  superspeedway:{ soloP:0.15, sizes:[[0.22,2,3],[0.28,4,5],[0.28,6,8],[0.22,9,12]] },
+};
+function nascarDrawClusterSize(trackType){
+  const cfg = (NASCAR_WRECK_CLUSTER[trackType]||NASCAR_WRECK_CLUSTER.intermediate).sizes;
+  let r=Math.random(), cum=0;
+  for(const [prob,lo,hi] of cfg){ cum+=prob; if(r<=cum) return lo+Math.floor(Math.random()*(hi-lo+1)); }
+  return cfg[cfg.length-1][1];
 }
 
 // Draw a finishing position from the driver's calibrated distribution.
@@ -4226,27 +4251,51 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
   // Per-sim top scorer ID — used by bucket engine in runNascarSimGen
   const simTopScorer   = new Array(numSims);
 
+  // Fraction of incident events that are single-car (vs multi-car clusters)
+  const incidentSoloP = (NASCAR_WRECK_CLUSTER[trackType]||NASCAR_WRECK_CLUSTER.intermediate).soloP;
 
   for(let s=0; s<numSims; s++){
 
     // ── 1. Draw incident count from historical track-specific distribution ──
     const numIncidents = nascarDrawIncidentCount(trackType);
 
-    // ── 3. Assign incidents — uniform across field
+    // ── 2-4. Assign incidents as correlated multi-car events ──────────────
+    // numIncidents (above) = total cars collected this race — calibration intact.
+    // Instead of scattering them independently, we group most into multi-car
+    // wrecks: pick a seed car, then collect the cars running NEAREST it into the
+    // same event, sharing one exit time. Running order is proxied by skill rank
+    // plus per-sim noise, so similar-caliber cars (who race near each other) go
+    // down together. When the chalk runs up front, a front-pack wreck takes the
+    // chalk down together — the leverage jackpot — instead of three unrelated DNFs.
     const incidentSet = new Set();
-    const candidates  = pool.map((p,i)=>({i, w:1.0}));
-    for(let n=0; n<Math.min(numIncidents, FIELD-2); n++){
-      const rem = candidates.filter(c=>!incidentSet.has(c.i));
-      const tw  = rem.length;
-      const pick = rem[Math.floor(Math.random()*tw)];
-      if(pick) incidentSet.add(pick.i);
-    }
-
-    // ── 4. Draw exit timing — late-race biased per track type ─────────────
-    const exitTiming = {};
-    incidentSet.forEach(i=>{
-      exitTiming[i] = nascarDrawExitTiming(trackType);
+    const exitTiming  = {};
+    const runOrder = pool.map((p,i)=>{
+      const _v1=Math.max(1e-10,Math.random()), _v2=Math.random();
+      return (p._nSkillRank||(i+1)) + Math.sqrt(-2*Math.log(_v1))*Math.cos(2*Math.PI*_v2)*7;
     });
+    const posInOrder = new Array(FIELD);
+    pool.map((_,i)=>i).sort((a,b)=>runOrder[a]-runOrder[b]).forEach((carI,pos)=>{ posInOrder[carI]=pos; });
+
+    let toPlace = Math.min(numIncidents, FIELD-2);
+    let guard = 0;
+    while(toPlace > 0 && incidentSet.size < FIELD-2 && guard++ < 100){
+      const avail = [];
+      for(let i=0;i<FIELD;i++) if(!incidentSet.has(i)) avail.push(i);
+      if(!avail.length) break;
+      const seed = avail[Math.floor(Math.random()*avail.length)];
+      const isSolo = (toPlace===1) || (Math.random() < incidentSoloP);
+      const size = isSolo ? 1 : Math.min(toPlace, avail.length, nascarDrawClusterSize(trackType));
+      const exit = nascarDrawExitTiming(trackType); // one wreck → one exit time
+      const seedPos = posInOrder[seed];
+      const collected = (size===1)
+        ? [seed]
+        : avail.slice().sort((a,b)=>Math.abs(posInOrder[a]-seedPos)-Math.abs(posInOrder[b]-seedPos)).slice(0,size);
+      collected.forEach(carI=>{
+        incidentSet.add(carI);
+        exitTiming[carI] = (size===1) ? exit : Math.max(0.02, Math.min(0.99, exit + (Math.random()*2-1)*0.01));
+      });
+      toPlace -= collected.length;
+    }
 
     // ── 5. Survivor finish order ──────────────────────────────────────────
     // Every surviving driver gets a position drawn from their odds distribution.
@@ -4771,8 +4820,15 @@ async function runNascarSimGen(){
     _gFloorSal+=(p.salary||0);
     _gFloorScore+=(p._simComposite||0);
   }
-  const GLOBAL_FLOOR = _gFloorScore * 0.78;
-  log(`Global composite floor: ${GLOBAL_FLOOR.toFixed(1)} (78% of est. best ${_gFloorScore.toFixed(1)})`);
+  // Floor relaxes as leverage rises. At leverage 0 we demand lineups within 22%
+  // of the best achievable composite; as the slider climbs we deliberately trade
+  // raw projection for uniqueness, so the low-composite leverage plays the
+  // driver-level boost is generating (cheap, low-owned, good-odds cars) clear the
+  // gate instead of being filtered right back out. Still rejects genuine garbage
+  // at every setting (never drops below 60% of best).
+  const _floorPct = 0.78 - (ownMapped ? leverageStrength : 0) * 0.18; // 0.78 → 0.60
+  const GLOBAL_FLOOR = _gFloorScore * _floorPct;
+  log(`Global composite floor: ${GLOBAL_FLOOR.toFixed(1)} (${(_floorPct*100).toFixed(0)}% of est. best ${_gFloorScore.toFixed(1)})`);
 
   // ── Leverage-aware selection helpers ──────────────────────────────────────
   // ceiling = a ceiling-leaning percentile of the lineup's TOTAL DK score taken
