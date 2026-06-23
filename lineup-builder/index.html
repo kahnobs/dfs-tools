@@ -3983,67 +3983,6 @@ function nascarDrawClusterSize(trackType){
   return cfg[cfg.length-1][1];
 }
 
-// Draw a finishing position from the driver's calibrated distribution.
-// Beyond-top-10: anchor = 50% projected finish + 50% skill rank
-// Std dev ~9 across all grid positions (data-confirmed, uniform not pTop10-based)
-// Track-aware version used by the sim (passes trackType for std dev lookup)
-// Accepts any combination of pWin / pTop3 / pTop5 / pTop10 — all optional except pWin.
-// Uses available CDF anchors; missing tiers fall through to Gaussian finish model.
-function nascarDrawFinishPosTyped(skillRank, projFinish, pWin, pTop3, pTop5, pTop10, fieldSize, trackType){
-  const isSuper = trackType === 'superspeedway';
-
-  if(isSuper){
-    const anchor = projFinish ? projFinish * 0.50 + skillRank * 0.50 : skillRank;
-    const u1=Math.random(), u2=Math.random();
-    const z = Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2);
-    return Math.max(1, Math.min(fieldSize, Math.round(anchor + z*10.5 + Math.random()*0.4)));
-  }
-
-  const u = Math.random();
-  let rawPos;
-
-  if(pWin && u <= pWin){
-    // Driver wins
-    rawPos = 1;
-  } else if(pTop3 && u <= pTop3){
-    // Finish 2nd or 3rd
-    const pBase = pWin || 0;
-    const t = (u - pBase) / (pTop3 - pBase);
-    rawPos = 1 + t * 2; // interpolate from ~1 to ~3
-  } else if(pTop5 && u <= pTop5){
-    // Finish 4th or 5th
-    const pBase = pTop3 || pWin || 0;
-    const t = (u - pBase) / (pTop5 - pBase);
-    rawPos = (pTop3 ? 3 : 1) + t * (5 - (pTop3 ? 3 : 1));
-  } else if(pTop10 && u <= pTop10){
-    // Finish 6th–10th
-    const pBase = pTop5 || pTop3 || pWin || 0;
-    const topBound = pTop5 ? 5 : pTop3 ? 3 : 1;
-    const t = (u - pBase) / (pTop10 - pBase);
-    rawPos = topBound + t * (10 - topBound);
-  } else {
-    // Beyond available odds: Gaussian anchored to skill rank + projected finish.
-    // Std dev scales with skill rank — top drivers have wide variance (can win or crash),
-    // backmarkers have almost no upside variance (they finish near the back every time).
-    // A skill rank 1 driver has full std dev; rank 38 driver has minimal upside std dev.
-    const anchor = projFinish
-      ? projFinish * 0.50 + skillRank * 0.50
-      : skillRank;
-    const baseStdDev = trackType==='short' ? 8.7 : trackType==='intermediate' ? 9.2 : 9.0;
-    // Upside std dev shrinks for back-of-field drivers: rank 1 gets full stdDev,
-    // rank 38 gets only 20% (they can fall back but not move up much).
-    const relRank = (skillRank - 1) / Math.max(fieldSize - 1, 1); // 0 (best) to 1 (worst)
-    const upsideStd = baseStdDev * (1 - relRank * 0.80); // shrinks to 20% for worst driver
-    const downsideStd = baseStdDev; // everyone can fall back equally
-    const u1=Math.random(), u2=Math.random();
-    const z = Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2);
-    // Apply asymmetric std dev: positive z = move up (use upsideStd), negative z = fall back
-    rawPos = anchor + z * (z < 0 ? downsideStd : upsideStd);
-  }
-
-  return Math.max(1, Math.min(fieldSize, Math.round(rawPos + Math.random()*0.4)));
-}
-
 // DK NASCAR finish position points — exact table from DraftKings scoring rules
 const DK_NASCAR_FINISH_PTS = {
   1:45, 2:42, 3:41, 4:40, 5:39, 6:38, 7:37, 8:36, 9:35, 10:34,
@@ -4254,6 +4193,10 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
   // Fraction of incident events that are single-car (vs multi-car clusters)
   const incidentSoloP = (NASCAR_WRECK_CLUSTER[trackType]||NASCAR_WRECK_CLUSTER.intermediate).soloP;
 
+  // id → pool index, precomputed once (avoids an O(field) pool.indexOf inside the
+  // per-driver, per-sim scoring loop — ~30M lookups at 20k sims otherwise).
+  const poolIdxById = new Map(pool.map((p,i)=>[p.id,i]));
+
   for(let s=0; s<numSims; s++){
 
     // ── 1. Draw incident count from historical track-specific distribution ──
@@ -4457,34 +4400,37 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
     const lapLeaderSet = new Set(lapLeaders.map(d => d.p.id));
     survivorDrawnFinal.forEach(d=>{ if(!lapLeaderSet.has(d.p.id)) d.lapsLed=0; });
 
-    // ── 8. Redistribute incident drivers' expected laps to surviving leaders ──
-    // A strong driver who crashes early would have led laps — those laps
-    // transfer to whoever ends up leading. We estimate the incident driver's
-    // expected laps led as: their skill weight share × greenLaps × (1-exit).
-    // To avoid double-counting with the regular laps led pool, we scale
-    // by the fraction of laps BEFORE their crash (exit), not the full race.
-    // Only top-skilled drivers benefit from redistribution — a backmarker
-    // crashing doesn't free up meaningful laps for the leader.
+    // ── 8. Credit crashed leaders with pre-crash laps (conserving) ──────────
+    // Step 7 already allocated all greenLaps among survivors — including the
+    // early laps a crashed dominator actually led before exiting. A strong car
+    // that crashes at, say, 60% distance led a share of those first 60% of laps
+    // (DK awards laps-led points even on a DNF). We credit the crashed driver
+    // those pre-crash laps and RECLAIM exactly that many from the survivor pool,
+    // so the field total stays at greenLaps (no phantom laps) and crashed
+    // dominators aren't under-credited. exit = fraction of race completed before
+    // the crash, so pre-crash share ∝ exit.
     if(survivorDrawnFinal.length > 0){
-      // Use win probability for redistribution weight — same rationale as laps led:
-      // a dominant driver crashing frees up more laps for the next-best odds driver.
-      const allWinW = pool.reduce((s,p)=>s+Math.sqrt(p._nPWin||0.001),0);
+      const allWinW = pool.reduce((s,p)=>s+Math.sqrt(p._nPWin||0.001),0) || 1;
       incidentDrivers.forEach(d=>{
         const incWinW = Math.sqrt(d.p._nPWin||0.001);
-        if(incWinW/allWinW < 0.03) return; // skip true backmarkers
-        const expectedLapsLed = Math.round((incWinW/allWinW) * greenLaps * (1-d.exit));
-        if(expectedLapsLed <= 0) return;
-        const recipients = survivorDrawnFinal.slice(0, Math.min(3, numSurvivors));
-        const recWeights = recipients.map(r=>Math.sqrt(r.p._nPWin||0.001));
-        const totalRecW = recWeights.reduce((s,w)=>s+w,0);
-        if(totalRecW > 0){
-          recipients.forEach((r,ri)=>{
-            r.lapsLed += Math.round((recWeights[ri]/totalRecW)*expectedLapsLed);
-          });
-        }
+        if(incWinW/allWinW < 0.03) return; // true backmarkers led ~nothing
+        const preCrashLaps = Math.round((incWinW/allWinW) * greenLaps * (d.exit||0));
+        if(preCrashLaps <= 0) return;
+        // Reclaim from current survivor leaders, proportional to their share.
+        const donors = survivorDrawnFinal.filter(r=>r.lapsLed>0);
+        const donorTotal = donors.reduce((s,r)=>s+r.lapsLed,0);
+        if(donorTotal <= 0) return;
+        const reclaim = Math.min(preCrashLaps, donorTotal);
+        let reclaimed = 0;
+        donors.forEach(r=>{
+          const take = Math.round(reclaim * (r.lapsLed/donorTotal));
+          const t = Math.min(take, r.lapsLed);
+          r.lapsLed -= t; reclaimed += t;
+        });
+        d.lapsLed = reclaimed; // crashed driver credited exactly what was reclaimed
       });
       survivorDrawnFinal.forEach(d=>{
-        d.lapsLed = Math.min(d.lapsLed, Math.round(greenLaps*0.90));
+        d.lapsLed = Math.min(d.lapsLed, Math.round(greenLaps*0.95));
       });
     }
 
@@ -4507,7 +4453,7 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
     let simBestScore = -Infinity;
     let simBestId    = null;
     allDrawn.forEach(d=>{
-      const idx   = pool.indexOf(d.p);
+      const idx   = poolIdxById.get(d.p.id);
       const score = nascarCalcScore(d.p._nGrid, d.finishPos, d.lapsLed||0, d.fastestLaps||0);
       sumScore[idx]  += score;
       sumLapsLed[idx]+= d.lapsLed||0;
@@ -4526,9 +4472,11 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
     const p75    = sorted[Math.floor(sorted.length*0.75)];
     const p90    = sorted[Math.floor(sorted.length*0.90)];
 
-    const maxOwn    = Math.max(...pool.map(q=>q._nOwn||0)) || 1;
-    const ownPenalty= ((p._nOwn||0) / maxOwn) * 0.02;
-    const composite = (avg*0.40 + p75*0.30 + p90*0.30) * (1 - ownPenalty);
+    // Composite is a pure projection blend now — ownership is handled entirely by
+    // the leverage system (bucket allocation, chalk fade, driver-level boost), so
+    // leverage 0 is genuinely ownership-neutral. (Previously a flat 2% ownership
+    // haircut was baked in here, silently fading chalk even with leverage off.)
+    const composite = avg*0.40 + p75*0.30 + p90*0.30;
 
     const dist = buildSimDist(simScores[i], 'nascar');
     return { player:p, avg, p50, p75, p90, composite, dist };
