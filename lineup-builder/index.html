@@ -4815,6 +4815,35 @@ async function runNascarSimGen(){
   }, 0);
   const MAX_FADE = 0.60; // chalkiest lineup loses at most 60% of its ceiling at leverage 100
 
+  // ── Driver-level leverage multiplier ──────────────────────────────────────
+  // Per-driver tilt for the candidate BUILDER: prefer drivers who are under-owned
+  // relative to their own sim equity, fade drivers who are over-owned. This is the
+  // piece that surfaces cheap, low-owned, good-odds cars (the Heim/Buescher/AJ
+  // profile) that never clear the 5% bar to be a centerpiece and would otherwise
+  // almost never get built in.
+  //
+  // levRatio = (driver's share of total sim equity) / (driver's share of total
+  // ownership). >1 = under-owned vs equity → boost; <1 = over-owned → fade. Because
+  // it's equity-RELATIVE, genuinely weak longshots (cheap, low-owned, low equity)
+  // land ≤1 and are NOT boosted — only cars whose equity outruns their ownership.
+  // Clamped to [0.5, 2.0] then raised to leverage strength so slider 0 = off.
+  const driverLevMult = {};
+  (function(){
+    if(!ownMapped || leverageStrength<=0){ pool.forEach(p=>driverLevMult[p.id]=1); return; }
+    const sumComp = pool.reduce((a,p)=>a+Math.max(0,p._simComposite||0),0) || 1;
+    const sumOwn  = pool.reduce((a,p)=>a+Math.max(0,(parseFloat(p.own)||0)),0) || 1;
+    pool.forEach(p=>{
+      const eqShare  = Math.max(0,p._simComposite||0)/sumComp;
+      const ownVal   = (parseFloat(p.own)||0) || (fieldAvgOwnF*100); // impute field avg if missing
+      const ownShare = ownVal/sumOwn;
+      const ratio    = ownShare>0 ? eqShare/ownShare : 1;
+      const clamped  = Math.max(0.5, Math.min(2.0, ratio));
+      driverLevMult[p.id] = Math.pow(clamped, leverageStrength);
+    });
+    const boosted = pool.filter(p=>driverLevMult[p.id]>1.03)
+      .sort((a,b)=>driverLevMult[b.id]-driverLevMult[a.id]).slice(0,6);
+    if(boosted.length) log(`Driver-level leverage boosts: ${boosted.map(p=>`${p.name.split(' ').slice(-1)[0]} ${driverLevMult[p.id].toFixed(2)}×`).join(', ')}`);
+  })();
 
   for(const bucket of buckets){
     if(window._genCancelled){ log('Cancelled.'); done(); return; }
@@ -4825,8 +4854,17 @@ async function runNascarSimGen(){
     const bucketSeenKeys  = new Set(globalSeenKeys);
     let attempts = 0;
 
-    // Build weight array from bucket-specific composites (not global)
-    const baseWeights = pool.map(p => Math.max(0, bucket.driverComposites[p.id]||0));
+    // Build weight array from bucket-specific composites (not global), tilted by
+    // driver-level leverage. The centerpiece is exempt from any leverage FADE in
+    // his own bucket (floored at 1×) so the boost can't push him out of his own
+    // scenario — consistent with the chalk-fade centerpiece exemption.
+    const baseWeights = pool.map(p => {
+      const comp = Math.max(0, bucket.driverComposites[p.id]||0);
+      const lm = (p.id === bucket.id)
+        ? Math.max(1, driverLevMult[p.id]||1)
+        : (driverLevMult[p.id]||1);
+      return comp * lm;
+    });
 
     while(bucketGenerated.length < WANT_CANDIDATES && attempts < MAX_ATT){
       attempts++;
