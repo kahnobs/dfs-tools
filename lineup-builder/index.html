@@ -1004,7 +1004,7 @@ html { overscroll-behavior-y: contain; }
               </div>
             </div>
             <div style="padding:6px 8px;background:rgba(232,66,26,.07);border:1px solid rgba(232,66,26,.2);border-radius:5px;font-size:9px;color:var(--muted);line-height:1.5;">
-              Requires <span style="color:var(--accent2);font-weight:600;">WIN</span>, <span style="color:var(--accent2);font-weight:600;">TOP5</span>, <span style="color:var(--accent2);font-weight:600;">TOP10</span> odds and <span style="color:var(--accent2);font-weight:600;">Grid</span> mapped. <span style="color:var(--accent2);font-weight:600;">Proj Finish</span> recommended.
+              Requires <span style="color:var(--accent2);font-weight:600;">WIN</span>, <span style="color:var(--accent2);font-weight:600;">TOP5</span>, <span style="color:var(--accent2);font-weight:600;">TOP10</span> odds and <span style="color:var(--accent2);font-weight:600;">Grid</span> mapped.
             </div>
             <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -1348,7 +1348,6 @@ const OPTIONAL_ROLES = [
   {value:'ssOwn',      label:'SS Own'},
   {value:'rrgProj',    label:'RRG Proj'},
   {value:'rrgOwn',     label:'RRG Own'},
-  {value:'projFinish', label:'Projected Finish (NASCAR)'},
 ];
 const ALL_ROLES = [...REQUIRED_ROLES, ...OPTIONAL_ROLES];
 
@@ -1371,7 +1370,6 @@ const AUTO_MAP = {
   top20:  /^(top[\s_]?20([\s_]?odds?)?|t20)$/i,
   top40:  /^(top[\s_]?40([\s_]?odds?)?|t40)$/i,
   cut:        /^(cut|make[\s_]?cut|make[\s_]?the[\s_]?cut)$/i,
-  projFinish: /^(proj[\s_]?finish|projected[\s_]?finish|finish[\s_]?proj|proj[\s_]?pos|projected[\s_]?pos)$/i,
 };
 
 // Columns that should win over normal AUTO_MAP matches when present.
@@ -3110,24 +3108,18 @@ function lineupScore(lineup, players, optimizeBy, groups, blendWeights){
     const wPrj = blendWeights.wProj  !=null ? blendWeights.wProj   : 1;
     const projs2 = players.map(p=>parseFloat(p.proj)||0);
     const rtgs2  = players.map(p=>parseFloat(p.rating)||0);
-    const odds2  = players.map(p=>p._oddsScore||0);
+    const odds2  = players.map(p=>p._vor!=null?p._vor:(p._oddsScore||0));
     const minP=Math.min(...projs2),maxP=Math.max(...projs2);
     const minR=Math.min(...rtgs2), maxR=Math.max(...rtgs2);
     const minO=Math.min(...odds2), maxO=Math.max(...odds2);
     const nP = p => maxP===minP?1:((parseFloat(p.proj)||0)-minP)/(maxP-minP);
     const nR = p => maxR===minR?1:((parseFloat(p.rating)||0)-minR)/(maxR-minR);
-    const nO = p => maxO===minO?0:((p._oddsScore||0)-minO)/(maxO-minO);
-    // Same leverage fade as the build, so ranking/selection optimizes the leverage-adjusted objective.
-    const levStr = blendWeights.leverageStrength || 0;
-    const ownReal2 = players.map(p=>parseFloat(p.own)).filter(v=>!isNaN(v));
-    const avgOw = ownReal2.length ? ownReal2.reduce((s,v)=>s+v,0)/ownReal2.length : 0;
-    const ownOf2 = p => { const v=parseFloat(p.own); return isNaN(v) ? avgOw : v; };
-    const owns2 = players.map(ownOf2);
-    const minOw=Math.min(...owns2), maxOw=Math.max(...owns2);
-    const nOw = p => maxOw===minOw?0:((ownOf2(p)-minOw)/(maxOw-minOw));
+    const nO = p => { const v=(p._vor!=null?p._vor:(p._oddsScore||0)); return maxO===minO?0:(v-minO)/(maxO-minO); };
+    // Equity-relative leverage factor (_levFactor) is precomputed per player by the
+    // builder, so ranking/selection optimizes the same leverage-adjusted objective.
     score = lineup.reduce((s,p)=>{
       const q = nO(p)*wEq + nR(p)*wMod + nP(p)*wPrj;
-      return s + (levStr>0 ? q*(1 - levStr*nOw(p)) : q);
+      return s + q * (p._levFactor!=null ? p._levFactor : 1);
     }, 0);
   } else {
     score = lineup.reduce((s,p)=>s+(parseFloat(p[optimizeBy])||0),0);
@@ -4056,7 +4048,7 @@ const NASCAR_INCIDENT_DIST = {
   // mean attrition to ~12 cars). Renormalizing preserves the intended heavy tail
   // and brings mean attrition to ~9.7 cars/race. (Tail shape unverified vs real
   // caution data — a candidate for future calibration.)
-  superspeedway:[[0.0664,0,0],[0.1120,1,2],[0.1120,3,5],[0.1499,6,7],[0.0455,8,8],[0.0702,9,9],
+  superspeedway:[[0.0664,0,0],[0.1120,1,2],[0.1120,3,5],[0.1499,6,7],[0.0455,8,8],[0.0702,9,10],
                  [0.0702,11,11],[0.1044,12,12],[0.0702,13,13],[0.0702,14,14],[0.0702,15,15],[0.0588,16,24]]
 };
 
@@ -4174,7 +4166,6 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
     // Rear starters physically begin at the back regardless of qualifying position,
     // so they cannot lead early laps. _nGrid (qualifying pos) is kept intact for DK scoring.
     p._nLLGrid = rearStarterSet.has(p.id) ? FIELD : p._nGrid;
-    p._nProj   = p.projFinish ? parseInt(p.projFinish) : null;
     p._nOwn    = parseFloat(p.own) || 0;
   });
 
@@ -4303,18 +4294,7 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
     p._nOddsScore = oddsScore;
   });
   // Primary sort by skill score
-  // For drivers whose odds scores are very close (backmarkers all near zero),
-  // use projected finish position as a tiebreaker — it reflects expected finishing
-  // order based on qualifying speed and team strength, which the market odds
-  // don't differentiate well among tail-end drivers.
-  const skillSorted = [...pool].sort((a,b)=>{
-    const scoreDiff = b._nSkillScore - a._nSkillScore;
-    // If skill scores are very close (within 0.01), use projected finish as tiebreaker
-    if(Math.abs(scoreDiff) < 0.01 && a._nProj && b._nProj){
-      return a._nProj - b._nProj; // lower proj finish = better
-    }
-    return scoreDiff;
-  });
+  const skillSorted = [...pool].sort((a,b)=> b._nSkillScore - a._nSkillScore);
   skillSorted.forEach((p,i)=>{ p._nSkillRank = i+1; });
 
   // ── Accumulators ──────────────────────────────────────────────────────────
@@ -4413,9 +4393,7 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
         // Both upside and downside variance are symmetric — the odds already
         // gave this driver low probability of a top finish; any remaining
         // variance is legitimate race uncertainty.
-        const anchor = d.p._nProj
-          ? d.p._nProj * 0.5 + (skillIdx+1) * 0.5
-          : skillIdx + 1;
+        const anchor = skillIdx + 1;
         const stdDev = trackType==='short' ? 8.7 : trackType==='intermediate' ? 9.2 : 9.0;
         const _u1=Math.max(1e-10,Math.random()), _u2=Math.random();
         const z = Math.sqrt(-2*Math.log(_u1))*Math.cos(2*Math.PI*_u2);
@@ -4430,22 +4408,30 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
     const survivorDrawnFinal = survivorDrawn;
 
     // ── 6. Incident drivers fill back positions ───────────────────────────
-    // Sorted by exit timing: earliest crash → last position
-    // Superspeedway: partial randomness (71% bottom quartile, not 97%)
+    // Sorted by exit timing: earliest crash → last position. Every incident
+    // driver gets a unique slot in [numSurvivors+1 .. FIELD].
     const incidentDrivers = [...incidentSet]
       .map(i=>({p:pool[i], pidx:i, exit:exitTiming[i]}))
       .sort((a,b)=>a.exit - b.exit);
 
     incidentDrivers.forEach((d,j)=>{
-      if(isSuper && Math.random() < 0.29){
-        // Superspeedway: ~29% of crash cars don't go to dead last
-        // (big pileups are chaotic — some damaged cars limp to mid-field)
-        d.finishPos = numSurvivors + 1 + Math.floor(Math.random()*(FIELD-numSurvivors-j));
-      } else {
-        d.finishPos = FIELD - j; // earliest crash = last position
-      }
+      d.finishPos = FIELD - j; // earliest crash = last position
       d.lapsLed=0; d.fastestLaps=0;
     });
+    // Superspeedway: big pileups are chaotic — some damaged cars limp to a
+    // better spot in the back pack. Swap finish positions WITHIN the incident
+    // block so order scrambles while every position stays unique (the old
+    // independent random draw could hand two crashed cars the same finish).
+    if(isSuper && incidentDrivers.length > 1){
+      for(let k=0;k<incidentDrivers.length;k++){
+        if(Math.random() < 0.29){
+          const m = Math.floor(Math.random()*incidentDrivers.length);
+          const tmp = incidentDrivers[k].finishPos;
+          incidentDrivers[k].finishPos = incidentDrivers[m].finishPos;
+          incidentDrivers[m].finishPos = tmp;
+        }
+      }
+    }
 
     // ── 7. Laps led allocation (two-phase) ───────────────────────────────
     // Phase 1 (early): grid position dominates — front-starters lead until
@@ -4684,7 +4670,6 @@ function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target, leverage
   // ── Build per-bucket driver composites ──────────────────────
   function buildBucketComposites(simIndices){
     const composites = {};
-    const maxOwn = Math.max(...pool.map(p => p._nOwn||0)) || 1;
     pool.forEach((p, pi) => {
       if(!simIndices.length){ composites[p.id] = 0; return; }
       const scores = simIndices.map(si => simScoreArrays[pi][si]);
@@ -4693,8 +4678,11 @@ function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target, leverage
       const avg = scores.reduce((s,v)=>s+v,0)/n;
       const p75 = scores[Math.floor(n*0.75)];
       const p90 = scores[Math.floor(n*0.90)];
-      const ownPenalty = ((p._nOwn||0)/maxOwn)*0.02;
-      composites[p.id] = (avg*0.40 + p75*0.30 + p90*0.30) * (1 - ownPenalty);
+      // Pure projection blend — matches the displayed composite (driverResults).
+      // Ownership is handled entirely by the leverage system (bucket allocation,
+      // chalk fade, driver-level boost), so leverage 0 is genuinely ownership-
+      // neutral here too. (Previously a residual 2% chalk haircut leaked in.)
+      composites[p.id] = avg*0.40 + p75*0.30 + p90*0.30;
     });
     return composites;
   }
@@ -4746,8 +4734,8 @@ function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target, leverage
     exact: (weight / totalWeight) * target
   }));
 
-  rawCounts.forEach(b => { b.allocated = Math.max(1, Math.floor(b.exact)); });
-  const remainder = target - rawCounts.reduce((s2,b)=>s2+b.allocated, 0);
+  rawCounts.forEach(b => { b.allocated = Math.floor(b.exact); });
+  let remainder = target - rawCounts.reduce((s2,b)=>s2+b.allocated, 0);
   rawCounts
     .map((b,i)=>({i, frac: b.exact - Math.floor(b.exact)}))
     .sort((a,b)=>b.frac-a.frac)
@@ -5153,7 +5141,7 @@ async function runNascarSimGen(){
   if(Object.keys(nascarMinOverrides).some(id=>nascarMinOverrides[id]>0)){
     const allCandidates = allFinalLineups.map(l=>{ const c=[...l]; c._simAvg=l._simAvg; c._simCeiling=l._simCeiling; c._simLev=l._simLev; c._chalkSum=l._chalkSum; c._bucketId=l._bucketId; c._bucketName=l._bucketName; return c; });
     const scoreFn = l => l.reduce((s,p)=>s+(p._simComposite||0),0);
-    finalLineups = enforceMinExposure(finalLineups, allCandidates, nascarMinOverrides, scoreFn, log);
+    finalLineups = enforceMinExposure(finalLineups, allCandidates, nascarMinOverrides, scoreFn, log, id => globalOutCap[id]);
   }
 
   // ── Step 6: Interleave buckets for preview variety ────────────────────────
@@ -5181,55 +5169,77 @@ async function runNascarSimGen(){
 
 // ── enforceMinExposure ────────────────────────────────────────────────────────
 // Post-selection pass: for each player with a minimum exposure target, check
-// if they've hit it. If not, find the best-scoring candidate lineups containing
-// that player (not already in the final set) and replace the worst-scoring
-// lineups in the final set that don't contain them.
+// if they've hit it. If not, swap in the best-scoring candidate lineups that
+// contain them, replacing the worst lineups that don't.
 // Players are processed in order of "most lineups still needed" so the most
-// constrained players get priority when there's overlap.
-// Returns the (potentially modified) finalLineups array and logs what changed.
-function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, logFn){
+// constrained players get priority when there's overlap. Swaps avoid (a)
+// dropping another player below an already-met min and (b) pushing a player
+// past their max cap (when maxCapFn is supplied), so enforcing one player's
+// floor doesn't silently break someone else's floor or ceiling.
+function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, logFn, maxCapFn){
   const playersWithMin = Object.keys(minOverrides).filter(id => minOverrides[id] > 0);
   if(!playersWithMin.length) return finalLineups;
 
   const result = [...finalLineups]; // work on a copy
+  const N = result.length;
 
-  // Sort by most lineups needed first
-  const needs = playersWithMin.map(id => {
-    const minCount = Math.ceil(minOverrides[id] / 100 * result.length);
-    const curCount = result.filter(l => l.some(p => p.id === id)).length;
-    return { id, minCount, needed: Math.max(0, minCount - curCount) };
-  }).filter(x => x.needed > 0)
+  // Live exposure counts, updated as we swap so sequential players see truth.
+  const counts = {};
+  const bump = (l, delta) => l.forEach(p => { counts[p.id] = (counts[p.id]||0) + delta; });
+  result.forEach(l => bump(l, 1));
+
+  // Min target (in lineup count) per constrained player.
+  const minTarget = {};
+  playersWithMin.forEach(id => { minTarget[id] = Math.ceil(minOverrides[id] / 100 * N); });
+
+  // Removing this lineup would drop a DIFFERENT min-player to/below their target.
+  const removalBreaksMin = (l, exceptId) =>
+    l.some(p => p.id !== exceptId && minTarget[p.id] && (counts[p.id]||0) <= minTarget[p.id]);
+  // Adding this lineup would push some player past their max cap.
+  const addExceedsCap = (l) => maxCapFn
+    ? l.some(p => { const cap = maxCapFn(p.id); return cap != null && (counts[p.id]||0) + 1 > cap; })
+    : false;
+
+  const needs = playersWithMin.map(id => ({
+    id, minCount: minTarget[id], needed: Math.max(0, minTarget[id] - (counts[id]||0))
+  })).filter(x => x.needed > 0)
     .sort((a, b) => b.needed - a.needed);
 
   if(!needs.length) return result;
 
-  needs.forEach(({ id, minCount, needed }) => {
-    const curCount = result.filter(l => l.some(p => p.id === id)).length;
-    const stillNeeded = minCount - curCount;
+  needs.forEach(({ id, minCount }) => {
+    let stillNeeded = minCount - (counts[id]||0);
     if(stillNeeded <= 0) return;
 
-    // Best unused candidate lineups containing this player
+    // Candidate lineups containing this player, not already in the set.
+    // Cap-clean lineups first, then by score.
     const usedKeys = new Set(result.map(l => l.map(p=>p.id).sort().join(',')));
     const withPlayer = candidatePool
       .filter(l => {
         const key = l.map(p=>p.id).sort().join(',');
         return l.some(p => p.id === id) && !usedKeys.has(key);
       })
-      .map(l => ({ l, score: scoreFn(l) }))
-      .sort((a, b) => b.score - a.score);
+      .map(l => ({ l, score: scoreFn(l), cap: addExceedsCap(l) ? 1 : 0 }))
+      .sort((a, b) => (a.cap - b.cap) || (b.score - a.score));
 
     let replaced = 0;
     for(let n = 0; n < stillNeeded && withPlayer.length > 0; n++){
       const replacement = withPlayer.shift();
-      // Find worst-scored lineup in result that doesn't contain this player
+      // Worst lineup lacking this player whose removal won't break another met
+      // min; fall back to plain worst only if every option would break one.
       let worstIdx = -1, worstScore = Infinity;
+      let safeIdx = -1, safeScore = Infinity;
       result.forEach((l, li) => {
-        if(l.some(p => p.id === id)) return; // skip — already has this player
-        const s = scoreFn(l);
-        if(s < worstScore){ worstScore = s; worstIdx = li; }
+        if(l.some(p => p.id === id)) return;
+        const sc = scoreFn(l);
+        if(sc < worstScore){ worstScore = sc; worstIdx = li; }
+        if(!removalBreaksMin(l, id) && sc < safeScore){ safeScore = sc; safeIdx = li; }
       });
-      if(worstIdx >= 0){
-        result[worstIdx] = replacement.l;
+      const pick = safeIdx >= 0 ? safeIdx : worstIdx;
+      if(pick >= 0){
+        bump(result[pick], -1);
+        result[pick] = replacement.l;
+        bump(replacement.l, 1);
         replaced++;
       }
     }
@@ -5306,12 +5316,25 @@ async function runAutoGen(){
   const normProj = p => maxProj===minProj ? 1 : ((parseFloat(p.proj)||0)-minProj)/(maxProj-minProj);
   const normRtg  = p => maxRtg===minRtg   ? 1 : ((parseFloat(p.rating)||0)-minRtg)/(maxRtg-minRtg);
 
-  // Equity-first scoring: each golfer = normalized equity·wEq + model·wMod + proj·wPrj.
+  // Equity-first scoring: each golfer = normalized value·wEq + model·wMod + proj·wPrj.
   // Weights come from the preset and renormalize over whichever signals are present.
   const oddsAvailable = ensureOddsScores(pool, slate);
-  const oddsArr = pool.map(p=>p._oddsScore||0);
+  // Equity leg uses VALUE OVER REPLACEMENT, not raw equity: each golfer's equity NET of
+  // what that salary buys at the field's going rate (λ = total equity ÷ total salary).
+  // This is the salary opportunity cost — at equal equity the cheaper golfer scores
+  // higher, and an expensive player must clear his price in equity to stay positive, so
+  // overpriced mids get dinged while a stud whose equity dwarfs his price (and the
+  // efficient value plays) clear the bar. The leverage factor below still keys off raw
+  // _oddsScore — leverage is vs ownership, value is vs salary, orthogonal axes that both
+  // apply. No odds mapped → _vor falls to 0 and the equity leg is dropped via wEquity.
+  const _sumEqRaw = pool.reduce((a,p)=>a+(p._oddsScore||0),0);
+  const _sumSal   = pool.reduce((a,p)=>a+(p.salary||0),0);
+  const _lambda   = _sumSal>0 ? _sumEqRaw/_sumSal : 0;
+  pool.forEach(p=>{ p._vor = (p._oddsScore||0) - _lambda*(p.salary||0); });
+  blendWeights.lambda = _lambda;
+  const oddsArr = pool.map(p=>p._vor);
   const minOdds=Math.min(...oddsArr), maxOdds=Math.max(...oddsArr);
-  const normOdds = p => maxOdds===minOdds ? 0 : (((p._oddsScore||0)-minOdds)/(maxOdds-minOdds));
+  const normOdds = p => maxOdds===minOdds ? 0 : (((p._vor||0)-minOdds)/(maxOdds-minOdds));
   const hasProjF = !!slate.columnMapping?.proj, hasModelF = !!slate.columnMapping?.rating;
   const rawEq  = oddsAvailable ? mix.equity : 0;
   const rawMod = hasModelF    ? mix.model  : 0;
@@ -5334,22 +5357,41 @@ async function runAutoGen(){
   const ownOf = p => { const v=parseFloat(p.own); return isNaN(v) ? avgOwn : v; };
   const ownArr = pool.map(ownOf);
   const minOwn=Math.min(...ownArr), maxOwn=Math.max(...ownArr);
-  const normOwn = p => maxOwn===minOwn ? 0 : ((ownOf(p)-minOwn)/(maxOwn-minOwn));
-  const MAX_LEV = 0.55;
   const levSliderVal = parseInt(document.getElementById('leverageSlider')?.value);
-  const leverageStrength = (optimizeBy==='blend3' && ownAvailable && !isNaN(levSliderVal))
-    ? (levSliderVal/100) * MAX_LEV : 0;
+  const leverageStrength = (optimizeBy==='blend3' && ownAvailable && oddsAvailable && !isNaN(levSliderVal))
+    ? (levSliderVal/100) : 0;
   blendWeights.leverageStrength = leverageStrength;
+
+  // Equity-RELATIVE leverage (mirrors the UFC engine): boost golfers under-owned
+  // relative to their OWN equity, fade those over-owned. A flat ownership penalty
+  // fades the chalkiest player hardest — but the slate's elite (e.g. a player with
+  // 4x the field's equity at only ~1.5x its ownership) is UNDER-owned relative to
+  // how good he is, so he is a leverage PLAY, not a fade. ratio = equity share ÷
+  // ownership share; >1 boost, <1 fade. Clamped [0.5,2] then raised to slider
+  // strength so 0 = off. Genuinely weak low-owned punts (low equity AND low own)
+  // sit near 1 — neutral, not boosted. _levFactor is read by getBaseScore and
+  // lineupScore so build + selection optimize the same leverage-adjusted objective.
+  const _sumOdds   = pool.reduce((a,p)=>a+(p._oddsScore||0),0) || 1;
+  const _sumOwnRaw = pool.reduce((a,p)=>a+ownOf(p),0) || 1;
+  pool.forEach(p=>{
+    if(leverageStrength<=0){ p._levFactor = 1; return; }
+    const eqShare  = (p._oddsScore||0)/_sumOdds;
+    const ownShare = ownOf(p)/_sumOwnRaw;
+    const ratio    = ownShare>0 ? eqShare/ownShare : 1;
+    p._levFactor = Math.pow(Math.max(0.5, Math.min(2.0, ratio)), leverageStrength);
+  });
   if(optimizeBy==='blend3'){
     log(`Equity model → equity ${Math.round(wEquity*100)} · model ${Math.round(wModel*100)} · proj ${Math.round(wProj*100)}${oddsAvailable?'':' (no odds mapped — equity leg dropped)'}`);
-    if(leverageStrength>0) log(`Leverage ${levSliderVal}/100 → fading chalk (up to −${Math.round(MAX_LEV*100)}% on the highest-owned).`);
-    else if(!ownAvailable) log(`Leverage off — map an Own% column to fade chalk.`);
+    if(leverageStrength>0){
+      const boosted = pool.filter(p=>p._levFactor>1.02).sort((a,b)=>b._levFactor-a._levFactor).slice(0,5);
+      log(`Leverage ${levSliderVal}/100 → equity-relative${boosted.length?' (boosting '+boosted.map(p=>p.name.split(' ').slice(-1)[0]+' '+p._levFactor.toFixed(2)+'×').join(', ')+')':''}.`);
+    } else if(!ownAvailable) log(`Leverage off — map an Own% column to enable.`);
   }
 
   const getBaseScore = p => {
     if(optimizeBy==='blend3'){
       const q = normOdds(p)*wEquity + normRtg(p)*wModel + normProj(p)*wProj;
-      return leverageStrength>0 ? q * (1 - leverageStrength*normOwn(p)) : q;
+      return q * (p._levFactor!=null ? p._levFactor : 1);
     }
     return (parseFloat(p[optimizeBy])||0);
   };
@@ -5533,21 +5575,30 @@ async function runAutoGen(){
       let total = lineup.reduce((s,p)=>s+p.salary,0);
       let guard = 0;
       while(total < minSal && guard++ < 30){
-        let li = 0;
-        for(let i=1;i<lineup.length;i++) if(lineup[i].salary < lineup[li].salary) li = i;
-        const out = lineup[li];
-        const budget = maxSal - (total - out.salary);
-        let best = null, bestScore = getBaseScore(out);
-        for(const p of available){
-          if(p===out || lineup.includes(p)) continue;
-          if(expTracker[p.id] >= playerMaxCount[p.id]) continue;
-          if(p.salary <= out.salary || p.salary > budget) continue; // raise salary, stay ≤ cap
-          const sc = getBaseScore(p);
-          if(sc > bestScore){ bestScore = sc; best = p; }
+        // Try slots cheapest-first; upgrade the first one that has an affordable,
+        // higher-salary, higher-score replacement. Only stop when no slot at all
+        // can be improved — not just when the single cheapest slot is stuck.
+        const order = lineup.map((p,i)=>i).sort((a,b)=>lineup[a].salary-lineup[b].salary);
+        let swapped = false;
+        for(const li of order){
+          const out = lineup[li];
+          const budget = maxSal - (total - out.salary);
+          let best = null, bestScore = getBaseScore(out);
+          for(const p of available){
+            if(p===out || lineup.includes(p)) continue;
+            if(expTracker[p.id] >= playerMaxCount[p.id]) continue;
+            if(p.salary <= out.salary || p.salary > budget) continue; // raise salary, stay ≤ cap
+            const sc = getBaseScore(p);
+            if(sc > bestScore){ bestScore = sc; best = p; }
+          }
+          if(best){
+            total = total - out.salary + best.salary;
+            lineup[li] = best;
+            swapped = true;
+            break; // restart slot scan from cheapest after a successful upgrade
+          }
         }
-        if(!best) break;
-        total = total - out.salary + best.salary;
-        lineup[li] = best;
+        if(!swapped) break;
       }
     }
 
@@ -5715,7 +5766,8 @@ async function runAutoGen(){
     // Min exposure enforcement via shared helper
     const allCandidateLineups = scoredValid.map(x => x.lineup);
     const scoreFnAutoGen = l => lineupScore(l, pool, optimizeBy, groups, blendWeights);
-    const enforcedLineups = enforceMinExposure(finalLineups, allCandidateLineups, minOverrides, scoreFnAutoGen, log);
+    const pgaMaxCap = id => { const pct = overrides[id]!=null ? overrides[id] : maxExpPct; return pct>=100 ? null : Math.max(1, Math.ceil(target * pct / 100)); };
+    const enforcedLineups = enforceMinExposure(finalLineups, allCandidateLineups, minOverrides, scoreFnAutoGen, log, pgaMaxCap);
 
     const final = enforcedLineups;
 
@@ -6589,7 +6641,7 @@ async function refreshFromSheet(){
         ['finish_r1','finish_r2','finish_r3','finish_r4','finish_r5','decision'].forEach(k=>{
           p[k]=getN(k.replace('_r','_R').replace('finish','Finish').replace('decision','Decision'));
         });
-        const ssKeys=['55','60','65','70','75','80','85','90','95','100','105','110','115','120','125'];
+        const ssKeys=['35','40','45','50','55','60','65','70','75','80','85','90','95','100','105','110','115','120','125'];
         ssKeys.forEach(k=>{ p['ss_'+k]=getN(`SS_${k}plus`); });
         const tdKeys=['1','2','3','4','5','6'];
         tdKeys.forEach(k=>{ p['td_'+k]=getN(`TD_${k}plus`); });
@@ -6720,6 +6772,7 @@ function buildMapper(){
   // Columns auto-read by the UFC sim — hidden from optional mapper
   const UFC_SIM_COLS = new Set([
     'finish_r1','finish_r2','finish_r3','finish_r4','finish_r5','decision',
+    'ss_35plus','ss_40plus','ss_45plus','ss_50plus',
     'ss_55plus','ss_60plus','ss_65plus','ss_70plus','ss_75plus','ss_80plus','ss_85plus','ss_90plus',
     'ss_95plus','ss_100plus','ss_105plus','ss_110plus','ss_115plus','ss_120plus','ss_125plus',
     'td_1plus','td_2plus','td_3plus','td_4plus','td_5plus','td_6plus',
@@ -6892,7 +6945,6 @@ function createSlate(){
     if(colMapping.top10!=null) p.top10=(row[colMapping.top10]||'').trim();
     if(colMapping.top20!=null) p.top20=(row[colMapping.top20]||'').trim();
     if(colMapping.top40!=null) p.top40=(row[colMapping.top40]||'').trim();
-    if(colMapping.projFinish!=null) p.projFinish=parseInt(row[colMapping.projFinish])||null;
     if(colMapping.cut!=null)   p.cut=(row[colMapping.cut]||'').trim();
 
     // UFC odds columns — read directly by header name from raw CSV row
@@ -6909,6 +6961,10 @@ function createSlate(){
       p.finish_r5  = getNum('Finish_R5');
       p.decision   = getNum('Decision');
       // Sig strike alternate lines
+      p.ss_35  = getNum('SS_35plus');
+      p.ss_40  = getNum('SS_40plus');
+      p.ss_45  = getNum('SS_45plus');
+      p.ss_50  = getNum('SS_50plus');
       p.ss_55  = getNum('SS_55plus');
       p.ss_60  = getNum('SS_60plus');
       p.ss_65  = getNum('SS_65plus');
@@ -7145,6 +7201,27 @@ function applyPoolUpdate(){
   const cm = updateColMapping;
   let matched=0, unmatched=0, added=0;
 
+  // UFC granular odds re-read by header name (mirrors createSlate / sheet import).
+  // Pool update otherwise only refreshes salary/own/ml/etc, leaving finish/SS/TD/
+  // decision stale and new fighters with none. Only overwrites a field when its
+  // column is actually present in the update CSV, so a salary-only refresh leaves
+  // existing odds intact.
+  const ufcHdrs = updateParsedCSV.headers || [];
+  const applyUfcOdds = (p, row) => {
+    if(slate.sport !== 'ufc') return;
+    const idx = name => ufcHdrs.findIndex(h=>(h||'').trim().toLowerCase()===name.toLowerCase());
+    const has = name => idx(name) >= 0;
+    const getNum = name => { const i=idx(name); if(i<0) return null; const n=parseFloat((row[i]||'').trim()); return (!isNaN(n)&&n!==0)?n:null; };
+    const getStr = name => { const i=idx(name); return i>=0?((row[i]||'').trim()||null):null; };
+    ['1','2','3','4','5'].forEach(r=>{ if(has('Finish_R'+r)) p['finish_r'+r]=getNum('Finish_R'+r); });
+    if(has('Decision')) p.decision=getNum('Decision');
+    ['35','40','45','50','55','60','65','70','75','80','85','90','95','100','105','110','115','120','125']
+      .forEach(k=>{ if(has('SS_'+k+'plus')) p['ss_'+k]=getNum('SS_'+k+'plus'); });
+    ['1','2','3','4','5','6'].forEach(k=>{ if(has('TD_'+k+'plus')) p['td_'+k]=getNum('TD_'+k+'plus'); });
+    if(has('SS O/U')) p.ss_ou=getStr('SS O/U');
+    if(has('TD O/U')) p.td_ou=getStr('TD O/U');
+  };
+
   // Build lookup from new CSV: normalize name → row
   const newDataByName = {};
   updateParsedCSV.rows.forEach(row=>{
@@ -7172,8 +7249,8 @@ function applyPoolUpdate(){
     if(cm.top10!=null) p.top10=(row[cm.top10]||'').trim();
     if(cm.top20!=null) p.top20=(row[cm.top20]||'').trim();
     if(cm.top40!=null) p.top40=(row[cm.top40]||'').trim();
-    if(cm.projFinish!=null) p.projFinish=parseInt(row[cm.projFinish])||null;
     if(cm.cut!=null)   p.cut=(row[cm.cut]||'').trim();
+    applyUfcOdds(p, row);
     delete newDataByName[key]; // mark consumed
   });
 
@@ -7198,8 +7275,8 @@ function applyPoolUpdate(){
     if(cm.top10!=null) p.top10=(row[cm.top10]||'').trim();
     if(cm.top20!=null) p.top20=(row[cm.top20]||'').trim();
     if(cm.top40!=null) p.top40=(row[cm.top40]||'').trim();
-    if(cm.projFinish!=null) p.projFinish=parseInt(row[cm.projFinish])||null;
     if(cm.cut!=null)   p.cut=(row[cm.cut]||'').trim();
+    applyUfcOdds(p, row);
     slate.players.push(p);
     added++;
   });
