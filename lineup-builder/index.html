@@ -3892,6 +3892,15 @@ async function runUFCSimGen(){
   // lineups, not by force; to hard-fade one, remove him from the pool. Respects caps.
   const SIM_TOL = 0.5;   // sharing ≤3 of 6 fighters is free
   const DUP_PEN = 0.6;   // max quality haircut applied to a near-identical lineup
+  // Controlled per-pick noise so exposure tracks the SIZE of an edge instead of
+  // going winner-take-all. Each lineup is drawn under a fresh per-fighter random
+  // multiplier; two fighters with nearly equal composites (a pick'em) trade the
+  // slot back and forth across draws and end up with balanced exposure, while a
+  // big composite gap (stud over punt) almost never flips, so the punt stays
+  // faded. ~18% per-fighter swing — enough to spread close calls, not enough to
+  // rostere genuinely worse fighters. Makes each generate a fresh set, as expected.
+  const EXPO_NOISE = 0.18;
+  const _gauss = () => { const u=Math.max(1e-9,Math.random()), v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); };
   const outputExpCount = {};
   const selectedSets   = [];
   const filled         = [];
@@ -3899,6 +3908,9 @@ async function runUFCSimGen(){
 
   while(filled.length < target && remaining.length > 0){
     let bestIdx=-1, bestVal=-Infinity;
+    // Fresh per-fighter noise multipliers for this lineup slot.
+    const noiseById = {};
+    pool.forEach(p=>{ noiseById[p.id] = Math.exp(EXPO_NOISE * _gauss()); });
 
     for(let ri=0; ri<remaining.length; ri++){
       const x = remaining[ri];
@@ -3922,7 +3934,11 @@ async function runUFCSimGen(){
         if(sim>maxSim) maxSim=sim;
       }
 
-      const quality       = x._sumFC / maxSumFC;
+      // Quality = noised sum of fighter composites (noise spreads close calls,
+      // leaves big gaps intact).
+      let noisedSum = 0;
+      x.lineup.forEach(p=>{ noisedSum += (compositeScoreById[p.id]||0) * (noiseById[p.id]||1); });
+      const quality       = noisedSum / maxSumFC;
       const leverageFactor = lineupLeverage(x);
       // Penalize only high overlap (near-duplicates); no reward for dissimilarity.
       const dupPenalty    = 1 - DUP_PEN * Math.max(0, maxSim - SIM_TOL) / (1 - SIM_TOL);
