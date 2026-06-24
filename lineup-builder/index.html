@@ -1346,7 +1346,7 @@ const AUTO_MAP = {
   id:     /^(id|playerid|player[\s_]?id|name \+ id|dkid|dfs[\s_]?id)$/i,
   proj:   /^(proj|projection|fpts?|fantasy|my[\s_]?proj|avgpointspergame|avg[\s_]?pts|ss[\s_]?proj)$/i,
   own:    /^(own|ownership|own ?%|my[\s_]?own|ss[\s_]?own)$/i,
-  rating: /^(rating|rtg|score|model[\s_]?score|(average[\s_]?)?rating)$/i,
+  rating: /(^|[\s_])(rating|rtg)$|^(score|model[\s_]?score)$/i,
   start:  /^(start|seed|rank|pos|position|start[\s_]?pos|starting[\s_]?position|grid[\s_]?pos|starting[\s_]?pos|grid|tee|tee[\s_]?time|teetime|fight[\s_]?#?|fight[\s_]?num)$/i,
   team:   /^(team|teamabbrev|matchup|game)$/i,
   opp:    /^(opp|opponent)$/i,
@@ -1365,8 +1365,13 @@ const AUTO_MAP = {
 // Columns that should win over normal AUTO_MAP matches when present.
 // Scanned first — if a header matches here it claims the role before the normal pass runs.
 const PRIORITY_MAP = {
-  proj: /^(avg[\s_]?proj|average[\s_]?proj)$/i,
-  own:  /^(avg[\s_]?own|average[\s_]?own)$/i,
+  proj:   /^(avg[\s_]?proj|average[\s_]?proj)$/i,
+  own:    /^(avg[\s_]?own|average[\s_]?own)$/i,
+  // Prefer a combined/averaged rating (e.g. "Averaged Rating", "Avg Rating",
+  // "Combined Rating") over any single component rating. If none exists, the
+  // normal pass falls back to whatever single rating column is in the sheet
+  // (e.g. "Road Course Rating", "Track Rating", "Tire Rating").
+  rating: /^(averaged?|avg|mean|combined|composite|overall|blended|total)[\s_]?.*(rating|rtg)$/i,
 };
 
 // Two-pass auto-mapper: priority columns (Average Proj/Own) are claimed first,
