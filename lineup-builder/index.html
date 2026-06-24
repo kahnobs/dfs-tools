@@ -3806,61 +3806,34 @@ async function runUFCSimGen(){
     return;
   }
 
-  // ── Net width scales with lineup count ────────────────────────────────────
-  // A fighter's sim-optimal frequency (how often they're in the optimal lineup)
-  // is the cleanest signal for how often they're genuinely worth playing. Small
-  // builds should concentrate on the fighters worth at least ~one of your lineups
-  // and leave the rare-upset longshots out; big builds cast a wider net. The
-  // frequency floor loosens as target grows (≈ 1/target), so a 20-max excludes a
-  // fighter who's only optimal in 2-3% of sims while a 150-max keeps almost
-  // everyone. This is "more lineups → wider net," exactly as intended.
-  const totalOptCount = {};
-  ranked.forEach(e=>{ e.lineup.forEach(p=>{ totalOptCount[p.id]=(totalOptCount[p.id]||0)+e.count; }); });
-  const fighterFreq = {};
-  pool.forEach(p=>{ fighterFreq[p.id] = (totalOptCount[p.id]||0)/totalSims; });
-
-  let minFreq = Math.min(0.10, 1/target);
-  const passesFloor = e => e.lineup.every(p => (fighterFreq[p.id]||0) >= minFreq);
-  let candidatePool = ranked.filter(passesFloor);
-  let _relax = 0;
-  while(candidatePool.length < target && minFreq > 0.002 && _relax++ < 25){
-    minFreq *= 0.75;
-    candidatePool = ranked.filter(passesFloor);
-  }
-  if(candidatePool.length === 0) candidatePool = ranked; // ultimate fallback
-  const heldOut = pool.filter(p => (fighterFreq[p.id]||0) > 0 && (fighterFreq[p.id]||0) < minFreq)
-                      .sort((a,b)=>(fighterFreq[b.id]||0)-(fighterFreq[a.id]||0));
-  log(`Net width: ${target} lineups → fighters must be optimal ≥${(minFreq*100).toFixed(1)}% of sims (${candidatePool.length} qualifying lineups).`);
-  if(heldOut.length) log(`Held out ${heldOut.length} low-frequency fighter${heldOut.length>1?'s':''}: ${heldOut.slice(0,6).map(p=>p.name.split(' ').slice(-1)[0]).join(', ')}${heldOut.length>6?'…':''}`);
-
   // ── Leverage (chalk fade) — needs Own% mapped ─────────────────────────────
   // Fades chalky lineups (high cumulative ownership) toward under-owned builds.
-  // Under-owned-but-good fighters are doubly favored: they clear the frequency
-  // floor (often optimal) AND their lineups carry less chalk, so the fade lifts
-  // them — the leverage spots you want, without forcing in rare longshots.
   const ownMapped = pool.some(p => (parseFloat(p.own)||0) > 0);
   const levStrength = ownMapped ? ((parseInt(document.getElementById('ufcLeverageSlider')?.value)||0)/100) : 0;
   const _ownVals = pool.map(p=>parseFloat(p.own)||0).filter(v=>v>0);
   const fieldAvgOwn = _ownVals.length ? _ownVals.reduce((a,b)=>a+b,0)/_ownVals.length : 0;
   const lineupChalk = e => e.lineup.reduce((s,p)=>{ const o=parseFloat(p.own)||0; return s+(o>0?o:fieldAvgOwn); }, 0);
   let minChalk=Infinity, maxChalk=-Infinity;
-  candidatePool.forEach(e=>{ e._chalk=lineupChalk(e); if(e._chalk<minChalk)minChalk=e._chalk; if(e._chalk>maxChalk)maxChalk=e._chalk; });
+  ranked.forEach(e=>{ e._chalk=lineupChalk(e); if(e._chalk<minChalk)minChalk=e._chalk; if(e._chalk>maxChalk)maxChalk=e._chalk; });
   const chalkRange = (maxChalk-minChalk)||1;
   const MAX_FADE = 0.55;
   if(levStrength>0) log(`Leverage ${Math.round(levStrength*100)}/100 → fading chalky lineups toward under-owned builds.`);
   else if(!ownMapped) log('Leverage off (map an Own% column to enable).');
 
-  // Diversity weight scales with target: small sets lean hard on the best plays
-  // (concentrate to win), big sets spread wider to cover more outcomes.
-  const divWeight = Math.max(0.12, Math.min(0.40, 0.12 + target/400));
-
-  // Select final lineups from the qualifying pool: ceiling × leverage-fade + diversity,
-  // respecting per-player exposure caps.
+  // Select final lineups by QUALITY, not by spreading. We rank candidates on
+  // composite × leverage-fade and pick the best ones, applying a penalty only to
+  // NEAR-DUPLICATES (lineups sharing more than half their fighters with one we
+  // already took). We do not reward being different for its own sake — that just
+  // drags in weaker lineups. Fighters fall out of the set when they aren't in the
+  // best lineups, not because they were force-excluded; to hard-fade a specific
+  // fighter, remove them from the pool. Respects per-player exposure caps.
+  const SIM_TOL = 0.5;   // sharing ≤3 of 6 fighters is free
+  const DUP_PEN = 0.6;   // max quality haircut applied to a near-identical lineup
   const outputExpCount = {};
   const selectedSets   = [];
   const filled         = [];
-  const remaining      = [...candidatePool];
-  const topComposite   = candidatePool[0]?.composite || ranked[0]?.composite || 1;
+  const remaining      = [...ranked];
+  const topComposite   = ranked[0]?.composite || 1;
 
   while(filled.length < target && remaining.length > 0){
     let bestIdx=-1, bestVal=-Infinity;
@@ -3877,9 +3850,9 @@ async function runUFCSimGen(){
       });
       if(exceedsCap) continue;
 
-      // Jaccard similarity vs already-selected lineups (check last 8)
+      // Jaccard similarity vs recently-selected lineups (check last 12)
       let maxSim=0;
-      const checkSets = selectedSets.slice(-8);
+      const checkSets = selectedSets.slice(-12);
       for(const sel of checkSets){
         let shared=0;
         ids.forEach(id=>{ if(sel.has(id)) shared++; });
@@ -3890,7 +3863,9 @@ async function runUFCSimGen(){
       const normComposite = x.composite / topComposite;
       const normChalk     = (x._chalk - minChalk) / chalkRange;
       const leverageFade  = 1 - MAX_FADE * levStrength * normChalk;
-      const val = (1-divWeight)*(normComposite*leverageFade) + divWeight*(1-maxSim);
+      // Penalize only high overlap (near-duplicates); no reward for dissimilarity.
+      const dupPenalty    = 1 - DUP_PEN * Math.max(0, maxSim - SIM_TOL) / (1 - SIM_TOL);
+      const val = normComposite * leverageFade * dupPenalty;
       if(val>bestVal){ bestVal=val; bestIdx=ri; }
     }
 
