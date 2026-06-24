@@ -3837,34 +3837,58 @@ async function runUFCSimGen(){
     return;
   }
 
-  // ── Leverage (chalk fade) — needs Own% mapped ─────────────────────────────
-  // Fades chalky lineups (high cumulative ownership) toward under-owned builds.
+  // ── Rank lineups by FIGHTER QUALITY, leverage equity-relative ─────────────
+  // The lineup-total composite (its sim ceiling) treats the cheap value slot as
+  // interchangeable, so the cheapest body wins it regardless of how good that
+  // fighter is — which buries elite-but-expensive fighters under cheap +450 punts
+  // for salary relief. Instead we rank each lineup by the SUM of its fighters'
+  // own sim composites. The sim already scores punts low (it knows they rarely
+  // hit), so a lineup leaning on one ranks lower in proportion — no thresholds,
+  // no forced exclusions, the sim surfaces it. Mid-priced fighters, usually the
+  // keys to a slate, rise; longshot punts fall out of small sets on their own.
+  const sumFC = e => e.lineup.reduce((s,p)=>s+(compositeScoreById[p.id]||0), 0);
+  let maxSumFC = 0;
+  ranked.forEach(e=>{ e._sumFC = sumFC(e); if(e._sumFC>maxSumFC) maxSumFC=e._sumFC; });
+  maxSumFC = maxSumFC || 1;
+
+  // Leverage is equity-relative: a fighter is "leverage" only when under-owned
+  // RELATIVE TO HIS CEILING, not merely cheap/unpopular. ratio = equity share ÷
+  // ownership share; >1 = under-owned vs his sim equity (boost), <1 = over-owned
+  // (fade). A low-equity low-own punt sits near 1 — neutral, not boosted — so
+  // cranking leverage can't bury a stud under a bad scrub the way raw ownership did.
   const ownMapped = pool.some(p => (parseFloat(p.own)||0) > 0);
   const levStrength = ownMapped ? ((parseInt(document.getElementById('ufcLeverageSlider')?.value)||0)/100) : 0;
   const _ownVals = pool.map(p=>parseFloat(p.own)||0).filter(v=>v>0);
   const fieldAvgOwn = _ownVals.length ? _ownVals.reduce((a,b)=>a+b,0)/_ownVals.length : 0;
-  const lineupChalk = e => e.lineup.reduce((s,p)=>{ const o=parseFloat(p.own)||0; return s+(o>0?o:fieldAvgOwn); }, 0);
-  let minChalk=Infinity, maxChalk=-Infinity;
-  ranked.forEach(e=>{ e._chalk=lineupChalk(e); if(e._chalk<minChalk)minChalk=e._chalk; if(e._chalk>maxChalk)maxChalk=e._chalk; });
-  const chalkRange = (maxChalk-minChalk)||1;
-  const MAX_FADE = 0.55;
-  if(levStrength>0) log(`Leverage ${Math.round(levStrength*100)}/100 → fading chalky lineups toward under-owned builds.`);
+  const sumComp = pool.reduce((s,p)=>s+(compositeScoreById[p.id]||0), 0) || 1;
+  const sumOwn  = pool.reduce((s,p)=>s+((parseFloat(p.own)||0)||fieldAvgOwn), 0) || 1;
+  const levRatio = {};
+  pool.forEach(p=>{
+    const eqShare  = (compositeScoreById[p.id]||0) / sumComp;
+    const ownShare = ((parseFloat(p.own)||0)||fieldAvgOwn) / sumOwn;
+    levRatio[p.id] = ownShare>0 ? eqShare/ownShare : 1;
+  });
+  // Per-lineup leverage factor: geometric mean of each fighter's clamped ratio^strength
+  // (centered at 1 when strength=0, so leverage 0 is a no-op).
+  const lineupLeverage = e => {
+    if(levStrength<=0) return 1;
+    let lg=0;
+    e.lineup.forEach(p=>{ const m=Math.max(0.5,Math.min(2.0,Math.pow(levRatio[p.id]||1, levStrength))); lg+=Math.log(m); });
+    return Math.exp(lg / e.lineup.length);
+  };
+  if(levStrength>0) log(`Leverage ${Math.round(levStrength*100)}/100 → tilting toward fighters under-owned relative to their ceiling.`);
   else if(!ownMapped) log('Leverage off (map an Own% column to enable).');
 
-  // Select final lineups by QUALITY, not by spreading. We rank candidates on
-  // composite × leverage-fade and pick the best ones, applying a penalty only to
-  // NEAR-DUPLICATES (lineups sharing more than half their fighters with one we
-  // already took). We do not reward being different for its own sake — that just
-  // drags in weaker lineups. Fighters fall out of the set when they aren't in the
-  // best lineups, not because they were force-excluded; to hard-fade a specific
-  // fighter, remove them from the pool. Respects per-player exposure caps.
+  // Select by quality × equity-leverage, penalizing only NEAR-DUPLICATES (lineups
+  // sharing more than half their fighters with one already taken). No reward for
+  // being different for its own sake. Fighters fall out when they're not in good
+  // lineups, not by force; to hard-fade one, remove him from the pool. Respects caps.
   const SIM_TOL = 0.5;   // sharing ≤3 of 6 fighters is free
   const DUP_PEN = 0.6;   // max quality haircut applied to a near-identical lineup
   const outputExpCount = {};
   const selectedSets   = [];
   const filled         = [];
   const remaining      = [...ranked];
-  const topComposite   = ranked[0]?.composite || 1;
 
   while(filled.length < target && remaining.length > 0){
     let bestIdx=-1, bestVal=-Infinity;
@@ -3891,12 +3915,11 @@ async function runUFCSimGen(){
         if(sim>maxSim) maxSim=sim;
       }
 
-      const normComposite = x.composite / topComposite;
-      const normChalk     = (x._chalk - minChalk) / chalkRange;
-      const leverageFade  = 1 - MAX_FADE * levStrength * normChalk;
+      const quality       = x._sumFC / maxSumFC;
+      const leverageFactor = lineupLeverage(x);
       // Penalize only high overlap (near-duplicates); no reward for dissimilarity.
       const dupPenalty    = 1 - DUP_PEN * Math.max(0, maxSim - SIM_TOL) / (1 - SIM_TOL);
-      const val = normComposite * leverageFade * dupPenalty;
+      const val = quality * leverageFactor * dupPenalty;
       if(val>bestVal){ bestVal=val; bestIdx=ri; }
     }
 
