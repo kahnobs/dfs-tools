@@ -7867,6 +7867,9 @@ function showOddsTooltip(el, p) {
   if (!tip || !body) return;
 
   const has = v => v != null && v !== '';
+  // American-odds display: prepend + to positives; negatives already carry -.
+  // Non-numeric values pass through untouched.
+  const amOdds = v => { const n = parseFloat(v); return isNaN(n) ? v : (n > 0 ? '+' + n : '' + n); };
 
   const rounds = [
     {k:'finish_r1',l:'R1'},{k:'finish_r2',l:'R2'},{k:'finish_r3',l:'R3'},
@@ -7884,7 +7887,7 @@ function showOddsTooltip(el, p) {
     if (rounds.length) {
       h += `<div class="odds-tip-sec">By round</div>`;
       h += `<div class="odds-tip-grid">` + rounds.map(r =>
-        `<div class="odds-tip-cell"><span class="odds-tip-k">${r.l}</span><span class="odds-tip-v">${p[r.k]}</span></div>`
+        `<div class="odds-tip-cell"><span class="odds-tip-k">${r.l}</span><span class="odds-tip-v">${amOdds(p[r.k])}</span></div>`
       ).join('') + `</div>`;
     }
     if (ou.length) {
