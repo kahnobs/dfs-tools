@@ -3766,7 +3766,18 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
       // p90 over-rewards skewed punt distributions (a longshot's only value is its
       // rare finish spike), which would undo the punt fade. p80 carries the weight
       // because it's the *reliable* ceiling, where studs/mids separate from punts.
-      compositeScoreById[p.id] = Math.round((0.65*p80 + 0.15*p90 + 0.20*avg) * 10) / 10;
+      const ceiling = 0.65*p80 + 0.15*p90 + 0.20*avg;
+      // Reliability discount: a fighter's ceiling only counts to the extent he's
+      // likely to reach it (you have to win to post it). p80 sits inside a fighter's
+      // win outcomes regardless of how often he wins, so the ceiling alone doesn't
+      // penalize a coin-flip favorite enough — a -163 grappler can show the same p80
+      // as a -400 fighter while winning far less. Scaling by win prob fixes that:
+      // ~no discount for solid favorites (≥89% → factor 1.0), a real haircut for
+      // modest favorites and live dogs whose upside is more win-gated. Discount-only
+      // (capped at 1) so it never rewards chalk, just taxes unreliability.
+      const wp = (winProb[p.id] != null ? winProb[p.id] : 0.5);
+      const reliability = Math.min(1, 0.60 + 0.45*wp);
+      compositeScoreById[p.id] = Math.round((ceiling * reliability) * 10) / 10;
     } else {
       compositeScoreById[p.id] = medianScoreById[p.id];
     }
