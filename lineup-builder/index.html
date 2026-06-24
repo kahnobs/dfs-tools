@@ -1004,7 +1004,7 @@ html { overscroll-behavior-y: contain; }
               </div>
             </div>
             <div style="padding:6px 8px;background:rgba(232,66,26,.07);border:1px solid rgba(232,66,26,.2);border-radius:5px;font-size:9px;color:var(--muted);line-height:1.5;">
-              Requires <span style="color:var(--accent2);font-weight:600;">WIN</span>, <span style="color:var(--accent2);font-weight:600;">TOP5</span>, <span style="color:var(--accent2);font-weight:600;">TOP10</span> odds and <span style="color:var(--accent2);font-weight:600;">Grid</span> mapped. <span style="color:var(--accent2);font-weight:600;">Proj Finish</span> recommended.
+              Requires <span style="color:var(--accent2);font-weight:600;">WIN</span>, <span style="color:var(--accent2);font-weight:600;">TOP5</span>, <span style="color:var(--accent2);font-weight:600;">TOP10</span> odds and <span style="color:var(--accent2);font-weight:600;">Grid</span> mapped.
             </div>
             <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -1336,7 +1336,6 @@ const OPTIONAL_ROLES = [
   {value:'ssOwn',      label:'SS Own'},
   {value:'rrgProj',    label:'RRG Proj'},
   {value:'rrgOwn',     label:'RRG Own'},
-  {value:'projFinish', label:'Projected Finish (NASCAR)'},
 ];
 const ALL_ROLES = [...REQUIRED_ROLES, ...OPTIONAL_ROLES];
 
@@ -1359,7 +1358,6 @@ const AUTO_MAP = {
   top20:  /^(top[\s_]?20([\s_]?odds?)?|t20)$/i,
   top40:  /^(top[\s_]?40([\s_]?odds?)?|t40)$/i,
   cut:        /^(cut|make[\s_]?cut|make[\s_]?the[\s_]?cut)$/i,
-  projFinish: /^(proj[\s_]?finish|projected[\s_]?finish|finish[\s_]?proj|proj[\s_]?pos|projected[\s_]?pos)$/i,
 };
 
 // Columns that should win over normal AUTO_MAP matches when present.
@@ -4044,7 +4042,6 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
     // Rear starters physically begin at the back regardless of qualifying position,
     // so they cannot lead early laps. _nGrid (qualifying pos) is kept intact for DK scoring.
     p._nLLGrid = rearStarterSet.has(p.id) ? FIELD : p._nGrid;
-    p._nProj   = p.projFinish ? parseInt(p.projFinish) : null;
     p._nOwn    = parseFloat(p.own) || 0;
   });
 
@@ -4172,19 +4169,8 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
     // Store raw odds score for later use
     p._nOddsScore = oddsScore;
   });
-  // Primary sort by skill score
-  // For drivers whose odds scores are very close (backmarkers all near zero),
-  // use projected finish position as a tiebreaker — it reflects expected finishing
-  // order based on qualifying speed and team strength, which the market odds
-  // don't differentiate well among tail-end drivers.
-  const skillSorted = [...pool].sort((a,b)=>{
-    const scoreDiff = b._nSkillScore - a._nSkillScore;
-    // If skill scores are very close (within 0.01), use projected finish as tiebreaker
-    if(Math.abs(scoreDiff) < 0.01 && a._nProj && b._nProj){
-      return a._nProj - b._nProj; // lower proj finish = better
-    }
-    return scoreDiff;
-  });
+  // Primary sort by skill score (odds-weighted equity + rating).
+  const skillSorted = [...pool].sort((a,b)=> b._nSkillScore - a._nSkillScore);
   skillSorted.forEach((p,i)=>{ p._nSkillRank = i+1; });
 
   // ── Accumulators ──────────────────────────────────────────────────────────
@@ -4283,9 +4269,7 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
         // Both upside and downside variance are symmetric — the odds already
         // gave this driver low probability of a top finish; any remaining
         // variance is legitimate race uncertainty.
-        const anchor = d.p._nProj
-          ? d.p._nProj * 0.5 + (skillIdx+1) * 0.5
-          : skillIdx + 1;
+        const anchor = skillIdx + 1;
         const stdDev = trackType==='short' ? 8.7 : trackType==='intermediate' ? 9.2 : 9.0;
         const _u1=Math.max(1e-10,Math.random()), _u2=Math.random();
         const z = Math.sqrt(-2*Math.log(_u1))*Math.cos(2*Math.PI*_u2);
@@ -6716,7 +6700,6 @@ function createSlate(){
     if(colMapping.top10!=null) p.top10=(row[colMapping.top10]||'').trim();
     if(colMapping.top20!=null) p.top20=(row[colMapping.top20]||'').trim();
     if(colMapping.top40!=null) p.top40=(row[colMapping.top40]||'').trim();
-    if(colMapping.projFinish!=null) p.projFinish=parseInt(row[colMapping.projFinish])||null;
     if(colMapping.cut!=null)   p.cut=(row[colMapping.cut]||'').trim();
 
     // UFC odds columns — read directly by header name from raw CSV row
@@ -6996,7 +6979,6 @@ function applyPoolUpdate(){
     if(cm.top10!=null) p.top10=(row[cm.top10]||'').trim();
     if(cm.top20!=null) p.top20=(row[cm.top20]||'').trim();
     if(cm.top40!=null) p.top40=(row[cm.top40]||'').trim();
-    if(cm.projFinish!=null) p.projFinish=parseInt(row[cm.projFinish])||null;
     if(cm.cut!=null)   p.cut=(row[cm.cut]||'').trim();
     delete newDataByName[key]; // mark consumed
   });
@@ -7022,7 +7004,6 @@ function applyPoolUpdate(){
     if(cm.top10!=null) p.top10=(row[cm.top10]||'').trim();
     if(cm.top20!=null) p.top20=(row[cm.top20]||'').trim();
     if(cm.top40!=null) p.top40=(row[cm.top40]||'').trim();
-    if(cm.projFinish!=null) p.projFinish=parseInt(row[cm.projFinish])||null;
     if(cm.cut!=null)   p.cut=(row[cm.cut]||'').trim();
     slate.players.push(p);
     added++;
