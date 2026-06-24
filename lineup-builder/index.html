@@ -1228,7 +1228,7 @@ html { overscroll-behavior-y: contain; }
         </div>
         <div id="mapperSimInputs" style="display:none;margin-top:10px;">
           <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;" onclick="const g=document.getElementById('mapperSimGrid');const arr=document.getElementById('simInputsArrow');g.style.display=g.style.display==='none'?'grid':'none';arr.textContent=g.style.display==='none'?'&#9658;':'&#9660;';">
-            <span style="font-family:'DM Mono',monospace;font-size:10px;font-weight:600;color:var(--blue);text-transform:uppercase;letter-spacing:.05em;">&#9881; Sim inputs detected</span>
+            <span id="mapperSimTitle" style="font-family:'DM Mono',monospace;font-size:10px;font-weight:600;color:var(--blue);text-transform:uppercase;letter-spacing:.05em;">&#9881; Sim inputs detected</span>
             <span id="simInputsArrow" style="font-size:9px;color:var(--muted);">&#9658;</span>
           </div>
           <div id="mapperSimGrid" style="display:none;margin-top:6px;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;max-height:180px;overflow-y:auto;grid-template-columns:1fr 1fr;gap:2px;"></div>
@@ -1385,6 +1385,37 @@ const PRIORITY_MAP = {
   // (e.g. "Road Course Rating", "Track Rating", "Tire Rating").
   rating: /^(averaged?|avg|mean|combined|composite|overall|blended|total)[\s_]?.*(rating|rtg)$/i,
 };
+
+// PGA model blend: instead of uploading one pre-averaged "model score", drop the
+// three rolling-window model scores (L12 / L24 / L36) as separate columns and the
+// tool builds the weighted average automatically. Weights renormalize over whichever
+// windows are present, so a missing window doesn't deflate the score.
+const PGA_MODEL_WEIGHTS = { l12:0.40, l24:0.35, l36:0.25 };
+
+// Locate the L12/L24/L36 columns by header. Matches forms like "L12", "L 12",
+// "L12 Model", "Model L12", "L12 Score", "Last 24" — but NOT words that merely end
+// in 'l' before a number (e.g. "Total12"). Returns indices or null if none found.
+function findPgaModelCols(headers){
+  const find = n => (headers||[]).findIndex(h =>
+    new RegExp(`(^|[^a-z0-9])(l|last)[\\s_-]?0?${n}([^0-9]|$)`, 'i').test((h||'').trim()));
+  const idx = { l12:find(12), l24:find(24), l36:find(36) };
+  return Object.values(idx).some(i => i >= 0) ? idx : null;
+}
+
+// Weighted blend of whatever L12/L24/L36 values a row has. Renormalizes over the
+// present windows. Returns null if the row has none of them.
+function blendPgaModel(row, idx){
+  let wSum = 0, acc = 0;
+  for(const k of ['l12','l24','l36']){
+    const i = idx[k];
+    if(i == null || i < 0) continue;
+    const v = parseFloat(row[i]);
+    if(isNaN(v)) continue;
+    acc  += v * PGA_MODEL_WEIGHTS[k];
+    wSum += PGA_MODEL_WEIGHTS[k];
+  }
+  return wSum ? Math.round((acc / wSum) * 100) / 100 : null;
+}
 
 // Two-pass auto-mapper: priority columns (Average Proj/Own) are claimed first,
 // then normal AUTO_MAP fills in anything not yet assigned.
@@ -6471,6 +6502,7 @@ async function refreshFromSheet(){
     const colMap = slate.columnMapping || {};
     const getNum = (row, key) => { const i=colMap[key]; return i!=null ? parseFloat(row[i])||0 : 0; };
     const getStr = (row, key) => { const i=colMap[key]; return i!=null ? (row[i]||'').trim() : ''; };
+    const pgaModelCols = slate.sport==='pga' ? findPgaModelCols(headers) : null;
 
     // Update player data in place — match by id, refresh numeric/odds fields only
     // Preserves: savedLineups, hiddenIds, groups, manual proj edits (_origProj lock)
@@ -6491,6 +6523,7 @@ async function refreshFromSheet(){
       if(colMap.top20!=null) p.top20 = getStr(row,'top20');
       if(colMap.top40!=null) p.top40 = getStr(row,'top40');
       if(colMap.rating!=null)p.rating= parseFloat(row[colMap.rating])||null;
+      if(pgaModelCols){ const r=blendPgaModel(row,pgaModelCols); if(r!=null) p.rating=r; }
       // UFC odds — re-read by header name
       if(slate.sport==='ufc'){
         const get = name => { const i=headers.findIndex(h=>h.toLowerCase()===name.toLowerCase()); return i>=0?(row[i]||'').trim():null; };
@@ -6636,6 +6669,17 @@ function buildMapper(){
     'ss o/u','td o/u',
   ]);
   const isUFCUpload = document.getElementById('slateSport')?.value === 'ufc';
+  const isPGAUpload = document.getElementById('slateSport')?.value === 'pga';
+
+  // PGA model blend: detect L12/L24/L36 columns. Set rating to the first present
+  // one as a sentinel (so the Rating row shows as detected and downstream features
+  // light up); the actual score is the weighted blend, computed at slate build.
+  const pgaModelCols = isPGAUpload ? findPgaModelCols(parsedCSV.headers) : null;
+  const pgaModelIdxSet = new Set(pgaModelCols ? Object.values(pgaModelCols).filter(i=>i>=0) : []);
+  if(pgaModelCols && colMapping.rating==null){
+    colMapping.rating = [pgaModelCols.l12,pgaModelCols.l24,pgaModelCols.l36].find(i=>i>=0);
+  }
+  const pgaModelRows = [];
 
   // Optional section — skip required-mapped cols and UFC sim cols
   const requiredMappedCols = new Set(REQUIRED_ROLES.map(r=>colMapping[r.value]).filter(v=>v!=null));
@@ -6643,6 +6687,13 @@ function buildMapper(){
   const simColRows = [];
   optEl.innerHTML=parsedCSV.headers.map((h,i)=>{
     if(requiredMappedCols.has(i)) return '';
+    if(isPGAUpload && pgaModelIdxSet.has(i)){
+      const sample=(parsedCSV.rows[0]?.[i]||'').toString().slice(0,20);
+      const win = pgaModelCols.l12===i?'L12':pgaModelCols.l24===i?'L24':'L36';
+      const wt  = Math.round(PGA_MODEL_WEIGHTS[win.toLowerCase()]*100);
+      pgaModelRows.push({h:`${h}  (${win} · ${wt}%)`, sample});
+      return '';
+    }
     if(isUFCUpload && UFC_SIM_COLS.has(h.trim().toLowerCase())){
       const sample=(parsedCSV.rows[0]?.[i]||'').toString().slice(0,20);
       simColRows.push({h, sample});
@@ -6660,14 +6711,19 @@ function buildMapper(){
     </div>`;
   }).join('');
 
-  // Collapsed sim inputs section
+  // Collapsed inputs section — UFC sim columns or PGA model-blend columns
   const simWrap = document.getElementById('mapperSimInputs');
   if(simWrap){
-    if(isUFCUpload && simColRows.length > 0){
+    const panelRows = isPGAUpload ? pgaModelRows : (isUFCUpload ? simColRows : []);
+    const titleEl = document.getElementById('mapperSimTitle');
+    if(titleEl) titleEl.innerHTML = isPGAUpload
+      ? '&#9881; Model blend &rarr; Rating (40% L12 &middot; 35% L24 &middot; 25% L36)'
+      : '&#9881; Sim inputs detected';
+    if(panelRows.length > 0){
       simWrap.style.display='block';
       const simGrid = document.getElementById('mapperSimGrid');
       if(simGrid){
-        simGrid.innerHTML = simColRows.map(function(row){
+        simGrid.innerHTML = panelRows.map(function(row){
           return '<div style="display:flex;align-items:center;gap:8px;padding:2px 0;">'
             + '<span style="font-family:\'DM Mono\',monospace;font-size:10px;color:var(--accent);min-width:120px;">'+row.h+'</span>'
             + '<span style="font-family:\'DM Mono\',monospace;font-size:10px;color:var(--muted);">'+( row.sample||'—')+'</span>'
@@ -6723,8 +6779,19 @@ function buildPreview(){
   const table=document.getElementById('previewTable');
   const mapped=ALL_ROLES.filter(r=>colMapping[r.value]!=null);
   if(!mapped.length){table.innerHTML='';return;}
+  // PGA: the Rating column is a computed L12/L24/L36 blend, not a single cell —
+  // render the weighted average so the preview matches what the slate will use.
+  const isPGAUpload = document.getElementById('slateSport')?.value === 'pga';
+  const pgaModelCols = isPGAUpload ? findPgaModelCols(parsedCSV.headers) : null;
+  const cell=(row,r)=>{
+    if(r.value==='rating' && pgaModelCols){
+      const b=blendPgaModel(row,pgaModelCols);
+      return b!=null ? b : '';
+    }
+    return row[colMapping[r.value]]||'';
+  };
   const thead='<tr>'+mapped.map(r=>`<th>${r.label}</th>`).join('')+'</tr>';
-  const rows=parsedCSV.rows.slice(0,3).map(row=>'<tr>'+mapped.map(r=>`<td>${row[colMapping[r.value]]||''}</td>`).join('')+'</tr>').join('');
+  const rows=parsedCSV.rows.slice(0,3).map(row=>'<tr>'+mapped.map(r=>`<td>${cell(row,r)}</td>`).join('')+'</tr>').join('');
   table.innerHTML='<thead>'+thead+'</thead><tbody>'+rows+'</tbody>';
 }
 
@@ -6732,6 +6799,14 @@ function createSlate(){
   const name=document.getElementById('slateName').value.trim()||'Untitled Slate';
   const sport=document.getElementById('slateSport').value;
   const players=[];
+  // PGA: auto-blend the L12/L24/L36 model-score columns into a single rating.
+  const pgaModelCols = sport==='pga' ? findPgaModelCols(parsedCSV.headers) : null;
+  if(pgaModelCols && colMapping.rating==null){
+    // Point rating at the first present component as a sentinel so every
+    // rating-gated feature (Rtg column, equity model leg, totals, imputation)
+    // turns on — the value itself gets overwritten with the weighted blend below.
+    colMapping.rating = [pgaModelCols.l12,pgaModelCols.l24,pgaModelCols.l36].find(i=>i>=0);
+  }
   parsedCSV.rows.forEach((row,ri)=>{
     const idRaw=colMapping.id!=null?row[colMapping.id]:'';
     const idMatch=idRaw.match(/\((\d+)\)/);
@@ -6742,6 +6817,8 @@ function createSlate(){
     if(colMapping.proj!=null)p.proj=parseFloat(row[colMapping.proj])||0;
     if(colMapping.own!=null) p.own=parseFloat(row[colMapping.own])||0;
     if(colMapping.rating!=null)p.rating=parseFloat(row[colMapping.rating])||null;
+    // PGA model blend overrides the single-column read with the weighted L12/L24/L36 average.
+    if(pgaModelCols){ const r=blendPgaModel(row,pgaModelCols); if(r!=null) p.rating=r; }
     if(colMapping.start!=null){
       const raw=(row[colMapping.start]||'').trim();
       // Store as string to preserve ISO datetime (e.g. 2026-05-07T10:05:00)
