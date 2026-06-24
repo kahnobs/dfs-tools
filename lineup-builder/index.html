@@ -1004,7 +1004,7 @@ html { overscroll-behavior-y: contain; }
               </div>
             </div>
             <div style="padding:6px 8px;background:rgba(232,66,26,.07);border:1px solid rgba(232,66,26,.2);border-radius:5px;font-size:9px;color:var(--muted);line-height:1.5;">
-              Requires <span style="color:var(--accent2);font-weight:600;">WIN</span>, <span style="color:var(--accent2);font-weight:600;">TOP5</span>, <span style="color:var(--accent2);font-weight:600;">TOP10</span> odds and <span style="color:var(--accent2);font-weight:600;">Grid</span> mapped.
+              Requires <span style="color:var(--accent2);font-weight:600;">WIN</span>, <span style="color:var(--accent2);font-weight:600;">TOP5</span>, <span style="color:var(--accent2);font-weight:600;">TOP10</span> odds and <span style="color:var(--accent2);font-weight:600;">Grid</span> mapped. <span style="color:var(--accent2);font-weight:600;">Proj Finish</span> recommended.
             </div>
             <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -1061,6 +1061,18 @@ html { overscroll-behavior-y: contain; }
             <div style="display:flex;justify-content:space-between;margin-top:2px;margin-bottom:8px;">
               <span style="font-size:9px;color:var(--muted);">Faster</span>
               <span style="font-size:9px;color:var(--muted);">More accurate</span>
+            </div>
+            <div style="margin-bottom:8px;padding-top:8px;border-top:1px solid var(--border);">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <span class="setting-label">Leverage <span style="color:var(--muted);font-weight:400;">(fade chalk)</span></span>
+                <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--purple);" id="ufcLeverageLabel">30</span>
+              </div>
+              <input type="range" id="ufcLeverageSlider" min="0" max="100" value="30" style="width:100%;accent-color:var(--purple);" oninput="document.getElementById('ufcLeverageLabel').textContent=this.value;const _s=activeSlate();if(_s){_s._ufcLeverage=parseInt(this.value);save();}">
+              <div style="display:flex;justify-content:space-between;">
+                <span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">0 = pure ceiling (chalk)</span>
+                <span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">100 = max contrarian</span>
+              </div>
+              <div style="font-size:9px;color:var(--muted);text-align:center;margin-top:4px;">Fades chalky lineups toward under-owned builds. Needs an <span style="color:var(--purple);">Own%</span> column mapped.</div>
             </div>
             <div style="padding:6px 8px;background:rgba(168,85,247,.07);border:1px solid rgba(168,85,247,.2);border-radius:5px;font-size:9px;color:var(--muted);line-height:1.5;">
               Requires <span style="color:var(--purple);font-weight:600;">ML</span> mapped. Sim samples fight outcomes from odds, picks optimal lineup per sim, ranks by frequency.
@@ -1336,6 +1348,7 @@ const OPTIONAL_ROLES = [
   {value:'ssOwn',      label:'SS Own'},
   {value:'rrgProj',    label:'RRG Proj'},
   {value:'rrgOwn',     label:'RRG Own'},
+  {value:'projFinish', label:'Projected Finish (NASCAR)'},
 ];
 const ALL_ROLES = [...REQUIRED_ROLES, ...OPTIONAL_ROLES];
 
@@ -1358,6 +1371,7 @@ const AUTO_MAP = {
   top20:  /^(top[\s_]?20([\s_]?odds?)?|t20)$/i,
   top40:  /^(top[\s_]?40([\s_]?odds?)?|t40)$/i,
   cut:        /^(cut|make[\s_]?cut|make[\s_]?the[\s_]?cut)$/i,
+  projFinish: /^(proj[\s_]?finish|projected[\s_]?finish|finish[\s_]?proj|proj[\s_]?pos|projected[\s_]?pos)$/i,
 };
 
 // Columns that should win over normal AUTO_MAP matches when present.
@@ -2860,6 +2874,10 @@ function renderGroupRulesSummary(){
     const ufcSlider = document.getElementById('ufcSimCountSlider');
     const ufcLabel  = document.getElementById('ufcSimCountLabel');
     if(ufcSlider && slate._simCount){ ufcSlider.value = slate._simCount; if(ufcLabel) ufcLabel.textContent = slate._simCount; }
+    // Restore leverage slider + label
+    const ufcLevSl = document.getElementById('ufcLeverageSlider');
+    const ufcLevLb = document.getElementById('ufcLeverageLabel');
+    if(ufcLevSl){ const lv = (slate._ufcLeverage!=null ? slate._ufcLeverage : 30); ufcLevSl.value = lv; if(ufcLevLb) ufcLevLb.textContent = lv; }
   }
 
   if(slate.sport==='pga'){
@@ -3788,12 +3806,61 @@ async function runUFCSimGen(){
     return;
   }
 
-  // Select final lineups: top by frequency + Jaccard diversity to avoid near-duplicates
-  // Also respect per-player exposure caps
+  // ── Net width scales with lineup count ────────────────────────────────────
+  // A fighter's sim-optimal frequency (how often they're in the optimal lineup)
+  // is the cleanest signal for how often they're genuinely worth playing. Small
+  // builds should concentrate on the fighters worth at least ~one of your lineups
+  // and leave the rare-upset longshots out; big builds cast a wider net. The
+  // frequency floor loosens as target grows (≈ 1/target), so a 20-max excludes a
+  // fighter who's only optimal in 2-3% of sims while a 150-max keeps almost
+  // everyone. This is "more lineups → wider net," exactly as intended.
+  const totalOptCount = {};
+  ranked.forEach(e=>{ e.lineup.forEach(p=>{ totalOptCount[p.id]=(totalOptCount[p.id]||0)+e.count; }); });
+  const fighterFreq = {};
+  pool.forEach(p=>{ fighterFreq[p.id] = (totalOptCount[p.id]||0)/totalSims; });
+
+  let minFreq = Math.min(0.10, 1/target);
+  const passesFloor = e => e.lineup.every(p => (fighterFreq[p.id]||0) >= minFreq);
+  let candidatePool = ranked.filter(passesFloor);
+  let _relax = 0;
+  while(candidatePool.length < target && minFreq > 0.002 && _relax++ < 25){
+    minFreq *= 0.75;
+    candidatePool = ranked.filter(passesFloor);
+  }
+  if(candidatePool.length === 0) candidatePool = ranked; // ultimate fallback
+  const heldOut = pool.filter(p => (fighterFreq[p.id]||0) > 0 && (fighterFreq[p.id]||0) < minFreq)
+                      .sort((a,b)=>(fighterFreq[b.id]||0)-(fighterFreq[a.id]||0));
+  log(`Net width: ${target} lineups → fighters must be optimal ≥${(minFreq*100).toFixed(1)}% of sims (${candidatePool.length} qualifying lineups).`);
+  if(heldOut.length) log(`Held out ${heldOut.length} low-frequency fighter${heldOut.length>1?'s':''}: ${heldOut.slice(0,6).map(p=>p.name.split(' ').slice(-1)[0]).join(', ')}${heldOut.length>6?'…':''}`);
+
+  // ── Leverage (chalk fade) — needs Own% mapped ─────────────────────────────
+  // Fades chalky lineups (high cumulative ownership) toward under-owned builds.
+  // Under-owned-but-good fighters are doubly favored: they clear the frequency
+  // floor (often optimal) AND their lineups carry less chalk, so the fade lifts
+  // them — the leverage spots you want, without forcing in rare longshots.
+  const ownMapped = pool.some(p => (parseFloat(p.own)||0) > 0);
+  const levStrength = ownMapped ? ((parseInt(document.getElementById('ufcLeverageSlider')?.value)||0)/100) : 0;
+  const _ownVals = pool.map(p=>parseFloat(p.own)||0).filter(v=>v>0);
+  const fieldAvgOwn = _ownVals.length ? _ownVals.reduce((a,b)=>a+b,0)/_ownVals.length : 0;
+  const lineupChalk = e => e.lineup.reduce((s,p)=>{ const o=parseFloat(p.own)||0; return s+(o>0?o:fieldAvgOwn); }, 0);
+  let minChalk=Infinity, maxChalk=-Infinity;
+  candidatePool.forEach(e=>{ e._chalk=lineupChalk(e); if(e._chalk<minChalk)minChalk=e._chalk; if(e._chalk>maxChalk)maxChalk=e._chalk; });
+  const chalkRange = (maxChalk-minChalk)||1;
+  const MAX_FADE = 0.55;
+  if(levStrength>0) log(`Leverage ${Math.round(levStrength*100)}/100 → fading chalky lineups toward under-owned builds.`);
+  else if(!ownMapped) log('Leverage off (map an Own% column to enable).');
+
+  // Diversity weight scales with target: small sets lean hard on the best plays
+  // (concentrate to win), big sets spread wider to cover more outcomes.
+  const divWeight = Math.max(0.12, Math.min(0.40, 0.12 + target/400));
+
+  // Select final lineups from the qualifying pool: ceiling × leverage-fade + diversity,
+  // respecting per-player exposure caps.
   const outputExpCount = {};
   const selectedSets   = [];
   const filled         = [];
-  const remaining      = [...ranked];
+  const remaining      = [...candidatePool];
+  const topComposite   = candidatePool[0]?.composite || ranked[0]?.composite || 1;
 
   while(filled.length < target && remaining.length > 0){
     let bestIdx=-1, bestVal=-Infinity;
@@ -3820,8 +3887,10 @@ async function runUFCSimGen(){
         if(sim>maxSim) maxSim=sim;
       }
 
-      const normComposite = x.composite / (ranked[0]?.composite||1);
-      const val = 0.7*normComposite + 0.3*(1-maxSim);
+      const normComposite = x.composite / topComposite;
+      const normChalk     = (x._chalk - minChalk) / chalkRange;
+      const leverageFade  = 1 - MAX_FADE * levStrength * normChalk;
+      const val = (1-divWeight)*(normComposite*leverageFade) + divWeight*(1-maxSim);
       if(val>bestVal){ bestVal=val; bestIdx=ri; }
     }
 
@@ -4042,6 +4111,7 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
     // Rear starters physically begin at the back regardless of qualifying position,
     // so they cannot lead early laps. _nGrid (qualifying pos) is kept intact for DK scoring.
     p._nLLGrid = rearStarterSet.has(p.id) ? FIELD : p._nGrid;
+    p._nProj   = p.projFinish ? parseInt(p.projFinish) : null;
     p._nOwn    = parseFloat(p.own) || 0;
   });
 
@@ -4169,8 +4239,19 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
     // Store raw odds score for later use
     p._nOddsScore = oddsScore;
   });
-  // Primary sort by skill score (odds-weighted equity + rating).
-  const skillSorted = [...pool].sort((a,b)=> b._nSkillScore - a._nSkillScore);
+  // Primary sort by skill score
+  // For drivers whose odds scores are very close (backmarkers all near zero),
+  // use projected finish position as a tiebreaker — it reflects expected finishing
+  // order based on qualifying speed and team strength, which the market odds
+  // don't differentiate well among tail-end drivers.
+  const skillSorted = [...pool].sort((a,b)=>{
+    const scoreDiff = b._nSkillScore - a._nSkillScore;
+    // If skill scores are very close (within 0.01), use projected finish as tiebreaker
+    if(Math.abs(scoreDiff) < 0.01 && a._nProj && b._nProj){
+      return a._nProj - b._nProj; // lower proj finish = better
+    }
+    return scoreDiff;
+  });
   skillSorted.forEach((p,i)=>{ p._nSkillRank = i+1; });
 
   // ── Accumulators ──────────────────────────────────────────────────────────
@@ -4269,7 +4350,9 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
         // Both upside and downside variance are symmetric — the odds already
         // gave this driver low probability of a top finish; any remaining
         // variance is legitimate race uncertainty.
-        const anchor = skillIdx + 1;
+        const anchor = d.p._nProj
+          ? d.p._nProj * 0.5 + (skillIdx+1) * 0.5
+          : skillIdx + 1;
         const stdDev = trackType==='short' ? 8.7 : trackType==='intermediate' ? 9.2 : 9.0;
         const _u1=Math.max(1e-10,Math.random()), _u2=Math.random();
         const z = Math.sqrt(-2*Math.log(_u1))*Math.cos(2*Math.PI*_u2);
@@ -6700,6 +6783,7 @@ function createSlate(){
     if(colMapping.top10!=null) p.top10=(row[colMapping.top10]||'').trim();
     if(colMapping.top20!=null) p.top20=(row[colMapping.top20]||'').trim();
     if(colMapping.top40!=null) p.top40=(row[colMapping.top40]||'').trim();
+    if(colMapping.projFinish!=null) p.projFinish=parseInt(row[colMapping.projFinish])||null;
     if(colMapping.cut!=null)   p.cut=(row[colMapping.cut]||'').trim();
 
     // UFC odds columns — read directly by header name from raw CSV row
@@ -6979,6 +7063,7 @@ function applyPoolUpdate(){
     if(cm.top10!=null) p.top10=(row[cm.top10]||'').trim();
     if(cm.top20!=null) p.top20=(row[cm.top20]||'').trim();
     if(cm.top40!=null) p.top40=(row[cm.top40]||'').trim();
+    if(cm.projFinish!=null) p.projFinish=parseInt(row[cm.projFinish])||null;
     if(cm.cut!=null)   p.cut=(row[cm.cut]||'').trim();
     delete newDataByName[key]; // mark consumed
   });
@@ -7004,6 +7089,7 @@ function applyPoolUpdate(){
     if(cm.top10!=null) p.top10=(row[cm.top10]||'').trim();
     if(cm.top20!=null) p.top20=(row[cm.top20]||'').trim();
     if(cm.top40!=null) p.top40=(row[cm.top40]||'').trim();
+    if(cm.projFinish!=null) p.projFinish=parseInt(row[cm.projFinish])||null;
     if(cm.cut!=null)   p.cut=(row[cm.cut]||'').trim();
     slate.players.push(p);
     added++;
