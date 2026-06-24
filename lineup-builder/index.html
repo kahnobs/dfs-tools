@@ -3758,8 +3758,15 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     distById[p.id] = buildSimDist(fighterAllScores[p.id], 'ufc');
     if(arr.length > 0){
       const p80 = arr[Math.min(Math.floor(arr.length*0.80), arr.length-1)];
+      const p90 = arr[Math.min(Math.floor(arr.length*0.90), arr.length-1)];
       const avg = arr.reduce((s,v)=>s+v,0) / arr.length;
-      compositeScoreById[p.id] = Math.round((0.6*p80 + 0.4*avg) * 10) / 10;
+      // Ceiling-weighted: 80% on the ceiling (p80 + a little p90), 20% on the
+      // floor (avg). A pricey fighter has to project a real ceiling to rate — his
+      // win-rate safety barely pads the number. p90 stays light (0.15): heavier
+      // p90 over-rewards skewed punt distributions (a longshot's only value is its
+      // rare finish spike), which would undo the punt fade. p80 carries the weight
+      // because it's the *reliable* ceiling, where studs/mids separate from punts.
+      compositeScoreById[p.id] = Math.round((0.65*p80 + 0.15*p90 + 0.20*avg) * 10) / 10;
     } else {
       compositeScoreById[p.id] = medianScoreById[p.id];
     }
