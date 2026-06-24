@@ -587,6 +587,42 @@ html { overscroll-behavior-y: contain; }
     -webkit-backdrop-filter: none;
   }
   #simDistTooltip.visible { opacity: 1; }
+  #oddsTooltip {
+    position: fixed;
+    z-index: 99999;
+    background: #1a1d24;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    padding: 9px 11px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    box-shadow: 0 6px 28px rgba(0,0,0,0.80), 0 1px 0 rgba(255,255,255,0.04) inset;
+  }
+  #oddsTooltip.visible { opacity: 1; }
+  .odds-tip-sec {
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    margin-bottom: 5px;
+  }
+  .odds-tip-grid {
+    display: grid;
+    grid-template-columns: repeat(3, auto);
+    gap: 4px 14px;
+  }
+  .odds-tip-ou { display: flex; gap: 16px; }
+  .odds-tip-cell {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .odds-tip-k { font-family: 'DM Mono', monospace; font-size: 9px; color: var(--muted); }
+  .odds-tip-v { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--text); font-weight: 600; }
+  .odds-tip-empty { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); font-style: italic; }
   .sim-tooltip-title {
     font-family: 'DM Mono', monospace;
     font-size: 9px;
@@ -2170,11 +2206,20 @@ function renderPool(){
       ? `driver-row${inGroup?' selected':''}`
       : `driver-row${isSelected?' selected':''}${dimmed?' dimmed':''}${isHidden?' is-hidden':''}`;
 
+    // UFC name-hover odds tooltip (desktop only, when extended odds are loaded)
+    const hasOddsTip = slate.sport==='ufc' && !mobile && (
+      p.finish_r1!=null||p.finish_r2!=null||p.finish_r3!=null||p.finish_r4!=null||
+      p.finish_r5!=null||p.decision!=null||p.ss_ou!=null||p.td_ou!=null
+    );
+    const nameAttrs = hasOddsTip
+      ? ` style="flex:1;cursor:help;" onmouseenter="showOddsTooltipById(this,'${p.id}')" onmouseleave="hideOddsTooltip()"`
+      : ` style="flex:1"`;
+
     return `<div class="${rowClass}" style="grid-template-columns:${gt}${isHidden&&!showHidden?';display:none':''}${isGroupEdit?';cursor:pointer':''}" data-pid="${p.id}" onclick="${rowClick}">
       ${isGroupEdit ? `<div class="col-c" style="font-size:13px;color:${inGroup?'var(--purple)':'var(--muted)'};">${inGroup?'☑':'☐'}</div>` : ''}
       <div class="cell-mono col-c" style="padding-right:6px;">${leftColValue(slate,p,i)}</div>
       <div style="display:flex;align-items:center;gap:4px;min-width:0;">
-        <div class="cell-name" style="flex:1">${p.name}</div>
+        <div class="cell-name"${nameAttrs}>${p.name}</div>
         ${!isGroupEdit&&dots?`<div class="grp-dots">${dots}</div>`:''}
       </div>
       ${(_hasUFCSim||false) && !mobile
@@ -7637,6 +7682,9 @@ window.switchTab=function(tab,el){
   <div class="sim-tooltip-percentiles" id="simTooltipPcts"></div>
 </div>
 
+<!-- ── Fighter Odds Tooltip (UFC name hover) ────────────────────────────── -->
+<div id="oddsTooltip"><div id="oddsTooltipBody"></div></div>
+
 <script>
 // ── buildSimDist: bucket raw scores into histogram + key percentiles ────────
 // Uses a fixed domain per sport so distributions are comparable across drivers.
@@ -7798,6 +7846,73 @@ function showSimTooltip(el, dist) {
 function hideSimTooltip() {
   _simTipTimeout = setTimeout(() => {
     const tip = document.getElementById('simDistTooltip');
+    if (tip) tip.classList.remove('visible');
+  }, 80);
+}
+
+// ── Fighter odds tooltip (UFC name hover) ──────────────────────────────────
+let _oddsTipTimeout = null;
+
+function showOddsTooltipById(el, pid) {
+  const sl = activeSlate();
+  if (!sl) return;
+  const p = (sl.players || []).find(x => x.id === pid);
+  if (p) showOddsTooltip(el, p);
+}
+
+function showOddsTooltip(el, p) {
+  clearTimeout(_oddsTipTimeout);
+  const tip = document.getElementById('oddsTooltip');
+  const body = document.getElementById('oddsTooltipBody');
+  if (!tip || !body) return;
+
+  const has = v => v != null && v !== '';
+
+  const rounds = [
+    {k:'finish_r1',l:'R1'},{k:'finish_r2',l:'R2'},{k:'finish_r3',l:'R3'},
+    {k:'finish_r4',l:'R4'},{k:'finish_r5',l:'R5'},{k:'decision',l:'Dec'},
+  ].filter(r => has(p[r.k]));
+
+  const ou = [];
+  if (has(p.ss_ou)) ou.push({l:'SS O/U', v:p.ss_ou});
+  if (has(p.td_ou)) ou.push({l:'TD O/U', v:p.td_ou});
+
+  if (!rounds.length && !ou.length) {
+    body.innerHTML = `<div class="odds-tip-empty">No extended odds loaded</div>`;
+  } else {
+    let h = '';
+    if (rounds.length) {
+      h += `<div class="odds-tip-sec">By round</div>`;
+      h += `<div class="odds-tip-grid">` + rounds.map(r =>
+        `<div class="odds-tip-cell"><span class="odds-tip-k">${r.l}</span><span class="odds-tip-v">${p[r.k]}</span></div>`
+      ).join('') + `</div>`;
+    }
+    if (ou.length) {
+      h += `<div class="odds-tip-sec"${rounds.length ? ' style="margin-top:8px;"' : ''}>Props</div>`;
+      h += `<div class="odds-tip-ou">` + ou.map(o =>
+        `<div class="odds-tip-cell"><span class="odds-tip-k">${o.l}</span><span class="odds-tip-v">${o.v}</span></div>`
+      ).join('') + `</div>`;
+    }
+    body.innerHTML = h;
+  }
+
+  // Position: prefer above the name, flip below if near top of viewport.
+  // Measure first (opacity:0 element still has layout), then reveal.
+  const rect = el.getBoundingClientRect();
+  const tipW = tip.offsetWidth || 180;
+  const tipH = tip.offsetHeight || 100;
+  let left = rect.left + rect.width / 2 - tipW / 2;
+  let top  = rect.top - tipH - 8;
+  left = Math.max(8, Math.min(left, window.innerWidth - tipW - 8));
+  if (top < 8) top = rect.bottom + 8;
+  tip.style.left = left + 'px';
+  tip.style.top  = top + 'px';
+  tip.classList.add('visible');
+}
+
+function hideOddsTooltip() {
+  _oddsTipTimeout = setTimeout(() => {
+    const tip = document.getElementById('oddsTooltip');
     if (tip) tip.classList.remove('visible');
   }, 80);
 }
