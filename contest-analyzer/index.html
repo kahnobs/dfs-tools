@@ -492,7 +492,7 @@ function renderOwnership(){
     field:fieldOwnership[p]||0,
     mine:myOwnership[p]||0,
     diff:(myOwnership[p]||0)-(fieldOwnership[p]||0)
-  })).filter(r=>myPool.has(r.player)||r.field>=1.0).sort((a,b)=>b.diff-a.diff);
+  })).filter(r=>myPool.has(r.player)||r.field>=1.0).sort((a,b)=>b.field-a.field);
 
   const maxAll=Math.max(...rows.map(r=>Math.max(r.field,r.mine)),1);
 
@@ -532,7 +532,7 @@ function renderOwnership(){
         <tbody>${trs}</tbody>
       </table>
     </div>
-    <p class="legend">Showing: players in your pool + anyone ≥1% field owned. Sorted overweight → underweight. Green rows = +5%+ above field · Red = 5%+ below field.</p>`;
+    <p class="legend">Showing: players in your pool + anyone ≥1% field owned. Sorted by field ownership (highest → lowest). Green rows = +5%+ above field · Red = 5%+ below field.</p>`;
 }
 
 /* ── LEVERAGE ── */
