@@ -160,7 +160,7 @@ input[type=text]:focus{border-color:var(--accent);}
 .saved-num{font-family:'Bebas Neue',sans-serif;font-size:12px;color:var(--accent2);}
 .saved-sal{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);}
 .saved-names{font-size:10px;color:var(--text);line-height:1.5;margin-bottom:3px;}
-.saved-stats{display:flex;align-items:center;gap:4px;}
+.saved-stats{display:flex;flex-wrap:wrap;align-items:center;gap:4px;row-gap:3px;}
 .saved-stat{font-family:'DM Mono',monospace;font-size:10px;color:var(--accent);}
 .saved-stat-lbl{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.4px;margin-right:1px;}
 .saved-stat-sep{color:var(--border);}
@@ -2351,6 +2351,19 @@ function clearSavedLineups(){
   if(!confirm(`Clear all ${n} saved lineups? This cannot be undone.`))return;
   slate.savedLineups=[];slate._lineupMeta={};save();renderSaved();renderExposure();renderPool();
 }
+function refreshSavedSortControl(avail,sortBy){
+  const sel=document.getElementById('savedSortMetric');
+  const dirEl=document.getElementById('savedSortDir');
+  if(!sel)return;
+  const LABELS=[['saved','Order saved'],['proj','Proj'],['sim','Sim'],['win','Win%'],['top5','Top5%'],['top10','Top10%'],['top20','Top20%'],['own','Own%'],['sal','Salary']];
+  const activeMetric=sortBy==='saved'?'saved':sortBy.replace(/_desc$|_asc$/,'').replace(/^ml$/,'win');
+  sel.innerHTML=LABELS.filter(([v])=>avail.has(v)).map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
+  sel.value=avail.has(activeMetric)?activeMetric:'saved';
+  if(dirEl){
+    dirEl.textContent=sortBy.endsWith('_asc')?'↑':'↓';
+    dirEl.style.visibility=sel.value==='saved'?'hidden':'visible';
+  }
+}
 function applySavedSort(){
   const metric=document.getElementById('savedSortMetric')?.value||'saved';
   const dir=document.getElementById('savedSortDir')?.textContent==='↓'?'desc':'asc';
@@ -2374,20 +2387,8 @@ function renderSaved(){
   document.getElementById('exportBtn').disabled=lineups.length===0;
   const clearBtn=document.getElementById('clearSavedBtn');
   if(clearBtn) clearBtn.style.display=lineups.length>0?'':'none';
-  const sortBy=slate._savedSort||'saved';
-  const sortMetricEl=document.getElementById('savedSortMetric');
-  const sortDirEl=document.getElementById('savedSortDir');
-  if(sortMetricEl){
-    const rawMetric=sortBy==='saved'?'saved':sortBy.replace(/_desc$|_asc$/,'');
-    const displayMetric=rawMetric==='ml'?'win':rawMetric;
-    sortMetricEl.value=displayMetric;
-    if(sortDirEl){
-      sortDirEl.textContent=sortBy.endsWith('_asc')?'↑':'↓';
-      sortDirEl.style.visibility=displayMetric==='saved'?'hidden':'visible';
-    }
-  }
+  let sortBy=slate._savedSort||'saved';
   const list=document.getElementById('savedList');
-  if(!lineups.length){list.innerHTML='<div class="empty-saved">No lineups saved yet.</div>';return;}
   const hasProj=!!slate.columnMapping?.proj, hasRtg=!!slate.columnMapping?.rating;
   const hasWin=!!slate.columnMapping?.win, hasTop5=!!slate.columnMapping?.top5;
   const hasTop10=!!slate.columnMapping?.top10, hasTop20=!!slate.columnMapping?.top20;
@@ -2396,6 +2397,23 @@ function renderSaved(){
   const isUfc=slate.sport==='ufc';
   const pool=slate.players||[];
   const meta=slate._lineupMeta||{};
+  // A lineup carries a sim score only if its stored meta has a usable simWinAvg.
+  const anySim=lineups.some(l=>{const v=meta[lineupKey(l)]?.simWinAvg;return v!=null&&v!==''&&!isNaN(parseFloat(v));});
+  // Only offer sort metrics that actually render on the cards, so the dropdown can't
+  // advertise a metric (e.g. Sim) that no saved lineup has.
+  const avail=new Set(['saved','sal']);
+  if(hasProj) avail.add('proj');
+  if(anySim) avail.add('sim');
+  if(isUfc?hasMl:hasWin) avail.add('win');
+  if(hasTop5) avail.add('top5');
+  if(hasTop10) avail.add('top10');
+  if(hasTop20) avail.add('top20');
+  if(hasOwn) avail.add('own');
+  // If the active sort points at a now-unavailable metric, fall back to saved order.
+  const activeMetric=sortBy==='saved'?'saved':sortBy.replace(/_desc$|_asc$/,'').replace(/^ml$/,'win');
+  if(!avail.has(activeMetric)){sortBy='saved';slate._savedSort='saved';save();}
+  refreshSavedSortControl(avail,sortBy);
+  if(!lineups.length){list.innerHTML='<div class="empty-saved">No lineups saved yet.</div>';return;}
   // Vig removal for PGA/NASCAR: divide by sum of raw implied probs across full field
   const vigDiv={
     win:   hasWin  ?Math.max(0.01,pool.reduce((s,p)=>s+(nascarMlToProb(p.win)||0),  0)):1,
@@ -2419,7 +2437,8 @@ function renderSaved(){
     const proj=players.reduce((s,p)=>s+(parseFloat(p.proj)||0),0);
     const rtg=players.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
     const lk=lineupKey(lineup);
-    const simScore=parseFloat(meta[lk]?.simWinAvg)||parseFloat(lineup._simWinAvg)||null;
+    const rawSim=meta[lk]?.simWinAvg??lineup._simWinAvg;
+    const simScore=(rawSim!=null&&rawSim!==''&&!isNaN(parseFloat(rawSim)))?parseFloat(rawSim):null;
     const winEq  =hasWin  ?players.reduce((s,p)=>s+(nascarMlToProb(p.win)||0)/vigDiv.win,  0)*100:null;
     const top5Eq =hasTop5 ?players.reduce((s,p)=>s+(nascarMlToProb(p.top5)||0)/vigDiv.top5, 0)*100:null;
     const top10Eq=hasTop10?players.reduce((s,p)=>s+(nascarMlToProb(p.top10)||0)/vigDiv.top10,0)*100:null;
@@ -2450,7 +2469,7 @@ function renderSaved(){
     const stats=[];
     if(hasProj)        stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Proj</span>${proj.toFixed(2)}</span>`);
     if(hasRtg)         stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Rtg</span>${rtg.toFixed(1)}</span>`);
-    if(simScore!=null) stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Sim</span>${simScore}</span>`);
+    if(simScore!=null) stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Sim</span>${simScore.toFixed(1)}</span>`);
     if(mlEq!=null)     stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Win%</span>${mlEq.toFixed(1)}%</span>`);
     if(winEq!=null)    stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Win%</span>${winEq.toFixed(1)}%</span>`);
     if(top5Eq!=null)   stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top5%</span>${top5Eq.toFixed(1)}%</span>`);
