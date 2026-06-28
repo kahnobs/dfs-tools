@@ -1775,8 +1775,10 @@ function slateFieldsBase(slate){
   if(cm.top20)  f.push({key:'top20', label:'Top20', cls:'col-r'});
   if(cm.top40)  f.push({key:'top40', label:'Top40', cls:'col-r'});
   // Show sim-derived p50 projection for NASCAR slates after sims have been run
-  if(slate.sport==='nascar' && (slate.players||[]).some(p=>p._simP50!=null))
+  if(slate.sport==='nascar' && (slate.players||[]).some(p=>p._simP50!=null)){
     f.push({key:'_simP50', label:'Sim', cls:'col-r'});
+    f.push({key:'simValue', label:'SVal', cls:'col-r', computed:true});
+  }
   // UFC sim score shown left of salary column — not in right fields
   if(cm.cut)    f.push({key:'cut',   label:'Cut',   cls:'col-r'});
   f.push({key:'minExp', label:'Min%', cls:'col-c', inline:true});
@@ -1798,7 +1800,7 @@ function isMobileView(){ return window.innerWidth <= 768; }
 
 // Returns the two stat fields to show on mobile
 function getMobileStatFields(fields){
-  const eligible=fields.filter(f=>f.key!=='minExp'&&f.key!=='maxExp'&&f.key!=='value');
+  const eligible=fields.filter(f=>f.key!=='minExp'&&f.key!=='maxExp'&&f.key!=='value'&&f.key!=='simValue');
   const preferred=['proj','own','rating'];
   const primary=eligible.find(f=>f.key===sortKey)||eligible.find(f=>preferred.includes(f.key))||eligible[0];
   const secondary=primary?(eligible.find(f=>f.key!==primary.key&&preferred.includes(f.key))||eligible.find(f=>f.key!==primary.key)):null;
@@ -1823,6 +1825,7 @@ function gridTemplate(fields){
   fields.forEach(f=>{
     if(f.key==='proj')  cols.push('56px');
     else if(f.key==='value') cols.push('38px');
+    else if(f.key==='simValue') cols.push('38px');
     else if(f.key==='ml'||f.key==='itd'||f.key==='win'||f.key==='top3'||f.key==='top5'||f.key==='top10'||f.key==='top20'||f.key==='top40'||f.key==='cut') cols.push('48px');
     else if(f.key==='minExp'||f.key==='maxExp') cols.push('50px');
     else cols.push(f.key==='team'?'56px':'44px');
@@ -2042,6 +2045,11 @@ function getSortedPlayers(){
         const vb=(parseFloat(b.proj)||0)/((b.salary||1)/1000);
         return dir*(vb-va);
       }
+      if(sortKey==='simValue'){
+        const va=a._simP50!=null?(parseFloat(a._simP50)||0)/((a.salary||1)/1000):-Infinity;
+        const vb=b._simP50!=null?(parseFloat(b._simP50)||0)/((b.salary||1)/1000):-Infinity;
+        return dir*(vb-va);
+      }
       return dir*((parseFloat(b[sortKey])||0)-(parseFloat(a[sortKey])||0));
     });
 }
@@ -2106,7 +2114,7 @@ function renderPool(){
       ? (mStat1?`<span class="${mStat1.cls} pool-col-hdr" onclick="setSort('${mStat1.key}')" style="font-size:9px;">${mStat1.label}</span>`:'')
         +(mStat2?`<span class="${mStat2.cls} pool-col-hdr" onclick="setSort('${mStat2.key}')" style="font-size:9px;">${mStat2.label}</span>`:'')
       : fields.map(f=>{
-          const isDraggable = f.key!=='value' && !isGroupEdit;
+          const isDraggable = f.key!=='value' && f.key!=='simValue' && !isGroupEdit;
           const headerLabel = f.key==='proj'
             ? `<span style="display:block;padding-right:5px;">${f.label}</span>`
             : f.label;
@@ -2158,6 +2166,14 @@ function renderPool(){
           const val=proj>0?(proj/(sal/1000)).toFixed(2):'—';
           const valColor=proj>0?(proj/(sal/1000)>=5?'var(--green)':proj/(sal/1000)>=3.5?'var(--accent)':'var(--muted)'):'var(--muted)';
           return `<div class="cell-mono col-r" style="color:${valColor};">${val}</div>`;
+        }
+        if(f.key==='simValue'){
+          const sp=p._simP50!=null?(parseFloat(p._simP50)||0):0;
+          const sal=p.salary||1;
+          if(p._simP50==null||sp<=0) return `<div class="cell-mono col-r" style="color:var(--muted);">—</div>`;
+          const sv=sp/(sal/1000);
+          const svColor=sv>=5?'var(--green)':sv>=3.5?'var(--accent)':'var(--muted)';
+          return `<div class="cell-mono col-r" style="color:${svColor};">${sv.toFixed(2)}</div>`;
         }
        if(f.key==='minExp'||f.key==='maxExp'){
          const isMin = f.key==='minExp';
