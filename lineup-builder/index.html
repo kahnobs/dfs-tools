@@ -5637,8 +5637,28 @@ async function runAutoGen(){
         continue;
       }
 
-      const topN = Math.max(5, Math.ceil(cands.length * (0.4 + randomness * 0.4)));
-      const pick = cands[Math.floor(Math.random() * Math.min(topN, cands.length))].p;
+      // Softmax selection — replaces the old hard topN-cutoff/uniform-random pick.
+      // That approach gave every candidate inside the window equal odds and everyone
+      // outside it zero odds, so a marginal score edge (two "very similar" plays)
+      // produced the same all-or-nothing outcome as a huge one — the cliff, not the
+      // score gap, decided the winner. Softmax ties pick probability continuously to
+      // the score gap: near-tied plays get near-tied odds, a real edge still wins more
+      // often, but nothing is bulldozed by a fractional advantage. Temperature scales
+      // with both the score magnitude (so it's scale-invariant across optimizeBy
+      // metrics) and the randomness slider (low randomness = sharper preference for
+      // the best score, high randomness = flatter/more exploratory).
+      const windowN = Math.max(15, Math.ceil(cands.length * 0.6));
+      const window = cands.slice(0, Math.min(windowN, cands.length));
+      const maxScore = window[0].score;
+      const temp = Math.max(0.03, Math.abs(maxScore) * (0.06 + randomness * 0.35)) || 0.03;
+      const weights = window.map(c => Math.exp((c.score - maxScore) / temp));
+      const wSum = weights.reduce((a,b)=>a+b, 0);
+      let r = Math.random() * wSum;
+      let pick = window[window.length - 1].p;
+      for(let i = 0; i < window.length; i++){
+        r -= weights[i];
+        if(r <= 0){ pick = window[i].p; break; }
+      }
       lineup.push(pick);
       salUsed += pick.salary;
     }
