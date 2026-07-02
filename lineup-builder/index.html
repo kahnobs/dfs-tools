@@ -1509,7 +1509,14 @@ function loadHistory(){ try { const r=localStorage.getItem(HISTORY_KEY); if(r) l
 
 function addToHistory(slateId, label, lineups){
   if(!lineupHistory[slateId]) lineupHistory[slateId]=[];
-  const counter = (lineupHistory[slateId]._counter||0) + 1;
+  // Derive the counter from existing labels rather than a non-index array
+  // property (_counter), which JSON.stringify silently drops — numbering used
+  // to reset to "Set 1" after every page reload.
+  const maxExisting = lineupHistory[slateId].reduce((m,s)=>{
+    const n = parseInt((s.label||'').match(/^Set (\d+)/)?.[1] || 0);
+    return Math.max(m, n);
+  }, 0);
+  const counter = Math.max(maxExisting, lineupHistory[slateId]._counter||0) + 1;
   const fullLabel = `Set ${counter} — ${label}`;
   const entry = {id:uid(), label:fullLabel, ts:Date.now(), lineups: lineups.map(l=>{
     const ids = l.map(p=>p.id);
@@ -1610,7 +1617,7 @@ function previewHistorySet(id){
 // ═══════════════════════════════════════════════════════════
 function save() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(slates)); } catch(e){} }
 function imputeMissingRatings(slate){
-  if(!slate.columnMapping?.rating) return;
+  if(slate.columnMapping?.rating == null) return;
   const BAND = 500;
   (slate.players||[]).forEach(p=>{
     if(p.rating!=null) return;
@@ -1761,26 +1768,26 @@ function expColor(p){return p<.25?'var(--green)':p<.5?'var(--accent)':'var(--acc
 function slateFieldsBase(slate){
   const cm=slate.columnMapping||{};
   const f=[];
-  if(cm.proj)   f.push({key:'proj',  label:'Proj', cls:'col-r'});
-  if(cm.proj)   f.push({key:'value', label:'Val',  cls:'col-r', computed:true});
-  if(cm.own)    f.push({key:'own',   label:'Own%', cls:'col-r'});
-  if(cm.rating) f.push({key:'rating',label:'Rtg',  cls:'col-r'});
-  if(cm.team)   f.push({key:'team',  label:'Team', cls:''});
-  if(cm.ml)     f.push({key:'ml',    label:'ML',    cls:'col-r'});
-  if(cm.itd)    f.push({key:'itd',   label:'ITD',   cls:'col-r'});
-  if(cm.win)    f.push({key:'win',   label:'Win',   cls:'col-r'});
-  if(cm.top3)   f.push({key:'top3',  label:'Top3',  cls:'col-r'});
-  if(cm.top5)   f.push({key:'top5',  label:'Top5',  cls:'col-r'});
-  if(cm.top10)  f.push({key:'top10', label:'Top10', cls:'col-r'});
-  if(cm.top20)  f.push({key:'top20', label:'Top20', cls:'col-r'});
-  if(cm.top40)  f.push({key:'top40', label:'Top40', cls:'col-r'});
+  if(cm.proj!=null)   f.push({key:'proj',  label:'Proj', cls:'col-r'});
+  if(cm.proj!=null)   f.push({key:'value', label:'Val',  cls:'col-r', computed:true});
+  if(cm.own!=null)    f.push({key:'own',   label:'Own%', cls:'col-r'});
+  if(cm.rating!=null) f.push({key:'rating',label:'Rtg',  cls:'col-r'});
+  if(cm.team!=null)   f.push({key:'team',  label:'Team', cls:''});
+  if(cm.ml!=null)     f.push({key:'ml',    label:'ML',    cls:'col-r'});
+  if(cm.itd!=null)    f.push({key:'itd',   label:'ITD',   cls:'col-r'});
+  if(cm.win!=null)    f.push({key:'win',   label:'Win',   cls:'col-r'});
+  if(cm.top3!=null)   f.push({key:'top3',  label:'Top3',  cls:'col-r'});
+  if(cm.top5!=null)   f.push({key:'top5',  label:'Top5',  cls:'col-r'});
+  if(cm.top10!=null)  f.push({key:'top10', label:'Top10', cls:'col-r'});
+  if(cm.top20!=null)  f.push({key:'top20', label:'Top20', cls:'col-r'});
+  if(cm.top40!=null)  f.push({key:'top40', label:'Top40', cls:'col-r'});
   // Show sim-derived p50 projection for NASCAR slates after sims have been run
   if(slate.sport==='nascar' && (slate.players||[]).some(p=>p._simP50!=null)){
     f.push({key:'_simP50', label:'Sim', cls:'col-r'});
     f.push({key:'simValue', label:'SVal', cls:'col-r', computed:true});
   }
   // UFC sim score shown left of salary column — not in right fields
-  if(cm.cut)    f.push({key:'cut',   label:'Cut',   cls:'col-r'});
+  if(cm.cut!=null)    f.push({key:'cut',   label:'Cut',   cls:'col-r'});
   f.push({key:'minExp', label:'Min%', cls:'col-c', inline:true});
   f.push({key:'maxExp', label:'Max%', cls:'col-c', inline:true});
   return f;
@@ -2030,8 +2037,28 @@ function getSortedPlayers(){
       const dir=(typeof sortDir!=="undefined"?sortDir:1);
       if(sortKey==='exp')return dir*((ec[b.id]||0)-(ec[a.id]||0));
       if(sortKey==='start'){
-        const aVal = a.fightNum || parseFloat(a.start) || 999;
-        const bVal = b.fightNum || parseFloat(b.start) || 999;
+        // PGA tee times need real time parsing — parseFloat on an ISO datetime
+        // ("2026-07-02 12:45:00") returns the year for every row, so the tee
+        // sort silently degraded to salary-only. Minutes-since-midnight works
+        // for ISO, "H:MM AM/PM", and plain HH:MM formats.
+        const teeMinutes = v => {
+          if(v==null) return null;
+          const str = String(v).trim();
+          const m = str.match(/(?:[T ]|^)(\d{1,2}):(\d{2})/);
+          if(!m) return null;
+          let h = parseInt(m[1]);
+          const up = str.toUpperCase();
+          if(up.includes('PM') && h < 12) h += 12;
+          if(up.includes('AM') && h === 12) h = 0;
+          return h*60 + parseInt(m[2]);
+        };
+        const slate2 = activeSlate();
+        const aVal = slate2?.sport==='pga'
+          ? (teeMinutes(a.start) ?? 9999)
+          : (a.fightNum || parseFloat(a.start) || 999);
+        const bVal = slate2?.sport==='pga'
+          ? (teeMinutes(b.start) ?? 9999)
+          : (b.fightNum || parseFloat(b.start) || 999);
         if(aVal !== bVal) return dir*(aVal - bVal);
         return (b.salary||0) - (a.salary||0);
       }
@@ -2137,7 +2164,7 @@ function renderPool(){
     const dots=grps.map(g=>`<div class="grp-dot" style="background:${g.color}" title="${g.name}"></div>`).join('');
     const extraCells=fields.map(f=>{
       let v=p[f.key];if(v==null||v==='')v='—';
-       if(f.key==='proj' && slate.columnMapping?.proj){
+       if(f.key==='proj' && slate.columnMapping?.proj!=null){
          const isModified=p._origProj!=null&&parseFloat(p._origProj)!==parseFloat(p.proj);
          const color=isModified?(parseFloat(p.proj)>parseFloat(p._origProj)?'var(--green)':'var(--red)'):'var(--text)';
          return `<div class="proj-cell-wrap" onclick="event.stopPropagation()">
@@ -2250,7 +2277,7 @@ function renderPool(){
       ${mobile
         ? [mStat1, mStat2].filter(Boolean).map(f=>{
             let v=p[f.key];if(v==null||v==='')v='—';
-            if(f.key==='proj'&&slate.columnMapping?.proj){
+            if(f.key==='proj'&&slate.columnMapping?.proj!=null){
               const isModified=p._origProj!=null&&parseFloat(p._origProj)!==parseFloat(p.proj);
               const color=isModified?(parseFloat(p.proj)>parseFloat(p._origProj)?'var(--green)':'var(--red)'):'var(--text)';
               return `<div class="cell-mono col-r" style="color:${color};font-size:10px;">${(parseFloat(p.proj)||0).toFixed(1)}</div>`;
@@ -2309,7 +2336,7 @@ function renderLineup(){
   slots.innerHTML=rows.join('');
   const sel=current.map(id=>playerById(slate,id)).filter(Boolean);
   const has=sel.length>0;
-  const hasProj=!!slate.columnMapping?.proj,hasRtg=!!slate.columnMapping?.rating;
+  const hasProj=slate.columnMapping?.proj!=null,hasRtg=slate.columnMapping?.rating!=null;
   const pills=[];
   if(hasProj)pills.push(`<div class="total-pill${has?' lit':''}"><div class="total-label">Total Proj</div><div class="total-value${has?' lit':''}">${has?sel.reduce((s,p)=>s+(parseFloat(p.proj)||0),0).toFixed(2):'—'}</div></div>`);
   if(hasRtg)pills.push(`<div class="total-pill${has?' lit':''}"><div class="total-label">Total Rtg</div><div class="total-value${has?' lit':''}">${has?sel.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0).toFixed(1):'—'}</div></div>`);
@@ -2405,11 +2432,11 @@ function renderSaved(){
   if(clearBtn) clearBtn.style.display=lineups.length>0?'':'none';
   let sortBy=slate._savedSort||'saved';
   const list=document.getElementById('savedList');
-  const hasProj=!!slate.columnMapping?.proj, hasRtg=!!slate.columnMapping?.rating;
-  const hasWin=!!slate.columnMapping?.win, hasTop5=!!slate.columnMapping?.top5;
-  const hasTop10=!!slate.columnMapping?.top10, hasTop20=!!slate.columnMapping?.top20;
-  const hasMl=!!slate.columnMapping?.ml;
-  const hasOwn=!!slate.columnMapping?.own;
+  const hasProj=slate.columnMapping?.proj!=null, hasRtg=slate.columnMapping?.rating!=null;
+  const hasWin=slate.columnMapping?.win!=null, hasTop5=slate.columnMapping?.top5!=null;
+  const hasTop10=slate.columnMapping?.top10!=null, hasTop20=slate.columnMapping?.top20!=null;
+  const hasMl=slate.columnMapping?.ml!=null;
+  const hasOwn=slate.columnMapping?.own!=null;
   const isUfc=slate.sport==='ufc';
   const pool=slate.players||[];
   const meta=slate._lineupMeta||{};
@@ -2518,7 +2545,7 @@ function renderExposure(){
   if(!total){panel.innerHTML='<div class="no-data" style="margin-top:40px">Save lineups to see exposure data.</div>';return;}
   const ec=expCounts(slate);
   const hidden=new Set(slate.hiddenIds||[]);
-  const hasOwn=!!slate.columnMapping?.own;
+  const hasOwn=slate.columnMapping?.own!=null;
 
   // All non-hidden players, sorted by exposure desc
   const allPlayers=(slate.players||[])
@@ -2655,7 +2682,7 @@ function renderGroups(){
   const isUFC=slate.sport==='ufc';
 
   // Show AM/PM auto-group button for PGA with tee times mapped
-  const isPGA = slate.sport==='pga' && slate.columnMapping?.start;
+  const isPGA = slate.sport==='pga' && slate.columnMapping?.start!=null;
   const addBtn = document.getElementById('addGroupBtn');
   const ampmBtn = document.getElementById('ampmGroupBtnGroups');
   if(isPGA && !ampmBtn && addBtn){
@@ -3004,7 +3031,7 @@ function renderGroupRulesSummary(){
 
   const waveSection = document.getElementById('waveSection');
   if(waveSection){
-    const showWave = slate.sport==='pga' && slate.columnMapping?.start;
+    const showWave = slate.sport==='pga' && slate.columnMapping?.start!=null;
     waveSection.style.display = showWave ? 'block' : 'none';
   }
 
@@ -3131,11 +3158,25 @@ function applyMixPresetUI(key){
   if(lbl) lbl.textContent=`Equity ${Math.round(w.equity*100)} · Model ${Math.round(w.model*100)} · Proj ${Math.round(w.proj*100)}`;
 }
 
+// ── Shared leverage shaping curve ─────────────────────────────
+// Maps an equity/ownership ratio to a multiplier. Replaces the hard [0.5, 2.0]
+// clamp: with the clamp, every deeply under-owned player tied at exactly 2.0×,
+// and the deterministic tie-break concentrated exposure in one clamped player
+// at high slider values. This curve is smooth and saturating — same asymptotic
+// 0.5×–2× range, no tie-mass at the bounds, still distinguishes 2.5× from 6×
+// under-owned (mildly). At the usual slider settings (10–20) it is numerically
+// almost identical to the old clamp (ratio 2, strength 0.1: 1.054 vs 1.072).
+function levShape(ratio, strength){
+  if(!(strength > 0) || !(ratio > 0) || !isFinite(ratio)) return 1;
+  const L = Math.log(2);
+  return Math.exp(strength * L * Math.tanh(Math.log(ratio) / L));
+}
+
 // Per-player de-vigged sportsbook composite → p._oddsScore. Returns false if no
 // odds markets are mapped (caller renormalizes the mix to drop the odds leg).
 function ensureOddsScores(pool, slate){
   const cm=slate.columnMapping||{};
-  const markets=['win','top5','top10','top20'].filter(k=>cm[k] && ODDS_WEIGHTS[k]>0);
+  const markets=['win','top5','top10','top20'].filter(k=>cm[k]!=null && ODDS_WEIGHTS[k]>0); // !=null: column index 0 is a valid mapping
   if(!markets.length){ pool.forEach(p=>{p._oddsScore=0;}); return false; }
   const fieldSum={};
   markets.forEach(k=> fieldSum[k]=Math.max(0.01, pool.reduce((s,p)=>s+(nascarMlToProb(p[k])||0),0)) );
@@ -3443,8 +3484,50 @@ function buildCDF(points, ouLine){
   };
 }
 
+// ── LADDER CALIBRATION ────────────────────────────────────────
+// Alt-line ("X+") prices are all OVER prices, so every rung carries the book's
+// juice and the raw ladder systematically overstates P(volume ≥ x) — a small but
+// one-directional volume optimism. When an O/U total is available we calibrate:
+// scale the whole ladder so its implied exceedance AT THE O/U LINE matches the
+// de-vigged O/U over-price (the total is the sharpest volume number the book
+// posts). Without an O/U we apply a flat ~7% vig haircut. Uniform scaling
+// preserves the ladder's shape and monotonicity.
+function calibrateLadder(pts, ouStr){
+  if(!pts || !pts.length) return pts;
+  let line = null, overMl = null;
+  if(ouStr){
+    const m = String(ouStr).match(/(-?\d+(?:\.\d+)?)\s*(?:\(\s*([+-]?\d+)\s*\))?/);
+    if(m){ line = parseFloat(m[1]); if(m[2] != null) overMl = parseFloat(m[2]); }
+  }
+  let k = 0.93; // flat de-vig haircut when no usable O/U anchor
+  if(line != null && line > 0){
+    // Target exceedance at the line: de-vigged over-price (juice given), else 0.50.
+    const rawOver = overMl != null ? mlToProb(overMl) : null;
+    const target  = rawOver != null ? Math.max(0.05, Math.min(0.95, rawOver / 1.045)) : 0.50;
+    // Ladder-implied exceedance at the line via linear interpolation, treating
+    // P(X ≥ 0) = 1 below the first rung and flat beyond the last rung.
+    const sorted = pts.slice().sort((x,y)=>x.threshold-y.threshold);
+    let pLadder;
+    if(line <= sorted[0].threshold){
+      pLadder = 1 - (1 - sorted[0].prob) * (line / sorted[0].threshold);
+    } else if(line >= sorted[sorted.length-1].threshold){
+      pLadder = sorted[sorted.length-1].prob;
+    } else {
+      let lo = sorted[0], hi = sorted[sorted.length-1];
+      for(let i=0; i+1<sorted.length; i++){
+        if(line >= sorted[i].threshold && line <= sorted[i+1].threshold){ lo=sorted[i]; hi=sorted[i+1]; break; }
+      }
+      const t = (line - lo.threshold) / ((hi.threshold - lo.threshold) || 1);
+      pLadder = lo.prob + (hi.prob - lo.prob) * t;
+    }
+    if(pLadder > 0.001) k = target / pLadder;
+  }
+  k = Math.max(0.60, Math.min(1.15, k)); // never inflate much, never gut the ladder
+  return pts.map(pt=>({threshold:pt.threshold, prob:Math.min(0.97, pt.prob * k)}));
+}
+
 function extractSSCDF(p){
-  const pts = [
+  let pts = [
     {threshold:35,ml:p.ss_35},{threshold:40,ml:p.ss_40},{threshold:45,ml:p.ss_45},
     {threshold:50,ml:p.ss_50},{threshold:55,ml:p.ss_55},{threshold:60,ml:p.ss_60},
     {threshold:65,ml:p.ss_65},{threshold:70,ml:p.ss_70},{threshold:75,ml:p.ss_75},
@@ -3453,15 +3536,17 @@ function extractSSCDF(p){
     {threshold:110,ml:p.ss_110},{threshold:115,ml:p.ss_115},{threshold:120,ml:p.ss_120},
     {threshold:125,ml:p.ss_125},
   ].filter(pt=>pt.ml!=null).map(pt=>({threshold:pt.threshold, prob:mlToProb(pt.ml)}));
+  pts = calibrateLadder(pts, p.ss_ou);
   const ouLine = p.ss_ou ? parseFloat(p.ss_ou) : null;
   return buildCDF(pts, ouLine);
 }
 
 function extractTDCDF(p){
-  const pts = [
+  let pts = [
     {threshold:1,ml:p.td_1},{threshold:2,ml:p.td_2},{threshold:3,ml:p.td_3},
     {threshold:4,ml:p.td_4},{threshold:5,ml:p.td_5},{threshold:6,ml:p.td_6},
   ].filter(pt=>pt.ml!=null).map(pt=>({threshold:pt.threshold, prob:mlToProb(pt.ml)}));
+  pts = calibrateLadder(pts, p.td_ou);
   const ouLine = p.td_ou ? parseFloat(p.td_ou) : null;
   return buildCDF(pts, ouLine);
 }
@@ -3475,29 +3560,65 @@ function extractTDCDF(p){
 function sampleFightOutcome(a, b){
   const finishKeys = ['finish_r1','finish_r2','finish_r3','finish_r4','finish_r5'];
   const roundNums  = [1, 2, 3, 4, 5];
-  const outcomes   = [];
 
-  // Per-round finish outcomes
-  for(let i=0; i<5; i++){
-    const pA = a[finishKeys[i]] != null ? mlToProb(a[finishKeys[i]]) : null;
-    const pB = b && b[finishKeys[i]] != null ? mlToProb(b[finishKeys[i]]) : null;
-    if(pA != null) outcomes.push({winner:'a', round:roundNums[i], prob:pA});
-    if(pB != null) outcomes.push({winner:'b', round:roundNums[i], prob:pB});
+  // Collect each fighter's method-of-victory outcome set (raw implied probs).
+  const collect = f => {
+    if(!f) return [];
+    const out = [];
+    for(let i=0; i<5; i++){
+      const p = f[finishKeys[i]] != null ? mlToProb(f[finishKeys[i]]) : null;
+      if(p != null) out.push({round:roundNums[i], prob:p});
+    }
+    const dec = f.decision != null ? mlToProb(f.decision) : null;
+    if(dec != null) out.push({round:'dec', prob:dec});
+    return out;
+  };
+  const aOut = collect(a), bOut = collect(b);
+
+  // Win probability anchor: de-vigged ML. The 2-way ML is the cleanest win-prob
+  // estimate on the board; MOV alt lines carry heavier (and asymmetric,
+  // favorite-longshot-biased) juice, so letting the joint MOV normalization SET
+  // the win prob drifted it up to ~4-5pts on some fights. Instead: each
+  // fighter's MOV masses are scaled to sum to his de-vigged ML win prob — ML
+  // pins WHO wins, MOV only shapes WHEN/HOW. This also fixes the singleton
+  // failure mode: an unpaired fighter no longer wins 100% of sims, he wins at
+  // his ML rate (raw prob when there's no opponent ML to normalize against).
+  const mlA = a.ml != null && a.ml !== '' ? parseFloat(a.ml) : null;
+  const mlB = b && b.ml != null && b.ml !== '' ? parseFloat(b.ml) : null;
+  const hasMlAnchor = (mlA != null && !isNaN(mlA)) || (mlB != null && !isNaN(mlB));
+
+  if(hasMlAnchor){
+    const pA = vigRemovedWinProb(mlA, mlB);
+    const sumA = aOut.reduce((s,o)=>s+o.prob, 0);
+    const sumB = bOut.reduce((s,o)=>s+o.prob, 0);
+    const outcomes = [];
+    // Scale each side's MOV set to its ML-anchored win prob. A side with no MOV
+    // odds gets its whole share as a decision win (shape unknown, prob correct).
+    if(sumA > 0) aOut.forEach(o=>outcomes.push({winner:'a', round:o.round, prob:o.prob*(pA/sumA)}));
+    else outcomes.push({winner:'a', round:'dec', prob:pA});
+    if(b){
+      if(sumB > 0) bOut.forEach(o=>outcomes.push({winner:'b', round:o.round, prob:o.prob*((1-pA)/sumB)}));
+      else outcomes.push({winner:'b', round:'dec', prob:1-pA});
+    } else {
+      // Singleton: the "opponent wins" mass exists even if we can't score him.
+      outcomes.push({winner:'b', round:'dec', prob:1-pA});
+    }
+    const r = Math.random();
+    let acc = 0;
+    for(const o of outcomes){
+      acc += o.prob;
+      if(r < acc) return {winner:o.winner, round:o.round};
+    }
+    return {winner: Math.random() < pA ? 'a' : 'b', round:'dec'};
   }
 
-  // Decision outcomes — each fighter's decision ML is a direct market probability.
-  // Fighter A wins by decision and Fighter B wins by decision are separate outcomes.
-  const decA = a.decision != null ? mlToProb(a.decision) : null;
-  const decB = b && b.decision != null ? mlToProb(b.decision) : null;
-  if(decA != null) outcomes.push({winner:'a', round:'dec', prob:decA});
-  if(decB != null) outcomes.push({winner:'b', round:'dec', prob:decB});
-
-  // No odds at all — fall back to vig-removed ML win probability
+  // No ML anywhere — legacy behavior: jointly normalize whatever MOV odds exist.
+  const outcomes = [];
+  aOut.forEach(o=>outcomes.push({winner:'a', round:o.round, prob:o.prob}));
+  bOut.forEach(o=>outcomes.push({winner:'b', round:o.round, prob:o.prob}));
   if(outcomes.length === 0){
     return {winner: Math.random() < (a._simWinProb||0.5) ? 'a' : 'b', round:'dec'};
   }
-
-  // Normalize across all outcomes (removes residual vig in the joint distribution)
   const rawTotal = outcomes.reduce((s,o)=>s+o.prob, 0);
   const norm = rawTotal > 0 ? 1/rawTotal : 1;
   const r = Math.random();
@@ -3506,7 +3627,6 @@ function sampleFightOutcome(a, b){
     acc += o.prob * norm;
     if(r < acc) return {winner:o.winner, round:o.round};
   }
-  // Final fallback — use vig-removed win prob for decision winner
   return {winner: Math.random() < (a._simWinProb||0.5) ? 'a' : 'b', round:'dec'};
 }
 
@@ -3546,8 +3666,13 @@ function winBonus(round){
 // CDFs, capped by fight duration. This enforces the key insight: early finish
 // = win bonus + low volume; decision = no finish bonus + high volume opportunity.
 function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
-  // Detect 5-round fight: fighter has R4 or R5 finish odds
-  const is5Round = fighter.finish_r4 != null || fighter.finish_r5 != null;
+  // 5-round detection: explicit user toggle (tagged onto the fighter as
+  // _is5Round before the sim run) wins; otherwise infer from R4/R5 finish odds.
+  // The toggle matters when a known 5-rounder has no R4/R5 alt lines posted —
+  // without it, a decision was capped at 3-round volume (130 SS vs 200).
+  const is5Round = fighter._is5Round != null
+    ? fighter._is5Round
+    : (fighter.finish_r4 != null || fighter.finish_r5 != null);
   const ssCap = ssCapForRound(round, is5Round);
   const tdCap = tdCapForRound(round, is5Round);
 
@@ -3617,24 +3742,49 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
 }
 
 // ── FIGHT PAIR BUILDER ────────────────────────────────────────
+// Pairs by fight number FIRST (exact, alias-proof), falling back to opponent-name
+// matching only for fighters without a usable fight number. Name matching alone
+// silently produced singleton "pairs" on any opp-name alias mismatch — and a
+// singleton fighter with method-of-victory odds won 100% of sims (all his
+// outcomes normalized to 1.0), corrupting every lineup built on that card.
 function buildFightPairs(pool){
   const pairs = [];
   const seen  = new Set();
+  // Pass 1: exact pairing by fight number
+  const byFight = {};
+  pool.forEach(p=>{
+    const f = p.fightNum || parseInt(p.start) || 0;
+    if(f > 0) (byFight[f]=byFight[f]||[]).push(p);
+  });
+  Object.entries(byFight).forEach(([f, fighters])=>{
+    if(fighters.length === 2){
+      pairs.push({a:fighters[0], b:fighters[1], fightNum:parseInt(f)});
+      seen.add(fighters[0].id); seen.add(fighters[1].id);
+    }
+    // 1 or 3+ fighters sharing a fight number → leave for the name pass
+  });
+  // Pass 2: opponent-name matching for anyone not yet paired
   pool.forEach(p=>{
     if(seen.has(p.id)) return;
-    const opp = pool.find(o=> o.id!==p.id && (
+    const opp = pool.find(o=> o.id!==p.id && !seen.has(o.id) && (
       (p.opp && (p.opp===o.name || p.opp===o.id)) ||
       (o.opp && (o.opp===p.name || o.opp===p.id))
     ));
     const fNum = p.fightNum || parseInt(p.start) || 0;
-    if(opp && !seen.has(opp.id)){
+    if(opp){
       pairs.push({a:p, b:opp, fightNum:fNum});
       seen.add(p.id); seen.add(opp.id);
-    } else if(!opp){
+    } else {
       pairs.push({a:p, b:null, fightNum:fNum});
       seen.add(p.id);
     }
   });
+  // Surface unpaired fighters that clearly SHOULD have an opponent — an opp name
+  // that matched nobody is almost always an alias/typo in the source data.
+  const orphans = pairs.filter(pr=>!pr.b && pr.a.opp).map(pr=>`${pr.a.name} (opp "${pr.a.opp}")`);
+  if(orphans.length && typeof log==='function'){
+    log(`⚠ Unmatched opponents — check name aliases: ${orphans.join(', ')}`);
+  }
   return pairs;
 }
 
@@ -3647,6 +3797,18 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
     .sort((a,b)=>b.score-a.score);
 
   const hasGroups = groups && groups.length > 0;
+
+  // No-oppose conflict test that honors the per-fight exclusion toggles: a pair
+  // from an excluded fight is allowed together (opponents share a fight number,
+  // so checking one side suffices). Previously the search-level check ignored
+  // ufcExcludedFights entirely, making the F# toggles dead in sim mode.
+  const _fightExcluded = p => {
+    const f = p.fightNum || parseInt(p.start) || 0;
+    return f > 0 && ufcExcludedFights.has(f);
+  };
+  const opposes = (p, q) =>
+    !_fightExcluded(p) &&
+    ((p.opp && p.opp === q.name) || (q.opp && q.opp === p.name));
 
   // Pre-satisfy minimum group requirements before searching.
   // For each group with ruleMin > 0, find the top-scoring group members
@@ -3679,6 +3841,26 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
   let bestScore = -Infinity;
   let bestLineup = null;
 
+  // suffixCheap[i] = the (up to) 6 smallest salaries among non-locked
+  // candidates[i..end]. The search recurses in score order (indices only ever
+  // increase), so this is an EXACT lower bound on the cost of filling the
+  // remaining slots from index i. The old precheck summed the next candidates'
+  // salaries in SCORE order — an overestimate of the min fill cost that could
+  // wrongly prune feasible branches (e.g. skipping a top-scoring stud because
+  // the next-best scorers happened to be expensive, even though cheap fill
+  // existed further down the board).
+  const suffixCheap = new Array(candidates.length + 1);
+  suffixCheap[candidates.length] = [];
+  for(let i = candidates.length - 1; i >= 0; i--){
+    const arr = suffixCheap[i+1].slice();
+    if(!lockedIds.has(candidates[i].p.id)){
+      arr.push(candidates[i].sal);
+      arr.sort((a,b)=>a-b);
+      if(arr.length > 6) arr.length = 6;
+    }
+    suffixCheap[i] = arr;
+  }
+
   function upperBound(idx, slots, salLeft, curScore){
     let score=curScore, s=slots;
     for(let i=idx; i<candidates.length && s>0; i++){
@@ -3709,21 +3891,21 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
       const c=candidates[i];
       if(lockedIds.has(c.p.id)) continue; // already in chosen via locked
       if(noOppose){
-        const conflict=chosen.some(x=>x.p.opp===c.p.name||(c.p.opp&&c.p.opp===x.p.name));
+        const conflict=chosen.some(x=>opposes(x.p, c.p));
         if(conflict) continue;
       }
       const newSal=salUsed+c.sal;
       if(newSal>salaryCap) continue;
       const slotsAfter=slotsLeft-1;
       if(slotsAfter>0){
-        let cheapSum=0, cheapCount=0;
-        for(let j=i+1; j<candidates.length && cheapCount<slotsAfter; j++){
-          if(lockedIds.has(candidates[j].p.id)) continue;
-          if(!noOppose || !chosen.some(x=>x.p.opp===candidates[j].p.name||(candidates[j].p.opp&&candidates[j].p.opp===x.p.name))){
-            cheapSum+=candidates[j].sal; cheapCount++;
-          }
-        }
-        if(cheapCount<slotsAfter||newSal+cheapSum>salaryCap) continue;
+        // Exact min fill cost from the precomputed suffix-cheapest salaries.
+        // (Chosen players all have indices ≤ i, so suffixCheap[i+1] never
+        // double-counts them; locked players are excluded at build time.)
+        const cheap = suffixCheap[i+1];
+        if(cheap.length < slotsAfter) continue;
+        let cheapSum=0;
+        for(let k=0;k<slotsAfter;k++) cheapSum+=cheap[k];
+        if(newSal+cheapSum>salaryCap) continue;
       }
       chosen.push(c);
       search(i+1, chosen, newSal, curScore+c.score);
@@ -3742,7 +3924,7 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
     for(const c of candidates){
       if(lineup.length===6) break;
       if(lockedIds.has(c.p.id)) continue;
-      if(noOppose&&lineup.some(x=>x.p.opp===c.p.name||(c.p.opp&&c.p.opp===x.p.name))) continue;
+      if(noOppose&&lineup.some(x=>opposes(x.p, c.p))) continue;
       if(salUsed+c.sal>salaryCap) continue;
       lineup.push(c); salUsed+=c.sal;
       if(hasGroups&&!checkGroupRules(lineup.map(c=>c.p), groups)){lineup.pop();salUsed-=c.sal;}
@@ -3757,6 +3939,13 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
 // After N sims: aggregate lineup frequencies → select top lineups by count + diversity.
 async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, noOppose, minSal){
   const pairs = buildFightPairs(fullPool);
+
+  // Tag 5-rounders: user toggle OR presence of R4/R5 finish odds. Tagged here so
+  // drawScoreOdds (which only sees the fighter) applies the right decision caps.
+  fullPool.forEach(p=>{
+    const f = p.fightNum || parseInt(p.start) || 0;
+    p._is5Round = (f > 0 && ufc5RoundFights.has(f)) || p.finish_r4 != null || p.finish_r5 != null;
+  });
 
   // Precompute vig-removed win probs and CDFs.
   // vigRemovedWinProb normalizes the two fighters' raw implied probs to sum to 1.0,
@@ -3886,6 +4075,11 @@ async function runUFCSimGen(){
     return;
   }
 
+  // Disable the Generate button for the duration of the run. runAutoGen's
+  // disable happens AFTER the sim-mode routing return, so without this a
+  // double-click launched two overlapping UFC sim runs.
+  document.getElementById('genBtn').disabled = true;
+
   ufcNoOpposeGlobal = slate.sport==='ufc'&&(document.getElementById('genUfcNoOppose')?.checked||false);
 
   const el = document.getElementById('genLog');
@@ -3911,6 +4105,29 @@ async function runUFCSimGen(){
   const {ranked, medianScoreById, compositeScoreById, distById, winProb, totalSims} = await runUFCSimsNew(
     fullPool, pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal
   );
+
+  // ── ITD consistency check (diagnostic only) ────────────────────────────────
+  // The ITD column is a free calibration anchor: the model's P(fighter wins
+  // inside the distance) should roughly match the de-vigged ITD price. A big
+  // gap usually means a stale/missing finish ladder for that fighter. Warn-only.
+  (function itdCheck(){
+    const flagged = [];
+    pool.forEach(p=>{
+      const itdMl = p.itd != null && p.itd !== '' ? parseFloat(p.itd) : null;
+      if(itdMl == null || isNaN(itdMl)) return;
+      const finishKeys=['finish_r1','finish_r2','finish_r3','finish_r4','finish_r5'];
+      const finishSum = finishKeys.reduce((s,k)=>s+(p[k]!=null?(mlToProb(p[k])||0):0),0);
+      const decP = p.decision!=null ? (mlToProb(p.decision)||0) : 0;
+      const tot = finishSum + decP;
+      if(tot <= 0) return;
+      const pWin = winProb[p.id] != null ? winProb[p.id] : 0.5;
+      const modelItd = pWin * (finishSum / tot);          // anchored MOV model
+      const marketItd = Math.max(0.02, (mlToProb(itdMl)||0) / 1.045); // devig approx
+      const diff = (modelItd - marketItd) * 100;
+      if(Math.abs(diff) > 6) flagged.push(`${p.name.split(' ').slice(-1)[0]} ${diff>0?'+':''}${diff.toFixed(0)}pts`);
+    });
+    if(flagged.length) log(`⚠ ITD check — sim finish rate vs market: ${flagged.join(', ')} (check finish ladders)`);
+  })();
 
   // SIM column shows composite score (0.6xP80 + 0.4xavg) — ceiling-weighted, no floor double-count
   pool.forEach(p=>{
@@ -3963,7 +4180,7 @@ async function runUFCSimGen(){
   const lineupLeverage = e => {
     if(levStrength<=0) return 1;
     let lg=0;
-    e.lineup.forEach(p=>{ const m=Math.max(0.5,Math.min(2.0,Math.pow(levRatio[p.id]||1, levStrength))); lg+=Math.log(m); });
+    e.lineup.forEach(p=>{ const m=levShape(levRatio[p.id]||1, levStrength); lg+=Math.log(m); });
     return Math.exp(lg / e.lineup.length);
   };
   if(levStrength>0) log(`Leverage ${Math.round(levStrength*100)}/100 → tilting toward fighters under-owned relative to their ceiling.`);
@@ -4060,10 +4277,12 @@ async function runUFCSimGen(){
     [finalLineups[i],finalLineups[j]]=[finalLineups[j],finalLineups[i]];
   }
 
-  const topCount = filled[0]?.count||0;
   log(`Done! ${filled.length} lineups selected.`);
-  log(`Top lineup appeared optimal in ${topCount} of ${totalSims.toLocaleString()} sims (${(topCount/totalSims*100).toFixed(1)}%).`);
   log(`Avg sim score across selected lineups: ${avgSim.toFixed(1)} pts`);
+  // (The old "top lineup appeared optimal in X of N sims" line was dropped —
+  // with 26 fighters nearly every sim yields a unique optimal lineup, so the
+  // frequency read as 0.0% noise. Selection ranks by fighter composites, not
+  // that frequency, so nothing informative was lost.)
 
   const now=new Date();
   addToHistory(slate.id, `${finalLineups.length} lineups (sim) @ ${now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`, finalLineups);
@@ -4711,7 +4930,7 @@ function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target, leverage
     .sort((a,b) => b[1]-a[1]); // most frequent first
 
   if(!named.length){
-    // Extreme edge case: no driver cleared 2% — use top 5 by count
+    // Extreme edge case: no driver cleared the 5% threshold — use top 5 by count
     Object.entries(countById)
       .sort((a,b)=>b[1]-a[1])
       .slice(0,5)
@@ -4851,12 +5070,15 @@ async function runNascarSimGen(){
   const maxSal    = parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP;
   const totalLaps = parseInt(document.getElementById('nascarTotalLaps')?.value)||300;
   const numSims   = activeSlate()?._simCount || parseInt(document.getElementById('nascarSimCountSlider')?.value) || 2000;
+  // Track type: prefer the explicit type persisted by setNascarTrack (survives
+  // reloads and edited lap counts); the dataset.laps mapping is only a fallback
+  // for legacy slates that never clicked a track button after this change.
   const trackBtn  = document.querySelector('.nascar-track-btn.active');
-  const trackType = trackBtn ? (
+  const trackType = slate._nascarTrackType || (trackBtn ? (
     trackBtn.dataset.laps==='188' ? 'superspeedway' :
     trackBtn.dataset.laps==='500' ? 'short' :
     trackBtn.dataset.laps==='300' ? 'intermediate' : 'road'
-  ) : 'road';
+  ) : 'road');
   const groups    = slate.groups||[];
   const hiddenSet = new Set(slate.hiddenIds||[]);
   const fullField = (slate.players||[]).filter(p=>p.salary>0);
@@ -5048,13 +5270,33 @@ async function runNascarSimGen(){
       const ownVal   = (parseFloat(p.own)||0) || (fieldAvgOwnF*100); // impute field avg if missing
       const ownShare = ownVal/sumOwn;
       const ratio    = ownShare>0 ? eqShare/ownShare : 1;
-      const clamped  = Math.max(0.5, Math.min(2.0, ratio));
-      driverLevMult[p.id] = Math.pow(clamped, leverageStrength);
+      driverLevMult[p.id] = levShape(ratio, leverageStrength); // smooth 0.5x-2x curve, no clamp tie-mass
     });
     const boosted = pool.filter(p=>driverLevMult[p.id]>1.03)
       .sort((a,b)=>driverLevMult[b.id]-driverLevMult[a.id]).slice(0,6);
     if(boosted.length) log(`Driver-level leverage boosts: ${boosted.map(p=>`${p.name.split(' ').slice(-1)[0]} ${driverLevMult[p.id].toFixed(2)}×`).join(', ')}`);
   })();
+
+  // ── Salary-aware value tilt for the candidate builder ─────────────────────
+  // The composite is salary-blind, so sampling weight ∝ composite let expensive
+  // studs dominate candidate generation and value cars only appeared through
+  // cap feasibility. Tilt each driver's weight by (composite ÷ fair-priced
+  // composite)^γ where fair = λ·salary and λ = Σcomposite/Σsalary — a driver
+  // priced exactly to his equity gets 1×, cheap-for-his-equity gets a boost,
+  // overpriced gets a fade. γ=0.5 keeps it a tilt, not a takeover: the stud
+  // still samples heavily (his composite is the base), he just no longer
+  // crowds out per-dollar-better cars in the supporting slots. Clamped so the
+  // slate's top favorite can't be zeroed the way full VOR (comp − λ·sal) would.
+  const VALUE_GAMMA = 0.5;
+  const _sumCompAll = pool.reduce((a,p)=>a+Math.max(0,p._simComposite||0),0) || 1;
+  const _sumSalAll  = pool.reduce((a,p)=>a+(p.salary||0),0) || 1;
+  const _lambdaN    = _sumCompAll / _sumSalAll;
+  const valueTilt = p => {
+    const fair = _lambdaN * (p.salary||0);
+    if(fair <= 0) return 1;
+    const ratio = Math.max(0.6, Math.min(1.6, Math.max(0,p._simComposite||0) / fair));
+    return Math.pow(ratio, VALUE_GAMMA);
+  };
 
   for(const bucket of buckets){
     if(window._genCancelled){ log('Cancelled.'); done(); return; }
@@ -5074,7 +5316,8 @@ async function runNascarSimGen(){
       const lm = (p.id === bucket.id)
         ? Math.max(1, driverLevMult[p.id]||1)
         : (driverLevMult[p.id]||1);
-      return comp * lm;
+      // Salary-aware value tilt (global composite vs price) — see above.
+      return comp * lm * valueTilt(p);
     });
 
     while(bucketGenerated.length < WANT_CANDIDATES && attempts < MAX_ATT){
@@ -5356,8 +5599,8 @@ async function runAutoGen(){
   const blendWeights = { mix };
 
   if(optimizeBy==='blend3'){
-    const hasProjField=!!(slate.columnMapping?.proj);
-    const hasRtgField=!!(slate.columnMapping?.rating);
+    const hasProjField=slate.columnMapping?.proj!=null;
+    const hasRtgField=slate.columnMapping?.rating!=null;
     if(!hasProjField && !hasRtgField){alert('3-Signal Mix needs at least a Projection or Rating column mapped.');document.getElementById('genBtn').disabled=false;return;}
   }
 
@@ -5415,7 +5658,7 @@ async function runAutoGen(){
   const oddsArr = pool.map(p=>p._vor);
   const minOdds=Math.min(...oddsArr), maxOdds=Math.max(...oddsArr);
   const normOdds = p => maxOdds===minOdds ? 0 : (((p._vor||0)-minOdds)/(maxOdds-minOdds));
-  const hasProjF = !!slate.columnMapping?.proj, hasModelF = !!slate.columnMapping?.rating;
+  const hasProjF = slate.columnMapping?.proj!=null, hasModelF = slate.columnMapping?.rating!=null;
   const rawEq  = oddsAvailable ? mix.equity : 0;
   const rawMod = hasModelF    ? mix.model  : 0;
   const rawPrj = hasProjF     ? mix.proj   : 0;
@@ -5429,7 +5672,7 @@ async function runAutoGen(){
   // contention is favored over chalk. Multiplicative on the equity-first quality
   // score — a low-owned LONGSHOT (low quality, ~no fade) still can't beat a faded
   // stud, but an under-owned mid-tier contender can. Tunable 0..1 via the slider.
-  const ownAvailable = !!slate.columnMapping?.own;
+  const ownAvailable = slate.columnMapping?.own!=null;
   // Missing ownership → treat as the field average (neutral), never 0. A blank cell read
   // as 0% would normalize to the bottom and wrongly mark that golfer as a max-leverage play.
   const ownReal = pool.map(p=>parseFloat(p.own)).filter(v=>!isNaN(v));
@@ -5458,7 +5701,7 @@ async function runAutoGen(){
     const eqShare  = (p._oddsScore||0)/_sumOdds;
     const ownShare = ownOf(p)/_sumOwnRaw;
     const ratio    = ownShare>0 ? eqShare/ownShare : 1;
-    p._levFactor = Math.pow(Math.max(0.5, Math.min(2.0, ratio)), leverageStrength);
+    p._levFactor = levShape(ratio, leverageStrength); // smooth 0.5x-2x curve, no clamp tie-mass
   });
   if(optimizeBy==='blend3'){
     log(`Equity model → equity ${Math.round(wEquity*100)} · model ${Math.round(wModel*100)} · proj ${Math.round(wProj*100)}${oddsAvailable?'':' (no odds mapped — equity leg dropped)'}`);
@@ -5500,8 +5743,8 @@ async function runAutoGen(){
   // Wave allocation (PGA only)
   const waveAM = parseInt(document.getElementById('waveSlider_am')?.value||0);
   const wavePM = parseInt(document.getElementById('waveSlider_pm')?.value||0);
-  const useWave = (waveAM > 0 || wavePM > 0) && slate.sport==='pga' && slate.columnMapping?.start;
-  const hasTeeMapping = slate.sport==='pga' && slate.columnMapping?.start;
+  const useWave = (waveAM > 0 || wavePM > 0) && slate.sport==='pga' && slate.columnMapping?.start!=null;
+  const hasTeeMapping = slate.sport==='pga' && slate.columnMapping?.start!=null;
   // Build AM/PM sets whenever tee times are mapped — needed for wave tagging even at 0% allocation
   const amPlayerIds = new Set(hasTeeMapping ? (slate.players||[]).filter(p=>getPlayerAMPM(p)==='AM').map(p=>p.id) : []);
   const pmPlayerIds = new Set(hasTeeMapping ? (slate.players||[]).filter(p=>getPlayerAMPM(p)==='PM').map(p=>p.id) : []);
@@ -5891,14 +6134,13 @@ async function runAutoGen(){
 
     const projAvg = l => l.reduce((s,p)=>s+(parseFloat(p.proj)||0),0);
     const rtgAvg = l => l.filter(p=>p.rating!=null&&!p._ratingImputed).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
-    const topProj = projAvg(final[0]||[]).toFixed(2);
-    const botProj = projAvg(final[final.length-1]||[]).toFixed(2);
-    const topRtg = rtgAvg(final[0]||[]).toFixed(1);
-    const botRtg = rtgAvg(final[final.length-1]||[]).toFixed(1);
+    // True min/max across the final set — the previous first-vs-last read was
+    // taken AFTER the interleave shuffle, so the logged "range" was meaningless.
+    const projVals = final.map(projAvg), rtgVals = final.map(rtgAvg);
     const salAvg = l => l.reduce((s,p)=>s+p.salary,0);
     const minSalOut = Math.min(...final.map(salAvg));
     log(`Done! ${valid.length} cleared $${minSal.toLocaleString()}+ → ${final.length} returned in ${attempts.toLocaleString()} attempts. Lowest salary used: $${minSalOut.toLocaleString()}.`);
-    log(`Proj range: ${topProj} → ${botProj} pts | Rating range: ${topRtg} → ${botRtg}`);
+    log(`Proj range: ${Math.min(...projVals).toFixed(2)} → ${Math.max(...projVals).toFixed(2)} pts | Rating range: ${Math.min(...rtgVals).toFixed(1)} → ${Math.max(...rtgVals).toFixed(1)}`);
     document.getElementById('genBtn').disabled=false;
 
     if(!final.length){
@@ -6163,7 +6405,7 @@ function openPreviewModal(lineups, optimizeBy){
 
   // Build filter buttons if archetypes are present
   const archetypes = (slate.groups||[]).filter(g=>g.isArchetype);
-  const hasWave = slate.sport==='pga' && !!slate.columnMapping?.start;
+  const hasWave = slate.sport==='pga' && slate.columnMapping?.start!=null;
 
   const filterBtns = document.getElementById('previewFilterBtns');
   if(archetypes.some(g=>lineups.some(l=>l._archetypeTag===g.id)) || hasWave){
@@ -6242,7 +6484,7 @@ function getFilteredLineups(){
 
 function renderPreviewLineupsList(){
   const slate=activeSlate();if(!slate)return;
-  const hasProj=!!slate.columnMapping?.proj,hasRtg=!!slate.columnMapping?.rating;
+  const hasProj=slate.columnMapping?.proj!=null,hasRtg=slate.columnMapping?.rating!=null;
   // Apply player filter if active
   let allLineups = getFilteredLineups();
 
@@ -6350,7 +6592,7 @@ function renderPreviewExposure(){
   if(!total){el.innerHTML='<div style="font-size:11px;color:var(--muted);font-style:italic;">No lineups selected.</div>';return;}
 
   // Averages
-  const hasProj=!!slate.columnMapping?.proj, hasRtg=!!slate.columnMapping?.rating;
+  const hasProj=slate.columnMapping?.proj!=null, hasRtg=slate.columnMapping?.rating!=null;
   const avgProj = hasProj ? (selectedLineups.reduce((s,l)=>s+l.reduce((s2,p)=>s2+(parseFloat(p.proj)||0),0),0)/total).toFixed(2) : null;
   const avgRtg = hasRtg ? (selectedLineups.reduce((s,l)=>s+l.filter(p=>p.rating!=null).reduce((s2,p)=>s2+(parseFloat(p.rating)||0),0),0)/total).toFixed(1) : null;
   const avgSal = (selectedLineups.reduce((s,l)=>s+l.reduce((s2,p)=>s2+(p.salary||0),0),0)/total);
@@ -6371,7 +6613,7 @@ function renderPreviewExposure(){
   const sorted=Object.entries(counts).sort((a,b)=>b[1]-a[1]);
   const maxC=sorted[0]?.[1]||1;
 
-  const hasOwn=!!slate.columnMapping?.own;
+  const hasOwn=slate.columnMapping?.own!=null;
 
   const headerRow = hasOwn
     ? `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;margin-bottom:3px;border-bottom:1px solid var(--border);">
@@ -6524,11 +6766,15 @@ function toggleSelectAll(){
 function addSelectedToSaved(){
   const slate=activeSlate();if(!slate)return;
   slate.savedLineups=slate.savedLineups||[];
-  const checks=document.querySelectorAll('.preview-check');
   const existingKeys=new Set(slate.savedLineups.map(l=>lineupKey(l)));
   let added=0,skipped=0;
   previewLineups.forEach((lineup,i)=>{
-    if(!checks[i]?.checked)return;
+    // Look the checkbox up by its id (pc{originalIndex}) — a positional NodeList
+    // walk breaks whenever a sort or filter is active, because the DOM order no
+    // longer matches previewLineups order (wrong lineups get added/skipped).
+    // A lineup whose checkbox isn't rendered (filtered out) is treated as
+    // unselected, matching what the user can actually see.
+    if(!document.getElementById('pc'+i)?.checked)return;
     const key=lineupKey(lineup.map(p=>p.id));
     if(existingKeys.has(key)){skipped++;return;}
     existingKeys.add(key);
@@ -6554,7 +6800,7 @@ function addSelectedToSaved(){
 function renderProjEditList(){
   const slate=activeSlate();if(!slate)return;
   const el=document.getElementById('projEditList');if(!el)return;
-  if(!slate.columnMapping?.proj){el.innerHTML='<div class="no-data">No projection column mapped for this slate.</div>';return;}
+  if(slate.columnMapping?.proj==null){el.innerHTML='<div class="no-data">No projection column mapped for this slate.</div>';return;}
   const hidden=new Set(slate.hiddenIds||[]);
   const players=[...(slate.players||[])].filter(p=>!hidden.has(p.id)).sort((a,b)=>b.salary-a.salary);
   el.innerHTML=players.map(p=>{
@@ -6715,16 +6961,21 @@ async function refreshFromSheet(){
 
     // Update player data in place — match by id, refresh numeric/odds fields only
     // Preserves: savedLineups, hiddenIds, groups, manual proj edits (_origProj lock)
+    const newRows = []; // rows with no matching player — late adds
     dataRows.forEach(row => {
       const idRaw = colMap.id!=null ? row[colMap.id] : '';
       const idMatch = idRaw.match(/\((\d+)\)/);
       const id = (idMatch?idMatch[1]:idRaw.trim());
       const p = slate.players.find(q=>q.id===id);
-      if(!p) return;
+      if(!p){ newRows.push({row, id}); return; }
       // Refresh live fields
       if(colMap.proj!=null)  { const v=parseFloat(row[colMap.proj])||0; if(!p._projLocked) p.proj=v; p._origProj=v; }
       if(colMap.own!=null)   p.own   = parseFloat(row[colMap.own])||0;
       if(colMap.salary!=null){ const s=parseFloat((row[colMap.salary]||'').replace(/[^0-9.]/g,''))||0; if(s) p.salary=s; }
+      // start/opp refresh: NASCAR grids change after qualifying, PGA tee times
+      // after R1 — previously only Update Pool picked these up, not the sheet.
+      if(colMap.start!=null) { const v=(row[colMap.start]||'').trim(); if(v) p.start=v; }
+      if(colMap.opp!=null)   p.opp   = getStr(row,'opp');
       if(colMap.win!=null)   p.win   = getStr(row,'win');
       if(colMap.top3!=null)  p.top3  = getStr(row,'top3');
       if(colMap.top5!=null)  p.top5  = getStr(row,'top5');
@@ -6749,6 +7000,39 @@ async function refreshFromSheet(){
         p.td_ou=get('TD O/U')||null;
       }
     });
+
+    // Late adds: sheet rows whose id didn't match any player become new pool
+    // entries (mirrors Update Pool). Requires a real salary to avoid ghosts.
+    let lateAdds = 0;
+    newRows.forEach(({row, id}) => {
+      const sal = colMap.salary!=null ? (parseFloat((row[colMap.salary]||'').replace(/[^0-9.]/g,''))||0) : 0;
+      const name = colMap.name!=null ? (row[colMap.name]||'').replace(/\s*\(\d+\)\s*/g,'').trim() : '';
+      if(!sal || !name) return;
+      const p = { id: id || ('new_'+uid()), name, salary: sal };
+      if(colMap.proj!=null)  { p.proj=parseFloat(row[colMap.proj])||0; p._origProj=p.proj; }
+      if(colMap.own!=null)   p.own   = parseFloat(row[colMap.own])||0;
+      if(colMap.rating!=null){ const v=parseFloat(row[colMap.rating]); p.rating=!isNaN(v)?v:null; }
+      if(pgaModelCols){ const r=blendPgaModel(row,pgaModelCols); if(r!=null) p.rating=r; }
+      if(colMap.start!=null) p.start = (row[colMap.start]||'').trim()||null;
+      if(colMap.opp!=null)   p.opp   = getStr(row,'opp');
+      if(colMap.ml!=null)    p.ml    = getStr(row,'ml');
+      if(colMap.itd!=null)   p.itd   = getStr(row,'itd');
+      ['win','top3','top5','top10','top20','top40','cut'].forEach(k=>{ if(colMap[k]!=null) p[k]=getStr(row,k); });
+      if(slate.sport==='ufc'){
+        const get2 = n => { const i=headers.findIndex(h=>h.toLowerCase()===n.toLowerCase()); return i>=0?(row[i]||'').trim():null; };
+        const getN2 = n => { const v=get2(n); const x=parseFloat(v); return (!isNaN(x)&&x!==0)?x:null; };
+        ['finish_r1','finish_r2','finish_r3','finish_r4','finish_r5','decision'].forEach(k=>{
+          p[k]=getN2(k.replace('_r','_R').replace('finish','Finish').replace('decision','Decision'));
+        });
+        ['35','40','45','50','55','60','65','70','75','80','85','90','95','100','105','110','115','120','125'].forEach(k=>{ p['ss_'+k]=getN2(`SS_${k}plus`); });
+        ['1','2','3','4','5','6'].forEach(k=>{ p['td_'+k]=getN2(`TD_${k}plus`); });
+        p.ss_ou=get2('SS O/U')||null; p.td_ou=get2('TD O/U')||null;
+        p.fightNum = parseInt(p.start)||null;
+      }
+      slate.players.push(p);
+      lateAdds++;
+    });
+    if(lateAdds) showToast(`↺ Refreshed + ${lateAdds} new player${lateAdds>1?'s':''} added`,'ok');
 
     imputeMissingRatings(slate);
     save();
@@ -7242,9 +7526,11 @@ function renderUpdatePoolMapper(){
     cut:   {label:'Make Cut Odds',required:false},
   };
 
-  // Only show cols that exist in the current slate's columnMapping OR are required
+  // Show cols that are required, already exist in the slate's columnMapping, OR
+  // were auto-detected in the update CSV — so brand-new columns (e.g. odds added
+  // after slate creation) are visible and can actually be applied.
   const toShow = Object.entries(existingCols).filter(([key])=>
-    existingCols[key].required || slate.columnMapping?.[key] != null
+    existingCols[key].required || slate.columnMapping?.[key] != null || updateColMapping[key] != null
   );
 
   const container = document.getElementById('updatePoolMapperRows');
@@ -7381,8 +7667,15 @@ function applyPoolUpdate(){
     added++;
   });
 
-  // Update columnMapping to reflect any newly mapped cols
-  ['proj','own','rating','start'].forEach(key=>{
+  // Update columnMapping to reflect any newly mapped cols. Odds/ml/itd/opp are
+  // included so adding e.g. Win/Top5/Top10 via a pool update actually enables the
+  // equity leg (ensureOddsScores) and the pool columns — previously the values
+  // landed on the players but the mapping stayed unset, silently disabling both.
+  // Note: stored indices refer to the UPDATE CSV's layout (same as the existing
+  // behavior for proj/own/rating/start); after creation they're used as
+  // presence flags everywhere except refreshFromSheet, which assumes the sheet
+  // layout matches — keep sheet column order stable if you mix both workflows.
+  ['proj','own','rating','start','opp','ml','itd','win','top3','top5','top10','top20','top40','cut'].forEach(key=>{
     if(cm[key]!=null) slate.columnMapping[key] = cm[key];
   });
 
