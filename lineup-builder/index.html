@@ -2863,6 +2863,26 @@ function highlightOpp(oppPid, on, selfPid){
 
 // Single delegated listener on stable #driverList — survives all renderPool() calls.
 document.addEventListener('DOMContentLoaded', ()=>{
+  // Sync every label-paired slider once on load. Browser form-state restoration
+  // can restore a slider's DOM value on reload without firing input events,
+  // leaving the hardcoded label text stale (the "maxed slider labeled 2000"
+  // bug). Slate-persisted sliders are re-synced again in renderSlate; this
+  // covers the non-persisted ones (randomness, archetype boost, waves) and the
+  // window before the first renderSlate.
+  [
+    ['nascarSimCountSlider','nascarSimCountLabel', v=>v],
+    ['ufcSimCountSlider','ufcSimCountLabel', v=>v],
+    ['randomnessSlider','randomnessLabel', v=>v],
+    ['leverageSlider','leverageLabel', v=>v],
+    ['nascarLeverageSlider','nascarLeverageLabel', v=>v],
+    ['ufcLeverageSlider','ufcLeverageLabel', v=>v],
+    ['archetypeBoostSlider','archetypeBoostVal', v=>v+'×'],
+  ].forEach(([sid,lid,fmt])=>{
+    const sl=document.getElementById(sid), lb=document.getElementById(lid);
+    if(sl && lb) lb.textContent = fmt(sl.value);
+  });
+  if(typeof onWaveSlide==='function' && document.getElementById('waveSlider_am')) onWaveSlide();
+
   const list = document.getElementById('driverList');
   if(!list) return;
   let activeFightCell = null;
@@ -2977,10 +2997,19 @@ function renderGroupRulesSummary(){
         const simSettings = document.getElementById('nascarSimSettings');
         if(simSettings) simSettings.style.display = 'block';
       }
-      // Restore sim count slider + label from saved slate value
+      // Sync sim count slider + label. Unconditional: when the slate has no
+      // saved _simCount, the label must still be synced to the slider — the
+      // browser's form-state restoration can bring the slider's DOM value back
+      // on reload while the hardcoded label text stays at "2000", showing a
+      // maxed slider labeled 2000 until the first drag. Syncing to the live
+      // slider value also matches what the generator actually uses.
       const nascarSlider = document.getElementById('nascarSimCountSlider');
       const nascarLabel  = document.getElementById('nascarSimCountLabel');
-      if(nascarSlider && slate._simCount){ nascarSlider.value = slate._simCount; if(nascarLabel) nascarLabel.textContent = slate._simCount; }
+      if(nascarSlider){
+        const nCount = slate._simCount || parseInt(nascarSlider.value) || 2000;
+        nascarSlider.value = nCount;
+        if(nascarLabel) nascarLabel.textContent = nCount;
+      }
       // Restore leverage slider + label
       const nLevSl = document.getElementById('nascarLeverageSlider');
       const nLevLb = document.getElementById('nascarLeverageLabel');
@@ -3006,10 +3035,14 @@ function renderGroupRulesSummary(){
       const simSettings = document.getElementById('ufcSimSettings');
       if(simSettings) simSettings.style.display = 'block';
     }
-    // Restore sim count slider + label from saved slate value
+    // Sync sim count slider + label — unconditional, see the NASCAR note above.
     const ufcSlider = document.getElementById('ufcSimCountSlider');
     const ufcLabel  = document.getElementById('ufcSimCountLabel');
-    if(ufcSlider && slate._simCount){ ufcSlider.value = slate._simCount; if(ufcLabel) ufcLabel.textContent = slate._simCount; }
+    if(ufcSlider){
+      const uCount = slate._simCount || parseInt(ufcSlider.value) || 2000;
+      ufcSlider.value = uCount;
+      if(ufcLabel) ufcLabel.textContent = uCount;
+    }
     // Restore leverage slider + label
     const ufcLevSl = document.getElementById('ufcLeverageSlider');
     const ufcLevLb = document.getElementById('ufcLeverageLabel');
