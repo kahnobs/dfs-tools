@@ -4364,14 +4364,28 @@ async function runUFCSimGen(){
   // aren't flattened (dog exposure is a ceiling decision, not junk) — this
   // only removes the tail where a lineup is chalky AND low-equity AND low-sim.
   const _ownMapped = pool.some(p=>p.own!=null && p.own!=='');
+  // Unjustified ownership, sim-derived (the NASCAR lesson, ported): a fighter's
+  // ownership is justified up to his optimal-rate share of the exposure budget
+  // (appearRate/6 × total field ownership). Raw-ownership culling was killing
+  // main-event pick'ems whose 30-40% ownership the sims largely SUPPORT, while
+  // an empty-chalk fighter (owned far beyond his optimal rate) still gets
+  // culled. Thresholded so one modestly-over-owned fighter isn't cull-bait —
+  // only lineups STACKED with unsupported ownership die on this axis.
+  const _sumOwnU = pool.reduce((a,p)=>a+Math.max(0,parseFloat(p.own)||0),0) || 1;
+  const _unjOwnU = {};
+  pool.forEach(p=>{
+    const rate = appearRate[p.id]!=null ? appearRate[p.id] : 0.1;
+    const justified = (rate/6) * _sumOwnU;
+    _unjOwnU[p.id] = Math.max(0, (parseFloat(p.own)||0) - justified);
+  });
   const _annotated = ranked.map(e=>({
     e,
-    gOwn:  _ownMapped ? e.lineup.reduce((s,p)=>s+(parseFloat(p.own)||0),0) : null,
+    gOwn:  _ownMapped ? e.lineup.reduce((s,p)=>s+(_unjOwnU[p.id]||0),0) : null,
     gMl:   e.lineup.reduce((s,p)=>s+(winProb[p.id]!=null ? winProb[p.id] : 0.5),0),
     gComp: e.lineup.reduce((s,p)=>s+(compositeScoreById[p.id]||0),0),
   }));
   const _survivors = gauntletCull(_annotated, Math.max(target*8, 200), [
-    {key:'gOwn',  dir:'high', weight:3, label:'chalkiest'},
+    {key:'gOwn',  dir:'high', weight:3, label:'most-unjustified-chalk', minBad:35},
     {key:'gMl',   dir:'low',  weight:2, label:'lowest-ML-equity'},
     {key:'gComp', dir:'low',  weight:2, label:'lowest-composite'},
   ], log);
@@ -4423,6 +4437,14 @@ async function runUFCSimGen(){
       // whose fighters are under-covered relative to it get boosted, over-
       // covered get taxed. Leverage and caps still tilt/limit on top, so a
       // deliberate fade of the anchor remains one slider away.
+      // Multiplicative alignment servo. The first (additive, 0.35-weight)
+      // version was ~10× too weak: a ±0.01 nudge against quality×leverage gaps
+      // of ~0.12, so output sat at roughly half the sim-optimal anchor. As a
+      // multiplier on the same scale as quality and leverage, coverage deficits
+      // now carry real authority: a lineup full of under-anchor fighters gets
+      // up to ~+50%, over-anchor exposure fades symmetrically, and the boost
+      // decays to zero as output reaches each fighter's optimal rate — a servo
+      // around the anchor, with leverage still expressing a deliberate tilt.
       const denomA = Math.max(1, filled.length);
       let align = 0;
       x.lineup.forEach(p=>{
@@ -4430,8 +4452,9 @@ async function runUFCSimGen(){
         const cur = (outputExpCount[p.id]||0) / denomA;
         align += (tgt - cur);
       });
-      const ALIGN_W = 0.35;
-      const val = quality * leverageFactor * dupPenalty + ALIGN_W * (align / 6);
+      const ALIGN_M = 3.0;
+      const alignFactor = Math.max(0.5, 1 + ALIGN_M * (align / 6));
+      const val = quality * leverageFactor * dupPenalty * alignFactor;
       if(val>bestVal){ bestVal=val; bestIdx=ri; }
     }
 
