@@ -4086,6 +4086,13 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   const lineupFreq = new Map();
 
   const CHUNK = 100;
+  // Per-fighter optimal-rate: fraction of sims where the fighter is in that
+  // sim's optimal lineup. This is the theoretically correct exposure anchor
+  // for a GPP portfolio (it sums to exactly 6.0 = the exposure budget) and,
+  // unlike the win-prob-blended composite, it gives conditional stars their
+  // due: a pick'em main-eventer who is in nearly every optimal WHEN he wins
+  // rates ~50%, not the near-zero that composite ranking implied.
+  const optAppear = {};
   for(let s=0; s<numSims; s++){
     if(s > 0 && s % CHUNK === 0){
       await new Promise(r=>setTimeout(r,0));
@@ -4116,6 +4123,7 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
 
     const key = optimal.map(p=>p.id).sort().join('|');
     const total = optimal.reduce((s,p)=>s+(simScore[p.id]||0),0);
+    optimal.forEach(p=>{ optAppear[p.id] = (optAppear[p.id]||0) + 1; });
     if(lineupFreq.has(key)){
       const e = lineupFreq.get(key);
       e.count++;
@@ -4168,7 +4176,9 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     return e;
   }).sort((a,b) => b.composite - a.composite || b.count - a.count);
 
-  return {ranked, medianScoreById, compositeScoreById, distById, winProb, totalSims: numSims};
+  const appearRate = {};
+  visiblePool.forEach(p=>{ appearRate[p.id] = (optAppear[p.id]||0) / Math.max(1, numSims); });
+  return {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, totalSims: numSims};
 }
 
 async function runUFCSimGen(){
@@ -4218,7 +4228,7 @@ async function runUFCSimGen(){
 
   if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return; }
 
-  const {ranked, medianScoreById, compositeScoreById, distById, winProb, totalSims} = await runUFCSimsNew(
+  const {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, totalSims} = await runUFCSimsNew(
     fullPool, pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal
   );
 
@@ -4377,7 +4387,25 @@ async function runUFCSimGen(){
       const leverageFactor = lineupLeverage(x);
       // Penalize only high overlap (near-duplicates); no reward for dissimilarity.
       const dupPenalty    = 1 - DUP_PEN * Math.max(0, maxSim - SIM_TOL) / (1 - SIM_TOL);
-      const val = quality * leverageFactor * dupPenalty;
+      // Optimal-rate alignment: steer portfolio exposure toward each fighter's
+      // sim-derived optimal rate (share of sims where he's in the optimal
+      // lineup). Composite ranking alone structurally buries pick'em fighters —
+      // their composite is dragged by the ~50% of sims they lose, even though
+      // conditional on winning a cheap 5R main-eventer is the card's top
+      // ceiling. The optimal rate is the exposure anchor the sims actually
+      // recommend (it sums to exactly 6.0 = the full exposure budget); lineups
+      // whose fighters are under-covered relative to it get boosted, over-
+      // covered get taxed. Leverage and caps still tilt/limit on top, so a
+      // deliberate fade of the anchor remains one slider away.
+      const denomA = Math.max(1, filled.length);
+      let align = 0;
+      x.lineup.forEach(p=>{
+        const tgt = appearRate[p.id]!=null ? appearRate[p.id] : 0.25;
+        const cur = (outputExpCount[p.id]||0) / denomA;
+        align += (tgt - cur);
+      });
+      const ALIGN_W = 0.35;
+      const val = quality * leverageFactor * dupPenalty + ALIGN_W * (align / 6);
       if(val>bestVal){ bestVal=val; bestIdx=ri; }
     }
 
@@ -4412,6 +4440,15 @@ async function runUFCSimGen(){
     [finalLineups[i],finalLineups[j]]=[finalLineups[j],finalLineups[i]];
   }
 
+  // Surface the sim's own exposure recommendations for the biggest gaps
+  (function(){
+    const rows = pool.filter(p=>appearRate[p.id]!=null).map(p=>({
+      p, tgt: appearRate[p.id], out: (outputExpCount[p.id]||0)/Math.max(1,filled.length)
+    })).sort((a,b)=>(b.tgt-b.out)-(a.tgt-a.out));
+    const under = rows.slice(0,3).filter(r=>r.tgt-r.out>0.12)
+      .map(r=>`${r.p.name.split(' ').slice(-1)[0]} ${(r.out*100).toFixed(0)}% vs sim-opt ${(r.tgt*100).toFixed(0)}%`);
+    if(under.length) log(`Note — still under sim-optimal rate (leverage/caps): ${under.join(', ')}`);
+  })();
   log(`Done! ${filled.length} lineups selected.`);
   log(`Avg sim score across selected lineups: ${avgSim.toFixed(1)} pts`);
   // (The old "top lineup appeared optimal in X of N sims" line was dropped —
