@@ -3239,6 +3239,46 @@ function levShape(ratio, strength){
   return Math.exp(strength * L * Math.tanh(Math.log(ratio) / L));
 }
 
+// ── Multi-metric lineup gauntlet ──────────────────────────────
+// Automates the manual "build 5 sets, delete the worst" workflow: given a big
+// candidate pool, cull the worst lineups axis-by-axis in round-robin passes
+// (chalkiest by ownership, lowest equity, lowest proj, lowest rating, ...)
+// until only `targetCount` survivors remain. A lineup must be non-terrible on
+// EVERY axis to survive — a single collapsed blend score lets "mediocre at
+// everything" lineups sneak through, which is exactly the junk this kills.
+// Axis weights are deliberately asymmetric: ownership and equity cull hardest
+// (equity and contention win GPPs), proj/rating lightly (culling low-proj hard
+// would quietly re-chalk deliberately contrarian builds and fight the leverage
+// slider). items: [{...metric fields}], axes: [{key, dir:'high'|'low', weight,
+// label}]. Axes whose metric is missing across the pool are skipped.
+function gauntletCull(items, targetCount, axes, logFn, label){
+  if(items.length <= targetCount) return items;
+  const usable = axes.filter(ax => items.some(it => it[ax.key] != null && isFinite(it[ax.key])));
+  if(!usable.length) return items;
+  const alive = new Set(items);
+  const dropped = {};
+  usable.forEach(ax => dropped[ax.key] = 0);
+  let guard = 0;
+  while(alive.size > targetCount && guard++ < 10000){
+    let progressed = false;
+    for(const ax of usable){
+      const room = alive.size - targetCount;
+      if(room <= 0) break;
+      const k = Math.min(ax.weight, room);
+      const arr = [...alive].sort((a,b) => ax.dir === 'high'
+        ? ((b[ax.key]||0) - (a[ax.key]||0))
+        : ((a[ax.key]||0) - (b[ax.key]||0)));
+      for(let i = 0; i < k && i < arr.length; i++){ alive.delete(arr[i]); dropped[ax.key]++; progressed = true; }
+    }
+    if(!progressed) break;
+  }
+  if(logFn){
+    const parts = usable.map(ax => `${dropped[ax.key]} ${ax.label || ax.key}`).join(', ');
+    logFn(`Gauntlet${label ? ` (${label})` : ''}: ${items.length} → ${alive.size} candidates (culled ${parts})`);
+  }
+  return items.filter(it => alive.has(it));
+}
+
 // Per-player de-vigged sportsbook composite → p._oddsScore. Returns false if no
 // odds markets are mapped (caller renormalizes the mix to drop the odds leg).
 function ensureOddsScores(pool, slate){
@@ -4272,7 +4312,26 @@ async function runUFCSimGen(){
   const outputExpCount = {};
   const selectedSets   = [];
   const filled         = [];
-  const remaining      = [...ranked];
+
+  // ── Gauntlet: multi-metric cull before selection ──
+  // Same principle as the PGA gauntlet: a lineup must be non-terrible on every
+  // axis to reach the selector. Ownership culls hardest; ML equity and sim
+  // composite are weighted lighter so deliberately dog-heavy ceiling lineups
+  // aren't flattened (dog exposure is a ceiling decision, not junk) — this
+  // only removes the tail where a lineup is chalky AND low-equity AND low-sim.
+  const _ownMapped = pool.some(p=>p.own!=null && p.own!=='');
+  const _annotated = ranked.map(e=>({
+    e,
+    gOwn:  _ownMapped ? e.lineup.reduce((s,p)=>s+(parseFloat(p.own)||0),0) : null,
+    gMl:   e.lineup.reduce((s,p)=>s+(winProb[p.id]!=null ? winProb[p.id] : 0.5),0),
+    gComp: e.lineup.reduce((s,p)=>s+(compositeScoreById[p.id]||0),0),
+  }));
+  const _survivors = gauntletCull(_annotated, Math.max(target*8, 200), [
+    {key:'gOwn',  dir:'high', weight:3, label:'chalkiest'},
+    {key:'gMl',   dir:'low',  weight:2, label:'lowest-ML-equity'},
+    {key:'gComp', dir:'low',  weight:2, label:'lowest-composite'},
+  ], log);
+  const remaining      = _survivors.map(a=>a.e);
 
   while(filled.length < target && remaining.length > 0){
     let bestIdx=-1, bestVal=-Infinity;
@@ -5451,7 +5510,30 @@ async function runNascarSimGen(){
 
     const selSets  = [];
     const filled   = [];
-    const remaining = [...candidates].filter(x => x.score >= GLOBAL_FLOOR);
+    let remaining = [...candidates].filter(x => x.score >= GLOBAL_FLOOR);
+
+    // ── Gauntlet: multi-metric cull within this scenario bucket ──
+    // Culling happens PER BUCKET so scenario diversity is preserved — each
+    // bucket keeps its own best survivors rather than one dominant scenario
+    // swallowing the whole pool. Ownership culls hardest, de-vigged win+top5
+    // equity and composite lighter (same asymmetry rationale as PGA/UFC).
+    {
+      const nOwnMapped = slate.columnMapping?.own != null;
+      const annotatedN = remaining.map(x=>({
+        x,
+        gOwn:  nOwnMapped ? x.lu.reduce((s,p)=>s+(parseFloat(p.own)||0),0) : null,
+        gEq:   x.lu.reduce((s,p)=>s+((p._nPWin||0)+(p._nPTop5||0)),0),
+        gComp: x.score,
+      }));
+      const capFactorN = maxExpPct < 100 ? Math.min(3, 100 / Math.max(1, maxExpPct)) : 1;
+      const survTargetN = Math.ceil(Math.max((bucket.allocatedLineups||1)*6, 60) * capFactorN);
+      const survivorsN = gauntletCull(annotatedN, survTargetN, [
+        {key:'gOwn',  dir:'high', weight:3, label:'chalkiest'},
+        {key:'gEq',   dir:'low',  weight:2, label:'lowest-equity'},
+        {key:'gComp', dir:'low',  weight:2, label:'lowest-composite'},
+      ], log, bucket.playerName);
+      remaining = survivorsN.map(a=>a.x);
+    }
 
     // Compute ceiling + cumulative ownership for survivors, then normalize chalk
     // across this candidate set so the fade is relative (chalkiest → max fade,
@@ -5793,6 +5875,22 @@ async function runAutoGen(){
     return base * (1 + noise);
   };
 
+  // ── Candidate-pool exposure feedback ──
+  // The leverage boost and equity jam are (deliberately) persistent score
+  // advantages, but persistent advantages inside a softmax picker mean the same
+  // few players land in most of the CANDIDATE pool — and no downstream
+  // selection can diversify a pool that's 80% one golfer. This multiplier
+  // decays a player's build-time score as their share of already-generated
+  // candidates grows (linear fade, floored at 0.4×), so pool exposure has to be
+  // continuously re-earned instead of compounding. Deliberate concentration is
+  // still available via MIN% overrides; hard MAX% caps still bind above this.
+  const EXP_FEEDBACK = 0.8;
+  const expAdj = p => {
+    const denom = Math.max(50, generated.length);
+    const share = (expTracker[p.id]||0) / denom;
+    return Math.max(0.3, 1 - EXP_FEEDBACK * share);
+  };
+
   const scored=[...pool].sort((a,b)=>getBaseScore(b)-getBaseScore(a));
   const existingKeys=new Set((slate.savedLineups||[]).map(l=>lineupKey(l)));
 
@@ -5930,7 +6028,7 @@ async function runAutoGen(){
         if(slotsLeft > 1 && p.salary + cheapestFill(slotsLeft - 1, p.salary) > salRemaining) return false;
         return true;
       }).map(p=>{
-        let score = getNoisyScore(p);
+        let score = getNoisyScore(p) * expAdj(p);
         // Archetype tilt: boost players IN the archetype group, suppress players in OTHER archetype groups
         // This narrows the gap rather than applying absolute multipliers
         if(arcGroup){
@@ -6023,13 +6121,32 @@ async function runAutoGen(){
         for(const li of order){
           const out = lineup[li];
           const budget = maxSal - (total - out.salary);
-          let best = null, bestScore = getBaseScore(out);
+          // Collect ALL improving upgrades and pick one rank-weighted, instead of
+          // always taking the argmax. The argmax jam was a major concentration
+          // engine: every lineup with leftover salary got deterministically
+          // upgraded toward the same handful of top-score players, on top of the
+          // (also deterministic) leverage boost. Rank-weighted choice keeps the
+          // quality guarantee (only upgrades that beat the outgoing player are
+          // eligible) while spreading jam targets across near-equals.
+          const baseOut = getBaseScore(out);
+          const improving = [];
           for(const p of available){
             if(p===out || lineup.includes(p)) continue;
             if(expTracker[p.id] >= playerMaxCount[p.id]) continue;
             if(p.salary <= out.salary || p.salary > budget) continue; // raise salary, stay ≤ cap
             const sc = getBaseScore(p);
-            if(sc > bestScore){ bestScore = sc; best = p; }
+            // Eligibility on RAW quality (never swap in a worse player);
+            // ranking on exposure-ADJUSTED quality (spread the jam targets).
+            if(sc > baseOut) improving.push({p, sc: sc * expAdj(p)});
+          }
+          let best = null;
+          if(improving.length){
+            improving.sort((a,b)=>b.sc-a.sc);
+            const top = improving.slice(0, 5);
+            const wts = top.map((_,i)=>Math.pow(0.55, i)); // 1, .55, .30, .17, .09
+            let r = Math.random() * wts.reduce((a,b)=>a+b,0);
+            best = top[0].p;
+            for(let i=0;i<top.length;i++){ r -= wts[i]; if(r <= 0){ best = top[i].p; break; } }
           }
           if(best){
             total = total - out.salary + best.salary;
@@ -6144,9 +6261,35 @@ async function runAutoGen(){
         bucketLineups = scoredValid.filter(x=>x.lineup._overflow);
       }
       if(!bucketLineups.length) return;
-      // All candidates here already clear the salary floor (hard filter above) and are
-      // cap-jammed with equity, so we just feed the diversity selector a generous,
-      // quality-sorted pool — dropping only the weakest quartile.
+
+      // ── Gauntlet: multi-metric cull before diversity selection ──
+      // Annotate each candidate with the portfolio metrics used for manual
+      // elimination, then cull round-robin down to ~3× the bucket's output
+      // target. Selection then diversifies across a pool where nothing is
+      // bad on any axis. Weights: ownership 3 / equity 3 / proj 1 / rating 1.
+      const annotated = bucketLineups.map(x=>({
+        x,
+        gOwn:  x.lineup.reduce((s,p)=>s+(parseFloat(p.own)||0),0),
+        gEq:   oddsAvailable ? x.lineup.reduce((s,p)=>s+(p._oddsScore||0),0) : null,
+        gProj: slate.columnMapping?.proj!=null ? x.lineup.reduce((s,p)=>s+(parseFloat(p.proj)||0),0) : null,
+        gRtg:  slate.columnMapping?.rating!=null ? x.lineup.filter(p=>p.rating!=null&&!p._ratingImputed).reduce((s,p)=>s+(parseFloat(p.rating)||0),0) : null,
+      }));
+      const gauntletAxes = [
+        {key:'gOwn',  dir:'high', weight:3, label:'chalkiest'},
+        {key:'gEq',   dir:'low',  weight:3, label:'lowest-equity'},
+        {key:'gProj', dir:'low',  weight:1, label:'lowest-proj'},
+        {key:'gRtg',  dir:'low',  weight:1, label:'lowest-rating'},
+      ];
+      // Survivor headroom scales with exposure-cap strictness: at a 40% max
+      // exposure each player can only appear in 40% of the output, so the
+      // diversity selector needs a wider survivor pool to satisfy the caps
+      // without exhausting legal picks (returning fewer lineups than asked).
+      const capFactor = maxExpPct < 100 ? Math.min(3, 100 / Math.max(1, maxExpPct)) : 1;
+      const survivorTarget = Math.ceil(Math.max(q.outputTarget * 3, 30) * capFactor);
+      const survivors = gauntletCull(annotated, survivorTarget, gauntletAxes, log,
+        q.waveTarget || (q.archetypeGroupId ? 'archetype' : null));
+      bucketLineups = survivors.map(a=>a.x);
+
       const byScore = bucketLineups.slice().sort((a,b)=>b.score-a.score);
       const keepN = Math.max(q.outputTarget, Math.ceil(byScore.length * 0.75));
       const quality = byScore.slice(0, keepN);
@@ -6192,10 +6335,28 @@ async function runAutoGen(){
             const sim = shared / (ids.size + sel.size - shared);
             if(sim > maxSim) maxSim = sim;
           }
-          // Combined score: quality component + diversity component
+          // Combined score: quality + diversity − exposure imbalance.
+          // The Jaccard term only compares against recent picks, so it never
+          // stopped the portfolio from converging on the same leverage-boosted
+          // players (78% single-player exposure on small pools). The exposure
+          // penalty is portfolio-wide: a lineup pays for how much of the output
+          // its players already occupy, so concentration self-corrects — high
+          // exposure has to be EARNED against increasingly cheaper alternatives.
+          // The hard MAX% caps remain the absolute control on top of this.
           const qualVal = normScore(x);
           const divVal = 1 - maxSim;
-          const val = QUALITY_WEIGHT * qualVal + (1 - QUALITY_WEIGHT) * divVal;
+          // Two-part exposure penalty: a mild tax on the lineup's AVERAGE
+          // portfolio share (gentle, always on), plus a sharp escalator on the
+          // single MOST-exposed player once their share exceeds 35% — broad
+          // 25-35% exposures cost almost nothing, but a player pushing toward
+          // 60-70% of the portfolio has to keep beating increasingly cheaper
+          // alternatives. This is what makes exposure track conviction instead
+          // of compounding score advantages.
+          const tgt = Math.max(1, target);
+          const avgShare = x.lineup.reduce((s,p)=>s+(outputExpCount[p.id]||0),0) / (6 * tgt);
+          const maxShare = x.lineup.reduce((m,p)=>Math.max(m,(outputExpCount[p.id]||0)/tgt),0);
+          const expPen = 0.8 * avgShare + 1.5 * Math.max(0, maxShare - 0.35);
+          const val = QUALITY_WEIGHT * qualVal + (1 - QUALITY_WEIGHT) * divVal - expPen;
           if(val > bestVal){ bestVal = val; bestIdx = ri; }
         }
         if(bestVal === -Infinity) break; // all remaining exceed caps
