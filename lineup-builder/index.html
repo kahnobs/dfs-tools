@@ -2254,15 +2254,20 @@ function renderPool(){
       p.finish_r1!=null||p.finish_r2!=null||p.finish_r3!=null||p.finish_r4!=null||
       p.finish_r5!=null||p.decision!=null||p.ss_ou!=null||p.td_ou!=null
     );
-    const nameAttrs = hasOddsTip
-      ? ` style="flex:1;cursor:help;" onmouseenter="showOddsTooltipById(this,'${p.id}')" onmouseleave="hideOddsTooltip()"`
-      : ` style="flex:1"`;
+    // The hover handlers live on an inline span around the name text, not on the
+    // flex:1 cell — the cell stretches across the whole empty column, so hovering
+    // blank space to the right of short names was popping the odds card. An
+    // inline span is exactly as wide as the text, so the tooltip only triggers
+    // (and anchors) on the name itself. The cell keeps flex:1 for layout.
+    const nameHtml = hasOddsTip
+      ? `<span style="cursor:help;" onmouseenter="showOddsTooltipById(this,'${p.id}')" onmouseleave="hideOddsTooltip()">${p.name}</span>`
+      : p.name;
 
     return `<div class="${rowClass}" style="grid-template-columns:${gt}${isHidden&&!showHidden?';display:none':''}${isGroupEdit?';cursor:pointer':''}" data-pid="${p.id}" onclick="${rowClick}">
       ${isGroupEdit ? `<div class="col-c" style="font-size:13px;color:${inGroup?'var(--purple)':'var(--muted)'};">${inGroup?'☑':'☐'}</div>` : ''}
       <div class="cell-mono col-c" style="padding-right:6px;">${leftColValue(slate,p,i)}</div>
       <div style="display:flex;align-items:center;gap:4px;min-width:0;">
-        <div class="cell-name"${nameAttrs}>${p.name}</div>
+        <div class="cell-name" style="flex:1">${nameHtml}</div>
         ${!isGroupEdit&&dots?`<div class="grp-dots">${dots}</div>`:''}
       </div>
       ${(_hasUFCSim||false) && !mobile
