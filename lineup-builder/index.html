@@ -3574,8 +3574,30 @@ function buildCDF(points, ouLine){
     const pNext = i+1 < points.length ? points[i+1].prob : 0;
     const mass = Math.max(0, pThis - pNext);
     const step = i+1 < points.length ? points[i+1].threshold - points[i].threshold : 5;
-    buckets.push({low: points[i].threshold, high: points[i].threshold + step, mass});
+    buckets.push({low: points[i].threshold, high: points[i].threshold + step, mass,
+                  tail: i === points.length - 1});
   }
+  // Geometric tail for the TOP rung. The last rung's mass is P(X ≥ topThreshold)
+  // — everything at or beyond it. Sampling that uniformly in a one-step-wide
+  // bucket silently capped volume at topThreshold+step (e.g. SS ≤ ~130, TD ≤ 7)
+  // no matter the round cap, which erased the entire 5-round premium: a 5R
+  // decision's 200-SS cap was unreachable, so main-event winners showed the
+  // same ceilings as 3R fighters. The tail's decay rate is estimated from the
+  // survival ratio of the last two rungs (how fast exceedance was already
+  // falling per step), so heavy-volume ladders extend further than steep ones.
+  // Round caps still clamp every draw, so R1-R3 outcomes are unchanged — only
+  // outcomes whose caps exceed the ladder (5R decisions, late finishes,
+  // takedown sprees) gain the ceiling they were being denied.
+  const lastPt = points[points.length-1];
+  const prevPt = points.length > 1 ? points[points.length-2] : null;
+  const lastStep = prevPt ? (lastPt.threshold - prevPt.threshold) : 5;
+  let tailMean = lastStep;
+  if(prevPt && prevPt.prob > 0 && lastPt.prob > 0 && lastPt.prob < prevPt.prob){
+    const surv = lastPt.prob / prevPt.prob;                    // per-step survival
+    tailMean = lastStep / Math.max(0.10, Math.log(1/surv));    // exponential mean
+  }
+  tailMean = Math.min(tailMean, lastStep * 5);                 // sanity clamp
+
   const belowMass = Math.max(0, 1 - points[0].prob);
   const total = buckets.reduce((s,b)=>s+b.mass,0) + belowMass;
   const useAnchor = ouLine != null && ouLine > 0 && points[0].threshold > ouLine * 1.5;
@@ -3592,6 +3614,10 @@ function buildCDF(points, ouLine){
       if(maxVal != null && b.low >= maxVal) break;
       acc += b.mass;
       if(r < acc){
+        if(b.tail){
+          const draw = b.low + (-Math.log(1 - Math.random())) * tailMean;
+          return maxVal != null ? Math.min(draw, maxVal) : draw;
+        }
         const hi = maxVal != null ? Math.min(b.high, maxVal) : b.high;
         return b.low + Math.random() * (hi - b.low);
       }
