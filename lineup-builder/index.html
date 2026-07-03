@@ -3265,9 +3265,17 @@ function gauntletCull(items, targetCount, axes, logFn, label){
       const room = alive.size - targetCount;
       if(room <= 0) break;
       const k = Math.min(ax.weight, room);
-      const arr = [...alive].sort((a,b) => ax.dir === 'high'
+      let arr = [...alive].sort((a,b) => ax.dir === 'high'
         ? ((b[ax.key]||0) - (a[ax.key]||0))
         : ((a[ax.key]||0) - (b[ax.key]||0)));
+      // Optional threshold: an axis only culls entries that are GENUINELY bad
+      // on it. Needed for sparse metrics like unjustified ownership where most
+      // lineups score ~0 — without the floor, the axis rank-orders on
+      // mostly-zeros and spends every cycle deleting the same few nonzero
+      // lineups (one modestly-chalky driver ≠ junk; a stack of them = junk).
+      if(ax.minBad != null){
+        arr = arr.filter(it => ax.dir === 'high' ? (it[ax.key]||0) > ax.minBad : (it[ax.key]||0) < ax.minBad);
+      }
       for(let i = 0; i < k && i < arr.length; i++){ alive.delete(arr[i]); dropped[ax.key]++; progressed = true; }
     }
     if(!progressed) break;
@@ -5368,8 +5376,18 @@ async function runNascarSimGen(){
   // of his own bucket for being chalk. So his ownership is excluded from the sum.
   // Lineups that don't roster the centerpiece get no exemption, which naturally
   // pulls the centerpiece into his own bucket's lineups.
+  // Lineup chalk = summed UNJUSTIFIED ownership: the portion of each driver's
+  // ownership his sim share doesn't support (own% minus sim-share × field own).
+  // Raw ownership made the fade justification-blind — a correctly-popular
+  // mispriced value car (own high BECAUSE the sim value is real) was taxed
+  // identically to empty chalk. With this definition a driver owned exactly in
+  // proportion to his sim contributes zero chalk; only ownership beyond what
+  // the sim supports draws the leverage fade. Falls back to raw own if the
+  // unjustified field hasn't been computed (it's populated below, right after
+  // the sims run).
   const lineupChalk = (lu, exemptId) => lu.reduce((s,p)=>{
     if(exemptId && p.id === exemptId) return s;
+    if(p._unjOwn != null) return s + p._unjOwn/100;
     const o = parseFloat(p.own)||0;
     return s + (o>0 ? o/100 : fieldAvgOwnF);
   }, 0);
@@ -5390,14 +5408,33 @@ async function runNascarSimGen(){
   const driverLevMult = {};
   (function(){
     if(!ownMapped || leverageStrength<=0){ pool.forEach(p=>driverLevMult[p.id]=1); return; }
-    const sumComp = pool.reduce((a,p)=>a+Math.max(0,p._simComposite||0),0) || 1;
-    const sumOwn  = pool.reduce((a,p)=>a+Math.max(0,(parseFloat(p.own)||0)),0) || 1;
-    pool.forEach(p=>{
-      const eqShare  = Math.max(0,p._simComposite||0)/sumComp;
-      const ownVal   = (parseFloat(p.own)||0) || (fieldAvgOwnF*100); // impute field avg if missing
-      const ownShare = ownVal/sumOwn;
-      const ratio    = ownShare>0 ? eqShare/ownShare : 1;
-      driverLevMult[p.id] = levShape(ratio, leverageStrength); // smooth 0.5x-2x curve, no clamp tie-mass
+    // Dispersion-normalized justification. A raw share-ratio (simShare/ownShare)
+    // degenerates into inverse-ownership in NASCAR: sim composites are
+    // compressed (~2.7× spread, every driver scores 25-70 DK pts) while
+    // ownership is not (~26× spread), so ownership variance swamps the equity
+    // correction and every popular driver gets faded like unjustified chalk —
+    // including correctly-popular mispriced cars. Standardizing both signals in
+    // log space puts them in comparable units: the ratio now measures how many
+    // standard deviations a driver's ownership RANK exceeds his sim RANK.
+    // Justified chalk (own rank ≈ sim rank) lands near 1×; only ownership the
+    // sim doesn't support gets faded, and only unpopularity the sim supports
+    // gets boosted.
+    const lnComps = pool.map(p=>Math.log(Math.max(1e-6, p._simComposite||0)));
+    const lnOwns  = pool.map(p=>Math.log(Math.max(0.05, (parseFloat(p.own)||0) || (fieldAvgOwnF*100))));
+    const mean = a=>a.reduce((x,y)=>x+y,0)/a.length;
+    const sd = (a,m)=>Math.sqrt(a.reduce((x,y)=>x+(y-m)*(y-m),0)/a.length)||1;
+    const mC=mean(lnComps), sC=sd(lnComps,mC), mO=mean(lnOwns), sO=sd(lnOwns,mO);
+    const sumComp2 = pool.reduce((a,p)=>a+Math.max(0,p._simComposite||0),0) || 1;
+    const sumOwn2  = pool.reduce((a,p)=>a+Math.max(0,(parseFloat(p.own)||0)),0) || 1;
+    pool.forEach((p,i)=>{
+      const zEq  = (lnComps[i]-mC)/sC;
+      const zOwn = (lnOwns[i]-mO)/sO;
+      const ratio = Math.pow(2, zEq - zOwn); // ±1 SD of justification ↔ 2×/0.5× pre-shape
+      driverLevMult[p.id] = levShape(ratio, leverageStrength); // smooth saturating curve
+      // Unjustified ownership (percent points): own% beyond what the driver's
+      // sim share would predict. Consumed by lineupChalk and the gauntlet.
+      const justified = (Math.max(0,p._simComposite||0)/sumComp2) * sumOwn2;
+      p._unjOwn = Math.max(0, (parseFloat(p.own)||0) - justified);
     });
     const boosted = pool.filter(p=>driverLevMult[p.id]>1.03)
       .sort((a,b)=>driverLevMult[b.id]-driverLevMult[a.id]).slice(0,6);
@@ -5414,14 +5451,22 @@ async function runNascarSimGen(){
   // still samples heavily (his composite is the base), he just no longer
   // crowds out per-dollar-better cars in the supporting slots. Clamped so the
   // slate's top favorite can't be zeroed the way full VOR (comp − λ·sal) would.
-  const VALUE_GAMMA = 0.5;
+  // γ=1.6: price-relative value is the DOMINANT builder signal, not a tilt.
+  // At γ=1.0 the base weight was still absolute sim points, so a driver with a
+  // 10-point comp edge out-sampled a 23%-better-value car regardless of price —
+  // the top per-dollar plays on the slate kept landing mid-pack in exposure.
+  // At 1.6, equal per-dollar value ⇒ comparable builder weight across salary
+  // tiers, and the slate's genuine value leaders lead the sampling. Absolute
+  // quality still guards the output twice: the gauntlet's composite floor and
+  // ceiling-based selection both cull cheap-but-weak lineups.
+  const VALUE_GAMMA = 1.6;
   const _sumCompAll = pool.reduce((a,p)=>a+Math.max(0,p._simComposite||0),0) || 1;
   const _sumSalAll  = pool.reduce((a,p)=>a+(p.salary||0),0) || 1;
   const _lambdaN    = _sumCompAll / _sumSalAll;
   const valueTilt = p => {
     const fair = _lambdaN * (p.salary||0);
     if(fair <= 0) return 1;
-    const ratio = Math.max(0.6, Math.min(1.6, Math.max(0,p._simComposite||0) / fair));
+    const ratio = Math.max(0.4, Math.min(2.2, Math.max(0,p._simComposite||0) / fair));
     return Math.pow(ratio, VALUE_GAMMA);
   };
 
@@ -5533,7 +5578,7 @@ async function runNascarSimGen(){
         const salSum = x.lu.reduce((s,p)=>s+(p.salary||0),0) || 1;
         return {
           x,
-          gOwn:  nOwnMapped ? x.lu.reduce((s,p)=>s+(parseFloat(p.own)||0),0) : null,
+          gOwn:  nOwnMapped ? x.lu.reduce((s,p)=>s+(p._unjOwn!=null?p._unjOwn:(parseFloat(p.own)||0)),0) : null,
           gVal:  x.score / (salSum/1000),           // sim points per $1k (PD-aware)
           gComp: x.score,                            // absolute contention floor
         };
@@ -5542,7 +5587,7 @@ async function runNascarSimGen(){
       const survTargetN = Math.ceil(Math.max((bucket.allocatedLineups||1)*6, 60) * capFactorN);
       const survivorsN = gauntletCull(annotatedN, survTargetN, [
         {key:'gVal',  dir:'low',  weight:3, label:'worst-value'},
-        {key:'gOwn',  dir:'high', weight:2, label:'chalkiest'},
+        {key:'gOwn',  dir:'high', weight:2, label:'most-unjustified-chalk', minBad:45},
         {key:'gComp', dir:'low',  weight:2, label:'lowest-composite'},
       ], log, bucket.playerName);
       remaining = survivorsN.map(a=>a.x);
@@ -5557,13 +5602,18 @@ async function runNascarSimGen(){
       x.ceiling = lineupCeiling(x.lu, sampledSims);
       x.chalk   = lineupChalk(x.lu, bucket.id);
     });
-    const chalkVals = remaining.map(x=>x.chalk);
-    const minChalk = chalkVals.length ? Math.min(...chalkVals) : 0;
-    const maxChalk = chalkVals.length ? Math.max(...chalkVals) : 1;
-    const chalkRange = (maxChalk - minChalk) || 1;
+    // ABSOLUTE chalk scale, not min-max within the candidate set. With chalk
+    // defined as unjustified ownership, most drivers contribute zero — so a
+    // relative (min-max) normalization made any lineup containing one of the
+    // few unjustified drivers the maximum and dumped the entire fade on it (a
+    // 20-point unjustified car was faded like a 60-point one). Scaling against
+    // a fixed reference (~a full lineup of heavy unjustified chalk) makes the
+    // fade proportional to how much unsupported ownership the lineup actually
+    // carries: 20 pts of it costs a third of what 60 pts costs, at any slider.
+    const CHALK_REF = 1.2; // 120 percentage points of unjustified ownership
     const fadeStrength = bucket.ownApplied ? leverageStrength : 0;
     remaining.forEach(x=>{
-      x.normChalk = (x.chalk - minChalk) / chalkRange;
+      x.normChalk = Math.min(1, x.chalk / CHALK_REF);
       x.levScore  = x.ceiling * (1 - MAX_FADE * fadeStrength * x.normChalk);
     });
     const topLev = remaining.reduce((m,x)=>Math.max(m, x.levScore||0), 0) || 1;
