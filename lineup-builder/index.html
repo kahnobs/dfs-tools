@@ -5515,21 +5515,34 @@ async function runNascarSimGen(){
     // ── Gauntlet: multi-metric cull within this scenario bucket ──
     // Culling happens PER BUCKET so scenario diversity is preserved — each
     // bucket keeps its own best survivors rather than one dominant scenario
-    // swallowing the whole pool. Ownership culls hardest, de-vigged win+top5
-    // equity and composite lighter (same asymmetry rationale as PGA/UFC).
+    // swallowing the whole pool.
+    // NASCAR axes differ from PGA/UFC on purpose. Raw win/top5 odds equity is
+    // the WRONG cull metric here: back-of-grid value plays (P30+ starters)
+    // score DK points through place differential, which the betting markets'
+    // win/top5 prices don't see at all — a raw-equity axis systematically
+    // culled every lineup carrying the slate's best per-dollar plays. The sim
+    // composite already prices in PD (it's simulated), so the value axis is
+    // per-$1k sim composite — the same SVAL read used in the pool. Ownership
+    // weight is also lower than PGA/UFC (2, not 3): NASCAR value plays are
+    // chalky BY SALARY NECESSITY, and the leverage fade in selection is
+    // already the ownership control — culling chalk hard here double-taxed
+    // the exact same lineups the equity axis was killing.
     {
       const nOwnMapped = slate.columnMapping?.own != null;
-      const annotatedN = remaining.map(x=>({
-        x,
-        gOwn:  nOwnMapped ? x.lu.reduce((s,p)=>s+(parseFloat(p.own)||0),0) : null,
-        gEq:   x.lu.reduce((s,p)=>s+((p._nPWin||0)+(p._nPTop5||0)),0),
-        gComp: x.score,
-      }));
+      const annotatedN = remaining.map(x=>{
+        const salSum = x.lu.reduce((s,p)=>s+(p.salary||0),0) || 1;
+        return {
+          x,
+          gOwn:  nOwnMapped ? x.lu.reduce((s,p)=>s+(parseFloat(p.own)||0),0) : null,
+          gVal:  x.score / (salSum/1000),           // sim points per $1k (PD-aware)
+          gComp: x.score,                            // absolute contention floor
+        };
+      });
       const capFactorN = maxExpPct < 100 ? Math.min(3, 100 / Math.max(1, maxExpPct)) : 1;
       const survTargetN = Math.ceil(Math.max((bucket.allocatedLineups||1)*6, 60) * capFactorN);
       const survivorsN = gauntletCull(annotatedN, survTargetN, [
-        {key:'gOwn',  dir:'high', weight:3, label:'chalkiest'},
-        {key:'gEq',   dir:'low',  weight:2, label:'lowest-equity'},
+        {key:'gVal',  dir:'low',  weight:3, label:'worst-value'},
+        {key:'gOwn',  dir:'high', weight:2, label:'chalkiest'},
         {key:'gComp', dir:'low',  weight:2, label:'lowest-composite'},
       ], log, bucket.playerName);
       remaining = survivorsN.map(a=>a.x);
