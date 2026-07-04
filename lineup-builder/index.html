@@ -4830,6 +4830,11 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
     // Store raw odds score for later use
     p._nOddsScore = oddsScore;
   });
+  // NOTE: projections are deliberately NOT used anywhere in the simulation —
+  // the sim is a pure market (odds) + rating engine. Proj is an optimizer-side
+  // signal only. A proj-implied-finish skill component was tried and removed
+  // per explicit user direction (3rd-party source, adds noise).
+
   // Primary sort by skill score
   const skillSorted = [...pool].sort((a,b)=> b._nSkillScore - a._nSkillScore);
   skillSorted.forEach((p,i)=>{ p._nSkillRank = i+1; });
@@ -4919,6 +4924,16 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
       .map(p=>({p, lapsLed:0, fastestLaps:0}))
       .sort((a,b)=>b.p._nSkillScore - a.p._nSkillScore);
 
+    // Grid rank among survivors (for charge friction in the fallback draw)
+    const gridSorted = survivorDrawn.slice().sort((a,b)=>(a.p._nGrid||99)-(b.p._nGrid||99));
+    const gridRankSurv = {};
+    gridSorted.forEach((d,gi)=>{ gridRankSurv[d.p.id] = gi + 1; });
+    // Passing difficulty by track: superspeedway position is fluid, street/road
+    // courses are processional.
+    const CHARGE_FRICTION = trackType==='superspeedway' ? 0.15
+                          : trackType==='intermediate'  ? 0.35
+                          : trackType==='short'         ? 0.40 : 0.45;
+
     // Draw a raw position for every surviving driver from their odds distribution.
     // This is honest probability sampling — no floors, no ceilings, no forcing.
     // Good drivers naturally finish well more often because their odds say so.
@@ -4944,7 +4959,20 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
         // Both upside and downside variance are symmetric — the odds already
         // gave this driver low probability of a top finish; any remaining
         // variance is legitimate race uncertainty.
-        const anchor = skillIdx + 1;
+        // Charge friction: a driver starting BEHIND his skill rank only
+        // realizes part of the gap — passing cars costs pace and track
+        // position, and the cost scales with how processional the track is.
+        // Without this, a mid-rated back-marker (skill rank ~25, grid 33) was
+        // credited with driving through 8-9 cars every clean race, out-simming
+        // +4000-20000 cars from good grid spots. Falling BACK to skill rank is
+        // free (gravity needs no friction), so drivers starting ahead of their
+        // skill are unchanged — and tier draws from real odds bypass this
+        // entirely, so market-priced upside is untouched.
+        const skillAnchor = skillIdx + 1;
+        const gRank = gridRankSurv[d.p.id] || skillAnchor;
+        const anchor = gRank > skillAnchor
+          ? skillAnchor + CHARGE_FRICTION * (gRank - skillAnchor)
+          : skillAnchor;
         // Base SD was calibrated on historical FULL-FIELD finish distributions,
         // which already include attrition scatter — but this draw only orders
         // SURVIVORS (attrition is modeled separately by crasher-fill). Using
@@ -4959,7 +4987,12 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
         const baseSD = trackType==='short' ? 8.7 : trackType==='intermediate' ? 9.2 : 9.0;
         const stdDev = baseSD * Math.max(0.55, numSurvivors / FIELD);
         const _u1=Math.max(1e-10,Math.random()), _u2=Math.random();
-        const z = Math.sqrt(-2*Math.log(_u1))*Math.cos(2*Math.PI*_u2);
+        let z = Math.sqrt(-2*Math.log(_u1))*Math.cos(2*Math.PI*_u2);
+        // Right-skew the fallback: real finish distributions are asymmetric —
+        // losing 10 spots (damage, penalties, pit trouble) is far more common
+        // than gaining 10 on pace. A symmetric spread was handing every
+        // fallback driver top-15 tails at the same rate as blowup tails.
+        z = z < 0 ? z * 0.65 : z * 1.15;
         d._rawPos = Math.max(1, anchor + z*stdDev);
       }
     });
