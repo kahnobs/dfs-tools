@@ -3574,8 +3574,30 @@ function buildCDF(points, ouLine){
     const pNext = i+1 < points.length ? points[i+1].prob : 0;
     const mass = Math.max(0, pThis - pNext);
     const step = i+1 < points.length ? points[i+1].threshold - points[i].threshold : 5;
-    buckets.push({low: points[i].threshold, high: points[i].threshold + step, mass});
+    buckets.push({low: points[i].threshold, high: points[i].threshold + step, mass,
+                  tail: i === points.length - 1});
   }
+  // Geometric tail for the TOP rung. The last rung's mass is P(X ≥ topThreshold)
+  // — everything at or beyond it. Sampling that uniformly in a one-step-wide
+  // bucket silently capped volume at topThreshold+step (e.g. SS ≤ ~130, TD ≤ 7)
+  // no matter the round cap, which erased the entire 5-round premium: a 5R
+  // decision's 200-SS cap was unreachable, so main-event winners showed the
+  // same ceilings as 3R fighters. The tail's decay rate is estimated from the
+  // survival ratio of the last two rungs (how fast exceedance was already
+  // falling per step), so heavy-volume ladders extend further than steep ones.
+  // Round caps still clamp every draw, so R1-R3 outcomes are unchanged — only
+  // outcomes whose caps exceed the ladder (5R decisions, late finishes,
+  // takedown sprees) gain the ceiling they were being denied.
+  const lastPt = points[points.length-1];
+  const prevPt = points.length > 1 ? points[points.length-2] : null;
+  const lastStep = prevPt ? (lastPt.threshold - prevPt.threshold) : 5;
+  let tailMean = lastStep;
+  if(prevPt && prevPt.prob > 0 && lastPt.prob > 0 && lastPt.prob < prevPt.prob){
+    const surv = lastPt.prob / prevPt.prob;                    // per-step survival
+    tailMean = lastStep / Math.max(0.10, Math.log(1/surv));    // exponential mean
+  }
+  tailMean = Math.min(tailMean, lastStep * 5);                 // sanity clamp
+
   const belowMass = Math.max(0, 1 - points[0].prob);
   const total = buckets.reduce((s,b)=>s+b.mass,0) + belowMass;
   const useAnchor = ouLine != null && ouLine > 0 && points[0].threshold > ouLine * 1.5;
@@ -3592,6 +3614,10 @@ function buildCDF(points, ouLine){
       if(maxVal != null && b.low >= maxVal) break;
       acc += b.mass;
       if(r < acc){
+        if(b.tail){
+          const draw = b.low + (-Math.log(1 - Math.random())) * tailMean;
+          return maxVal != null ? Math.min(draw, maxVal) : draw;
+        }
         const hi = maxVal != null ? Math.min(b.high, maxVal) : b.high;
         return b.low + Math.random() * (hi - b.low);
       }
@@ -4086,6 +4112,13 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   const lineupFreq = new Map();
 
   const CHUNK = 100;
+  // Per-fighter optimal-rate: fraction of sims where the fighter is in that
+  // sim's optimal lineup. This is the theoretically correct exposure anchor
+  // for a GPP portfolio (it sums to exactly 6.0 = the exposure budget) and,
+  // unlike the win-prob-blended composite, it gives conditional stars their
+  // due: a pick'em main-eventer who is in nearly every optimal WHEN he wins
+  // rates ~50%, not the near-zero that composite ranking implied.
+  const optAppear = {};
   for(let s=0; s<numSims; s++){
     if(s > 0 && s % CHUNK === 0){
       await new Promise(r=>setTimeout(r,0));
@@ -4116,6 +4149,7 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
 
     const key = optimal.map(p=>p.id).sort().join('|');
     const total = optimal.reduce((s,p)=>s+(simScore[p.id]||0),0);
+    optimal.forEach(p=>{ optAppear[p.id] = (optAppear[p.id]||0) + 1; });
     if(lineupFreq.has(key)){
       const e = lineupFreq.get(key);
       e.count++;
@@ -4168,7 +4202,9 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     return e;
   }).sort((a,b) => b.composite - a.composite || b.count - a.count);
 
-  return {ranked, medianScoreById, compositeScoreById, distById, winProb, totalSims: numSims};
+  const appearRate = {};
+  visiblePool.forEach(p=>{ appearRate[p.id] = (optAppear[p.id]||0) / Math.max(1, numSims); });
+  return {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, totalSims: numSims};
 }
 
 async function runUFCSimGen(){
@@ -4218,7 +4254,7 @@ async function runUFCSimGen(){
 
   if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return; }
 
-  const {ranked, medianScoreById, compositeScoreById, distById, winProb, totalSims} = await runUFCSimsNew(
+  const {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, totalSims} = await runUFCSimsNew(
     fullPool, pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal
   );
 
@@ -4328,14 +4364,28 @@ async function runUFCSimGen(){
   // aren't flattened (dog exposure is a ceiling decision, not junk) — this
   // only removes the tail where a lineup is chalky AND low-equity AND low-sim.
   const _ownMapped = pool.some(p=>p.own!=null && p.own!=='');
+  // Unjustified ownership, sim-derived (the NASCAR lesson, ported): a fighter's
+  // ownership is justified up to his optimal-rate share of the exposure budget
+  // (appearRate/6 × total field ownership). Raw-ownership culling was killing
+  // main-event pick'ems whose 30-40% ownership the sims largely SUPPORT, while
+  // an empty-chalk fighter (owned far beyond his optimal rate) still gets
+  // culled. Thresholded so one modestly-over-owned fighter isn't cull-bait —
+  // only lineups STACKED with unsupported ownership die on this axis.
+  const _sumOwnU = pool.reduce((a,p)=>a+Math.max(0,parseFloat(p.own)||0),0) || 1;
+  const _unjOwnU = {};
+  pool.forEach(p=>{
+    const rate = appearRate[p.id]!=null ? appearRate[p.id] : 0.1;
+    const justified = (rate/6) * _sumOwnU;
+    _unjOwnU[p.id] = Math.max(0, (parseFloat(p.own)||0) - justified);
+  });
   const _annotated = ranked.map(e=>({
     e,
-    gOwn:  _ownMapped ? e.lineup.reduce((s,p)=>s+(parseFloat(p.own)||0),0) : null,
+    gOwn:  _ownMapped ? e.lineup.reduce((s,p)=>s+(_unjOwnU[p.id]||0),0) : null,
     gMl:   e.lineup.reduce((s,p)=>s+(winProb[p.id]!=null ? winProb[p.id] : 0.5),0),
     gComp: e.lineup.reduce((s,p)=>s+(compositeScoreById[p.id]||0),0),
   }));
   const _survivors = gauntletCull(_annotated, Math.max(target*8, 200), [
-    {key:'gOwn',  dir:'high', weight:3, label:'chalkiest'},
+    {key:'gOwn',  dir:'high', weight:3, label:'most-unjustified-chalk', minBad:35},
     {key:'gMl',   dir:'low',  weight:2, label:'lowest-ML-equity'},
     {key:'gComp', dir:'low',  weight:2, label:'lowest-composite'},
   ], log);
@@ -4377,7 +4427,34 @@ async function runUFCSimGen(){
       const leverageFactor = lineupLeverage(x);
       // Penalize only high overlap (near-duplicates); no reward for dissimilarity.
       const dupPenalty    = 1 - DUP_PEN * Math.max(0, maxSim - SIM_TOL) / (1 - SIM_TOL);
-      const val = quality * leverageFactor * dupPenalty;
+      // Optimal-rate alignment: steer portfolio exposure toward each fighter's
+      // sim-derived optimal rate (share of sims where he's in the optimal
+      // lineup). Composite ranking alone structurally buries pick'em fighters —
+      // their composite is dragged by the ~50% of sims they lose, even though
+      // conditional on winning a cheap 5R main-eventer is the card's top
+      // ceiling. The optimal rate is the exposure anchor the sims actually
+      // recommend (it sums to exactly 6.0 = the full exposure budget); lineups
+      // whose fighters are under-covered relative to it get boosted, over-
+      // covered get taxed. Leverage and caps still tilt/limit on top, so a
+      // deliberate fade of the anchor remains one slider away.
+      // Multiplicative alignment servo. The first (additive, 0.35-weight)
+      // version was ~10× too weak: a ±0.01 nudge against quality×leverage gaps
+      // of ~0.12, so output sat at roughly half the sim-optimal anchor. As a
+      // multiplier on the same scale as quality and leverage, coverage deficits
+      // now carry real authority: a lineup full of under-anchor fighters gets
+      // up to ~+50%, over-anchor exposure fades symmetrically, and the boost
+      // decays to zero as output reaches each fighter's optimal rate — a servo
+      // around the anchor, with leverage still expressing a deliberate tilt.
+      const denomA = Math.max(1, filled.length);
+      let align = 0;
+      x.lineup.forEach(p=>{
+        const tgt = appearRate[p.id]!=null ? appearRate[p.id] : 0.25;
+        const cur = (outputExpCount[p.id]||0) / denomA;
+        align += (tgt - cur);
+      });
+      const ALIGN_M = 3.0;
+      const alignFactor = Math.max(0.5, 1 + ALIGN_M * (align / 6));
+      const val = quality * leverageFactor * dupPenalty * alignFactor;
       if(val>bestVal){ bestVal=val; bestIdx=ri; }
     }
 
@@ -4412,6 +4489,15 @@ async function runUFCSimGen(){
     [finalLineups[i],finalLineups[j]]=[finalLineups[j],finalLineups[i]];
   }
 
+  // Surface the sim's own exposure recommendations for the biggest gaps
+  (function(){
+    const rows = pool.filter(p=>appearRate[p.id]!=null).map(p=>({
+      p, tgt: appearRate[p.id], out: (outputExpCount[p.id]||0)/Math.max(1,filled.length)
+    })).sort((a,b)=>(b.tgt-b.out)-(a.tgt-a.out));
+    const under = rows.slice(0,3).filter(r=>r.tgt-r.out>0.12)
+      .map(r=>`${r.p.name.split(' ').slice(-1)[0]} ${(r.out*100).toFixed(0)}% vs sim-opt ${(r.tgt*100).toFixed(0)}%`);
+    if(under.length) log(`Note — still under sim-optimal rate (leverage/caps): ${under.join(', ')}`);
+  })();
   log(`Done! ${filled.length} lineups selected.`);
   log(`Avg sim score across selected lineups: ${avgSim.toFixed(1)} pts`);
   // (The old "top lineup appeared optimal in X of N sims" line was dropped —
@@ -4644,32 +4730,49 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
   pool.forEach(p=>{
     const pW = p._nPWin || 0;
 
+    // Win-prob-dependent tier curves. The old fixed multipliers (Top3≈Win×2.8,
+    // Top10≈Win×7.5, chained ×1.39/×1.9 from top3) are only calibrated for
+    // favorites — the real win→tier relationship steepens sharply as win prob
+    // falls (a 25% winner is ~3× to top-10; a 2% winner is ~15×). On slates
+    // with only Win/Top3 posted, the flat multipliers cut mid-tier drivers'
+    // top-5/10 probabilities roughly in half, dumping them into the
+    // skill-anchored fallback and DEFLATING their sims — which inverted the
+    // board (floored-odds back-markers out-simming +2000-4000 cars). Power-law
+    // fits to empirical win→tier ratios; when a real top3 exists it anchors
+    // the estimate (curve supplies the ratio, market supplies the level).
+    const estT3  = w => Math.min(0.90, 0.48 * Math.pow(w/0.3, 0.62));
+    const estT5  = w => Math.min(0.92, 0.63 * Math.pow(w/0.3, 0.52));
+    const estT10 = w => Math.min(0.95, 0.84 * Math.pow(w/0.3, 0.42));
+
     // Estimate top3 if missing
     if(p._nPTop3 == null){
       if(p._nPTop5 != null){
-        // top3 ≈ top5 × 0.72 (3/5 positions ≈ 72% of top5 prob based on position distribution)
         p._nPTop3 = Math.min(p._nPTop5 * 0.72, 0.98);
       } else if(pW > 0){
-        p._nPTop3 = Math.min(pW * 2.8, 0.98);
+        p._nPTop3 = estT3(pW);
       }
     }
 
     // Estimate top5 if missing
     if(p._nPTop5 == null){
-      if(p._nPTop3 != null){
-        // top5 ≈ top3 / 0.72
+      if(p._nPTop3 != null && pW > 0){
+        // real top3 anchors the level; the curve supplies the win-prob-correct ratio
+        p._nPTop5 = Math.min(p._nPTop3 * (estT5(pW) / Math.max(1e-6, estT3(pW))), 0.98);
+      } else if(p._nPTop3 != null){
         p._nPTop5 = Math.min(p._nPTop3 / 0.72, 0.98);
       } else if(pW > 0){
-        p._nPTop5 = Math.min(pW * 4.0, 0.98);
+        p._nPTop5 = estT5(pW);
       }
     }
 
     // Estimate top10 if missing
     if(p._nPTop10 == null){
-      if(p._nPTop5 != null){
+      if(p._nPTop5 != null && pW > 0){
+        p._nPTop10 = Math.min(p._nPTop5 * (estT10(pW) / Math.max(1e-6, estT5(pW))), 0.98);
+      } else if(p._nPTop5 != null){
         p._nPTop10 = Math.min(p._nPTop5 * 1.9, 0.98);
       } else if(pW > 0){
-        p._nPTop10 = Math.min(pW * 7.5, 0.98);
+        p._nPTop10 = estT10(pW);
       }
     }
 
@@ -4770,11 +4873,25 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
 
     let toPlace = Math.min(numIncidents, FIELD-2);
     let guard = 0;
+    // Incident seeds are weighted by equipment risk instead of uniform. Uniform
+    // seeding meant a +250000 back-marker survived exactly as often as the
+    // slate's best car, then harvested huge place-differential every survival
+    // as crashers filled the rear — on superspeedways that clustered floored-
+    // odds punts ABOVE +2000-tier cars. Weight scales linearly with skill rank:
+    // worst equipment wrecks/fails ~1.8× as often as the best (conservative vs
+    // real DNF-rate spreads). Cluster collection still gathers by running
+    // order, so pack-wreck dynamics are unchanged.
+    const seedWeight = pool.map((p,i)=>{
+      const rankPct = ((p._nSkillRank||i+1) - 1) / Math.max(1, FIELD - 1);
+      return 1 + 0.8 * rankPct;
+    });
     while(toPlace > 0 && incidentSet.size < FIELD-2 && guard++ < 100){
       const avail = [];
       for(let i=0;i<FIELD;i++) if(!incidentSet.has(i)) avail.push(i);
       if(!avail.length) break;
-      const seed = avail[Math.floor(Math.random()*avail.length)];
+      let wSum = 0; for(const i of avail) wSum += seedWeight[i];
+      let rSeed = Math.random() * wSum, seed = avail[avail.length-1];
+      for(const i of avail){ rSeed -= seedWeight[i]; if(rSeed <= 0){ seed = i; break; } }
       const isSolo = (toPlace===1) || (Math.random() < incidentSoloP);
       const size = isSolo ? 1 : Math.min(toPlace, avail.length, nascarDrawClusterSize(trackType));
       const exit = nascarDrawExitTiming(trackType); // one wreck → one exit time
@@ -4828,7 +4945,19 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
         // gave this driver low probability of a top finish; any remaining
         // variance is legitimate race uncertainty.
         const anchor = skillIdx + 1;
-        const stdDev = trackType==='short' ? 8.7 : trackType==='intermediate' ? 9.2 : 9.0;
+        // Base SD was calibrated on historical FULL-FIELD finish distributions,
+        // which already include attrition scatter — but this draw only orders
+        // SURVIVORS (attrition is modeled separately by crasher-fill). Using
+        // full historical variance here double-counted the attrition upside:
+        // on high-attrition tracks a floored-odds back-marker drew top-15
+        // survivor slots far too often on top of the free PD from crashers
+        // filling behind him. Scaling SD to the surviving share applies pace
+        // variance to the pool it actually spans (road ~92% survivors → SD
+        // nearly unchanged; superspeedway ~65% → SD ~6), which trims junk-
+        // equipment ceilings while leaving skill-anchored rear-starters (the
+        // legitimate PD play) intact.
+        const baseSD = trackType==='short' ? 8.7 : trackType==='intermediate' ? 9.2 : 9.0;
+        const stdDev = baseSD * Math.max(0.55, numSurvivors / FIELD);
         const _u1=Math.max(1e-10,Math.random()), _u2=Math.random();
         const z = Math.sqrt(-2*Math.log(_u1))*Math.cos(2*Math.PI*_u2);
         d._rawPos = Math.max(1, anchor + z*stdDev);
@@ -5451,18 +5580,22 @@ async function runNascarSimGen(){
   // still samples heavily (his composite is the base), he just no longer
   // crowds out per-dollar-better cars in the supporting slots. Clamped so the
   // slate's top favorite can't be zeroed the way full VOR (comp − λ·sal) would.
-  // γ=1.0: price-relative value is a first-class signal in a salary-cap game —
-  // at equal sim score the cheaper driver should win builder weight, which at
-  // γ=0.5 it didn't (a 33% value edge became a 15% tilt, easily swamped by the
-  // leverage gap between a chalky value car and a contrarian expensive one).
-  const VALUE_GAMMA = 1.0;
+  // γ=1.6: price-relative value is the DOMINANT builder signal, not a tilt.
+  // At γ=1.0 the base weight was still absolute sim points, so a driver with a
+  // 10-point comp edge out-sampled a 23%-better-value car regardless of price —
+  // the top per-dollar plays on the slate kept landing mid-pack in exposure.
+  // At 1.6, equal per-dollar value ⇒ comparable builder weight across salary
+  // tiers, and the slate's genuine value leaders lead the sampling. Absolute
+  // quality still guards the output twice: the gauntlet's composite floor and
+  // ceiling-based selection both cull cheap-but-weak lineups.
+  const VALUE_GAMMA = 1.6;
   const _sumCompAll = pool.reduce((a,p)=>a+Math.max(0,p._simComposite||0),0) || 1;
   const _sumSalAll  = pool.reduce((a,p)=>a+(p.salary||0),0) || 1;
   const _lambdaN    = _sumCompAll / _sumSalAll;
   const valueTilt = p => {
     const fair = _lambdaN * (p.salary||0);
     if(fair <= 0) return 1;
-    const ratio = Math.max(0.5, Math.min(2.0, Math.max(0,p._simComposite||0) / fair));
+    const ratio = Math.max(0.4, Math.min(2.2, Math.max(0,p._simComposite||0) / fair));
     return Math.pow(ratio, VALUE_GAMMA);
   };
 
