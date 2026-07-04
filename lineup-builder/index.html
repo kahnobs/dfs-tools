@@ -4730,32 +4730,49 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
   pool.forEach(p=>{
     const pW = p._nPWin || 0;
 
+    // Win-prob-dependent tier curves. The old fixed multipliers (Top3≈Win×2.8,
+    // Top10≈Win×7.5, chained ×1.39/×1.9 from top3) are only calibrated for
+    // favorites — the real win→tier relationship steepens sharply as win prob
+    // falls (a 25% winner is ~3× to top-10; a 2% winner is ~15×). On slates
+    // with only Win/Top3 posted, the flat multipliers cut mid-tier drivers'
+    // top-5/10 probabilities roughly in half, dumping them into the
+    // skill-anchored fallback and DEFLATING their sims — which inverted the
+    // board (floored-odds back-markers out-simming +2000-4000 cars). Power-law
+    // fits to empirical win→tier ratios; when a real top3 exists it anchors
+    // the estimate (curve supplies the ratio, market supplies the level).
+    const estT3  = w => Math.min(0.90, 0.48 * Math.pow(w/0.3, 0.62));
+    const estT5  = w => Math.min(0.92, 0.63 * Math.pow(w/0.3, 0.52));
+    const estT10 = w => Math.min(0.95, 0.84 * Math.pow(w/0.3, 0.42));
+
     // Estimate top3 if missing
     if(p._nPTop3 == null){
       if(p._nPTop5 != null){
-        // top3 ≈ top5 × 0.72 (3/5 positions ≈ 72% of top5 prob based on position distribution)
         p._nPTop3 = Math.min(p._nPTop5 * 0.72, 0.98);
       } else if(pW > 0){
-        p._nPTop3 = Math.min(pW * 2.8, 0.98);
+        p._nPTop3 = estT3(pW);
       }
     }
 
     // Estimate top5 if missing
     if(p._nPTop5 == null){
-      if(p._nPTop3 != null){
-        // top5 ≈ top3 / 0.72
+      if(p._nPTop3 != null && pW > 0){
+        // real top3 anchors the level; the curve supplies the win-prob-correct ratio
+        p._nPTop5 = Math.min(p._nPTop3 * (estT5(pW) / Math.max(1e-6, estT3(pW))), 0.98);
+      } else if(p._nPTop3 != null){
         p._nPTop5 = Math.min(p._nPTop3 / 0.72, 0.98);
       } else if(pW > 0){
-        p._nPTop5 = Math.min(pW * 4.0, 0.98);
+        p._nPTop5 = estT5(pW);
       }
     }
 
     // Estimate top10 if missing
     if(p._nPTop10 == null){
-      if(p._nPTop5 != null){
+      if(p._nPTop5 != null && pW > 0){
+        p._nPTop10 = Math.min(p._nPTop5 * (estT10(pW) / Math.max(1e-6, estT5(pW))), 0.98);
+      } else if(p._nPTop5 != null){
         p._nPTop10 = Math.min(p._nPTop5 * 1.9, 0.98);
       } else if(pW > 0){
-        p._nPTop10 = Math.min(pW * 7.5, 0.98);
+        p._nPTop10 = estT10(pW);
       }
     }
 
@@ -4856,11 +4873,25 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
 
     let toPlace = Math.min(numIncidents, FIELD-2);
     let guard = 0;
+    // Incident seeds are weighted by equipment risk instead of uniform. Uniform
+    // seeding meant a +250000 back-marker survived exactly as often as the
+    // slate's best car, then harvested huge place-differential every survival
+    // as crashers filled the rear — on superspeedways that clustered floored-
+    // odds punts ABOVE +2000-tier cars. Weight scales linearly with skill rank:
+    // worst equipment wrecks/fails ~1.8× as often as the best (conservative vs
+    // real DNF-rate spreads). Cluster collection still gathers by running
+    // order, so pack-wreck dynamics are unchanged.
+    const seedWeight = pool.map((p,i)=>{
+      const rankPct = ((p._nSkillRank||i+1) - 1) / Math.max(1, FIELD - 1);
+      return 1 + 0.8 * rankPct;
+    });
     while(toPlace > 0 && incidentSet.size < FIELD-2 && guard++ < 100){
       const avail = [];
       for(let i=0;i<FIELD;i++) if(!incidentSet.has(i)) avail.push(i);
       if(!avail.length) break;
-      const seed = avail[Math.floor(Math.random()*avail.length)];
+      let wSum = 0; for(const i of avail) wSum += seedWeight[i];
+      let rSeed = Math.random() * wSum, seed = avail[avail.length-1];
+      for(const i of avail){ rSeed -= seedWeight[i]; if(rSeed <= 0){ seed = i; break; } }
       const isSolo = (toPlace===1) || (Math.random() < incidentSoloP);
       const size = isSolo ? 1 : Math.min(toPlace, avail.length, nascarDrawClusterSize(trackType));
       const exit = nascarDrawExitTiming(trackType); // one wreck → one exit time
@@ -4914,7 +4945,19 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
         // gave this driver low probability of a top finish; any remaining
         // variance is legitimate race uncertainty.
         const anchor = skillIdx + 1;
-        const stdDev = trackType==='short' ? 8.7 : trackType==='intermediate' ? 9.2 : 9.0;
+        // Base SD was calibrated on historical FULL-FIELD finish distributions,
+        // which already include attrition scatter — but this draw only orders
+        // SURVIVORS (attrition is modeled separately by crasher-fill). Using
+        // full historical variance here double-counted the attrition upside:
+        // on high-attrition tracks a floored-odds back-marker drew top-15
+        // survivor slots far too often on top of the free PD from crashers
+        // filling behind him. Scaling SD to the surviving share applies pace
+        // variance to the pool it actually spans (road ~92% survivors → SD
+        // nearly unchanged; superspeedway ~65% → SD ~6), which trims junk-
+        // equipment ceilings while leaving skill-anchored rear-starters (the
+        // legitimate PD play) intact.
+        const baseSD = trackType==='short' ? 8.7 : trackType==='intermediate' ? 9.2 : 9.0;
+        const stdDev = baseSD * Math.max(0.55, numSurvivors / FIELD);
         const _u1=Math.max(1e-10,Math.random()), _u2=Math.random();
         const z = Math.sqrt(-2*Math.log(_u1))*Math.cos(2*Math.PI*_u2);
         d._rawPos = Math.max(1, anchor + z*stdDev);
