@@ -6080,6 +6080,256 @@ function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, 
   return result;
 }
 
+// ═══════════════════════════════════════════════════════════
+// PGA TARGET-EXPOSURE GENERATOR
+// ═══════════════════════════════════════════════════════════
+// Architecture: decide exposure FIRST, then realize lineups against it.
+// The old pipeline picked golfers greedily and let the salary cap corner it at
+// the cheap end of the pool — exposure was an artifact of build order (a
+// curated pool whose floor was two $6,500 golfers put one of them in ~70% of
+// lineups purely as the salary release valve, regardless of merit). Here
+// exposure is an explicit decision:
+//   Stage 1 — allocate 6·L slots across the pool to maximize total quality
+//     subject to a PORTFOLIO salary budget. The budget's shadow price λ is
+//     solved, not assumed: a golfer's exposure rises iff quality − λ·salary
+//     earns it, which is exactly the "Scheffler + $7k vs $10k + $11k at equal
+//     combined salary" comparison, evaluated at the margin across the whole
+//     slate. Quality is the RAW blend (equity share, rating, proj, leverage
+//     applied) — salary-free, because λ prices salary exactly once. (VOR must
+//     NOT feed this: it already embeds a fixed λ, and would double-charge.)
+//   Stage 2 — realize L lineups by sampling against remaining quota, with
+//     salary lookahead both ways (still fits under the cap AND can still
+//     reach the floor). A golfer nobody allocated exposure to cannot be
+//     forced in by feasibility — a cornered build backtracks into a
+//     different spend shape instead.
+// Filler discipline: below-median-quality golfers cap at FILLER_CAP — they
+// are salary enablers, not plays — UNLESS their quality is an outlier for
+// their salary band (z ≥ MISPRICE_Z within ±$300), which lifts them to
+// MISPRICE_CAP. That is the "clear misprice" exception, and the only door a
+// punt has to real exposure.
+const PGA_PLAY_CAP     = 0.65; // ceiling for above-median-quality golfers (before user Max%)
+const PGA_FILLER_CAP   = 0.15; // ceiling for below-median fillers
+const PGA_MISPRICE_CAP = 0.35; // ceiling for band-outlier fillers
+const PGA_MISPRICE_Z   = 1.5;
+
+function runPgaTargetGen(ctx){
+  const {slate, pool, groups, target, maxExpPct, overrides, minOverrides,
+         minSal, maxSal, randomness, wEquity, wModel, wProj, oddsAvailable,
+         normRtg, normProj, waveAM, wavePM} = ctx;
+  const L = Math.max(1, target), SLOTS = 6*L;
+  const t0 = Date.now();
+
+  // ── Stage 1a: raw quality ──
+  // Conviction = the full blend: equity + rating carry it, proj kept at its
+  // small preset weight as a balance/tiebreaker. Quality stays salary-free —
+  // the budget λ below is the per-salary normalization, so salary is priced
+  // exactly once ("how much quality fits in a 6-man $50k combo"). Weights
+  // arrive already renormalized over whichever signals are mapped.
+  const eqArr = pool.map(p=>p._oddsScore||0);
+  const eqMin = Math.min(...eqArr), eqMax = Math.max(...eqArr);
+  const nEq = p => eqMax===eqMin ? 0 : ((p._oddsScore||0)-eqMin)/(eqMax-eqMin);
+  const q = new Map(pool.map(p=>[p.id,
+    (nEq(p)*wEquity + normRtg(p)*wModel + normProj(p)*wProj) * (p._levFactor!=null?p._levFactor:1)]));
+
+  // ── Stage 1b: caps, floors, misprice channel ──
+  const qVals = pool.map(p=>q.get(p.id));
+  const qMed = [...qVals].sort((a,b)=>a-b)[Math.floor(qVals.length/2)];
+  const bandZ = new Map(pool.map(p=>{
+    const band = pool.filter(x=>Math.abs(x.salary-p.salary)<=300);
+    const m = band.reduce((s,x)=>s+q.get(x.id),0)/band.length;
+    const sd = Math.sqrt(band.reduce((s,x)=>s+Math.pow(q.get(x.id)-m,2),0)/band.length);
+    return [p.id, sd>1e-9 ? (q.get(p.id)-m)/sd : 0];
+  }));
+  let fillerCap = PGA_FILLER_CAP;
+  const capOf = p => {
+    const user = (overrides[p.id]!=null?overrides[p.id]:maxExpPct)/100;
+    const cls = q.get(p.id)>=qMed ? PGA_PLAY_CAP
+              : (bandZ.get(p.id)>=PGA_MISPRICE_Z ? PGA_MISPRICE_CAP : fillerCap);
+    return Math.max(0, Math.min(user, cls));
+  };
+  // Capacity: caps must physically hold 6 slots per lineup. On tiny curated
+  // pools they may not — relax the filler cap (never the user Max%) and say so.
+  let capacity = pool.reduce((s,p)=>s+capOf(p),0);
+  if(capacity < 6.05){
+    const needed = Math.min(1, fillerCap * (6.3/Math.max(0.1,capacity)));
+    log(`Pool caps only hold ${capacity.toFixed(1)} slots/lineup — relaxing filler cap ${Math.round(fillerCap*100)}% → ${Math.round(needed*100)}% to fit 6.`);
+    fillerCap = needed;
+    capacity = pool.reduce((s,p)=>s+capOf(p),0);
+    if(capacity < 6.0){ log('Pool cannot hold 6 slots per lineup even relaxed — unhide players or raise Max%.'); document.getElementById('genBtn').disabled=false; return; }
+  }
+  const caps   = pool.map(p=>capOf(p)*L);
+  const floors = pool.map((p,i)=>Math.min(caps[i], ((minOverrides[p.id]||0)/100)*L));
+
+  // ── Stage 1c: allocate slots under the salary budget (solve λ) ──
+  // Softmax over (quality − λ·salary) with capped water-filling. Temperature
+  // rides the randomness slider: low = concentrate on the best plays, high =
+  // spread. λ is bisected so the mean lineup salary lands in the usable band.
+  const tau = 0.10 + randomness*0.25;
+  function allocate(lambda){
+    const val = pool.map(p=>q.get(p.id) - lambda*(p.salary/10000));
+    const mx = Math.max(...val);
+    const w = val.map(v=>Math.exp((v-mx)/tau));
+    const t = floors.slice();
+    let remaining = SLOTS - t.reduce((a,b)=>a+b,0);
+    let free = pool.map((_,i)=>i).filter(i=>t[i]<caps[i]);
+    let guard = 0;
+    while(remaining>1e-6 && free.length && guard++<60){
+      const wSum = free.reduce((s,i)=>s+w[i],0)||1;
+      let spill = 0; const nf=[];
+      for(const i of free){
+        const add = remaining*w[i]/wSum, room = caps[i]-t[i];
+        if(add>=room){ t[i]=caps[i]; spill+=add-room; } else { t[i]+=add; nf.push(i); }
+      }
+      remaining = spill; free = nf;
+    }
+    return t;
+  }
+  const meanSal = t => t.reduce((s,ti,i)=>s+ti*pool[i].salary,0)/L;
+  const floorSal = minSal>0 ? minSal : Math.max(0, maxSal-1500);
+  const aimSal = floorSal + (maxSal-floorSal)*0.6; // upper-middle of the band
+  let lo=-3, hi=3, targets=null;
+  for(let it=0; it<44; it++){
+    const mid=(lo+hi)/2; targets=allocate(mid);
+    const ms=meanSal(targets);
+    if(Math.abs(ms-aimSal)<20) break;
+    if(ms>aimSal) lo=mid; else hi=mid; // salary decreases in λ
+  }
+  const lambdaStar=(lo+hi)/2;
+  const allocSal = meanSal(targets);
+  if(allocSal < floorSal-400) log(`Note: pool is too cheap to average $${floorSal.toLocaleString()} — allocation tops out at $${Math.round(allocSal).toLocaleString()}/lineup.`);
+
+  // ── Stage 2: realization against quotas ──
+  const rem = new Map(pool.map((p,i)=>[p.id, targets[i]]));
+  const hardCap = new Map(pool.map((p,i)=>[p.id, Math.max(floors[i]>0?Math.ceil(floors[i]):0, Math.ceil(caps[i]))]));
+  const built = new Map(pool.map(p=>[p.id,0]));
+  const useWave = (waveAM>0||wavePM>0) && slate.columnMapping?.start!=null;
+  const amIds = new Set(useWave ? pool.filter(p=>getPlayerAMPM(p)==='AM').map(p=>p.id) : []);
+  const pmIds = new Set(useWave ? pool.filter(p=>getPlayerAMPM(p)==='PM').map(p=>p.id) : []);
+  // Per-lineup wave/archetype schedule (largest-remainder), shuffled
+  const archetypes = groups.filter(g=>g.isArchetype && (g.playerIds||[]).length>0 && (g.archetypePct||0)>0);
+  const schedule = [];
+  const waveDefs = useWave ? [['am',waveAM/100],['pm',wavePM/100],[null,Math.max(0,1-(waveAM+wavePM)/100)]] : [[null,1]];
+  waveDefs.forEach(([wk,wp])=>{
+    let allocated=0;
+    archetypes.forEach(g=>{ const n=Math.round(wp*(g.archetypePct||0)/100*L); for(let i=0;i<n;i++) schedule.push({wave:wk, arch:g}); allocated+=n; });
+    const rest=Math.round(wp*L)-allocated;
+    for(let i=0;i<rest;i++) schedule.push({wave:wk, arch:null});
+  });
+  while(schedule.length<L) schedule.push({wave:null, arch:null});
+  schedule.length=L;
+  for(let i=schedule.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [schedule[i],schedule[j]]=[schedule[j],schedule[i]]; }
+
+  function buildOneTarget(slot){
+    let lineup=[], salUsed=0, backtracks=0;
+    while(lineup.length<6){
+      const slotsLeft=6-lineup.length, salRemaining=maxSal-salUsed;
+      const avail=pool.filter(p=>!lineup.includes(p) && built.get(p.id)<hardCap.get(p.id));
+      const sals=avail.map(p=>p.salary).sort((a,b)=>a-b);
+      const cheapest=(k,ex)=>{ let s=0,t2=0,sk=false;
+        for(let i=0;i<sals.length&&t2<k;i++){ if(!sk&&ex!=null&&sals[i]===ex){sk=true;continue;} s+=sals[i];t2++; }
+        return t2<k?Infinity:s; };
+      const richest=(k,ex)=>{ let s=0,t2=0,sk=false;
+        for(let i=sals.length-1;i>=0&&t2<k;i--){ if(!sk&&ex!=null&&sals[i]===ex){sk=true;continue;} s+=sals[i];t2++; }
+        return t2<k?-Infinity:s; };
+      const cands=[];
+      for(const p of avail){
+        if(p.salary>salRemaining) continue;
+        // Two-sided lookahead: after taking p, the remaining slots must be able
+        // to stay under the cap AND still reach the salary floor.
+        if(slotsLeft>1){
+          if(p.salary+cheapest(slotsLeft-1,p.salary)>salRemaining) continue;
+          if(salUsed+p.salary+richest(slotsLeft-1,p.salary)<floorSal) continue;
+        } else {
+          if(salUsed+p.salary<floorSal) continue;
+        }
+        // Prospective group-max check (cheap; min rules validated at the end)
+        let bad=false;
+        for(const g of groups){
+          if(!(g.ruleMax>0)) continue;
+          const ids=g.playerIds||[];
+          if(!ids.includes(p.id)) continue;
+          const cnt=lineup.filter(lp=>ids.includes(lp.id)).length;
+          if(cnt+1>g.ruleMax){ bad=true; break; }
+        }
+        if(bad) continue;
+        // Weight = remaining quota. The tiny quality-tilted epsilon keeps
+        // completion possible once quotas run dry near the end of the run —
+        // it cannot create meaningful exposure on its own.
+        let wgt=Math.max(rem.get(p.id),0)+0.02*(1+q.get(p.id));
+        if(slot.wave==='am'){ if(amIds.has(p.id)) wgt*=1.4; else if(pmIds.has(p.id)) wgt*=0.75; }
+        else if(slot.wave==='pm'){ if(pmIds.has(p.id)) wgt*=1.4; else if(amIds.has(p.id)) wgt*=0.75; }
+        if(slot.arch){ wgt *= (slot.arch.playerIds||[]).includes(p.id) ? 1.6 : 1.0; }
+        groups.forEach(g=>{
+          if(!g.correlation||g.correlation===0) return;
+          const inL=lineup.filter(lp=>(g.playerIds||[]).includes(lp.id)).length;
+          if(inL>0&&(g.playerIds||[]).includes(p.id)) wgt*=(1+(g.correlation/100)*inL);
+        });
+        cands.push({p,wgt});
+      }
+      if(!cands.length){
+        if(lineup.length>0&&backtracks<12){ salUsed-=lineup.pop().salary; backtracks++; continue; }
+        return null;
+      }
+      let r=Math.random()*cands.reduce((s,c)=>s+c.wgt,0);
+      let pick=cands[cands.length-1].p;
+      for(const c of cands){ r-=c.wgt; if(r<=0){ pick=c.p; break; } }
+      lineup.push(pick); salUsed+=pick.salary;
+    }
+    // Floor rescue (rare — the richest() lookahead makes the floor reachable,
+    // but the sampler may not have taken the rich path): quota-aware upgrades.
+    let total=lineup.reduce((s,p)=>s+p.salary,0), guard=0;
+    while(total<floorSal && guard++<20){
+      const order=lineup.map((p,i)=>i).sort((a,b)=>lineup[a].salary-lineup[b].salary);
+      let swapped=false;
+      for(const li of order){
+        const out=lineup[li], budget=maxSal-(total-out.salary);
+        const ups=pool.filter(p=>p!==out && !lineup.includes(p) && built.get(p.id)<hardCap.get(p.id)
+          && p.salary>out.salary && p.salary<=budget)
+          .sort((a,b)=>(Math.max(rem.get(b.id),0))-(Math.max(rem.get(a.id),0)));
+        if(ups.length){ const rp=ups[0]; total=total-out.salary+rp.salary; lineup[li]=rp; swapped=true; break; }
+      }
+      if(!swapped) break;
+    }
+    if(total<floorSal||total>maxSal) return null;
+    if(!checkGroupRules(lineup, groups)) return null;
+    return lineup;
+  }
+
+  const finalLineups=[], seen=new Set((slate.savedLineups||[]).map(l=>lineupKey(l)));
+  let attempts=0, si=0;
+  const maxAttempts=L*60;
+  while(finalLineups.length<L && attempts++<maxAttempts){
+    if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; return; }
+    const slot=schedule[Math.min(si, schedule.length-1)];
+    const lu=buildOneTarget(slot);
+    if(!lu) continue;
+    const key=lu.map(p=>p.id).sort().join('|');
+    if(seen.has(key)) continue;
+    seen.add(key);
+    lu._waveTag = slot.wave;
+    lu._archetypeTag = slot.arch ? slot.arch.id : null;
+    lu._archetypeGroupId = lu._archetypeTag;
+    finalLineups.push(lu);
+    lu.forEach(p=>{ rem.set(p.id, rem.get(p.id)-1); built.set(p.id, built.get(p.id)+1); });
+    si++;
+  }
+
+  // ── Report ──
+  const dev=pool.map((p,i)=>({name:p.name, tgt:targets[i]/L, got:(built.get(p.id)||0)/finalLineups.length}))
+    .filter(x=>x.tgt>0.005||x.got>0.005);
+  dev.sort((a,b)=>b.got-a.got);
+  log(`Target engine: λ=${lambdaStar.toFixed(2)} (salary shadow price), τ=${tau.toFixed(2)}, alloc avg $${Math.round(allocSal).toLocaleString()}/lineup.`);
+  log(`Top targets → achieved: ${dev.slice(0,6).map(x=>`${x.name.split(' ').slice(-1)[0]} ${Math.round(x.tgt*100)}→${Math.round(x.got*100)}%`).join(', ')}`);
+  const worst=dev.slice().sort((a,b)=>Math.abs(b.got-b.tgt)-Math.abs(a.got-a.tgt))[0];
+  if(worst && Math.abs(worst.got-worst.tgt)>0.08) log(`Largest target miss: ${worst.name} ${Math.round(worst.tgt*100)}% → ${Math.round(worst.got*100)}%.`);
+  const salAvgs=finalLineups.map(l=>l.reduce((s,p)=>s+p.salary,0));
+  log(`Done! ${finalLineups.length}/${L} lineups in ${attempts.toLocaleString()} attempts (${((Date.now()-t0)/1000).toFixed(1)}s). Salary $${Math.min(...salAvgs).toLocaleString()}–$${Math.max(...salAvgs).toLocaleString()}.`);
+  addToHistory(slate.id, `${finalLineups.length} lineups @ ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`, finalLineups);
+  document.getElementById('genBtn').disabled=false;
+  if(!finalLineups.length){ alert('Could not generate any valid lineups. Try relaxing group rules, lowering min salary, raising Max%, or unhiding players.'); return; }
+  openPreviewModal(finalLineups, 'blend3');
+}
+
 async function runAutoGen(){
   const slate=activeSlate();if(!slate)return;
 
@@ -6229,6 +6479,18 @@ async function runAutoGen(){
     const noise = (Math.random()*2 - 1) * randomness;
     return base * (1 + noise);
   };
+
+  // ── PGA: hand off to the target-exposure architecture ──
+  // Exposure is decided up front from the data (Stage 1) and lineups realized
+  // against it (Stage 2) — see runPgaTargetGen. The candidate-oversample →
+  // gauntlet → greedy path below remains for other sports/metrics.
+  if(slate.sport==='pga' && optimizeBy==='blend3'){
+    const waveAM = parseInt(document.getElementById('waveSlider_am')?.value||0);
+    const wavePM = parseInt(document.getElementById('waveSlider_pm')?.value||0);
+    return runPgaTargetGen({ slate, pool, groups, target, maxExpPct, overrides,
+      minOverrides, minSal, maxSal, randomness, wEquity, wModel, wProj,
+      oddsAvailable, normRtg, normProj, waveAM, wavePM });
+  }
 
   // ── Candidate-pool exposure feedback ──
   // The leverage boost and equity jam are (deliberately) persistent score
