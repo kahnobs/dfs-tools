@@ -6160,7 +6160,10 @@ function runPgaTargetGen(ctx){
   // ranking so the reorder is visible. Overriding it is what Min% is for.
   // Sharpness ladder: rand 0 is a conviction portfolio (top plays ~45-50%),
   // rand ~10 a pressed-but-diversified book (~low 30s), rand 30+ wide.
-  const tau = 0.20 + randomness*4.0;
+  // Slider reads as PERCENT NOISE: rand 10 = 90% conviction (~65-70% on top
+  // plays), 25 ≈ 45-50%, 50 ≈ 30%, 75+ wide. Power curve keeps the sharp end
+  // dense and the wide end gradual.
+  const tau = 0.20 + 1.6*Math.pow(Math.max(randomness,0), 1.5);
   const floorSlots = PGA_TARGET_FLOOR*L;
   function allocate(lambda){
     const val = pool.map(p=>vZ.get(p.id) - lambda*(p.salary/10000));
