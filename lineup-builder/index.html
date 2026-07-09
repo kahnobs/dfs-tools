@@ -1790,7 +1790,11 @@ function slateFieldsBase(slate){
     f.push({key:'_simP50', label:'Sim', cls:'col-r'});
     f.push({key:'simValue', label:'SVal', cls:'col-r', computed:true});
   }
-  // UFC sim score shown left of salary column — not in right fields
+  // UFC sim score shown left of salary column — not in right fields.
+  // SVal (sim composite per $1k) IS a right field, mirroring NASCAR.
+  if(slate.sport==='ufc' && (slate.players||[]).some(p=>p._simP50!=null)){
+    f.push({key:'simValue', label:'SVal', cls:'col-r', computed:true});
+  }
   if(cm.cut!=null)    f.push({key:'cut',   label:'Cut',   cls:'col-r'});
   f.push({key:'minExp', label:'Min%', cls:'col-c', inline:true});
   f.push({key:'maxExp', label:'Max%', cls:'col-c', inline:true});
@@ -1803,8 +1807,14 @@ function slateFields(slate){
   if(!order) return base;
   const byKey=Object.fromEntries(base.map(f=>[f.key,f]));
   const ordered=order.map(k=>byKey[k]).filter(Boolean);
-  // Append any new fields not yet in saved order
-  base.forEach(f=>{if(!order.includes(f.key))ordered.push(f);});
+  // Insert any new fields not yet in the saved order BEFORE Min%/Max% — a plain
+  // append put non-draggable computed columns (e.g. SVal) permanently after the
+  // exposure inputs with no way to move them.
+  base.forEach(f=>{
+    if(order.includes(f.key)) return;
+    const expIdx=ordered.findIndex(x=>x.key==='minExp'||x.key==='maxExp');
+    if(expIdx>=0) ordered.splice(expIdx,0,f); else ordered.push(f);
+  });
   return ordered;
 }
 function isMobileView(){ return window.innerWidth <= 768; }
@@ -2186,6 +2196,19 @@ function renderPool(){
     +`<span></span><span></span>`;
   const list=document.getElementById('driverList');
   if(!players.length){list.innerHTML='<div style="text-align:center;color:var(--muted);font-size:11px;padding:20px;font-style:italic">No players match.</div>';return;}
+  // Slate-relative SVal color range (UFC): fixed thresholds tuned for NASCAR
+  // point scales paint nearly every fighter green (UFC SVal runs ~2-11), so
+  // UFC colors on the slate's own min→max via the shared odds gradient.
+  let _svalRange=null;
+  if(slate.sport==='ufc'){
+    const _svs=(slate.players||[])
+      .filter(p=>p._simP50!=null&&(p.salary||0)>0&&(parseFloat(p._simP50)||0)>0)
+      .map(p=>(parseFloat(p._simP50)||0)/((p.salary||1)/1000));
+    if(_svs.length>=2){
+      const mn=Math.min(..._svs), mx=Math.max(..._svs);
+      if(mx>mn) _svalRange={min:mn,max:mx};
+    }
+  }
   list.innerHTML=players.map((p,i)=>{
     const isSelected=current.includes(p.id),isHidden=hidden.includes(p.id);
     const isFull=current.length>=MAX&&!isSelected;
@@ -2231,7 +2254,10 @@ function renderPool(){
           const sal=p.salary||1;
           if(p._simP50==null||sp<=0) return `<div class="cell-mono col-r" style="color:var(--muted);">—</div>`;
           const sv=sp/(sal/1000);
-          const svColor=sv>=5?'var(--green)':sv>=3.5?'var(--accent)':'var(--muted)';
+          // UFC: slate-relative gradient; NASCAR keeps its fixed thresholds.
+          const svColor=_svalRange
+            ? oddsGradientColor(Math.max(0,Math.min(1,(sv-_svalRange.min)/(_svalRange.max-_svalRange.min))))
+            : (sv>=5?'var(--green)':sv>=3.5?'var(--accent)':'var(--muted)');
           return `<div class="cell-mono col-r" style="color:${svColor};">${sv.toFixed(2)}</div>`;
         }
        if(f.key==='minExp'||f.key==='maxExp'){
@@ -3752,7 +3778,11 @@ function buildCDF(points, ouLine){
         return b.low + Math.random() * (hi - b.low);
       }
     }
-    return points[0].threshold * 0.5;
+    // Last-resort fallback (draw landed past every bucket under a tight cap,
+    // e.g. R1 finish with a sparse high-starting ladder) — clamp to the cap so
+    // this path can't violate the duration-cap invariant.
+    const fb = points[0].threshold * 0.5;
+    return maxVal != null ? Math.min(fb, maxVal) : fb;
   };
 }
 
@@ -4249,11 +4279,17 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   // due: a pick'em main-eventer who is in nearly every optimal WHEN he wins
   // rates ~50%, not the near-zero that composite ranking implied.
   const optAppear = {};
+  // Count sims actually completed — a mid-run cancel breaks the loop, and the
+  // old code still divided appearRate by the FULL numSims (deflating every
+  // optimal-rate that feeds the alignment servo and ownership cull) and
+  // reported totalSims as if the run finished.
+  let simsDone = 0;
   for(let s=0; s<numSims; s++){
     if(s > 0 && s % CHUNK === 0){
       await new Promise(r=>setTimeout(r,0));
       if(window._genCancelled) break;
     }
+    simsDone++;
     // Step 1: sample fight outcomes
     const simWinner={}, simRound={};
     pairs.forEach(({a,b})=>{
@@ -4333,8 +4369,8 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   }).sort((a,b) => b.composite - a.composite || b.count - a.count);
 
   const appearRate = {};
-  visiblePool.forEach(p=>{ appearRate[p.id] = (optAppear[p.id]||0) / Math.max(1, numSims); });
-  return {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, totalSims: numSims};
+  visiblePool.forEach(p=>{ appearRate[p.id] = (optAppear[p.id]||0) / Math.max(1, simsDone); });
+  return {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, totalSims: simsDone};
 }
 
 async function runUFCSimGen(){
@@ -4387,6 +4423,16 @@ async function runUFCSimGen(){
   const {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, totalSims} = await runUFCSimsNew(
     fullPool, pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal
   );
+
+  // Cancelled mid-run: abort instead of building lineups from a partial sample.
+  // (runUFCSimsNew's denominators are now correct either way, but a deliberate
+  // cancel means "stop", not "select from whatever finished".)
+  if(window._genCancelled){
+    log(`Cancelled after ${totalSims.toLocaleString()} sims.`);
+    document.getElementById('genBtn').disabled=false;
+    cancelBtn?.remove();
+    return;
+  }
 
   // ── ITD consistency check (diagnostic only) ────────────────────────────────
   // The ITD column is a free calibration anchor: the model's P(fighter wins
@@ -8126,7 +8172,17 @@ async function refreshFromSheet(){
       if(slate.sport==='ufc'){
         const get = name => { const i=headers.findIndex(h=>h.toLowerCase()===name.toLowerCase()); return i>=0?(row[i]||'').trim():null; };
         const getN = name => { const v=get(name); const n=parseFloat(v); return (!isNaN(n)&&n!==0)?n:null; };
-        p.ml=get('ML'); p.itd=get('ITD');
+        // Only overwrite ML/ITD when the header actually exists in the sheet —
+        // the old unconditional `p.ml=get('ML')` nulled both fields on every
+        // refresh if the header wasn't literally "ML"/"ITD", then tripped the
+        // "Simulation Mode requires ML" alert. Falls back to the mapped column
+        // (mirrors the late-add path below) when the named header is absent.
+        const _mlV=get('ML'), _itdV=get('ITD');
+        if(_mlV!=null) p.ml=_mlV; else if(colMap.ml!=null) p.ml=getStr(row,'ml');
+        if(_itdV!=null) p.itd=_itdV; else if(colMap.itd!=null) p.itd=getStr(row,'itd');
+        // Fight order can be renumbered in the sheet — keep fightNum in sync
+        // with the refreshed start field.
+        { const _fn=parseInt(p.start); if(_fn) p.fightNum=_fn; }
         ['finish_r1','finish_r2','finish_r3','finish_r4','finish_r5','decision'].forEach(k=>{
           p[k]=getN(k.replace('_r','_R').replace('finish','Finish').replace('decision','Decision'));
         });
@@ -8777,6 +8833,8 @@ function applyPoolUpdate(){
     if(cm.top30!=null) p.top30=(row[cm.top30]||'').trim();
     if(cm.top40!=null) p.top40=(row[cm.top40]||'').trim();
     if(cm.cut!=null)   p.cut=(row[cm.cut]||'').trim();
+    // UFC: keep fightNum in sync when the update CSV carries a start (fight #) column
+    if(slate.sport==='ufc' && cm.start!=null){ const _fn=parseInt(p.start); if(_fn) p.fightNum=_fn; }
     applyUfcOdds(p, row);
     delete newDataByName[key]; // mark consumed
   });
@@ -8804,6 +8862,17 @@ function applyPoolUpdate(){
     if(cm.top30!=null) p.top30=(row[cm.top30]||'').trim();
     if(cm.top40!=null) p.top40=(row[cm.top40]||'').trim();
     if(cm.cut!=null)   p.cut=(row[cm.cut]||'').trim();
+    // UFC late adds previously got no fightNum at all — the Odds tab grouped
+    // them under "Fight #0" and the saved-lineup Win% metric normalized them
+    // against an 'unknown' bucket instead of their real opponent. Take the
+    // fight # from start if present, else inherit from the opponent's row.
+    if(slate.sport==='ufc'){
+      p.fightNum = parseInt(p.start)||null;
+      if(!p.fightNum && p.opp){
+        const _oppP = slate.players.find(q=>q.name===p.opp);
+        if(_oppP) p.fightNum = _oppP.fightNum || parseInt(_oppP.start) || null;
+      }
+    }
     applyUfcOdds(p, row);
     slate.players.push(p);
     added++;
