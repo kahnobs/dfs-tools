@@ -6103,11 +6103,12 @@ function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, 
 // Realizability: if pure value targets imply a portfolio salary outside the
 // usable band, the smallest salary tilt λ that reaches the band edge is
 // applied (and logged). λ stays 0 whenever value alone is feasible.
+const PGA_TARGET_FLOOR = 0.02; // targets below 2% are zeroed — the tool builds its own pool
 
 function runPgaTargetGen(ctx){
   const {slate, pool, groups, target, maxExpPct, overrides, minOverrides,
          minSal, maxSal, randomness, wEquity, wModel, wProj, oddsAvailable,
-         normRtg, normProj, waveAM, wavePM} = ctx;
+         normRtg, normProj, waveAM, wavePM, archetypeBoost} = ctx;
   const L = Math.max(1, target), SLOTS = 6*L;
   const t0 = Date.now();
 
@@ -6127,10 +6128,15 @@ function runPgaTargetGen(ctx){
   // VALUE = score per $1,000 of salary. Score is zero-anchored at the pool's
   // worst golfer (Stage 1a min-max), so this is surplus-over-replacement per
   // dollar — the zero point is what makes a per-dollar column rankable at all.
+  // DK pricing keeps raw value gaps tiny (efficient salaries → small
+  // residuals), so values are STANDARDIZED (z-scored) before target mapping:
+  // separation is expressed relative to the field's spread, not its raw range,
+  // which is what gives the randomness slider real dynamic range below.
   const value = new Map(pool.map(p=>[p.id, q.get(p.id)/(p.salary/1000)]));
   const vArr = pool.map(p=>value.get(p.id));
-  const vMin = Math.min(...vArr), vMax = Math.max(...vArr), vRange=(vMax-vMin)||1;
-  const vN = new Map(pool.map(p=>[p.id, (value.get(p.id)-vMin)/vRange]));
+  const vMean = vArr.reduce((a,b)=>a+b,0)/vArr.length;
+  const vSd = Math.sqrt(vArr.reduce((s,v)=>s+(v-vMean)*(v-vMean),0)/vArr.length)||1e-9;
+  const vZ = new Map(pool.map(p=>[p.id, (value.get(p.id)-vMean)/vSd]));
   const capOf = p => Math.max(0, Math.min(1, (overrides[p.id]!=null?overrides[p.id]:maxExpPct)/100));
   let capacity = pool.reduce((s,p)=>s+capOf(p),0);
   if(capacity < 6.0){ log('User Max% caps cannot hold 6 slots per lineup — raise Max% or unhide players.'); document.getElementById('genBtn').disabled=false; return; }
@@ -6138,59 +6144,161 @@ function runPgaTargetGen(ctx){
   const floors = pool.map((p,i)=>Math.min(caps[i], ((minOverrides[p.id]||0)/100)*L));
 
   // ── Stage 1c: targets from the value ranking (+ realizability tilt) ──
-  // Targets follow softmax(value). λ is a salary tilt applied ONLY if pure
-  // value targets imply a portfolio salary outside the usable band — and then
-  // only the minimum needed to reach the band edge. Temperature rides the
-  // randomness slider: low = concentrate on the top value plays, high = spread.
-  const tau = 0.10 + randomness*0.25;
+  // Targets follow softmax(standardized value). Randomness slider = sharpness:
+  // ~0 presses the top value plays hard, ~10 is a balanced portfolio, 30+
+  // spreads wide. λ is a salary tilt applied ONLY if pure value targets imply
+  // a portfolio salary outside the usable band — and then only the minimum
+  // needed to reach the band edge. λ stays 0 when value alone fits.
+  // TRUNCATION: golfers whose water-filled target lands under PGA_TARGET_FLOOR
+  // are zeroed and their mass redistributed up the ranking — the tool builds
+  // its own player pool instead of sprinkling crumbs across the whole field.
+  // User Min% floors and shape-pass band floors are exempt from truncation.
+  // NOTE: when the salary tilt engages, expensive golfers pay the most — a
+  // sharp portfolio can rank a $14k golfer below mid-priced plays even when he
+  // leads raw value. That is the budget's actual answer to "stud + punt vs two
+  // mids at equal salary", not a defect; the log prints the net-of-salary
+  // ranking so the reorder is visible. Overriding it is what Min% is for.
+  const tau = 0.45 + randomness*2.2;
+  const floorSlots = PGA_TARGET_FLOOR*L;
   function allocate(lambda){
-    const val = pool.map(p=>vN.get(p.id) - lambda*(p.salary/10000));
+    const val = pool.map(p=>vZ.get(p.id) - lambda*(p.salary/10000));
     const mx = Math.max(...val);
     const w = val.map(v=>Math.exp((v-mx)/tau));
     const t = floors.slice();
-    let remaining = SLOTS - t.reduce((a,b)=>a+b,0);
-    let free = pool.map((_,i)=>i).filter(i=>t[i]<caps[i]);
-    let guard = 0;
-    while(remaining>1e-6 && free.length && guard++<60){
-      const wSum = free.reduce((s,i)=>s+w[i],0)||1;
-      let spill = 0; const nf=[];
-      for(const i of free){
-        const add = remaining*w[i]/wSum, room = caps[i]-t[i];
-        if(add>=room){ t[i]=caps[i]; spill+=add-room; } else { t[i]+=add; nf.push(i); }
+    const fill = (amount, eligible) => {
+      let remaining = amount, free = eligible.filter(i=>t[i]<caps[i]), guard=0;
+      while(remaining>1e-6 && free.length && guard++<60){
+        const wSum = free.reduce((s,i)=>s+w[i],0)||1;
+        let spill = 0; const nf=[];
+        for(const i of free){
+          const add = remaining*w[i]/wSum, room = caps[i]-t[i];
+          if(add>=room){ t[i]=caps[i]; spill+=add-room; } else { t[i]+=add; nf.push(i); }
+        }
+        remaining = spill; free = nf;
       }
-      remaining = spill; free = nf;
+    };
+    fill(SLOTS - t.reduce((a,b)=>a+b,0), pool.map((_,i)=>i));
+    let removed=0;
+    for(let i=0;i<t.length;i++){
+      if(t[i]>1e-9 && t[i]<floorSlots && floors[i]<=0){ removed+=t[i]; t[i]=0; }
     }
+    if(removed>1e-6) fill(removed, pool.map((_,i)=>i).filter(i=>t[i]>1e-9));
     return t;
+  }
+  // Distribute `amount` across `idxList` proportional to softmax(value),
+  // respecting caps against the supplied base array — greedy fill-to-cap
+  // would hand everything to the single best golfer in the set.
+  function spreadAdd(base, idxList, amount, maxPer){
+    const lim=i=>Math.min(caps[i], maxPer!=null?maxPer:Infinity);
+    let give=amount, guard=0, added=0;
+    while(give>1e-6 && guard++<30){
+      const free=idxList.filter(i=>base[i]<lim(i)-1e-9);
+      if(!free.length) break;
+      const w=free.map(i=>Math.exp(vZ.get(pool[i].id)/tau));
+      const wSum=w.reduce((a,b)=>a+b,0)||1;
+      let spill=0;
+      free.forEach((i,k)=>{
+        const a2=give*w[k]/wSum, room=lim(i)-base[i];
+        if(a2>=room){ base[i]=lim(i); spill+=a2-room; added+=room; }
+        else { base[i]+=a2; added+=a2; }
+      });
+      give=spill;
+    }
+    return added;
   }
   const meanSal = t => t.reduce((s,ti,i)=>s+ti*pool[i].salary,0)/L;
   const floorSal = minSal>0 ? minSal : Math.max(0, maxSal-1500);
-  let lambdaStar = 0, targets = allocate(0);
-  const pureSal = meanSal(targets);
   const bandLo = floorSal+100, bandHi = maxSal-100;
-  if(pureSal < bandLo || pureSal > bandHi){
-    const aim = pureSal < bandLo ? bandLo : bandHi;
-    let lo=-3, hi=3;
-    for(let it=0; it<44; it++){
-      const mid=(lo+hi)/2; const t2=allocate(mid);
-      const ms=meanSal(t2);
-      if(Math.abs(ms-aim)<20){ targets=t2; lambdaStar=mid; break; }
-      if(ms>aim) lo=mid; else hi=mid; // salary decreases in λ
-      targets=t2; lambdaStar=mid;
+  function solveTargets(){
+    let lam=0, t=allocate(0);
+    const pure=meanSal(t);
+    if(pure<bandLo || pure>bandHi){
+      const aim = pure<bandLo ? bandLo : bandHi;
+      // Extend the bracket until it straddles the aim — heavy Min% floors can
+      // push the needed tilt outside a fixed ±3 range, and a pegged λ leaves
+      // target mean outside the band.
+      let lo=-3, hi=3, guard=0;
+      while(meanSal(allocate(hi))>aim && hi<12 && guard++<4) hi*=2;
+      guard=0;
+      while(meanSal(allocate(lo))<aim && lo>-12 && guard++<4) lo*=2;
+      for(let it=0; it<48; it++){
+        const mid=(lo+hi)/2; t=allocate(mid); lam=mid;
+        const ms=meanSal(t);
+        if(Math.abs(ms-aim)<20) break;
+        if(ms>aim) lo=mid; else hi=mid; // salary decreases in λ
+      }
     }
-    log(`Pure value targets average $${Math.round(pureSal).toLocaleString()}/lineup — outside the $${bandLo.toLocaleString()}–$${bandHi.toLocaleString()} band, applied minimal salary tilt λ=${lambdaStar.toFixed(2)}.`);
+    return {t, lam, pure};
   }
+
+  // Group rules shape the TARGETS too, not just realization: a min-2 group
+  // must hold ≥ 2·L slots of aggregate target or realization would be forced
+  // to satisfy it with quota the allocation never granted (feasibility-steered
+  // exposure — the exact failure mode this engine exists to prevent). Mass is
+  // added to members by value order and taken from the lowest-value
+  // non-members; ruleMax aggregates are scaled down symmetrically.
+  function adjustForGroupRules(t){
+    const notes=[];
+    for(const g of groups){
+      const ids=new Set(g.playerIds||[]); if(!ids.size) continue;
+      const mIdx=[], oIdx=[];
+      pool.forEach((p,i)=>{ (ids.has(p.id)?mIdx:oIdx).push(i); });
+      if(!mIdx.length) continue;
+      const sumM=()=>mIdx.reduce((s,i)=>s+t[i],0);
+      if((g.ruleMin||0)>0 && sumM() < g.ruleMin*L-1e-6){
+        // 15% headroom over the bare minimum: lineups drawing 3+ members
+        // consume extra quota, and provisioning exactly ruleMin·L starves the
+        // tail of the run into rule-forced fallback picks.
+        const added=spreadAdd(t, mIdx, Math.min(g.ruleMin*L*1.15, 6*L) - sumM());
+        let cut=added;
+        const oOrder=[...oIdx].sort((a,b)=>vZ.get(pool[a].id)-vZ.get(pool[b].id));
+        for(const i of oOrder){ if(cut<=1e-9)break; const c2=Math.min(Math.max(0,t[i]-floors[i]),cut); t[i]-=c2; cut-=c2; }
+        notes.push('min '+g.ruleMin+' "'+g.name+'"');
+      }
+      if((g.ruleMax||0)>0 && sumM() > g.ruleMax*L+1e-6){
+        const scale=(g.ruleMax*L)/sumM();
+        let freed=0;
+        mIdx.forEach(i=>{ const nv=Math.max(floors[i], t[i]*scale); freed+=t[i]-nv; t[i]=nv; });
+        let give=freed, guard=0;
+        while(give>1e-6 && guard++<20){
+          const free=oIdx.filter(i=>t[i]<caps[i]-1e-9);
+          if(!free.length) break;
+          const base=free.reduce((s,i)=>s+Math.max(t[i],0.01),0);
+          let spill=0;
+          for(const i of free){ const a2=give*Math.max(t[i],0.01)/base, room=caps[i]-t[i];
+            if(a2>=room){ t[i]=caps[i]; spill+=a2-room; } else t[i]+=a2; }
+          give=spill;
+        }
+        notes.push('max '+g.ruleMax+' "'+g.name+'"');
+      }
+    }
+    if(notes.length) log('Group rules shaped targets: '+notes.join('; ')+'.');
+  }
+
+  let sol = solveTargets();
+  let targets = sol.t, lambdaStar = sol.lam;
+  if(sol.pure < bandLo || sol.pure > bandHi)
+    log('Pure value targets average $'+Math.round(sol.pure).toLocaleString()+'/lineup — outside the $'+bandLo.toLocaleString()+'–$'+bandHi.toLocaleString()+' band, applied minimal salary tilt λ='+lambdaStar.toFixed(2)+'.');
+  adjustForGroupRules(targets);
   const allocSal = meanSal(targets);
-  if(allocSal < floorSal-400) log(`Note: pool is too cheap to average $${floorSal.toLocaleString()} — allocation tops out at $${Math.round(allocSal).toLocaleString()}/lineup.`);
+  if(allocSal < floorSal-400) log('Note: pool is too cheap to average $'+floorSal.toLocaleString()+' — allocation tops out at $'+Math.round(allocSal).toLocaleString()+'/lineup.');
+
+  const vTop = pool.map(p=>({name:p.name, v:value.get(p.id)})).sort((a,b)=>b.v-a.v);
+  log('Top value plays (score/$1k): '+vTop.slice(0,8).map(x=>x.name.split(' ').slice(-1)[0]+' '+x.v.toFixed(2)).join(', '));
+  if(lambdaStar!==0){
+    const nTop = pool.map(p=>({name:p.name, v:vZ.get(p.id)-lambdaStar*(p.salary/10000)})).sort((a,b)=>b.v-a.v);
+    log('Net of salary tilt, the board presses: '+nTop.slice(0,8).map(x=>x.name.split(' ').slice(-1)[0]).join(', '));
+  }
 
   // ── Stage 2: realization against quotas ──
-  const rem = new Map(pool.map((p,i)=>[p.id, targets[i]]));
-  const hardCap = new Map(pool.map((p,i)=>[p.id, Math.max(floors[i]>0?Math.ceil(floors[i]):0, Math.ceil(caps[i]))]));
-  const built = new Map(pool.map(p=>[p.id,0]));
   const useWave = (waveAM>0||wavePM>0) && slate.columnMapping?.start!=null;
   const amIds = new Set(useWave ? pool.filter(p=>getPlayerAMPM(p)==='AM').map(p=>p.id) : []);
   const pmIds = new Set(useWave ? pool.filter(p=>getPlayerAMPM(p)==='PM').map(p=>p.id) : []);
-  // Per-lineup wave/archetype schedule (largest-remainder), shuffled
   const archetypes = groups.filter(g=>g.isArchetype && (g.playerIds||[]).length>0 && (g.archetypePct||0)>0);
+  // Old-engine archetype semantics: user slider drives both a member boost and
+  // a non-member suppression on archetype-scheduled lineups.
+  const archBoostFactor    = 1 + ((archetypeBoost-1)*0.25);
+  const archSuppressFactor = Math.max(0.05, 1 - ((archetypeBoost-1)*0.175));
   const schedule = [];
   const waveDefs = useWave ? [['am',waveAM/100],['pm',wavePM/100],[null,Math.max(0,1-(waveAM+wavePM)/100)]] : [[null,1]];
   waveDefs.forEach(([wk,wp])=>{
@@ -6203,30 +6311,94 @@ function runPgaTargetGen(ctx){
   schedule.length=L;
   for(let i=schedule.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [schedule[i],schedule[j]]=[schedule[j],schedule[i]]; }
 
-  function buildOneTarget(slot){
+  let rem, tgtSlots, targetedIds, built, hardCap, crumbFills, outsideFills, seen, finalLineups;
+  const savedKeys=(slate.savedLineups||[]).map(l=>lineupKey(l));
+  function initState(){
+    rem = new Map(pool.map((p,i)=>[p.id, targets[i]]));
+    tgtSlots = new Map(pool.map((p,i)=>[p.id, targets[i]]));
+    targetedIds = new Set(pool.filter((p,i)=>targets[i]>1e-9).map(p=>p.id));
+    built = new Map(pool.map(p=>[p.id,0]));
+    hardCap = new Map(pool.map((p,i)=>[p.id, Math.max(floors[i]>0?Math.ceil(floors[i]):0, Math.ceil(caps[i]))]));
+    crumbFills=0; outsideFills=0;
+    seen = new Set(savedKeys);
+    finalLineups = [];
+  }
+
+  function buildOneTarget(slot, allowOutside, mergeTiers, pressure){
+    // Under sustained pressure (dup/fail streaks), flatten sampling weights so
+    // the remaining quota recombines into new lineups instead of regenerating
+    // the same near-deterministic combos.
+    const flat = 1/(1+0.25*(pressure||0));
     let lineup=[], salUsed=0, backtracks=0;
     while(lineup.length<6){
       const slotsLeft=6-lineup.length, salRemaining=maxSal-salUsed;
+      // ruleMin steering: if a group's remaining deficit consumes all the
+      // remaining slots, only its members are eligible; if deficits exceed
+      // the slots left, the branch is dead and we backtrack. Soft boosts pull
+      // members in earlier so hard restriction is the exception.
+      let forcedSet=null, deadBranch=false, totalDeficit=0;
+      const deficits=[];
+      for(const g of groups){
+        const min=g.ruleMin||0; if(min<=0) continue;
+        const gids=g.playerIds||[];
+        const have=lineup.filter(lp=>gids.includes(lp.id)).length;
+        const d=min-have; if(d<=0) continue;
+        totalDeficit+=d;
+        const idSet=new Set(gids);
+        deficits.push({ids:idSet, d});
+        if(d>slotsLeft){ deadBranch=true; break; }
+        if(d===slotsLeft){
+          forcedSet = forcedSet ? new Set([...forcedSet].filter(id=>idSet.has(id))) : idSet;
+          if(!forcedSet.size) deadBranch=true;
+        }
+      }
+      if(!deadBranch && totalDeficit>slotsLeft) deadBranch=true;
+      if(deadBranch){
+        if(lineup.length>0&&backtracks<12){ salUsed-=lineup.pop().salary; backtracks++; continue; }
+        return null;
+      }
       const avail=pool.filter(p=>!lineup.includes(p) && built.get(p.id)<hardCap.get(p.id));
-      const sals=avail.map(p=>p.salary).sort((a,b)=>a-b);
+      // Salary lookaheads MUST be computed over golfers the current strictness
+      // is actually allowed to pick — counting excluded outside-pool golfers
+      // as viable completions lets builds walk into corners only forbidden
+      // golfers can close, then backtrack-storm.
+      const pickable=allowOutside ? avail : avail.filter(p=>targetedIds.has(p.id));
+      const sals=pickable.map(p=>p.salary).sort((a,b)=>a-b);
       const cheapest=(k,ex)=>{ let s=0,t2=0,sk=false;
         for(let i=0;i<sals.length&&t2<k;i++){ if(!sk&&ex!=null&&sals[i]===ex){sk=true;continue;} s+=sals[i];t2++; }
         return t2<k?Infinity:s; };
       const richest=(k,ex)=>{ let s=0,t2=0,sk=false;
         for(let i=sals.length-1;i>=0&&t2<k;i--){ if(!sk&&ex!=null&&sals[i]===ex){sk=true;continue;} s+=sals[i];t2++; }
         return t2<k?-Infinity:s; };
+      // Deficit-aware completion bound: with d member slots still owed, the
+      // cheapest legal completion must include the d cheapest available
+      // members. Member-blind lookahead lets a $6.6k final window arrive when
+      // the rule demands a $7.8k member.
+      let deficitMinSal=0, deficitMaxSal=0, dTot=0;
+      if(deficits.length){
+        for(const df of deficits){
+          const mSals=pickable.filter(p=>df.ids.has(p.id)).map(p=>p.salary).sort((a,b)=>a-b);
+          if(mSals.length<df.d){ deficitMinSal=Infinity; break; }
+          for(let k2=0;k2<df.d;k2++){ deficitMinSal+=mSals[k2]; deficitMaxSal+=mSals[mSals.length-1-k2]; }
+          dTot+=df.d;
+        }
+        const restMin = dTot<slotsLeft ? (isFinite(deficitMinSal)?(()=>{let s=0,t2=0;for(let i=0;i<sals.length&&t2<slotsLeft-dTot;i++){s+=sals[i];t2++;}return t2<slotsLeft-dTot?Infinity:s;})():Infinity) : 0;
+        const restMax = dTot<slotsLeft ? (()=>{let s=0,t2=0;for(let i=sals.length-1;i>=0&&t2<slotsLeft-dTot;i--){s+=sals[i];t2++;}return s;})() : 0;
+        if(salUsed+deficitMinSal+restMin>maxSal || salUsed+deficitMaxSal+restMax<floorSal){
+          if(lineup.length>0&&backtracks<12){ salUsed-=lineup.pop().salary; backtracks++; continue; }
+          return null;
+        }
+      }
       const cands=[];
-      for(const p of avail){
+      for(const p of pickable){
+        if(forcedSet && !forcedSet.has(p.id)) continue;
         if(p.salary>salRemaining) continue;
-        // Two-sided lookahead: after taking p, the remaining slots must be able
-        // to stay under the cap AND still reach the salary floor.
         if(slotsLeft>1){
           if(p.salary+cheapest(slotsLeft-1,p.salary)>salRemaining) continue;
           if(salUsed+p.salary+richest(slotsLeft-1,p.salary)<floorSal) continue;
         } else {
           if(salUsed+p.salary<floorSal) continue;
         }
-        // Prospective group-max check (cheap; min rules validated at the end)
         let bad=false;
         for(const g of groups){
           if(!(g.ruleMax>0)) continue;
@@ -6236,39 +6408,76 @@ function runPgaTargetGen(ctx){
           if(cnt+1>g.ruleMax){ bad=true; break; }
         }
         if(bad) continue;
-        // Weight = remaining quota. The tiny quality-tilted epsilon keeps
-        // completion possible once quotas run dry near the end of the run —
-        // it cannot create meaningful exposure on its own.
-        let wgt=Math.max(rem.get(p.id),0)+0.02*(1+q.get(p.id));
+        let wgt;
+        const rp = rem.get(p.id);
+        if(rp>1e-9){ wgt = rp; }
+        else {
+          // Fallback weight decays with overshoot so completion fills rotate
+          // across the pool instead of stacking on one cheap valve golfer.
+          const over = Math.max(0, (built.get(p.id)||0) - (tgtSlots.get(p.id)||0));
+          // Pure overshoot equalization: quality-tilted crumbs crown a single
+          // band golfer with every structural cheap slot; equal-overshoot
+          // rotation spreads the residue across the band instead.
+          wgt = 0.02/(1+over);
+        }
+        deficits.forEach(df=>{ if(df.ids.has(p.id)) wgt*=(1+2*df.d); });
         if(slot.wave==='am'){ if(amIds.has(p.id)) wgt*=1.4; else if(pmIds.has(p.id)) wgt*=0.75; }
         else if(slot.wave==='pm'){ if(pmIds.has(p.id)) wgt*=1.4; else if(amIds.has(p.id)) wgt*=0.75; }
-        if(slot.arch){ wgt *= (slot.arch.playerIds||[]).includes(p.id) ? 1.6 : 1.0; }
+        if(slot.arch){ wgt *= (slot.arch.playerIds||[]).includes(p.id) ? archBoostFactor : archSuppressFactor; }
         groups.forEach(g=>{
           if(!g.correlation||g.correlation===0) return;
           const inL=lineup.filter(lp=>(g.playerIds||[]).includes(lp.id)).length;
           if(inL>0&&(g.playerIds||[]).includes(p.id)) wgt*=(1+(g.correlation/100)*inL);
         });
-        cands.push({p,wgt});
+        let tier = rp>1e-9 ? 0 : (targetedIds.has(p.id) ? 1 : 2);
+        if(mergeTiers && tier===1) tier=0;
+        if(flat<1) wgt=Math.pow(Math.max(wgt,1e-9), flat);
+        cands.push({p,wgt,tier});
+      }
+      if(!allowOutside){
+        const inPool=cands.filter(c=>c.tier<2);
+        cands.length=0; cands.push(...inPool);
       }
       if(!cands.length){
         if(lineup.length>0&&backtracks<12){ salUsed-=lineup.pop().salary; backtracks++; continue; }
         return null;
       }
-      let r=Math.random()*cands.reduce((s,c)=>s+c.wgt,0);
-      let pick=cands[cands.length-1].p;
-      for(const c of cands){ r-=c.wgt; if(r<=0){ pick=c.p; break; } }
+      const bestTier=Math.min(...cands.map(c=>c.tier));
+      const tierCands=cands.filter(c=>c.tier===bestTier);
+      if(bestTier===1) crumbFills++;
+      if(bestTier===2) outsideFills++;
+      let r=Math.random()*tierCands.reduce((s,c)=>s+c.wgt,0);
+      let pick=tierCands[tierCands.length-1].p;
+      for(const c of tierCands){ r-=c.wgt; if(r<=0){ pick=c.p; break; } }
       lineup.push(pick); salUsed+=pick.salary;
     }
-    // Floor rescue (rare — the richest() lookahead makes the floor reachable,
-    // but the sampler may not have taken the rich path): quota-aware upgrades.
     let total=lineup.reduce((s,p)=>s+p.salary,0), guard=0;
+    // Rule-aware salary-floor rescue: a swap must not pull a group below its
+    // ruleMin (the cheapest golfer is often a member holding the minimum) nor
+    // push the incoming golfer's group over its ruleMax — a rule-blind jam
+    // silently breaks finished lineups that then fail checkGroupRules, wasting
+    // the entire build.
+    const swapBreaksRules=(out,rp)=>{
+      for(const g of groups){
+        const ids=g.playerIds||[];
+        if((g.ruleMin||0)>0 && ids.includes(out.id) && !ids.includes(rp.id)){
+          const cnt=lineup.filter(lp=>ids.includes(lp.id)).length;
+          if(cnt<=g.ruleMin) return true;
+        }
+        if((g.ruleMax||0)>0 && ids.includes(rp.id)){
+          const cnt=lineup.filter(lp=>lp!==out&&ids.includes(lp.id)).length;
+          if(cnt+1>g.ruleMax) return true;
+        }
+      }
+      return false;
+    };
     while(total<floorSal && guard++<20){
       const order=lineup.map((p,i)=>i).sort((a,b)=>lineup[a].salary-lineup[b].salary);
       let swapped=false;
       for(const li of order){
         const out=lineup[li], budget=maxSal-(total-out.salary);
         const ups=pool.filter(p=>p!==out && !lineup.includes(p) && built.get(p.id)<hardCap.get(p.id)
-          && p.salary>out.salary && p.salary<=budget)
+          && p.salary>out.salary && p.salary<=budget && !swapBreaksRules(out,p))
           .sort((a,b)=>(Math.max(rem.get(b.id),0))-(Math.max(rem.get(a.id),0)));
         if(ups.length){ const rp=ups[0]; total=total-out.salary+rp.salary; lineup[li]=rp; swapped=true; break; }
       }
@@ -6279,38 +6488,89 @@ function runPgaTargetGen(ctx){
     return lineup;
   }
 
-  const finalLineups=[], seen=new Set((slate.savedLineups||[]).map(l=>lineupKey(l)));
-  let attempts=0, si=0;
-  const maxAttempts=L*60;
-  while(finalLineups.length<L && attempts++<maxAttempts){
-    if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; return; }
-    const slot=schedule[Math.min(si, schedule.length-1)];
-    const lu=buildOneTarget(slot);
-    if(!lu) continue;
-    const key=lu.map(p=>p.id).sort().join('|');
-    if(seen.has(key)) continue;
-    seen.add(key);
-    lu._waveTag = slot.wave;
-    lu._archetypeTag = slot.arch ? slot.arch.id : null;
-    lu._archetypeGroupId = lu._archetypeTag;
-    finalLineups.push(lu);
-    lu.forEach(p=>{ rem.set(p.id, rem.get(p.id)-1); built.set(p.id, built.get(p.id)+1); });
-    si++;
+  function realize(count){
+    let attempts=0, si=0, strictFails=0;
+    const maxAttempts=count*60;
+    while(finalLineups.length<count && attempts++<maxAttempts){
+      if(window._genCancelled) return -1;
+      const slot=schedule[Math.min(si, schedule.length-1)];
+      // strictFails is generation PRESSURE: failed builds and duplicate
+      // rejections both raise it. Sustained pressure first merges the
+      // quota-exhausted tier into sampling (late-run quota concentrates in a
+      // few golfers and regenerates the same lineups otherwise), then allows
+      // outside-pool picks as the last resort.
+      const lu=buildOneTarget(slot, strictFails>=8, strictFails>=3, strictFails);
+      if(!lu){ strictFails++; continue; }
+      const key=lu.map(p=>p.id).sort().join('|');
+      if(seen.has(key)){ strictFails++; continue; }
+      strictFails=0;
+      seen.add(key);
+      lu._waveTag = slot.wave;
+      lu._archetypeTag = slot.arch ? slot.arch.id : null;
+      lu._archetypeGroupId = lu._archetypeTag;
+      finalLineups.push(lu);
+      lu.forEach(p=>{ rem.set(p.id, rem.get(p.id)-1); built.set(p.id, built.get(p.id)+1); });
+      si++;
+    }
+    return attempts;
   }
 
+  // ── Shape feedback pass ──
+  // The λ solve fits the portfolio's MEAN salary, but lineups are combos: each
+  // expensive golfer picked forces cheap complements, so realized slot demand
+  // by salary band exceeds target mass at the cheap end whenever the mix is
+  // top-heavy — and that gap used to leak to fallback fills steered by
+  // feasibility instead of value. Dry-run a sample, measure demand per $500
+  // band, floor under-provisioned cheap bands (distributed within each band by
+  // value order), then re-solve so the cheap slots are CHOSEN, not forced.
+  const dryN = Math.min(100, L);
+  const bucket=s=>Math.floor(s/500)*500;
+  let reservedTotal=0;
+  for(let iter=0; iter<3; iter++){
+    initState();
+    if(realize(dryN)===-1){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; return; }
+    if(finalLineups.length<Math.min(20,dryN)) break;
+    const demand={}, bmass={};
+    finalLineups.forEach(l=>l.forEach(p=>{ const b=bucket(p.salary); demand[b]=(demand[b]||0)+1; }));
+    pool.forEach((p,i)=>{ const b=bucket(p.salary); bmass[b]=(bmass[b]||0)+targets[i]; });
+    const scaleUp = L/finalLineups.length;
+    let reserved=0;
+    Object.keys(demand).map(Number).sort((a,b)=>a-b).forEach(b=>{
+      const need=demand[b]*scaleUp, have=bmass[b]||0;
+      const short=need-have;
+      if(short>0.5 && b<=8000 && reservedTotal+reserved<SLOTS*0.35){
+        // Recipients: the top half of the band by value (min 4) with a hard
+        // 10% per-golfer ceiling on shape floors — structural cheap demand is
+        // a population need (~1 slot/lineup) and must spread across the band's
+        // best values, not crown whoever tops it.
+        let idx=pool.map((p,i)=>i).filter(i=>bucket(pool[i].salary)===b)
+          .sort((a,c)=>vZ.get(pool[c].id)-vZ.get(pool[a].id));
+        idx=idx.slice(0, Math.max(Math.min(4, idx.length), Math.ceil(idx.length/2)));
+        reserved+=spreadAdd(floors, idx, Math.min(short, SLOTS*0.12, SLOTS*0.35-reservedTotal-reserved), 0.10*L);
+      }
+    });
+    if(reserved<=0.5) break;   // converged: targets now cover realized demand
+    reservedTotal+=reserved;
+    sol=solveTargets(); targets=sol.t; lambdaStar=sol.lam;
+    adjustForGroupRules(targets);
+  }
+  if(reservedTotal>0.5)
+    log('Shape pass: reserved '+Math.round(reservedTotal/SLOTS*100)+'% of slots for under-provisioned salary bands (measured from dry-run demand).');
+  initState();
+  if(realize(L)===-1){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; return; }
+
   // ── Report ──
-  const dev=pool.map((p,i)=>({name:p.name, tgt:targets[i]/L, got:(built.get(p.id)||0)/finalLineups.length}))
+  const dev=pool.map((p,i)=>({name:p.name, tgt:targets[i]/L, got:(built.get(p.id)||0)/Math.max(1,finalLineups.length)}))
     .filter(x=>x.tgt>0.005||x.got>0.005);
   dev.sort((a,b)=>b.got-a.got);
-  const vTop = pool.map(p=>({name:p.name, v:value.get(p.id)})).sort((a,b)=>b.v-a.v);
-  log(`Top value plays (score/$1k): ${vTop.slice(0,8).map(x=>`${x.name.split(' ').slice(-1)[0]} ${x.v.toFixed(2)}`).join(', ')}`);
-  log(`Target engine: ${lambdaStar!==0?`salary tilt λ=${lambdaStar.toFixed(2)}, `:''}τ=${tau.toFixed(2)}, alloc avg $${Math.round(allocSal).toLocaleString()}/lineup.`);
-  log(`Top targets → achieved: ${dev.slice(0,6).map(x=>`${x.name.split(' ').slice(-1)[0]} ${Math.round(x.tgt*100)}→${Math.round(x.got*100)}%`).join(', ')}`);
+  log('Top targets → achieved: '+dev.slice(0,6).map(x=>x.name.split(' ').slice(-1)[0]+' '+Math.round(x.tgt*100)+'→'+Math.round(x.got*100)+'%').join(', '));
   const worst=dev.slice().sort((a,b)=>Math.abs(b.got-b.tgt)-Math.abs(a.got-a.tgt))[0];
-  if(worst && Math.abs(worst.got-worst.tgt)>0.08) log(`Largest target miss: ${worst.name} ${Math.round(worst.tgt*100)}% → ${Math.round(worst.got*100)}%.`);
+  if(worst && Math.abs(worst.got-worst.tgt)>0.08) log('Largest target miss: '+worst.name+' '+Math.round(worst.tgt*100)+'% → '+Math.round(worst.got*100)+'%.');
+  const usedN = pool.filter(p=>(built.get(p.id)||0)>0).length;
+  log('Player pool: '+targetedIds.size+' golfers earned targets (of '+pool.length+'); '+usedN+' used'+(crumbFills?', '+crumbFills+' exhausted-quota fills':'')+(outsideFills?', '+outsideFills+' OUTSIDE-POOL fills':'')+'.');
   const salAvgs=finalLineups.map(l=>l.reduce((s,p)=>s+p.salary,0));
-  log(`Done! ${finalLineups.length}/${L} lineups in ${attempts.toLocaleString()} attempts (${((Date.now()-t0)/1000).toFixed(1)}s). Salary $${Math.min(...salAvgs).toLocaleString()}–$${Math.max(...salAvgs).toLocaleString()}.`);
-  addToHistory(slate.id, `${finalLineups.length} lineups @ ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`, finalLineups);
+  log('Done! '+finalLineups.length+'/'+L+' lineups ('+((Date.now()-t0)/1000).toFixed(1)+'s). Salary $'+Math.min(...salAvgs).toLocaleString()+'–$'+Math.max(...salAvgs).toLocaleString()+'.');
+  addToHistory(slate.id, finalLineups.length+' lineups @ '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}), finalLineups);
   document.getElementById('genBtn').disabled=false;
   if(!finalLineups.length){ alert('Could not generate any valid lineups. Try relaxing group rules, lowering min salary, raising Max%, or unhiding players.'); return; }
   openPreviewModal(finalLineups, 'blend3');
@@ -6473,9 +6733,10 @@ async function runAutoGen(){
   if(slate.sport==='pga' && optimizeBy==='blend3'){
     const waveAM = parseInt(document.getElementById('waveSlider_am')?.value||0);
     const wavePM = parseInt(document.getElementById('waveSlider_pm')?.value||0);
+    const archetypeBoost = parseFloat(document.getElementById('archetypeBoostSlider')?.value||4);
     return runPgaTargetGen({ slate, pool, groups, target, maxExpPct, overrides,
       minOverrides, minSal, maxSal, randomness, wEquity, wModel, wProj,
-      oddsAvailable, normRtg, normProj, waveAM, wavePM });
+      oddsAvailable, normRtg, normProj, waveAM, wavePM, archetypeBoost });
   }
 
   // ── Candidate-pool exposure feedback ──
