@@ -6158,7 +6158,9 @@ function runPgaTargetGen(ctx){
   // leads raw value. That is the budget's actual answer to "stud + punt vs two
   // mids at equal salary", not a defect; the log prints the net-of-salary
   // ranking so the reorder is visible. Overriding it is what Min% is for.
-  const tau = 0.45 + randomness*2.2;
+  // Sharpness ladder: rand 0 is a conviction portfolio (top plays ~45-50%),
+  // rand ~10 a pressed-but-diversified book (~low 30s), rand 30+ wide.
+  const tau = 0.20 + randomness*4.0;
   const floorSlots = PGA_TARGET_FLOOR*L;
   function allocate(lambda){
     const val = pool.map(p=>vZ.get(p.id) - lambda*(p.salary/10000));
@@ -6524,7 +6526,10 @@ function runPgaTargetGen(ctx){
   // band, floor under-provisioned cheap bands (distributed within each band by
   // value order), then re-solve so the cheap slots are CHOSEN, not forced.
   const dryN = Math.min(100, L);
-  const bucket=s=>Math.floor(s/500)*500;
+  // $250 buckets under $7k: the corners that generate punt demand are salary-
+  // exact (a $6.8k floor can't serve a $6.5k corner), so coarse buckets floor
+  // the wrong golfers and the true release valves overshoot uncounted.
+  const bucket=s=> s<7000 ? Math.floor(s/250)*250 : Math.floor(s/500)*500;
   let reservedTotal=0;
   for(let iter=0; iter<3; iter++){
     initState();
