@@ -1134,21 +1134,6 @@ html { overscroll-behavior-y: contain; }
                     <input type="number" id="ufcEvFee" value="20" min="0.1" step="0.5" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.fee=parseFloat(this.value)||20;save();}"
                       style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
                   </div>
-                  <div style="flex:1;">
-                    <div style="font-size:9px;color:var(--muted);margin-bottom:2px;" title="Ownership projections are point estimates — EV is averaged over scenarios that perturb Own% by this much (relative). 0 = trust projections exactly.">Own% wiggle ±%</div>
-                    <input type="number" id="ufcEvSigma" value="35" min="0" max="100" step="5" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.ownSigma=parseFloat(this.value);save();}"
-                      style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
-                  </div>
-                </div>
-                <div style="display:flex;gap:6px;margin-bottom:6px;">
-                  <div style="flex:1;">
-                    <div style="font-size:9px;color:var(--muted);margin-bottom:2px;" title="Optional hard constraint on top of the standardized risk model: no 2-fighter combination in more than this % of lineups. 100 = off.">Max pair %</div>
-                    <input type="number" id="ufcEvPairCap" value="100" min="1" max="100" step="5" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.pairCap=parseFloat(this.value);save();}"
-                      style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
-                  </div>
-                  <div style="flex:1.4;display:flex;align-items:flex-end;">
-                    <div style="font-size:9px;color:var(--muted);line-height:1.4;padding-bottom:2px;">Risk is standardized to the slate stake (assumes entries follow your bankroll management).</div>
-                  </div>
                 </div>
                 <div style="margin-bottom:6px;">
                   <div style="font-size:9px;color:var(--muted);margin-bottom:3px;">Payout structure</div>
@@ -1161,7 +1146,7 @@ html { overscroll-behavior-y: contain; }
                 <textarea id="ufcEvCustom" placeholder="1: 5000&#10;2-5: 1000&#10;6-100: 40" spellcheck="false"
                   onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.custom=this.value;save();}"
                   style="display:none;width:100%;min-height:56px;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-size:10px;font-family:'DM Mono',monospace;outline:none;margin-bottom:6px;"></textarea>
-                <div style="font-size:9px;color:var(--muted);line-height:1.5;">Field of 2,000 lineups sampled to match Own% under cap/no-oppose. Dup-adjusted. The leverage slider is ignored in this mode — uniqueness is priced by the payout curve itself.</div>
+                <div style="font-size:9px;color:var(--muted);line-height:1.5;">Field modeled from Own% under cap/no-oppose, dup-adjusted, with a standard ±35% allowance for ownership projection error. Risk is standardized to the slate stake (assumes entries follow your bankroll management). The leverage slider is ignored in this mode — uniqueness is priced by the payout curve itself.</div>
               </div>
             </div>
             <div style="padding:6px 8px;background:rgba(168,85,247,.07);border:1px solid rgba(168,85,247,.2);border-radius:5px;font-size:9px;color:var(--muted);line-height:1.5;">
@@ -3171,8 +3156,6 @@ function renderGroupRulesSummary(){
     if(evT){ evT.checked = !!ev.on; const es=document.getElementById('ufcEvSettings'); if(es) es.style.display = ev.on?'block':'none'; }
     const evF = document.getElementById('ufcEvField'); if(evF && ev.fieldSize) evF.value = ev.fieldSize;
     const evFee = document.getElementById('ufcEvFee'); if(evFee && ev.fee!=null) evFee.value = ev.fee;
-    const evSg = document.getElementById('ufcEvSigma'); if(evSg && ev.ownSigma!=null) evSg.value = ev.ownSigma;
-    const evPc = document.getElementById('ufcEvPairCap'); if(evPc && ev.pairCap!=null) evPc.value = ev.pairCap;
     const evC = document.getElementById('ufcEvCustom'); if(evC){ if(ev.custom!=null) evC.value = ev.custom; evC.style.display = (ev.preset==='custom')?'block':'none'; }
     const presetKey = ev.preset||'gpp';
     [['gpp','ufcEvPresetGpp'],['double','ufcEvPresetDouble'],['custom','ufcEvPresetCustom']].forEach(([k,id])=>{
@@ -4800,22 +4783,20 @@ async function runUFCContestEV(ctx){
   // positions carry their EV across scenarios. sigma is user-set (default
   // ±35% relative), 0 = trust the projections exactly (old behavior).
   const K = 5;
-  const sigma = Math.max(0, Math.min(1, (parseFloat(cfg.ownSigma!=null?cfg.ownSigma:35))/100));
+  // Standard ownership-error allowance — not a setting. If the user distrusts
+  // a specific projection, the honest fix is editing that Own% value; the
+  // fixed ±35% covers ordinary projection noise for everyone identically.
+  const sigma = 0.35;
   const gaussEV = ()=>{ const u=Math.max(1e-9,Math.random()), v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); };
   const baseOwn = pool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
   const ownBudget = baseOwn.reduce((a,b)=>a+b,0);
   const scenarios = [baseOwn];
-  if(sigma>0){
-    for(let k=1;k<K;k++){
-      let o = baseOwn.map(v=>v*Math.exp(sigma*gaussEV() - sigma*sigma/2));
-      const s2 = o.reduce((a,b)=>a+b,0)||1;
-      scenarios.push(o.map(v=>Math.max(0.1, v*ownBudget/s2)));
-    }
-    log(`Ownership uncertainty: ${K} scenarios at ±${Math.round(sigma*100)}% relative (budget-preserving); sims split across them.`);
-  } else {
-    while(scenarios.length<K) scenarios.push(baseOwn);
-    log(`Ownership uncertainty off (wiggle 0%) — projections trusted exactly.`);
+  for(let k=1;k<K;k++){
+    let o = baseOwn.map(v=>v*Math.exp(sigma*gaussEV() - sigma*sigma/2));
+    const s2 = o.reduce((a,b)=>a+b,0)||1;
+    scenarios.push(o.map(v=>Math.max(0.1, v*ownBudget/s2)));
   }
+  log(`Ownership uncertainty: ${K} scenarios at a standard ±${Math.round(sigma*100)}% (budget-preserving); sims split across them.`);
   const NF = 2000;
   const fields=[], fieldKeyCounts=[];
   let dev0=0, dev0Name='';
@@ -4972,35 +4953,12 @@ async function runUFCContestEV(ctx){
   const B = fee*target*10;
   log(`Risk model: log-utility standardized to 10× the slate stake ($${Math.round(B).toLocaleString()}) — assumes entries follow standard bankroll management.`);
   const outputExpCount={}; const chosen=[];
-  // Pair-exposure cap: a RISK constraint, not an EV correction. In large
-  // fields the self-crowding cost of many entries sharing a pair is tiny
-  // (a few dozen ranks among 10k paid), so pure EV happily rides one pair
-  // in 70+ lineups — and when that pair's dog side loses, most of the
-  // portfolio dies at once. EV is indifferent to that variance; bankrolls
-  // aren't. The cap bounds how much of the portfolio any single 2-fighter
-  // combination can carry, forcing the EV maximizer to diversify its
-  // correlation structure while it optimizes. User-set; 100 = off.
-  const pairCapPct = Math.max(1, Math.min(100, parseFloat(cfg.pairCap!=null?cfg.pairCap:100)));
-  const pairCapN   = Math.max(1, Math.ceil(pairCapPct/100*target));
-  const pairCount  = {};
-  const pairsOf = lu => {
-    const ids = lu.map(p=>p.id).sort(); const out=[];
-    for(let i=0;i<ids.length;i++) for(let j=i+1;j<ids.length;j++) out.push(ids[i]+'|'+ids[j]);
-    return out;
-  };
-  if(pairCapPct<100) log(`Pair exposure cap: no 2-fighter combo in more than ${pairCapPct}% of lineups.`);
-  const capBlocked = lu => {
-    if(lu.some(p=>{
-      const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
-      if(pct>=100) return false;
-      if(pct<=0) return true;
-      return (outputExpCount[p.id]||0) >= Math.max(1,Math.ceil(pct/100*target));
-    })) return true;
-    if(pairCapPct<100){
-      for(const k of pairsOf(lu)) if((pairCount[k]||0) >= pairCapN) return true;
-    }
-    return false;
-  };
+  const capBlocked = lu => lu.some(p=>{
+    const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
+    if(pct>=100) return false;
+    if(pct<=0) return true;
+    return (outputExpCount[p.id]||0) >= Math.max(1,Math.ceil(pct/100*target));
+  });
   const totalsOf = e => {
     const idxs = e.lineup.map(p=>idxById.get(p.id)).filter(i=>i!=null);
     const out = new Float64Array(fieldSorted.length);
@@ -5086,7 +5044,6 @@ async function runUFCContestEV(ctx){
       if(!top.e._tots) top.e._tots = totalsOf(top.e);
       acceptEntry(top.e);
       top.e.lineup.forEach(p=>{ outputExpCount[p.id]=(outputExpCount[p.id]||0)+1; });
-      pairsOf(top.e.lineup).forEach(k=>{ pairCount[k]=(pairCount[k]||0)+1; });
       cands.shift();
       if(chosen.length % 8 === 0){ await tick(); if(window._genCancelled) return null; }
     } else {
