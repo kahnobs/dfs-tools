@@ -3906,6 +3906,20 @@ function sampleFightOutcome(a, b){
     }
     const dec = f.decision != null ? mlToProb(f.decision) : null;
     if(dec != null) out.push({round:'dec', prob:dec});
+    // ITD-anchored fallback shape: no finish ladder posted, but ML+ITD pinned
+    // P(finish | win) upstream (_itdFinish, see runUFCSimsNew). Build the win
+    // mass from that split instead of defaulting everything to a decision.
+    // Only the SHAPE matters here — the ML anchor rescales to the true win
+    // prob — so probs are emitted as shares. The finish mass spreads across
+    // rounds by the historical UFC finish-round distribution (R1-heavy).
+    if(!out.some(o=>o.round!=='dec') && f._itdFinish != null){
+      out.length = 0; // a lone posted decision price is superseded by the ITD shape
+      const split = f._is5Round
+        ? [[1,0.42],[2,0.24],[3,0.16],[4,0.10],[5,0.08]]
+        : [[1,0.50],[2,0.30],[3,0.20]];
+      split.forEach(([r,s])=>out.push({round:r, prob:f._itdFinish*s}));
+      out.push({round:'dec', prob:Math.max(0.05, 1 - f._itdFinish)});
+    }
     return out;
   };
   const aOut = collect(a), bOut = collect(b);
@@ -4380,8 +4394,43 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
       const finM = [1,2,3,4,5].reduce((s,r)=>s+(f['finish_r'+r]!=null?(mlToProb(f['finish_r'+r])||0):0),0);
       const decM = f.decision!=null ? (mlToProb(f.decision)||0) : 0;
       f._finishRate = (finM+decM)>0 ? finM/(finM+decM) : null;
+
+      // ── ITD-anchored finish share (fallback MOV shape) ────────────────────
+      // A fighter with NO finish ladder posted used to have his entire win
+      // mass simmed as a DECISION (30-pt bonus, no KD spike, no quick-win) —
+      // even when his ITD price said he finishes most of his wins. That
+      // silently buried finish-heavy fighters whose alt lines simply weren't
+      // in the sheet yet (early-week cards, headline fights). When the ladder
+      // is absent but ML + ITD exist, derive the finish/decision split from
+      // the market instead: P(finish | win) = de-vigged ITD ÷ win prob.
+      const hasLadder = [1,2,3,4,5].some(r=>f['finish_r'+r]!=null);
+      f._itdFinish = null;
+      if(!hasLadder){
+        const mlV  = (f.ml  != null && f.ml  !== '') ? parseFloat(f.ml)  : null;
+        const itdV = (f.itd != null && f.itd !== '') ? parseFloat(f.itd) : null;
+        const pW = (mlV != null && !isNaN(mlV)) ? mlToProb(mlV) : null;
+        const pI = (itdV != null && !isNaN(itdV)) ? (mlToProb(itdV)||0)/1.045 : null; // flat de-vig, mirrors itdCheck
+        if(pW > 0 && pI != null) f._itdFinish = Math.max(0.03, Math.min(0.95, pI/pW));
+      }
+      if(f._itdFinish != null && f._finishRate == null) f._finishRate = f._itdFinish;
     });
   });
+
+  // ── Data-coverage visibility ────────────────────────────────────────────
+  // Say out loud which fighters are running on fallback shapes — an inverted
+  // sim score is almost always a data gap, and these lines make it one glance.
+  if(typeof log === 'function'){
+    const lastName = p => p.name.split(' ').slice(-1)[0];
+    const noLadder = fullPool.filter(p=>![1,2,3,4,5].some(r=>p['finish_r'+r]!=null));
+    const viaItd   = noLadder.filter(p=>p._itdFinish!=null);
+    const blind    = noLadder.filter(p=>p._itdFinish==null);
+    if(viaItd.length) log(`ITD fallback (no finish ladder posted — finish/decision split taken from ITD price): ${viaItd.map(lastName).join(', ')}`);
+    if(blind.length)  log(`⚠ No finish ladder OR ITD — simmed as decision-only (finishing equity invisible): ${blind.map(lastName).join(', ')}`);
+    const fiveR = [...new Set(pairs.filter(({a,b})=>a._is5Round||(b&&b._is5Round)).map(({fightNum})=>fightNum).filter(Boolean))].sort((x,y)=>x-y);
+    log(fiveR.length
+      ? `5-round fights: ${fiveR.map(f=>'F'+f).join(', ')}`
+      : `5-round fights: none detected — if the main event lacks R4/R5 alt lines, set its F# toggle or its decision volume caps at 3-round levels (130 SS vs 200).`);
+  }
 
   // Precompute vig-removed win probs and CDFs.
   // vigRemovedWinProb normalizes the two fighters' raw implied probs to sum to 1.0,
