@@ -4668,20 +4668,37 @@ function buildPayoutFn(cfg){
       at: r => { for(const t of tiers){ if(r>=t.lo && r<=t.hi) return t.amt; } return 0; },
       desc: `Custom: ${tiers.length} tiers, paying through ${tiers[tiers.length-1].hi.toLocaleString()}` };
   }
-  // Top-heavy GPP preset: 85% of entries → prize pool (15% rake). Power-law
-  // 1/r^1.05 over the top 12% of the field, floored at a 2× min-cash that
-  // extends through 20% of the field — a generic large-GPP shape.
-  const pool2      = F*fee*0.85;
-  const topN       = Math.max(1, Math.floor(F*0.12));
-  const mincashHi  = Math.max(topN, Math.floor(F*0.20));
-  const mincashAmt = fee*2;
-  const mincashBudget = (mincashHi-topN)*mincashAmt;
-  let hSum=0; for(let r=1;r<=topN;r++) hSum+=1/Math.pow(r,1.05);
-  const A = Math.max(0,(pool2-mincashBudget))/Math.max(1e-9,hSum);
+  // Top-heavy GPP preset — the ACTUAL payout table of the DK UFC main GPP
+  // ($3 entry, 47.5k cap, $120k guaranteed; tiers verified to sum to exactly
+  // $120,000 through 9,791st), used as the reference shape. At those exact
+  // parameters it reproduces the table to the dollar. For other sizes/fees,
+  // prizes scale with the prize pool (same 84.2% effective payout ratio) and
+  // deep tier BOUNDARIES scale with field size, while the top 25 places stay
+  // absolute — 2nd place is 2nd place in any field. This replaces the fitted
+  // power curve: real DK tables are steeper 2nd→6th and wider mid-tier than
+  // any single-exponent decay. Paste the exact table via Custom when a
+  // specific contest's structure differs.
+  const REF = [[1,1,15000],[2,2,7500],[3,3,3000],[4,4,2000],[5,5,1500],[6,6,1000],
+    [7,8,750],[9,10,500],[11,14,400],[15,19,300],[20,25,250],[26,35,200],[36,45,150],
+    [46,60,100],[61,80,75],[81,105,60],[106,135,50],[136,175,40],[176,225,30],
+    [226,285,25],[286,405,20],[406,725,15],[726,1625,10],[1626,3427,8],[3428,9791,6]];
+  const REF_F = 47500, REF_FEE = 3;
+  // Scale prizes by total entry dollars — implies the reference contest's
+  // exact payout ratio ($120k / $142.5k = 84.21%), and reproduces the table
+  // to the dollar at the reference parameters.
+  const poolScale = (F*fee)/(REF_F*REF_FEE);
+  const rankScale = F/REF_F;
+  const tiers=[]; let prevHi=0;
+  for(const [lo,hi,amt] of REF){
+    const lo2 = Math.max(prevHi+1, lo<=25 ? lo : Math.round(lo*rankScale));
+    const hi2 = Math.max(lo2, hi<=25 ? hi : Math.round(hi*rankScale));
+    tiers.push({lo:lo2, hi:hi2, amt:amt*poolScale});
+    prevHi = hi2;
+  }
+  const lastPaid = tiers[tiers.length-1].hi;
   return {
-    at: r => { if(r<=topN) return Math.max(A/Math.pow(r,1.05), mincashAmt);
-               if(r<=mincashHi) return mincashAmt; return 0; },
-    desc: `GPP: ~$${Math.round(A).toLocaleString()} to 1st, min-cash $${mincashAmt.toFixed(0)} through ${mincashHi.toLocaleString()} of ${F.toLocaleString()} (15% rake)` };
+    at: r => { for(const t of tiers){ if(r<t.lo) return 0; if(r<=t.hi) return t.amt; } return 0; },
+    desc: `GPP (DK UFC main shape): $${Math.round(tiers[0].amt).toLocaleString()} to 1st, paying through ${lastPaid.toLocaleString()} of ${F.toLocaleString()} — exact at $3/47.5k, scaled otherwise` };
 }
 
 // Ownership-calibrated field sampler. Draws N 6-man lineups weighted by Own%
