@@ -4722,15 +4722,48 @@ async function runUFCSimGen(){
     const ownShare = ((parseFloat(p.own)||0)||fieldAvgOwn) / sumOwn;
     levRatio[p.id] = ownShare>0 ? eqShare/ownShare : 1;
   });
-  // Per-lineup leverage factor: geometric mean of each fighter's clamped ratio^strength
-  // (centered at 1 when strength=0, so leverage 0 is a no-op).
+  // Per-lineup leverage factor: PRODUCT of each fighter's multiplier (sum of
+  // logs, NOT the mean). The old geometric mean divided the log-sum by 6,
+  // which diluted a fighter's leverage edge to ~1/6th at the lineup level —
+  // at slider 20 a clearly-under-owned fighter moved a lineup's score ~1%,
+  // invisible under the ±18% selection noise, so the slider read as dead.
+  // With the product, a lineup stacking leverage plays compounds them, the
+  // way the NASCAR engine's per-driver builder weights always did.
+  // Applied at HALF exponent: the leverage-aware anchor below is the primary
+  // (budget-constrained) channel — it renormalizes to the 6-slot budget so it
+  // can't run away. Stacking the full product on top of it triple-counted
+  // leverage with the servo and the joint ceiling (a 1.3× fighter hit 99%
+  // exposure at slider 50); the half-exponent keeps the multiplier as a
+  // within-tier tiebreaker while the anchor sets allocation.
   const lineupLeverage = e => {
     if(levStrength<=0) return 1;
     let lg=0;
     e.lineup.forEach(p=>{ const m=levShape(levRatio[p.id]||1, levStrength); lg+=Math.log(m); });
-    return Math.exp(lg / e.lineup.length);
+    return Math.exp(lg*0.5);
   };
-  if(levStrength>0) log(`Leverage ${Math.round(levStrength*100)}/100 → tilting toward fighters under-owned relative to their ceiling.`);
+  // Leverage-aware exposure anchor: tilt each fighter's sim-optimal rate by
+  // his own leverage multiplier and renormalize to the 6-slot budget. The
+  // alignment servo previously pulled exposures back toward the RAW
+  // (leverage-blind) anchors — actively fighting the slider it shares a
+  // pipeline with. Now the servo and the slider point at the same target:
+  // slider 0 reproduces the pure sim anchors exactly.
+  const levTgt = {};
+  {
+    let tSum = 0;
+    pool.forEach(p=>{
+      const t = (appearRate[p.id]!=null ? appearRate[p.id] : 0.25)
+              * (levStrength>0 ? levShape(levRatio[p.id]||1, levStrength) : 1);
+      levTgt[p.id]=t; tSum+=t;
+    });
+    const norm = tSum>0 ? 6/tSum : 1;
+    pool.forEach(p=>{ levTgt[p.id]*=norm; });
+  }
+  if(levStrength>0){
+    const tips = pool.map(p=>({p, m: levShape(levRatio[p.id]||1, levStrength)}));
+    const boosted = tips.filter(t=>t.m>1.03).sort((a,b)=>b.m-a.m).slice(0,5);
+    const faded   = tips.filter(t=>t.m<0.97).sort((a,b)=>a.m-b.m).slice(0,5);
+    log(`Leverage ${Math.round(levStrength*100)}/100 → boosts: ${boosted.map(t=>`${t.p.name.split(' ').slice(-1)[0]} ${t.m.toFixed(2)}×`).join(', ')||'none'} · fades: ${faded.map(t=>`${t.p.name.split(' ').slice(-1)[0]} ${t.m.toFixed(2)}×`).join(', ')||'none'}`);
+  }
   else if(!ownMapped) log('Leverage off (map an Own% column to enable).');
 
   // Select by quality × equity-leverage, penalizing only NEAR-DUPLICATES (lineups
@@ -4877,7 +4910,8 @@ async function runUFCSimGen(){
       const denomA = Math.max(1, filled.length);
       let align = 0;
       x.lineup.forEach(p=>{
-        const tgt = appearRate[p.id]!=null ? appearRate[p.id] : 0.25;
+        // Leverage-tilted anchor (== raw sim-optimal rate at slider 0)
+        const tgt = levTgt[p.id]!=null ? levTgt[p.id] : 0.25;
         const cur = (outputExpCount[p.id]||0) / denomA;
         align += (tgt - cur);
       });
