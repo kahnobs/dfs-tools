@@ -1111,6 +1111,49 @@ html { overscroll-behavior-y: contain; }
               </div>
               <div style="font-size:9px;color:var(--muted);text-align:center;margin-top:4px;">Fades chalky lineups toward under-owned builds. Needs an <span style="color:var(--purple);">Own%</span> column mapped.</div>
             </div>
+            <div style="margin-bottom:8px;padding-top:8px;border-top:1px solid var(--border);" id="ufcEvBlock">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                <div>
+                  <div style="font-size:11px;font-weight:600;color:var(--text);">Contest EV Mode</div>
+                  <div style="font-size:9px;color:var(--muted);margin-top:1px;">Select by simulated payout vs an Own%-modeled field</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="ufcEvToggle" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.on=this.checked;save();}const es=document.getElementById('ufcEvSettings');if(es)es.style.display=this.checked?'block':'none';">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div id="ufcEvSettings" style="display:none;">
+                <div style="display:flex;gap:6px;margin-bottom:6px;">
+                  <div style="flex:1;">
+                    <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Field size</div>
+                    <input type="number" id="ufcEvField" value="10000" min="100" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.fieldSize=parseInt(this.value)||10000;save();}"
+                      style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
+                  </div>
+                  <div style="flex:1;">
+                    <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Entry fee $</div>
+                    <input type="number" id="ufcEvFee" value="20" min="0.1" step="0.5" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.fee=parseFloat(this.value)||20;save();}"
+                      style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
+                  </div>
+                  <div style="flex:1;">
+                    <div style="font-size:9px;color:var(--muted);margin-bottom:2px;" title="Ownership projections are point estimates — EV is averaged over scenarios that perturb Own% by this much (relative). 0 = trust projections exactly.">Own% wiggle ±%</div>
+                    <input type="number" id="ufcEvSigma" value="35" min="0" max="100" step="5" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.ownSigma=parseFloat(this.value);save();}"
+                      style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
+                  </div>
+                </div>
+                <div style="margin-bottom:6px;">
+                  <div style="font-size:9px;color:var(--muted);margin-bottom:3px;">Payout structure</div>
+                  <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                    <button class="nascar-track-btn active" id="ufcEvPresetGpp" onclick="setUfcEvPreset('gpp',this)">Top-heavy GPP</button>
+                    <button class="nascar-track-btn" id="ufcEvPresetDouble" onclick="setUfcEvPreset('double',this)">Double-Up</button>
+                    <button class="nascar-track-btn" id="ufcEvPresetCustom" onclick="setUfcEvPreset('custom',this)">Custom</button>
+                  </div>
+                </div>
+                <textarea id="ufcEvCustom" placeholder="1: 5000&#10;2-5: 1000&#10;6-100: 40" spellcheck="false"
+                  onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.custom=this.value;save();}"
+                  style="display:none;width:100%;min-height:56px;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-size:10px;font-family:'DM Mono',monospace;outline:none;margin-bottom:6px;"></textarea>
+                <div style="font-size:9px;color:var(--muted);line-height:1.5;">Field of 2,000 lineups sampled to match Own% under cap/no-oppose. Dup-adjusted. The leverage slider is ignored in this mode — uniqueness is priced by the payout curve itself.</div>
+              </div>
+            </div>
             <div style="padding:6px 8px;background:rgba(168,85,247,.07);border:1px solid rgba(168,85,247,.2);border-radius:5px;font-size:9px;color:var(--muted);line-height:1.5;">
               Requires <span style="color:var(--purple);font-weight:600;">ML</span> mapped. Sim samples fight outcomes from odds, picks optimal lineup per sim, ranks by frequency.
             </div>
@@ -3112,6 +3155,18 @@ function renderGroupRulesSummary(){
     const ufcLevSl = document.getElementById('ufcLeverageSlider');
     const ufcLevLb = document.getElementById('ufcLeverageLabel');
     if(ufcLevSl){ const lv = (slate._ufcLeverage!=null ? slate._ufcLeverage : 30); ufcLevSl.value = lv; if(ufcLevLb) ufcLevLb.textContent = lv; }
+    // Restore Contest EV settings
+    const ev = slate._ufcEv||{};
+    const evT = document.getElementById('ufcEvToggle');
+    if(evT){ evT.checked = !!ev.on; const es=document.getElementById('ufcEvSettings'); if(es) es.style.display = ev.on?'block':'none'; }
+    const evF = document.getElementById('ufcEvField'); if(evF && ev.fieldSize) evF.value = ev.fieldSize;
+    const evFee = document.getElementById('ufcEvFee'); if(evFee && ev.fee!=null) evFee.value = ev.fee;
+    const evSg = document.getElementById('ufcEvSigma'); if(evSg && ev.ownSigma!=null) evSg.value = ev.ownSigma;
+    const evC = document.getElementById('ufcEvCustom'); if(evC){ if(ev.custom!=null) evC.value = ev.custom; evC.style.display = (ev.preset==='custom')?'block':'none'; }
+    const presetKey = ev.preset||'gpp';
+    [['gpp','ufcEvPresetGpp'],['double','ufcEvPresetDouble'],['custom','ufcEvPresetCustom']].forEach(([k,id])=>{
+      const b=document.getElementById(id); if(b) b.classList.toggle('active', presetKey===k);
+    });
   }
 
   if(slate.sport==='pga'){
@@ -3673,6 +3728,14 @@ function setNascarTrack(type, btn){
   // Persist to slate so it survives refresh
   const slate = activeSlate();
   if(slate){ slate._nascarTrackType = type; slate._nascarLaps = parseInt(laps); save(); }
+}
+
+function setUfcEvPreset(key, btn){
+  const s=activeSlate(); if(s){ s._ufcEv=s._ufcEv||{}; s._ufcEv.preset=key; save(); }
+  document.querySelectorAll('#ufcEvBlock .nascar-track-btn').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  const ta=document.getElementById('ufcEvCustom');
+  if(ta) ta.style.display = key==='custom' ? 'block' : 'none';
 }
 
 function renderRearStartersUI(){
@@ -4575,6 +4638,390 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
           totalSims: simsDone, simScoresById: fighterAllScores};
 }
 
+// ═══════════════════════════════════════════════════════════
+// UFC CONTEST-EV ENGINE
+// ═══════════════════════════════════════════════════════════
+// Replaces the heuristic selection stack (leverage shaping, alignment servo,
+// dup penalty, chalk gauntlet) with the objective they all approximate:
+// expected payout against the actual field. The same sims score both your
+// candidates and an ownership-modeled field, so systematic scoring biases
+// largely cancel — what must be right is who wins fights (market-anchored)
+// and the payout curve (user-supplied). Leverage stops being a slider and
+// becomes an output: being under-owned pays exactly when the payout curve
+// says it does, differently for a top-heavy GPP than a double-up.
+
+// Payout curve builder. Returns { at(rank)→$, desc }.
+function buildPayoutFn(cfg){
+  const F   = Math.max(10, cfg.fieldSize||10000);
+  const fee = Math.max(0.01, cfg.fee||20);
+  if(cfg.preset==='double'){
+    // Double-up: ~44% of the field doubles (rake baked into the 44%).
+    const paidTo = Math.floor(F*0.44);
+    return { at: r => r<=paidTo ? fee*2 : 0,
+             desc: `Double-Up: top ${paidTo.toLocaleString()} of ${F.toLocaleString()} win $${(fee*2).toFixed(2)}` };
+  }
+  if(cfg.preset==='custom' && cfg.custom){
+    const tiers=[];
+    String(cfg.custom).split(/\n+/).forEach(line=>{
+      const m=line.match(/^\s*(\d[\d,]*)\s*(?:-\s*(\d[\d,]*))?\s*[:=]\s*\$?\s*([\d,]+(?:\.\d+)?)/);
+      if(!m) return;
+      const lo=parseInt(m[1].replace(/,/g,'')), hi=m[2]?parseInt(m[2].replace(/,/g,'')):lo;
+      const amt=parseFloat(m[3].replace(/,/g,''));
+      if(hi>=lo && amt>0) tiers.push({lo,hi,amt});
+    });
+    tiers.sort((a,b)=>a.lo-b.lo);
+    if(tiers.length) return {
+      at: r => { for(const t of tiers){ if(r>=t.lo && r<=t.hi) return t.amt; } return 0; },
+      desc: `Custom: ${tiers.length} tiers, paying through ${tiers[tiers.length-1].hi.toLocaleString()}` };
+  }
+  // Top-heavy GPP preset: 85% of entries → prize pool (15% rake). Power-law
+  // 1/r^1.05 over the top 12% of the field, floored at a 2× min-cash that
+  // extends through 20% of the field — a generic large-GPP shape.
+  const pool2      = F*fee*0.85;
+  const topN       = Math.max(1, Math.floor(F*0.12));
+  const mincashHi  = Math.max(topN, Math.floor(F*0.20));
+  const mincashAmt = fee*2;
+  const mincashBudget = (mincashHi-topN)*mincashAmt;
+  let hSum=0; for(let r=1;r<=topN;r++) hSum+=1/Math.pow(r,1.05);
+  const A = Math.max(0,(pool2-mincashBudget))/Math.max(1e-9,hSum);
+  return {
+    at: r => { if(r<=topN) return Math.max(A/Math.pow(r,1.05), mincashAmt);
+               if(r<=mincashHi) return mincashAmt; return 0; },
+    desc: `GPP: ~$${Math.round(A).toLocaleString()} to 1st, min-cash $${mincashAmt.toFixed(0)} through ${mincashHi.toLocaleString()} of ${F.toLocaleString()} (15% rake)` };
+}
+
+// Ownership-calibrated field sampler. Draws N 6-man lineups weighted by Own%
+// under the real constraints (cap, salary floor, no opposing fighters), then
+// iteratively re-weights so realized marginal exposures match the Own% column
+// — pure weighted draws drift under constraints; 3 calibration rounds fix it.
+function sampleUfcField(pool, N, ownArr){
+  const target   = ownArr
+    ? ownArr.map(v=>Math.max(0.2, v))
+    : pool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
+  const salaries = pool.map(p=>p.salary||0);
+  const oppIdx   = pool.map(p=>pool.findIndex(q=>q!==p && q.name===p.opp));
+  const CAP=50000, FLOOR=47000; // field lineups overwhelmingly spend $47k+
+  const cheap = salaries.slice().sort((a,b)=>a-b);
+  const cheapPrefix=[0]; cheap.forEach((s,i)=>cheapPrefix.push(cheapPrefix[i]+s));
+  let w = target.slice();
+  let field = [];
+  for(let iter=0; iter<3; iter++){
+    field = [];
+    let guard = 0;
+    while(field.length < N && guard++ < N*50){
+      // Per-lineup chalk temperature. A uniform ownership-weighted field is
+      // MORE diverse than a real one: actual entrants cluster — some max-
+      // chalk every slot, some deliberately contrarian. Drawing a sharpness
+      // exponent per lineup (γ 0.7–1.6 on the weights) reproduces that mix:
+      // high-γ lineups concentrate hard on the chalk block, low-γ spread out.
+      // Marginals stay calibrated (the re-weighting loop below enforces
+      // Own%); what changes is the JOINT — chalk builds co-occur the way
+      // they do in real fields, which is exactly the crowding that punishes
+      // "stud + the obvious value block" lineups at the top of the curve.
+      const gamma = 0.7 + Math.random()*0.9;
+      const picks=[]; const used=new Set(); let sal=0; let dead=false;
+      for(let slot=0; slot<6 && !dead; slot++){
+        const left=5-slot;
+        let tw=0; const elig=[]; const ew=[];
+        for(let i=0;i<pool.length;i++){
+          if(used.has(i)) continue;
+          if(oppIdx[i]>=0 && used.has(oppIdx[i])) continue;
+          if(sal+salaries[i]+cheapPrefix[left] > CAP) continue;
+          const wi = Math.pow(w[i], gamma);
+          elig.push(i); ew.push(wi); tw+=wi;
+        }
+        if(!elig.length || tw<=0){ dead=true; break; }
+        let r=Math.random()*tw, pick=elig[elig.length-1];
+        for(let k=0;k<elig.length;k++){ r-=ew[k]; if(r<=0){ pick=elig[k]; break; } }
+        picks.push(pick); used.add(pick); sal+=salaries[pick];
+      }
+      if(dead || picks.length<6) continue;
+      if(sal<FLOOR || sal>CAP) continue;
+      field.push(picks);
+    }
+    if(!field.length) break;
+    const cnt=new Array(pool.length).fill(0);
+    field.forEach(l=>l.forEach(i=>cnt[i]++));
+    for(let i=0;i<pool.length;i++){
+      const real=(cnt[i]/field.length)*100;
+      w[i]=Math.max(0.02, w[i]*Math.pow((target[i]+0.5)/(real+0.5), 0.85));
+    }
+  }
+  const cnt=new Array(pool.length).fill(0);
+  field.forEach(l=>l.forEach(i=>cnt[i]++));
+  let maxDev=0, maxName='';
+  pool.forEach((p,i)=>{
+    const real=(cnt[i]/Math.max(1,field.length))*100;
+    const d=Math.abs(real-(parseFloat(p.own)||0));
+    if(d>maxDev){ maxDev=d; maxName=p.name; }
+  });
+  return {field, maxDev, maxName};
+}
+
+// Contest-EV candidate evaluation + portfolio selection. Handles its own
+// history/preview; returns null on cancel.
+async function runUFCContestEV(ctx){
+  const {slate, pool, ranked, simScoresById, totalSims, target, maxExpPct, overrides} = ctx;
+  const minOverrides = slate.playerMinOverrides||{};
+  const cfg  = slate._ufcEv||{};
+  const F    = Math.max(target, parseInt(cfg.fieldSize)||10000);
+  const fee  = parseFloat(cfg.fee)||20;
+  const payout = buildPayoutFn({fieldSize:F, fee, preset:cfg.preset||'gpp', custom:cfg.custom});
+  const tick = ()=>new Promise(r=>setTimeout(r,0));
+  log(`Contest EV: ${payout.desc}. Leverage slider ignored — uniqueness is priced by the curve.`);
+
+  // Sampled sims (stride) — EV needs breadth, not every sim
+  const SIMS = Math.min(1500, totalSims);
+  const simIdx = [];
+  { const stride = totalSims/SIMS; for(let k=0;k<SIMS;k++) simIdx.push(Math.floor(k*stride)); }
+
+  // 1) OWNERSHIP-UNCERTAINTY SCENARIOS + field models.
+  // Ownership projections are point estimates of the least-knowable input, and
+  // EV-maximizing against a point estimate systematically overbets whatever
+  // that estimate flatters most (an extreme favorite projected at 19% own is
+  // the canonical case — the true number could easily be 2×). Instead of one
+  // field, build K ownership scenarios: scenario 0 is as-projected; the rest
+  // perturb every fighter's Own% by budget-preserving lognormal noise (±sigma,
+  // renormalized so the field still spends exactly 6 slots of ownership). The
+  // sampled sims are split across scenarios, so every candidate's EV — and
+  // every portfolio marginal — is averaged over ownership worlds. A position
+  // that only works if the projection is exactly right self-discounts; robust
+  // positions carry their EV across scenarios. sigma is user-set (default
+  // ±35% relative), 0 = trust the projections exactly (old behavior).
+  const K = 5;
+  const sigma = Math.max(0, Math.min(1, (parseFloat(cfg.ownSigma!=null?cfg.ownSigma:35))/100));
+  const gaussEV = ()=>{ const u=Math.max(1e-9,Math.random()), v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); };
+  const baseOwn = pool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
+  const ownBudget = baseOwn.reduce((a,b)=>a+b,0);
+  const scenarios = [baseOwn];
+  if(sigma>0){
+    for(let k=1;k<K;k++){
+      let o = baseOwn.map(v=>v*Math.exp(sigma*gaussEV() - sigma*sigma/2));
+      const s2 = o.reduce((a,b)=>a+b,0)||1;
+      scenarios.push(o.map(v=>Math.max(0.1, v*ownBudget/s2)));
+    }
+    log(`Ownership uncertainty: ${K} scenarios at ±${Math.round(sigma*100)}% relative (budget-preserving); sims split across them.`);
+  } else {
+    while(scenarios.length<K) scenarios.push(baseOwn);
+    log(`Ownership uncertainty off (wiggle 0%) — projections trusted exactly.`);
+  }
+  const NF = 2000;
+  const fields=[], fieldKeyCounts=[];
+  let dev0=0, dev0Name='';
+  for(let k=0;k<K;k++){
+    const {field, maxDev, maxName} = sampleUfcField(pool, NF, scenarios[k]);
+    if(!field.length){ log('⚠ Field sampler produced no lineups — check Own% column.'); return null; }
+    fields.push(field);
+    const m=new Map();
+    field.forEach(l=>{ const kk=l.slice().sort((a,b)=>a-b).join('|'); m.set(kk,(m.get(kk)||0)+1); });
+    fieldKeyCounts.push(m);
+    if(k===0){ dev0=maxDev; dev0Name=maxName; }
+    await tick(); if(window._genCancelled) return null;
+  }
+  log(`Field: ${K}×${NF.toLocaleString()} lineups sampled (as-projected scenario worst marginal miss ${dev0.toFixed(1)}pts on ${dev0Name}).`);
+
+  // 2) Field score distribution per sampled sim (sorted for rank lookup).
+  // Sim s is evaluated against scenario (s mod K)'s field.
+  const scoreArr = pool.map(p=>simScoresById[p.id]||[]);
+  const fieldSorted = [];
+  for(let s=0; s<simIdx.length; s++){
+    const si = simIdx[s];
+    const field = fields[s%K];
+    const arr = new Float64Array(field.length);
+    for(let f=0; f<field.length; f++){
+      const l=field[f]; let t=0;
+      for(let k=0;k<6;k++) t += (scoreArr[l[k]][si]||0);
+      arr[f]=t;
+    }
+    arr.sort();
+    fieldSorted.push(arr);
+    if(s>0 && s%150===0){ await tick(); if(window._genCancelled) return null; }
+  }
+
+  // 3) EV per candidate (all unique ex-post optimals).
+  // Duplication is CONDITIONAL, not marginal: an expensive stud funnels his
+  // lineups' other five slots into the same narrow salary band, so his chalk
+  // builds duplicate far beyond the independent Π(own) product. Two-part
+  // estimate: (a) EMPIRICAL — count exact matches of this candidate in the
+  // sampled field (the sampler already encodes the salary funneling and
+  // chalk clustering) scaled to field size; (b) analytic Π(own)×DUP_K as the
+  // floor for candidates too unique to appear in the sample. Take the max.
+  const idxById = new Map(pool.map((p,i)=>[p.id,i]));
+  const DUP_K = 4;
+  // ── Robust aggregation across ownership scenarios ──
+  // Averaging scenario EVs does NOT penalize input-fragile positions — under
+  // risk-neutral EV, being under-owned in half the worlds pays for being
+  // over-owned in the other half (leverage payoffs are convex in ownership
+  // error, so symmetric wiggle can even RAISE a concentrated play's mean).
+  // "I don't fully trust the projection" is a robustness statement, not a
+  // variance one: value = (1−ρ)·mean + ρ·worst-scenario. A lineup that only
+  // works when the Own% column is exactly right gets priced at what it earns
+  // when the column is wrong against it. ρ=0.5 splits the difference between
+  // expectation and worst-case; wiggle 0% collapses scenarios → pure EV.
+  const ROBUST_RHO = 0.5;
+  const robustAgg = (bSum, bCnt) => {
+    let tot=0, n=0, minB=Infinity;
+    for(let k=0;k<K;k++){
+      if(!bCnt[k]) continue;
+      const m=bSum[k]/bCnt[k];
+      tot+=bSum[k]; n+=bCnt[k];
+      if(m<minB) minB=m;
+    }
+    if(!n) return 0;
+    const mean=tot/n;
+    return (sigma>0) ? (1-ROBUST_RHO)*mean + ROBUST_RHO*minB : mean;
+  };
+  for(let c=0; c<ranked.length; c++){
+    const e = ranked[c];
+    const idxs = e.lineup.map(p=>idxById.get(p.id)).filter(i=>i!=null);
+    const key = idxs.slice().sort((a,b)=>a-b).join('|');
+    // Dups are per ownership scenario: both the analytic product and the
+    // empirical field count move with the scenario's Own%.
+    e._dupsK = [];
+    for(let k=0;k<K;k++){
+      const ownProdK = idxs.reduce((s2,i)=>s2*Math.max(0.0005, scenarios[k][i]/100),1);
+      const empK = (fieldKeyCounts[k].get(key)||0) * (F/fields[k].length);
+      e._dupsK.push(Math.max(F*ownProdK*DUP_K, empK));
+    }
+    const bSum=new Float64Array(K), bCnt=new Float64Array(K);
+    for(let s=0; s<fieldSorted.length; s++){
+      const si=simIdx[s]; let t=0;
+      for(const i of idxs) t += (scoreArr[i][si]||0);
+      const arr=fieldSorted[s];
+      const dups=e._dupsK[s%K];
+      // beating = strictly greater; tied = equal scores. The old lookup
+      // counted ties as BEATEN — placing the candidate at the top of its own
+      // score cluster in exactly the sims where chalk builds bunch together
+      // (the stud wins and every similar field lineup lands within a point).
+      // Expected rank within a tie cluster is its midpoint.
+      let lo=0, hi=arr.length;
+      while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid]<=t) lo=mid+1; else hi=mid; }
+      let lo2=0, hi2=lo;
+      while(lo2<hi2){ const mid=(lo2+hi2)>>1; if(arr[mid]<t) lo2=mid+1; else hi2=mid; }
+      const beating = arr.length-lo;
+      const tied    = lo-lo2;
+      // Laplace-smoothed rank: beating all N sampled lineups is evidence of
+      // being top ~F/N, not literal rank 1 — the +0.5/(N+1) smoothing prices
+      // that correctly instead of paying phantom first-place money.
+      const rank = ((beating + tied/2 + 0.5)/(arr.length+1))*F + 1 + dups/2;
+      bSum[s%K] += payout.at(rank); bCnt[s%K]++;
+    }
+    e._ev = robustAgg(bSum, bCnt) - fee;
+    if(c>0 && c%400===0){
+      log(`EV: ${c.toLocaleString()}/${ranked.length.toLocaleString()} candidates priced...`);
+      await tick(); if(window._genCancelled) return null;
+    }
+  }
+  const evList = ranked.slice().sort((a,b)=>b._ev-a._ev);
+
+  // 4) Portfolio: MARGINAL-EV greedy (lazy re-evaluation) under Max% caps.
+  // Summing standalone EVs double-counts the top of the payout curve for
+  // internally-correlated portfolios: 100 entries locked to the same stud
+  // surge in the SAME sims, occupy consecutive ranks, and cannot each take
+  // the rank the standalone number assumed — which made "lock one fighter
+  // everywhere" look strictly better than it is. Marginal EV re-prices each
+  // candidate GIVEN the already-chosen entries occupying ranks in every sim
+  // (my earlier lineups beating this one push its rank — and prize — down).
+  // Correlated portfolios self-tax; diversification earns its place by math,
+  // not by a dup-count heuristic. Lazy greedy: cached values only shrink as
+  // the portfolio grows, so re-evaluate the top candidate and accept only if
+  // it still beats the next cached value.
+  const outputExpCount={}; const chosen=[]; const chosenBySim = fieldSorted.map(()=>[]);
+  const capBlocked = lu => lu.some(p=>{
+    const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
+    if(pct>=100) return false;
+    if(pct<=0) return true;
+    return (outputExpCount[p.id]||0) >= Math.max(1,Math.ceil(pct/100*target));
+  });
+  const totalsOf = e => {
+    const idxs = e.lineup.map(p=>idxById.get(p.id)).filter(i=>i!=null);
+    const out = new Float64Array(fieldSorted.length);
+    for(let s=0; s<fieldSorted.length; s++){
+      const si=simIdx[s]; let t=0;
+      for(const i of idxs) t += (scoreArr[i][si]||0);
+      out[s]=t;
+    }
+    return out;
+  };
+  const marginalEV = e => {
+    const tots = e._tots || (e._tots = totalsOf(e));
+    const bSum=new Float64Array(K), bCnt=new Float64Array(K);
+    for(let s=0; s<fieldSorted.length; s++){
+      const t=tots[s], arr=fieldSorted[s];
+      let lo=0, hi=arr.length;
+      while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid]<=t) lo=mid+1; else hi=mid; }
+      let lo2=0, hi2=lo;
+      while(lo2<hi2){ const mid=(lo2+hi2)>>1; if(arr[mid]<t) lo2=mid+1; else hi2=mid; }
+      const beating = arr.length-lo, tied = lo-lo2;
+      let myBeats=0; const mine=chosenBySim[s];
+      for(let k=0;k<mine.length;k++) if(mine[k]>t) myBeats++;
+      const dupsS = e._dupsK ? e._dupsK[s%K] : 0;
+      const rank = ((beating + tied/2 + 0.5)/(arr.length+1))*F + 1 + dupsS/2 + myBeats;
+      bSum[s%K] += payout.at(rank); bCnt[s%K]++;
+    }
+    return robustAgg(bSum, bCnt) - fee;
+  };
+  // Bound the working set to the strongest standalone candidates
+  const cands = evList.slice(0, Math.max(target*12, 1200))
+    .map(e=>({e, val:e._ev, round:0}));
+  cands.sort((a,b)=>b.val-a.val);
+  let evalCount=0;
+  while(chosen.length < target && cands.length){
+    const top = cands[0];
+    if(capBlocked(top.e.lineup)){ cands.shift(); continue; }
+    if(top.round === chosen.length){
+      // Fresh valuation for the current portfolio state — accept.
+      chosen.push(top.e);
+      top.e._mev = top.val;
+      const tots = top.e._tots || (top.e._tots = totalsOf(top.e));
+      for(let s=0;s<chosenBySim.length;s++) chosenBySim[s].push(tots[s]);
+      top.e.lineup.forEach(p=>{ outputExpCount[p.id]=(outputExpCount[p.id]||0)+1; });
+      cands.shift();
+    } else {
+      top.val = marginalEV(top.e);
+      top.round = chosen.length;
+      // Re-position by new value (portfolio growth only lowers marginals)
+      let i=1; while(i<cands.length && cands[i].val>top.val) i++;
+      if(i>1){ cands.splice(0,1); cands.splice(i-1,0,top); }
+      if(++evalCount % 60 === 0){ await tick(); if(window._genCancelled) return null; }
+    }
+  }
+  const chosenKeySet = new Set(chosen.map(e=>e.lineup.map(p=>p.id).sort().join('|')));
+  const rest = evList.filter(e=>!chosenKeySet.has(e.lineup.map(p=>p.id).sort().join('|')));
+  if(!chosen.length){ log('No lineups selected — relax caps.'); return null; }
+
+  const decorate = e => { const l=[...e.lineup];
+    l._ev=e._ev; l._simWinAvg=e._ev.toFixed(2);
+    l._simAvg=(e.totalScore/e.count).toFixed(1);
+    l._simWinRate=((e.count/Math.max(1,totalSims))*100).toFixed(1);
+    return l; };
+  let finalLineups = chosen.map(decorate);
+  if(Object.keys(minOverrides).some(id=>minOverrides[id]>0)){
+    const cands = rest.map(decorate);
+    const sf = l => (l._ev!=null ? l._ev : 0);
+    const capFn = id => { const pct = overrides[id]!=null ? overrides[id] : maxExpPct;
+      return pct>=100 ? null : (pct<=0 ? 0 : Math.max(1,Math.ceil(target*pct/100))); };
+    finalLineups = enforceMinExposure(finalLineups, cands, minOverrides, sf, log, capFn);
+  }
+
+  // Portfolio value = Σ MARGINAL EVs (the honest joint estimate — each entry
+  // priced given the others exist). The standalone-EV sum is logged for
+  // contrast: the gap between the two is the self-crowding cost the old
+  // additive selection was ignoring.
+  const totMEV = chosen.reduce((s,e)=>s+(e._mev!=null?e._mev:e._ev),0);
+  const totEV  = chosen.reduce((s,e)=>s+(e._ev||0),0);
+  const spent  = fee*finalLineups.length;
+  log(`Done! ${finalLineups.length} lineups by marginal contest EV. Portfolio: ${totMEV>=0?'+':''}$${totMEV.toFixed(0)} net on $${spent.toFixed(0)} entered (${((totMEV/Math.max(1,spent))*100).toFixed(0)}% ROI if inputs hold). Standalone-EV sum was ${totEV>=0?'+':''}$${totEV.toFixed(0)} — the gap is self-crowding the old model ignored.`);
+  const expRows = pool.map(p=>({p, e:(outputExpCount[p.id]||0)}))
+    .filter(r=>r.e>0).sort((a,b)=>b.e-a.e).slice(0,6);
+  log(`Top exposure: ${expRows.map(r=>`${r.p.name.split(' ').slice(-1)[0]} ${Math.round(r.e/finalLineups.length*100)}%`).join(', ')}`);
+
+  const now=new Date();
+  addToHistory(slate.id, `${finalLineups.length} lineups (EV) @ ${now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`, finalLineups);
+  openPreviewModal(finalLineups, 'proj');
+  return finalLineups;
+}
+
 async function runUFCSimGen(){
   const slate = activeSlate(); if(!slate) return;
   const target     = parseInt(document.getElementById('genCount').value)||20;
@@ -4667,6 +5114,16 @@ async function runUFCSimGen(){
   if(typeof renderPool==='function') renderPool();
 
   log(`${ranked.length} unique optimal lineups found across ${totalSims.toLocaleString()} sims.`);
+
+  // ── Contest-EV mode: replaces the entire heuristic selection stack ──
+  if(slate._ufcEv && slate._ufcEv.on && ranked.length){
+    const out = await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims, target, maxExpPct, overrides});
+    if(out === null && window._genCancelled) log('Cancelled.');
+    document.getElementById('genBtn').disabled = false;
+    cancelBtn?.remove();
+    return;
+  }
+
   // Ex-post salary-structure read: how often the hindsight-optimal actually
   // contains a top-priced fighter, and what the optimal lineup spends on
   // average. UFC is price-sensitive — $9,700+ fighters need both their own
