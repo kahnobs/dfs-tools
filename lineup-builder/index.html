@@ -4568,7 +4568,11 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
 
   const appearRate = {};
   visiblePool.forEach(p=>{ appearRate[p.id] = (optAppear[p.id]||0) / Math.max(1, simsDone); });
-  return {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, totalSims: simsDone};
+  // simScoresById: every visible fighter's per-sim score array (index = sim).
+  // Exposed so the selection layer can price a candidate lineup's JOINT
+  // distribution (its total across the same sims) instead of summing marginals.
+  return {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate,
+          totalSims: simsDone, simScoresById: fighterAllScores};
 }
 
 async function runUFCSimGen(){
@@ -4618,7 +4622,7 @@ async function runUFCSimGen(){
 
   if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return; }
 
-  const {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, totalSims} = await runUFCSimsNew(
+  const {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, totalSims, simScoresById} = await runUFCSimsNew(
     fullPool, pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal
   );
 
@@ -4663,6 +4667,23 @@ async function runUFCSimGen(){
   if(typeof renderPool==='function') renderPool();
 
   log(`${ranked.length} unique optimal lineups found across ${totalSims.toLocaleString()} sims.`);
+  // Ex-post salary-structure read: how often the hindsight-optimal actually
+  // contains a top-priced fighter, and what the optimal lineup spends on
+  // average. UFC is price-sensitive — $9,700+ fighters need both their own
+  // finish AND cheap wins to fit — so this line is the sim's own answer to
+  // "is the stud worth the squeeze on THIS slate" (varies with how extreme
+  // the favorite's price/odds combo is).
+  {
+    const withStud = ranked.reduce((s,e)=>s+(e.lineup.some(p=>(p.salary||0)>=9700)?e.count:0),0);
+    const avgOptSal = ranked.reduce((s,e)=>s+e.lineup.reduce((t,p)=>t+(p.salary||0),0)*e.count,0)/Math.max(1,totalSims);
+    // The min-salary floor constrains the PER-SIM OPTIMALS too — with a high
+    // floor the sim can't even consider the sub-floor balanced builds that
+    // UFC optimals often are, which force-feeds spend into the priciest
+    // fighters. Flag it so a "the stud is always optimal" read isn't secretly
+    // an artifact of the floor.
+    const floorNote = (minSal||0) >= 48000 ? ` — note: $${minSal.toLocaleString()} min-salary floor applied to the sim's optimals; UFC optimals often leave salary on the table, consider lowering` : '';
+    log(`Ex-post optimals: ${(withStud/Math.max(1,totalSims)*100).toFixed(0)}% include a $9,700+ fighter · avg optimal salary $${Math.round(avgOptSal).toLocaleString()}${floorNote}`);
+  }
   if(!ranked.length){
     alert('No valid lineups generated. Try relaxing salary or group rules.');
     document.getElementById('genBtn').disabled=false;
@@ -4765,6 +4786,36 @@ async function runUFCSimGen(){
   ], log);
   const remaining      = _survivors.map(a=>a.e);
 
+  // ── JOINT lineup ceiling (the studs+scrubs corrector) ──────────────────
+  // Rank candidates by the lineup's TOTAL score percentile across the actual
+  // sims — the same joint metric the NASCAR engine uses — instead of the sum
+  // of individual ceiling-weighted composites. Summing marginals implicitly
+  // assumes all six fighters hit their ceilings TOGETHER, which is exactly
+  // where a $9,900-stud + value-dogs build gets flattered: the dogs' p80s
+  // require underdog wins that only co-occur in a thin slice of sims. The
+  // joint p85 prices that co-occurrence for free — a stud lineup's total
+  // only reaches its ceiling in sims where the cheap pieces ALSO won, so
+  // price-squeezed structures rank on their real joint distribution, not on
+  // six independent best cases. UFC is price-sensitive precisely this way.
+  const CEIL_SIMS = 600;
+  const _simN = Math.max(1, totalSims);
+  const _sampleIdx = (()=>{ if(_simN<=CEIL_SIMS) return Array.from({length:_simN},(_,i)=>i);
+    const out=[], stride=_simN/CEIL_SIMS;
+    for(let k=0;k<CEIL_SIMS;k++) out.push(Math.floor(k*stride));
+    return out; })();
+  let maxJointCeil = 0;
+  remaining.forEach(e=>{
+    const arrs = e.lineup.map(p=>simScoresById[p.id]).filter(Boolean);
+    const totals = _sampleIdx.map(si=>{ let t=0; for(const a of arrs) t+=(a[si]||0); return t; });
+    totals.sort((a,b)=>a-b);
+    const n = totals.length || 1;
+    const p50 = totals[Math.floor(n*0.50)]||0;
+    const p85 = totals[Math.floor(n*0.85)]||0;
+    e._jointCeil = p50*0.30 + p85*0.70; // ceiling-leaning, GPP-appropriate (mirrors NASCAR)
+    if(e._jointCeil>maxJointCeil) maxJointCeil=e._jointCeil;
+  });
+  maxJointCeil = maxJointCeil || 1;
+
   while(filled.length < target && remaining.length > 0){
     let bestIdx=-1, bestVal=-Infinity;
     // Fresh per-fighter noise multipliers for this lineup slot.
@@ -4795,11 +4846,13 @@ async function runUFCSimGen(){
         if(sim>maxSim) maxSim=sim;
       }
 
-      // Quality = noised sum of fighter composites (noise spreads close calls,
-      // leaves big gaps intact).
-      let noisedSum = 0;
-      x.lineup.forEach(p=>{ noisedSum += (compositeScoreById[p.id]||0) * (noiseById[p.id]||1); });
-      const quality       = noisedSum / maxSumFC;
+      // Quality = the lineup's JOINT sim ceiling (see _jointCeil above), under
+      // the per-fighter noise (geometric mean across members) so close calls
+      // still trade slots across draws while big gaps stay intact.
+      let _lgN = 0;
+      x.lineup.forEach(p=>{ _lgN += Math.log(noiseById[p.id]||1); });
+      const noiseMult     = Math.exp(_lgN / x.lineup.length);
+      const quality       = ((x._jointCeil||0) * noiseMult) / maxJointCeil;
       const leverageFactor = lineupLeverage(x);
       // Penalize only high overlap (near-duplicates); no reward for dissimilarity.
       const dupPenalty    = 1 - DUP_PEN * Math.max(0, maxSim - SIM_TOL) / (1 - SIM_TOL);
