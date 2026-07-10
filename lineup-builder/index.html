@@ -4880,20 +4880,41 @@ async function runUFCContestEV(ctx){
   // posterior whenever the candidate is in the top region. Deep ranks keep
   // the cheap point estimate (the curve is locally flat down there).
   const WH_Z = [-1.2816,-0.5244,0,0.5244,1.2816];
-  const expPayout = (beating, tied, sampleN, dups, myBeats) => {
+  // ── Head/flat payout decomposition (the tournament-coverage split) ──
+  // The HEAD is the steep tournament-winning region — top ~0.1% of the field
+  // (min 10 places); the FLAT body is everything below. In this contest 1st
+  // pays ~12.5% of the pool while ranks below 700 hold over half of it, so a
+  // purely additive EV objective mostly optimizes min-cash logistics — and
+  // it REWARDS leaderboard-stacking (75 correlated entries collecting ranks
+  // 1-2-3-5 all "pay"). For the actual GPP goal — ONE unique first-place
+  // winner — only the portfolio's best head-finisher per outcome matters.
+  // So: flat money stays additive (cash dollars are fungible), head money is
+  // coverage-credited (per sim, max over entries — a second lineup stacking
+  // an already-covered winning scenario earns zero head credit). Flat
+  // structures (double-ups) have no head, so this reduces to pure EV there.
+  const HEAD_RANK = Math.max(10, Math.round(F*0.001));
+  const headFloor = payout.at(HEAD_RANK);
+  const headPartAt = r => r<=HEAD_RANK ? Math.max(0, payout.at(r)-headFloor) : 0;
+  // Returns [totalPay, headPart] integrated over the true-rank posterior.
+  const expPayoutSplit = (beating, tied, sampleN, dups, myBeats) => {
     const shape  = beating + tied/2 + 0.5;
     const scale  = F/sampleN;
     const offset = 1 + dups/2 + myBeats;
-    if(shape > 30) return payout.at(shape*scale + offset);
-    let s=0;
+    if(shape > 30){
+      const r = shape*scale + offset;
+      return [payout.at(r), headPartAt(r)];
+    }
+    let s=0, h=0;
     const rt = 3*Math.sqrt(shape), corr = 1 - 1/(9*shape);
     for(let q=0;q<5;q++){
       const c = corr + WH_Z[q]/rt;
-      const T = shape * Math.max(0, c*c*c) * scale;
-      s += payout.at(T + offset);
+      const r = shape * Math.max(0, c*c*c) * scale + offset;
+      s += payout.at(r); h += headPartAt(r);
     }
-    return s/5;
+    return [s/5, h/5];
   };
+  const expPayout = (beating, tied, sampleN, dups, myBeats) =>
+    expPayoutSplit(beating, tied, sampleN, dups, myBeats)[0];
   const robustAgg = (bSum, bCnt) => {
     let tot=0, n=0, minB=Infinity;
     for(let k=0;k<K;k++){
@@ -4945,30 +4966,19 @@ async function runUFCContestEV(ctx){
   }
   const evList = ranked.slice().sort((a,b)=>b._ev-a._ev);
 
-  // 4) Portfolio: marginal LOG-UTILITY greedy (lazy re-evaluation) under caps.
-  // Linear EV — however exactly computed — is structurally indifferent to
-  // correlation among your own entries: 100 lineups that live and die
-  // together have the same mean as 100 independent ones, so no EV
-  // computation can limit pair concentration without a bolted-on constraint.
-  // The objective that prices correlation is E[log(bankroll + net)] (Kelly):
-  // marginal money in states where the portfolio already won is worth less,
-  // and dying in the states where everything else died forfeits utility
-  // exactly where it's dearest. Diversification emerges endogenously, scaled
-  // by the one honest knob — bankroll. Stakes ≪ bankroll → converges to pure
-  // EV (concentration genuinely optimal there); stakes that matter → spread.
-  // Accounting is exact per sim: an accepted entry takes its slot among my
-  // entries (tail-integrated own payout) AND pushes every lower entry down
-  // one rank — a cost the old one-sided marginal never charged.
-  // Standardized risk posture — no user knob. Assume standard bankroll
-  // management (a slate's total entries ≈ 10% of the roll, the common
-  // guideline), so the utility bankroll is 10× this portfolio's stake. Since
-  // contest losses are hard-capped at the stake, this curvature is mild by
-  // construction: it tempers chasing the extreme top of the curve and prices
-  // correlated wipeouts at their true (bounded) cost, without asking the
-  // user anything about their finances. The RESULT is standardized: two
-  // users running the same slate config get the same portfolio logic.
-  const B = fee*target*10;
-  log(`Risk model: log-utility standardized to 10× the slate stake ($${Math.round(B).toLocaleString()}) — assumes entries follow standard bankroll management.`);
+  // 4) Portfolio: marginal COVERAGE+EV greedy (lazy re-evaluation) under caps.
+  // Objective per sim: [head credit = max(0, candidate's head payout − best
+  // head already held in that sim)] + [flat payout, additive] − fee, robustly
+  // aggregated across ownership scenarios. Additive EV loves correlated
+  // leaderboard-stacking (the mean genuinely is maximized by 75 near-clones
+  // collecting ranks 1-2-3-5 when a core hits) — but the tournament goal is
+  // ONE unique first-place finish, and only the best entry per outcome can
+  // be it. Coverage credit makes a marginal core-clone earn only its flat
+  // money, so head EV grows ONLY by covering new winning scenarios —
+  // diversification across distinct #1 paths emerges from the objective, not
+  // from constraints. Also makes the objective submodular, which the lazy
+  // greedy formally requires (marginals only shrink as the portfolio grows).
+  log(`Objective: TOURNAMENT WIN EQUITY — head = top ${Math.max(10, Math.round(F*0.001)).toLocaleString()} places, coverage-credited per outcome, dup-adjusted; cash EV is a tiebreak, not a goal. (Flat curves like double-ups revert to pure cash EV.)`);
   const outputExpCount={}; const chosen=[];
   const capBlocked = lu => lu.some(p=>{
     const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
@@ -4994,6 +5004,7 @@ async function runUFCContestEV(ctx){
   const myRb     = Array.from({length:simN},()=>[]);
   const sufShift = Array.from({length:simN},()=>new Float64Array(1));
   const portNet  = new Float64Array(simN);
+  const bestHead = new Float64Array(simN); // best head payout held per sim (coverage state)
   const fieldStats = (t, s) => {
     const arr=fieldSorted[s];
     let lo=0, hi=arr.length;
@@ -5010,20 +5021,31 @@ async function runUFCContestEV(ctx){
   };
   const marginalVal = e => {
     const tots = e._tots || (e._tots = totalsOf(e));
-    const bSum=new Float64Array(K), bCnt=new Float64Array(K);
+    const bSum=new Float64Array(K), bCnt=new Float64Array(K), hSum=new Float64Array(K);
     for(let s=0; s<simN; s++){
       const t=tots[s];
       const {beating,tied,n} = fieldStats(t,s);
       const dupsS = e._dupsK ? e._dupsK[s%K] : 0;
       const j0 = mySlot(t,s);
-      const ownPay = expPayout(beating, tied, n, dupsS, j0);
-      const dNet = ownPay - fee + sufShift[s][j0];
-      const p0 = portNet[s];
-      const u = Math.log(Math.max(1, B+p0+dNet)) - Math.log(Math.max(1, B+p0));
-      bSum[s%K] += u; bCnt[s%K]++;
+      const [ownPay, ownHead] = expPayoutSplit(beating, tied, n, dupsS, j0);
+      // Flat part additive (incl. the rank-pushdown cost to entries below).
+      // Head credit is strictly NEW-SCENARIO: a winning outcome is either
+      // covered by the portfolio or it isn't — the goal is ONE unique winner
+      // per scenario, so a second entry landing in an already-covered
+      // scenario earns zero head credit (not the incremental upgrade the
+      // previous max-based rule paid, which still rewarded soft stacking).
+      const flat = (ownPay - ownHead) + sufShift[s][j0];
+      // Incremental head coverage: credit only the IMPROVEMENT over the best
+      // head finish the portfolio already holds in this outcome — a clone of
+      // a covered scenario earns nothing, an upgrade (rank-40 caliber → rank-1
+      // caliber) earns the difference. Weighted max-coverage: submodular, and
+      // exactly "one winner per scenario, and when it wins, win the most".
+      const headGain = Math.max(0, ownHead - bestHead[s]);
+      hSum[s%K] += headGain;
+      bSum[s%K] += flat + headGain - fee; bCnt[s%K]++;
     }
-    // Dollar-equivalent (×B) so values compare against the standalone-$ cache
-    return B * robustAgg(bSum, bCnt);
+    // head: new-winning-scenario equity only; cash: full marginal EV
+    return { head: robustAgg(hSum, bCnt), cash: robustAgg(bSum, bCnt) };
   };
   const acceptEntry = e => {
     const tots = e._tots;
@@ -5034,6 +5056,9 @@ async function runUFCContestEV(ctx){
       const rbase = ((beating + tied/2 + 0.5)/(n+1))*F + 1 + dupsS/2;
       const mt=myTots[s], rb=myRb[s];
       const a = mySlot(t,s);
+      // Coverage state: record the head payout this entry holds in this sim
+      const [, ownHead] = expPayoutSplit(beating, tied, n, dupsS, a);
+      if(ownHead > bestHead[s]) bestHead[s] = ownHead;
       mt.splice(a,0,t); rb.splice(a,0,rbase);
       // Portfolio net: own pay at slot a, minus fee, plus the shift cost of
       // every entry now pushed down one rank.
@@ -5046,9 +5071,19 @@ async function runUFCContestEV(ctx){
       sufShift[s] = suf;
     }
   };
-  // Bound the working set to the strongest standalone candidates
+  // Greedy on marginal TOURNAMENT WIN EQUITY. GPP doctrine, stated plainly:
+  // 100 min-cashes pay $600; one first place pays $15,000 — the portfolio is
+  // built to chase the top, not to cash. Selection value = incremental head
+  // equity (coverage-credited across outcomes, dup-adjusted so a build that
+  // would split its prize 250 ways is worth what a split is worth), with
+  // cash EV as a 1% TIEBREAK only — among equal win equity, take the lineup
+  // that banks more, but cash never buys a slot on its own. Mean EV and the
+  // cash engine are still measured and reported; they're consequences now,
+  // not objectives. Flat payout curves (double-ups) have no head, so this
+  // automatically reverts to pure cash EV there — the correct objective for
+  // that format.
   const cands = evList.slice(0, Math.max(target*12, 1200))
-    .map(e=>({e, val:e._ev, round:0}));
+    .map(e=>({e, val:(e._ev+fee)*1.02, round:-1}));
   cands.sort((a,b)=>b.val-a.val);
   let evalCount=0;
   while(chosen.length < target && cands.length){
@@ -5064,7 +5099,8 @@ async function runUFCContestEV(ctx){
       cands.shift();
       if(chosen.length % 8 === 0){ await tick(); if(window._genCancelled) return null; }
     } else {
-      top.val = marginalVal(top.e);
+      const mv = marginalVal(top.e);
+      top.val = mv.head + 0.01*mv.cash;
       top.round = chosen.length;
       // Re-position by new value (portfolio growth only lowers marginals)
       let i=1; while(i<cands.length && cands[i].val>top.val) i++;
@@ -5102,8 +5138,10 @@ async function runUFCContestEV(ctx){
   }
   let worstBlock=Infinity;
   for(let k=0;k<K;k++){ let s2=0,n2=0; for(let s=k;s<simN;s+=K){ s2+=portNet[s]; n2++; } if(n2 && s2/n2<worstBlock) worstBlock=s2/n2; }
-  log(`Done! ${finalLineups.length} lineups by marginal log-utility EV. Mean net ${meanNet>=0?'+':''}$${meanNet.toFixed(0)} on $${spent.toFixed(0)} entered (${((meanNet/Math.max(1,spent))*100).toFixed(0)}% ROI if inputs hold); worst ownership scenario ${worstBlock>=0?'+':''}$${worstBlock.toFixed(0)}.`);
+  log(`Done! ${finalLineups.length} lineups selected on tournament win equity. Mean net ${meanNet>=0?'+':''}$${meanNet.toFixed(0)} on $${spent.toFixed(0)} entered (${((meanNet/Math.max(1,spent))*100).toFixed(0)}% ROI if inputs hold); worst ownership scenario ${worstBlock>=0?'+':''}$${worstBlock.toFixed(0)}.`);
   log(`Risk profile: loses ≥50% of entries in ${(bustHalf/simN*100).toFixed(0)}% of sims, ≥90% in ${(bustAll/simN*100).toFixed(0)}%.`);
+  let _cov=0; for(let s=0;s<simN;s++) if(bestHead[s]>0) _cov++;
+  log(`Tournament coverage: portfolio holds a top-${HEAD_RANK.toLocaleString()} caliber finish in ${(_cov/simN*100).toFixed(0)}% of sims.`);
   const expRows = pool.map(p=>({p, e:(outputExpCount[p.id]||0)}))
     .filter(r=>r.e>0).sort((a,b)=>b.e-a.e).slice(0,6);
   log(`Top exposure: ${expRows.map(r=>`${r.p.name.split(' ').slice(-1)[0]} ${Math.round(r.e/finalLineups.length*100)}%`).join(', ')}`);
