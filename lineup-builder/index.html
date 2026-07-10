@@ -3256,10 +3256,21 @@ const MIX_PRESETS = {
 // real weight. Fair-total de-vig treats top-k as exactly k finishers (dead-heat
 // /tie inflation ignored — second-order, and shares partially cancel it).
 const ODDS_RUNGS = { win:1, top5:5, top10:10, top20:20, top30:30, top40:40 };
-// Composite eval weights — unchanged, ceiling-tilted on purpose. t30/t40 shape
-// the CURVE but get no direct weight: past 20th place DK points are near-flat,
-// and "safe 28th" equity is anti-signal for GPPs.
+// Composite eval weights — used ONLY by the legacy raw-share path (no deep
+// markets posted, so no curve exists to integrate). The curve-fit path below
+// no longer uses arbitrary rung weights at all: it integrates the fitted
+// finish curve directly against the real DK placement-points table, so the
+// "ceiling tilt" comes from DK's own payout convexity (30/20/18 up top vs
+// 1-6 pts mid-pack) instead of hand-chosen weights.
 const ODDS_WEIGHTS = { win:0.40, top5:0.25, top10:0.20, top20:0.15 };
+
+// DK placement points. PGA Classic: 1st 30, 2nd 20, 3rd 18, 4th 16, 5th 14,
+// 6th 12, 7th 10, 8th 9, 9th 8, 10th 7, 11-15th 6, 16-20th 5, 21-25th 4,
+// 26-30th 3, 31-40th 2, 41-50th 1, 51+ 0. Edit here if DK revises the table.
+const DK_PGA_PLACE_PTS = k =>
+  k===1?30 : k===2?20 : k===3?18 : k===4?16 : k===5?14 : k===6?12 : k===7?10 :
+  k===8?9 : k===9?8 : k===10?7 : k<=15?6 : k<=20?5 : k<=25?4 : k<=30?3 :
+  k<=40?2 : k<=50?1 : 0;
 
 function setMixPreset(key, btn){
   const s=activeSlate(); if(s){ s._mixPreset=key; save(); }
@@ -3440,22 +3451,42 @@ function ensureOddsScores(pool, slate){
     t.divisor=(fairS>1e-6&&rawS>0)?Math.min(2.5,Math.max(0.95,rawS/fairS)):1.08;
   });
 
-  // Final fit over ALL mapped tiers; evaluate the composite off the curve
+  // Final fit over ALL mapped tiers; equity = EXPECTED DK PLACEMENT POINTS
+  // integrated off the curve. The fitted survival curve gives P(finish ≤ k)
+  // for every k, and DK publishes the placement payout table — so instead of
+  // a weighted composite of four arbitrary rungs, compute the real quantity:
+  //   E[place pts] = Σ_k P(finish = k) · pts(k),  P(=k) = S(k) − S(k−1).
+  // The ceiling tilt GPPs need is already in DK's table (it pays 30/20/18 at
+  // the top and 1-6 mid-pack), so no hand-chosen weights remain on this path.
+  // Per-hole scoring/streak points correlate with finish and live in the
+  // proj/model legs of the blend — this leg prices placement equity exactly.
+  // Sport-aware: NASCAR slates (if ever deep-posted) use DK's NASCAR finish
+  // table over 40 places instead of the golf 50.
   const evalRungs=Object.keys(ODDS_WEIGHTS);
-  const wTot=evalRungs.reduce((s,k)=>s+ODDS_WEIGHTS[k],0)||1;
+  const isNascarSlate = slate?.sport==='nascar';
+  const placePts = isNascarSlate ? (k=>DK_NASCAR_FINISH_PTS[k]||0) : DK_PGA_PLACE_PTS;
+  const maxPlace = isNascarSlate ? 40 : 50;
+  const expectedPlacePts = f => {
+    let prev=0, e=0;
+    for(let k=1;k<=maxPlace;k++){
+      const S=clampP(invLogit(f.a+f.b*Math.log(k)));
+      const mass=Math.max(0, S-prev);
+      e+=mass*placePts(k);
+      prev=Math.max(prev,S);
+    }
+    return e;
+  };
   const fitted=new Map();
   withOdds.forEach(p=>{
     const f=fit(buildPoints(p,()=>true), pooledSlope);
     if(f){ const vals={};
       evalRungs.forEach(k=>{ vals[k]=clampP(invLogit(f.a+f.b*Math.log(ODDS_RUNGS[k]))); });
-      fitted.set(p,vals); }
+      fitted.set(p,{f,vals}); }
   });
-  const fieldSum={};
-  evalRungs.forEach(k=>{ fieldSum[k]=Math.max(0.01,[...fitted.values()].reduce((s,v)=>s+v[k],0)); });
   pool.forEach(p=>{
-    const vals=fitted.get(p);
-    p._eqFit=vals||null; // fitted win/t5/t10/t20 probs — inspectable in console
-    p._oddsScore=vals?evalRungs.reduce((s,k)=>s+(ODDS_WEIGHTS[k]/wTot)*(vals[k]/fieldSum[k]),0):0;
+    const e=fitted.get(p);
+    p._eqFit=e?e.vals:null; // fitted win/t5/t10/t20 probs — inspectable in console
+    p._oddsScore=e?expectedPlacePts(e.f):0;
   });
   return true;
 }
@@ -3994,8 +4025,23 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   const is5Round = fighter._is5Round != null
     ? fighter._is5Round
     : (fighter.finish_r4 != null || fighter.finish_r5 != null);
-  const ssCap = ssCapForRound(round, is5Round, frac);
-  const tdCap = tdCapForRound(round, is5Round, frac);
+  let ssCap = ssCapForRound(round, is5Round, frac);
+  let tdCap = tdCapForRound(round, is5Round, frac);
+
+  // Personal pace ceiling (market-derived). The global table above is fight
+  // PHYSICS — the most anyone can land in the time fought. A fighter's own
+  // O/U ÷ expected fight minutes is his market pace; his ceiling is capped at
+  // PACE_CEIL× that pace over the minutes actually fought. This only ever
+  // TIGHTENS the physical cap, and only for fighters whose markets say they
+  // are low-volume — high-pace fighters keep the full physical ceiling, and
+  // fighters with no O/U posted are untouched.
+  const _maxR = is5Round ? 5 : 3;
+  const _elapsedMin = (round==null || round==='dec' || typeof round!=='number')
+    ? _maxR*5
+    : ((Math.max(1,Math.min(round,_maxR))-1) + ((frac!=null&&frac>=0&&frac<=1)?frac:1))*5;
+  const SS_PACE_CEIL = 2.2, TD_PACE_CEIL = 2.5;
+  if(fighter._ssPace != null) ssCap = Math.min(ssCap, Math.max(8, SS_PACE_CEIL * fighter._ssPace * _elapsedMin));
+  if(fighter._tdPace != null) tdCap = Math.min(tdCap, Math.max(1, TD_PACE_CEIL * fighter._tdPace * _elapsedMin));
 
   // Sample sig strikes capped to what's achievable in this fight duration
   let ss = 0;
@@ -4040,24 +4086,40 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // Control time derived from takedowns: each TD averages ~45-90s of control
   const ctrlSecs = td * (45 + Math.random() * 45);
 
-  // Knockdowns: rare, more likely on finishes
-  const kdProb = (won && round !== 'dec') ? 0.12 : 0.05;
+  // Knockdowns: odds-derived instead of a flat 12%. On a finish win, KD
+  // likelihood scales with the fighter's own market finish tendency
+  // (_finishRate = finish mass ÷ total win mass from his MOV ladder): a pure
+  // decision grinder finishing early (rare, likely a sub) draws ~6%, a
+  // KO-heavy finisher ~30%. Decisions and losses keep the low base rate —
+  // KDs en route to a decision or in a losing effort happen but are rare.
+  let kdProb;
+  if(won && round !== 'dec'){
+    const fr = fighter._finishRate != null ? fighter._finishRate : 0.5;
+    kdProb = 0.06 + 0.24*fr;
+  } else {
+    kdProb = 0.05;
+  }
   const kd = Math.random() < kdProb ? 1 : 0;
 
   // DK scoring: sig strikes count as both strike (+0.2) and sig strike (+0.2) = +0.4 total
   let total = ss * 0.4 + td * 5 + ctrlSecs * 0.03 + kd * 10;
 
-  // Winner/loser volume split around the market's UNCONDITIONAL expectation.
-  // The SS/TD ladders are whole-fight markets (they already average over win
-  // and loss scenarios), and the duration caps above already truncate early-
-  // finish volume — so the old 0.55–0.82× loss multiplier double-counted the
-  // loss: once via the cap, again via the discount, pushing total simulated
-  // volume well below the O/U line the ladders were just calibrated to.
-  // Winners land ~55% of a fight's combined volume, losers ~45% — i.e. ~1.1×
-  // and ~0.9× their unconditional expectation. That split (roughly mass-
-  // conserving at even odds) is all that remains here; duration effects live
-  // entirely in the caps.
-  total *= won ? 1.08 : 0.90;
+  // Winner/loser volume split with EXACT mass conservation per fight.
+  // The SS/TD ladders are whole-fight markets: E[V] = p·E[V|win] + (1−p)·E[V|loss].
+  // Assume winners run r× the volume of losers (r = E[V|win]/E[V|loss]); the
+  // multipliers then follow from algebra rather than a hand-tuned pair:
+  //   winMult = r/(p·r + 1−p),  lossMult = 1/(p·r + 1−p)
+  // so p·winMult + (1−p)·lossMult = 1 EXACTLY for every fighter — each
+  // fighter's simulated volume re-averages to his own O/U-calibrated ladder
+  // at any odds, not just at even money like the old flat 1.08/0.90 did.
+  // A −400 favorite winning (expected) gets a small lift (≈1.03×); a +300 dog
+  // winning (an upset that flips the fight script) gets a bigger one (≈1.15×).
+  // r is the single remaining parameter: winners land ~55-60% of combined
+  // volume historically → r ≈ 1.2. Duration effects live entirely in the caps.
+  const UFC_WIN_VOL_RATIO = 1.2;
+  const pWinV = fighter._simWinProb != null ? fighter._simWinProb : 0.5;
+  const volDenom = pWinV*UFC_WIN_VOL_RATIO + (1 - pWinV);
+  total *= won ? (UFC_WIN_VOL_RATIO/volDenom) : (1/volDenom);
 
   if(won){
     total += winBonus(round);
@@ -4284,6 +4346,41 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   fullPool.forEach(p=>{
     const f = p.fightNum || parseInt(p.start) || 0;
     p._is5Round = (f > 0 && ufc5RoundFights.has(f)) || p.finish_r4 != null || p.finish_r5 != null;
+  });
+
+  // ── Market-derived pace & finish tendency (per fight) ─────────────────────
+  // Expected fight minutes from the pair's joint MOV distribution (finish in
+  // round r ≈ (r−0.5)·5 min, decision = full distance). A fighter's SS/TD O/U
+  // divided by those minutes is his market-implied PACE — consumed by
+  // drawScoreOdds as a personal volume ceiling (his tail can run hot, but a
+  // 2-strikes/min grinder can no longer draw a 120-strike outlier the global
+  // physical table alone would allow). _finishRate (finish mass ÷ total win
+  // mass) drives odds-derived knockdown rates in place of a flat constant.
+  pairs.forEach(({a,b})=>{
+    const maxR = (a._is5Round || (b && b._is5Round)) ? 5 : 3;
+    let wSum=0, mSum=0;
+    const addDist = f=>{
+      if(!f) return;
+      for(let r=1;r<=5;r++){
+        const pr = f['finish_r'+r]!=null ? mlToProb(f['finish_r'+r]) : null;
+        if(pr!=null){ wSum+=pr; mSum+=pr*((r-0.5)*5); }
+      }
+      const d = f.decision!=null ? mlToProb(f.decision) : null;
+      if(d!=null){ wSum+=d; mSum+=d*(maxR*5); }
+    };
+    addDist(a); addDist(b);
+    const expMin = wSum>0 ? (mSum/wSum) : maxR*5*0.8; // no MOV data → assume most of the distance
+    [a,b].forEach(f=>{
+      if(!f) return;
+      f._expFightMin = expMin;
+      const ssOU = f.ss_ou ? parseFloat(f.ss_ou) : NaN;
+      f._ssPace = (!isNaN(ssOU) && ssOU>0) ? ssOU/expMin : null;
+      const tdOU = f.td_ou ? parseFloat(f.td_ou) : NaN;
+      f._tdPace = (!isNaN(tdOU) && tdOU>0) ? tdOU/expMin : null;
+      const finM = [1,2,3,4,5].reduce((s,r)=>s+(f['finish_r'+r]!=null?(mlToProb(f['finish_r'+r])||0):0),0);
+      const decM = f.decision!=null ? (mlToProb(f.decision)||0) : 0;
+      f._finishRate = (finM+decM)>0 ? finM/(finM+decM) : null;
+    });
   });
 
   // Precompute vig-removed win probs and CDFs.
@@ -4947,62 +5044,69 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
   const fieldHasTop5  = pool.some(p=>p._nPTop5  != null);
   const fieldHasTop10 = pool.some(p=>p._nPTop10 != null);
 
-  // ── For each driver, fill in missing tiers by extrapolation ──────────────
-  // Relationships derived from historical implied prob ratios across large samples:
-  //   Top3  ≈ Win × 2.8  (win→top3 multiplier ~2.8)
-  //   Top5  ≈ Win × 4.0  (win→top5 multiplier ~4.0)
-  //   Top10 ≈ Top5 × 1.9 or Win × 7.5
-  // When a higher tier IS available, use it as the anchor for lower-tier estimates.
-  // All estimates are capped at a field-sum that doesn't exceed 1.0 per tier.
+  // ── For each driver, fill in missing tiers from a survival-curve fit ─────
+  // Replaces the frozen power-law multipliers with the same model the PGA
+  // odds engine uses: every posted tier is a point on the driver's finish-
+  // position survival curve, logit P(finish ≤ k) = a + b·ln(k), fit by
+  // weighted least squares (w = p(1−p)) over k = 1 (win), 3, 5, 10.
+  //   • Drivers with 2+ posted tiers get their own slope, shrunk toward the
+  //     POOLED FIELD SLOPE in proportion to the ln(k) span their points cover
+  //     (a slope read off two adjacent tiers is noisy; win→top10 earns weight).
+  //   • Drivers with a single posted tier (the common only-Win slate) get the
+  //     field slope through their point — so the win→tier steepening is set
+  //     by how THIS slate's book prices tiers, not by frozen constants.
+  //   • The logit-linear form reproduces the win-prob-dependent steepening the
+  //     old hand-tuned exponents approximated (at b≈1.1 a 25% winner extends
+  //     to ~3× to top-10, a 2% winner to ~10×) — but now it's fitted, and any
+  //     real posted tier anchors the level exactly.
+  // Drivers with NO posted tiers are untouched (skill-score fallback below).
+  (function fillMissingTiers(){
+    const clampT  = q => Math.min(0.985, Math.max(0.0005, q));
+    const logitT  = q => { const c=clampT(q); return Math.log(c/(1-c)); };
+    const invLogitT = z => 1/(1+Math.exp(-z));
+    const TIER_KS = [['_nPWin',1],['_nPTop3',3],['_nPTop5',5],['_nPTop10',10]];
+    const ptsOf = p => TIER_KS
+      .map(([key,k]) => p[key]!=null
+        ? {x:Math.log(k), y:logitT(p[key]), w:clampT(p[key])*(1-clampT(p[key]))}
+        : null)
+      .filter(Boolean);
+    const wls = pts => {
+      let sw=0,sx=0,sy=0,sxx=0,sxy=0,minX=Infinity,maxX=-Infinity;
+      pts.forEach(pt=>{ sw+=pt.w; sx+=pt.w*pt.x; sy+=pt.w*pt.y; sxx+=pt.w*pt.x*pt.x; sxy+=pt.w*pt.x*pt.y;
+        if(pt.x<minX)minX=pt.x; if(pt.x>maxX)maxX=pt.x; });
+      return {sw,sx,sy,sxx,sxy,spread:maxX-minX};
+    };
+    // Pooled field slope from drivers with 2+ posted tiers
+    let sS=0, sN=0;
+    pool.forEach(p=>{
+      const pts=ptsOf(p); if(pts.length<2) return;
+      const s=wls(pts); const den=s.sw*s.sxx-s.sx*s.sx;
+      if(Math.abs(den)<1e-9) return;
+      const b=(s.sw*s.sxy-s.sx*s.sy)/den;
+      sS+=Math.min(2.5,Math.max(0.4,b)); sN++;
+    });
+    // Fallback when only one tier is posted field-wide: b≈1.1 sits mid-range
+    // of observed win→tier logit slopes across favorites and back-markers.
+    const fieldSlope = sN ? sS/sN : 1.1;
+    pool.forEach(p=>{
+      const pts=ptsOf(p); if(!pts.length) return;
+      const s=wls(pts);
+      let b=fieldSlope;
+      if(pts.length>=2){
+        const den=s.sw*s.sxx-s.sx*s.sx;
+        const bRaw=Math.abs(den)<1e-9?fieldSlope:(s.sw*s.sxy-s.sx*s.sy)/den;
+        b=(s.spread*bRaw+0.7*fieldSlope)/(s.spread+0.7);
+      }
+      b=Math.min(2.5,Math.max(0.4,b));
+      const a=(s.sy-b*s.sx)/s.sw;
+      if(p._nPTop3  == null) p._nPTop3  = clampT(invLogitT(a+b*Math.log(3)));
+      if(p._nPTop5  == null) p._nPTop5  = clampT(invLogitT(a+b*Math.log(5)));
+      if(p._nPTop10 == null) p._nPTop10 = clampT(invLogitT(a+b*Math.log(10)));
+    });
+  })();
+
   pool.forEach(p=>{
     const pW = p._nPWin || 0;
-
-    // Win-prob-dependent tier curves. The old fixed multipliers (Top3≈Win×2.8,
-    // Top10≈Win×7.5, chained ×1.39/×1.9 from top3) are only calibrated for
-    // favorites — the real win→tier relationship steepens sharply as win prob
-    // falls (a 25% winner is ~3× to top-10; a 2% winner is ~15×). On slates
-    // with only Win/Top3 posted, the flat multipliers cut mid-tier drivers'
-    // top-5/10 probabilities roughly in half, dumping them into the
-    // skill-anchored fallback and DEFLATING their sims — which inverted the
-    // board (floored-odds back-markers out-simming +2000-4000 cars). Power-law
-    // fits to empirical win→tier ratios; when a real top3 exists it anchors
-    // the estimate (curve supplies the ratio, market supplies the level).
-    const estT3  = w => Math.min(0.90, 0.48 * Math.pow(w/0.3, 0.62));
-    const estT5  = w => Math.min(0.92, 0.63 * Math.pow(w/0.3, 0.52));
-    const estT10 = w => Math.min(0.95, 0.84 * Math.pow(w/0.3, 0.42));
-
-    // Estimate top3 if missing
-    if(p._nPTop3 == null){
-      if(p._nPTop5 != null){
-        p._nPTop3 = Math.min(p._nPTop5 * 0.72, 0.98);
-      } else if(pW > 0){
-        p._nPTop3 = estT3(pW);
-      }
-    }
-
-    // Estimate top5 if missing
-    if(p._nPTop5 == null){
-      if(p._nPTop3 != null && pW > 0){
-        // real top3 anchors the level; the curve supplies the win-prob-correct ratio
-        p._nPTop5 = Math.min(p._nPTop3 * (estT5(pW) / Math.max(1e-6, estT3(pW))), 0.98);
-      } else if(p._nPTop3 != null){
-        p._nPTop5 = Math.min(p._nPTop3 / 0.72, 0.98);
-      } else if(pW > 0){
-        p._nPTop5 = estT5(pW);
-      }
-    }
-
-    // Estimate top10 if missing
-    if(p._nPTop10 == null){
-      if(p._nPTop5 != null && pW > 0){
-        p._nPTop10 = Math.min(p._nPTop5 * (estT10(pW) / Math.max(1e-6, estT5(pW))), 0.98);
-      } else if(p._nPTop5 != null){
-        p._nPTop10 = Math.min(p._nPTop5 * 1.9, 0.98);
-      } else if(pW > 0){
-        p._nPTop10 = estT10(pW);
-      }
-    }
-
     // Mark which values were estimated vs. real (for logging/confidence)
     p._nTop3Est  = !nascarMlToProb(p.top3)  && p._nPTop3  != null;
     p._nTop5Est  = !nascarMlToProb(p.top5)  && p._nPTop5  != null;
