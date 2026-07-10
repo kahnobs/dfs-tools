@@ -1139,10 +1139,15 @@ html { overscroll-behavior-y: contain; }
                     <input type="number" id="ufcEvSigma" value="35" min="0" max="100" step="5" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.ownSigma=parseFloat(this.value);save();}"
                       style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
                   </div>
+                </div>
+                <div style="display:flex;gap:6px;margin-bottom:6px;">
                   <div style="flex:1;">
-                    <div style="font-size:9px;color:var(--muted);margin-bottom:2px;" title="Risk constraint: no 2-fighter combination may appear in more than this % of your lineups. 100 = off. Pure EV tolerates huge pair concentration in large fields; this bounds the correlated-wipeout tail.">Max pair %</div>
-                    <input type="number" id="ufcEvPairCap" value="40" min="1" max="100" step="5" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.pairCap=parseFloat(this.value);save();}"
+                    <div style="font-size:9px;color:var(--muted);margin-bottom:2px;" title="Optional hard constraint on top of the standardized risk model: no 2-fighter combination in more than this % of lineups. 100 = off.">Max pair %</div>
+                    <input type="number" id="ufcEvPairCap" value="100" min="1" max="100" step="5" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.pairCap=parseFloat(this.value);save();}"
                       style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
+                  </div>
+                  <div style="flex:1.4;display:flex;align-items:flex-end;">
+                    <div style="font-size:9px;color:var(--muted);line-height:1.4;padding-bottom:2px;">Risk is standardized to the slate stake (assumes entries follow your bankroll management).</div>
                   </div>
                 </div>
                 <div style="margin-bottom:6px;">
@@ -4942,19 +4947,31 @@ async function runUFCContestEV(ctx){
   }
   const evList = ranked.slice().sort((a,b)=>b._ev-a._ev);
 
-  // 4) Portfolio: MARGINAL-EV greedy (lazy re-evaluation) under Max% caps.
-  // Summing standalone EVs double-counts the top of the payout curve for
-  // internally-correlated portfolios: 100 entries locked to the same stud
-  // surge in the SAME sims, occupy consecutive ranks, and cannot each take
-  // the rank the standalone number assumed — which made "lock one fighter
-  // everywhere" look strictly better than it is. Marginal EV re-prices each
-  // candidate GIVEN the already-chosen entries occupying ranks in every sim
-  // (my earlier lineups beating this one push its rank — and prize — down).
-  // Correlated portfolios self-tax; diversification earns its place by math,
-  // not by a dup-count heuristic. Lazy greedy: cached values only shrink as
-  // the portfolio grows, so re-evaluate the top candidate and accept only if
-  // it still beats the next cached value.
-  const outputExpCount={}; const chosen=[]; const chosenBySim = fieldSorted.map(()=>[]);
+  // 4) Portfolio: marginal LOG-UTILITY greedy (lazy re-evaluation) under caps.
+  // Linear EV — however exactly computed — is structurally indifferent to
+  // correlation among your own entries: 100 lineups that live and die
+  // together have the same mean as 100 independent ones, so no EV
+  // computation can limit pair concentration without a bolted-on constraint.
+  // The objective that prices correlation is E[log(bankroll + net)] (Kelly):
+  // marginal money in states where the portfolio already won is worth less,
+  // and dying in the states where everything else died forfeits utility
+  // exactly where it's dearest. Diversification emerges endogenously, scaled
+  // by the one honest knob — bankroll. Stakes ≪ bankroll → converges to pure
+  // EV (concentration genuinely optimal there); stakes that matter → spread.
+  // Accounting is exact per sim: an accepted entry takes its slot among my
+  // entries (tail-integrated own payout) AND pushes every lower entry down
+  // one rank — a cost the old one-sided marginal never charged.
+  // Standardized risk posture — no user knob. Assume standard bankroll
+  // management (a slate's total entries ≈ 10% of the roll, the common
+  // guideline), so the utility bankroll is 10× this portfolio's stake. Since
+  // contest losses are hard-capped at the stake, this curvature is mild by
+  // construction: it tempers chasing the extreme top of the curve and prices
+  // correlated wipeouts at their true (bounded) cost, without asking the
+  // user anything about their finances. The RESULT is standardized: two
+  // users running the same slate config get the same portfolio logic.
+  const B = fee*target*10;
+  log(`Risk model: log-utility standardized to 10× the slate stake ($${Math.round(B).toLocaleString()}) — assumes entries follow standard bankroll management.`);
+  const outputExpCount={}; const chosen=[];
   // Pair-exposure cap: a RISK constraint, not an EV correction. In large
   // fields the self-crowding cost of many entries sharing a pair is tiny
   // (a few dozen ranks among 10k paid), so pure EV happily rides one pair
@@ -4963,7 +4980,7 @@ async function runUFCContestEV(ctx){
   // aren't. The cap bounds how much of the portfolio any single 2-fighter
   // combination can carry, forcing the EV maximizer to diversify its
   // correlation structure while it optimizes. User-set; 100 = off.
-  const pairCapPct = Math.max(1, Math.min(100, parseFloat(cfg.pairCap!=null?cfg.pairCap:40)));
+  const pairCapPct = Math.max(1, Math.min(100, parseFloat(cfg.pairCap!=null?cfg.pairCap:100)));
   const pairCapN   = Math.max(1, Math.ceil(pairCapPct/100*target));
   const pairCount  = {};
   const pairsOf = lu => {
@@ -4994,22 +5011,65 @@ async function runUFCContestEV(ctx){
     }
     return out;
   };
-  const marginalEV = e => {
+  // Per-sim portfolio state: my chosen entries' totals (desc) with their
+  // field rank bases, the suffix sum of "push everyone below down one rank"
+  // costs, and the portfolio's realized net in that sim.
+  const simN = fieldSorted.length;
+  const myTots   = Array.from({length:simN},()=>[]);
+  const myRb     = Array.from({length:simN},()=>[]);
+  const sufShift = Array.from({length:simN},()=>new Float64Array(1));
+  const portNet  = new Float64Array(simN);
+  const fieldStats = (t, s) => {
+    const arr=fieldSorted[s];
+    let lo=0, hi=arr.length;
+    while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid]<=t) lo=mid+1; else hi=mid; }
+    let lo2=0, hi2=lo;
+    while(lo2<hi2){ const mid=(lo2+hi2)>>1; if(arr[mid]<t) lo2=mid+1; else hi2=mid; }
+    return {beating: arr.length-lo, tied: lo-lo2, n: arr.length};
+  };
+  const mySlot = (t, s) => {
+    const mt=myTots[s];
+    let a=0, b2=mt.length;
+    while(a<b2){ const m=(a+b2)>>1; if(mt[m]>t) a=m+1; else b2=m; }
+    return a;
+  };
+  const marginalVal = e => {
     const tots = e._tots || (e._tots = totalsOf(e));
     const bSum=new Float64Array(K), bCnt=new Float64Array(K);
-    for(let s=0; s<fieldSorted.length; s++){
-      const t=tots[s], arr=fieldSorted[s];
-      let lo=0, hi=arr.length;
-      while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid]<=t) lo=mid+1; else hi=mid; }
-      let lo2=0, hi2=lo;
-      while(lo2<hi2){ const mid=(lo2+hi2)>>1; if(arr[mid]<t) lo2=mid+1; else hi2=mid; }
-      const beating = arr.length-lo, tied = lo-lo2;
-      let myBeats=0; const mine=chosenBySim[s];
-      for(let k=0;k<mine.length;k++) if(mine[k]>t) myBeats++;
+    for(let s=0; s<simN; s++){
+      const t=tots[s];
+      const {beating,tied,n} = fieldStats(t,s);
       const dupsS = e._dupsK ? e._dupsK[s%K] : 0;
-      bSum[s%K] += expPayout(beating, tied, arr.length, dupsS, myBeats); bCnt[s%K]++;
+      const j0 = mySlot(t,s);
+      const ownPay = expPayout(beating, tied, n, dupsS, j0);
+      const dNet = ownPay - fee + sufShift[s][j0];
+      const p0 = portNet[s];
+      const u = Math.log(Math.max(1, B+p0+dNet)) - Math.log(Math.max(1, B+p0));
+      bSum[s%K] += u; bCnt[s%K]++;
     }
-    return robustAgg(bSum, bCnt) - fee;
+    // Dollar-equivalent (×B) so values compare against the standalone-$ cache
+    return B * robustAgg(bSum, bCnt);
+  };
+  const acceptEntry = e => {
+    const tots = e._tots;
+    for(let s=0; s<simN; s++){
+      const t=tots[s];
+      const {beating,tied,n} = fieldStats(t,s);
+      const dupsS = e._dupsK ? e._dupsK[s%K] : 0;
+      const rbase = ((beating + tied/2 + 0.5)/(n+1))*F + 1 + dupsS/2;
+      const mt=myTots[s], rb=myRb[s];
+      const a = mySlot(t,s);
+      mt.splice(a,0,t); rb.splice(a,0,rbase);
+      // Portfolio net: own pay at slot a, minus fee, plus the shift cost of
+      // every entry now pushed down one rank.
+      let add = payout.at(rbase + a) - fee;
+      for(let j=a+1;j<mt.length;j++) add += payout.at(rb[j]+j) - payout.at(rb[j]+j-1);
+      portNet[s] += add;
+      // Rebuild the suffix shift-cost table for this sim
+      const suf = new Float64Array(mt.length+1);
+      for(let j=mt.length-1;j>=0;j--) suf[j] = suf[j+1] + (payout.at(rb[j]+j+1) - payout.at(rb[j]+j));
+      sufShift[s] = suf;
+    }
   };
   // Bound the working set to the strongest standalone candidates
   const cands = evList.slice(0, Math.max(target*12, 1200))
@@ -5023,13 +5083,14 @@ async function runUFCContestEV(ctx){
       // Fresh valuation for the current portfolio state — accept.
       chosen.push(top.e);
       top.e._mev = top.val;
-      const tots = top.e._tots || (top.e._tots = totalsOf(top.e));
-      for(let s=0;s<chosenBySim.length;s++) chosenBySim[s].push(tots[s]);
+      if(!top.e._tots) top.e._tots = totalsOf(top.e);
+      acceptEntry(top.e);
       top.e.lineup.forEach(p=>{ outputExpCount[p.id]=(outputExpCount[p.id]||0)+1; });
       pairsOf(top.e.lineup).forEach(k=>{ pairCount[k]=(pairCount[k]||0)+1; });
       cands.shift();
+      if(chosen.length % 8 === 0){ await tick(); if(window._genCancelled) return null; }
     } else {
-      top.val = marginalEV(top.e);
+      top.val = marginalVal(top.e);
       top.round = chosen.length;
       // Re-position by new value (portfolio growth only lowers marginals)
       let i=1; while(i<cands.length && cands[i].val>top.val) i++;
@@ -5055,14 +5116,20 @@ async function runUFCContestEV(ctx){
     finalLineups = enforceMinExposure(finalLineups, cands, minOverrides, sf, log, capFn);
   }
 
-  // Portfolio value = Σ MARGINAL EVs (the honest joint estimate — each entry
-  // priced given the others exist). The standalone-EV sum is logged for
-  // contrast: the gap between the two is the self-crowding cost the old
-  // additive selection was ignoring.
-  const totMEV = chosen.reduce((s,e)=>s+(e._mev!=null?e._mev:e._ev),0);
-  const totEV  = chosen.reduce((s,e)=>s+(e._ev||0),0);
+  // Portfolio report straight from the per-sim portfolio distribution — the
+  // exact object the utility optimized. Mean net is the linear-EV view;
+  // the loss probabilities are what the log-utility actually managed.
   const spent  = fee*finalLineups.length;
-  log(`Done! ${finalLineups.length} lineups by marginal contest EV. Portfolio: ${totMEV>=0?'+':''}$${totMEV.toFixed(0)} net on $${spent.toFixed(0)} entered (${((totMEV/Math.max(1,spent))*100).toFixed(0)}% ROI if inputs hold). Standalone-EV sum was ${totEV>=0?'+':''}$${totEV.toFixed(0)} — the gap is self-crowding the old model ignored.`);
+  const meanNet = portNet.reduce((a,b)=>a+b,0)/Math.max(1,simN);
+  let bustAll=0, bustHalf=0;
+  for(let s=0;s<simN;s++){
+    if(portNet[s] <= -0.9*spent) bustAll++;
+    if(portNet[s] <= -0.5*spent) bustHalf++;
+  }
+  let worstBlock=Infinity;
+  for(let k=0;k<K;k++){ let s2=0,n2=0; for(let s=k;s<simN;s+=K){ s2+=portNet[s]; n2++; } if(n2 && s2/n2<worstBlock) worstBlock=s2/n2; }
+  log(`Done! ${finalLineups.length} lineups by marginal log-utility EV. Mean net ${meanNet>=0?'+':''}$${meanNet.toFixed(0)} on $${spent.toFixed(0)} entered (${((meanNet/Math.max(1,spent))*100).toFixed(0)}% ROI if inputs hold); worst ownership scenario ${worstBlock>=0?'+':''}$${worstBlock.toFixed(0)}.`);
+  log(`Risk profile: loses ≥50% of entries in ${(bustHalf/simN*100).toFixed(0)}% of sims, ≥90% in ${(bustAll/simN*100).toFixed(0)}%.`);
   const expRows = pool.map(p=>({p, e:(outputExpCount[p.id]||0)}))
     .filter(r=>r.e>0).sort((a,b)=>b.e-a.e).slice(0,6);
   log(`Top exposure: ${expRows.map(r=>`${r.p.name.split(' ').slice(-1)[0]} ${Math.round(r.e/finalLineups.length*100)}%`).join(', ')}`);
