@@ -1691,12 +1691,19 @@ function detectTeeAMPM(teeVal){
   const upper = s.toUpperCase();
   if(upper.includes('AM')) return 'AM';
   if(upper.includes('PM')) return 'PM';
-  // Plain HH:MM
+  // Plain HH:MM with no AM/PM marker. 12–23 is unambiguous 24h → PM. For a
+  // bare 12-hour time, use golf reality: tour waves tee off ~7:00-9:30 and
+  // ~12:00-2:30, so 1:00–6:59 is an AFTERNOON time written 12-hour style
+  // ("1:05" = 1:05 PM), while 7:00–11:59 is morning. The old rule sent every
+  // bare 1–11 o'clock to AM, which silently flipped the entire PM wave (and
+  // therefore wave allocation) whenever a CSV dropped the AM/PM suffix.
   const m = s.match(/^(\d{1,2}):(\d{2})/);
   if(m){
     const h = parseInt(m[1]);
-    if(h>=1&&h<12) return 'AM';
-    if(h>=12) return 'PM';
+    if(h>=12) return 'PM';       // 12:xx–23:xx (24h or 12-hour noon hour)
+    if(h>=7&&h<12) return 'AM';  // 7:00–11:59 — morning wave
+    if(h>=1&&h<7) return 'PM';   // 1:00–6:59 bare — afternoon written 12-hour
+    return 'AM';                 // 0:xx (24h midnight-hour edge) — treat as AM
   }
   return '';
 }
@@ -1714,11 +1721,13 @@ function formatTeeDisplay(teeVal){
     else if(h>12) h=h-12;
     return `${h}:${m} ${ampm}`;
   }
-  // Plain HH:MM — convert if looks like 24h
+  // Plain HH:MM — convert if looks like 24h. AM/PM matches detectTeeAMPM's
+  // heuristic (bare 1:00–6:59 = afternoon) so the display never contradicts
+  // the wave grouping.
   const plainMatch = s.match(/^(\d{1,2}):(\d{2})$/);
   if(plainMatch){
     let h=parseInt(plainMatch[1]), m=plainMatch[2];
-    const ampm = h<12?'AM':'PM';
+    const ampm = (h>=7&&h<12) ? 'AM' : (h===0 ? 'AM' : 'PM');
     if(h===0) h=12;
     else if(h>12) h=h-12;
     return `${h}:${m} ${ampm}`;
@@ -1771,6 +1780,13 @@ function expColor(p){return p<.25?'var(--green)':p<.5?'var(--accent)':'var(--acc
 function slateFieldsBase(slate){
   const cm=slate.columnMapping||{};
   const f=[];
+  // UFC sim columns lead the stat fields (right after salary) and are ordinary
+  // draggable fields — Sim was previously hardcoded into the name/salary block
+  // and SVal locked, so neither could be moved next to the other.
+  if(slate.sport==='ufc' && (slate.players||[]).some(p=>p._simP50!=null)){
+    f.push({key:'_simP50', label:'Sim',  cls:'col-r'});
+    f.push({key:'simValue',label:'SVal', cls:'col-r', computed:true});
+  }
   if(cm.proj!=null)   f.push({key:'proj',  label:'Proj', cls:'col-r'});
   if(cm.proj!=null)   f.push({key:'value', label:'Val',  cls:'col-r', computed:true});
   if(cm.own!=null)    f.push({key:'own',   label:'Own%', cls:'col-r'});
@@ -1788,11 +1804,6 @@ function slateFieldsBase(slate){
   // Show sim-derived p50 projection for NASCAR slates after sims have been run
   if(slate.sport==='nascar' && (slate.players||[]).some(p=>p._simP50!=null)){
     f.push({key:'_simP50', label:'Sim', cls:'col-r'});
-    f.push({key:'simValue', label:'SVal', cls:'col-r', computed:true});
-  }
-  // UFC sim score shown left of salary column — not in right fields.
-  // SVal (sim composite per $1k) IS a right field, mirroring NASCAR.
-  if(slate.sport==='ufc' && (slate.players||[]).some(p=>p._simP50!=null)){
     f.push({key:'simValue', label:'SVal', cls:'col-r', computed:true});
   }
   if(cm.cut!=null)    f.push({key:'cut',   label:'Cut',   cls:'col-r'});
@@ -1841,12 +1852,12 @@ function gridTemplate(fields){
     return parts.join(' ');
   }
   const leftWidth = slate?.sport==='pga' ? '62px' : slate?.sport==='ufc' ? '76px' : '38px';
-  const hasUFCSim = slate?.sport==='ufc' && (slate?.players||[]).some(p=>p._simP50!=null);
-  const cols=[leftWidth,'minmax(140px,1fr)', ...(hasUFCSim ? ['48px','60px'] : ['72px'])];
+  const cols=[leftWidth,'minmax(140px,1fr)','72px'];
   fields.forEach(f=>{
     if(f.key==='proj')  cols.push('56px');
     else if(f.key==='value') cols.push('38px');
     else if(f.key==='simValue') cols.push('38px');
+    else if(f.key==='_simP50') cols.push('48px');
     else if(f.key==='ml'||f.key==='itd'||f.key==='win'||f.key==='top3'||f.key==='top5'||f.key==='top10'||f.key==='top20'||f.key==='top30'||f.key==='top40'||f.key==='cut') cols.push('48px');
     else if(f.key==='minExp'||f.key==='maxExp') cols.push('50px');
     else cols.push(f.key==='team'?'56px':'44px');
@@ -2173,17 +2184,16 @@ function renderPool(){
   hdr.style.gridTemplateColumns=gt;
   const mobile = isMobileView();
   const {primary: mStat1, secondary: mStat2} = mobile ? getMobileStatFields(fields) : {primary:null,secondary:null};
-  const _hasUFCSim = slate?.sport==='ufc' && (slate?.players||[]).some(p=>p._simP50!=null);
   hdr.innerHTML=(isGroupEdit?`<span class="col-c">✓</span>`:'')
     +`<span class="col-c" onclick="setSort('start')" title="${leftColLabel(activeSlate())}" style="cursor:pointer;padding-right:6px;">${leftColLabel(slate)}</span><span>Name</span>`
-    +(_hasUFCSim
-      ? `<span class="col-r" onclick="setSort('_simP50')" style="cursor:pointer;color:var(--green);">Sim</span><span class="col-r" onclick="setSort('salary')">Sal</span>`
-      : `<span class="col-r" onclick="setSort('salary')">Sal</span>`)
+    +`<span class="col-r" onclick="setSort('salary')">Sal</span>`
     +(mobile
       ? (mStat1?`<span class="${mStat1.cls} pool-col-hdr" onclick="setSort('${mStat1.key}')" style="font-size:9px;">${mStat1.label}</span>`:'')
         +(mStat2?`<span class="${mStat2.cls} pool-col-hdr" onclick="setSort('${mStat2.key}')" style="font-size:9px;">${mStat2.label}</span>`:'')
       : fields.map(f=>{
-          const isDraggable = f.key!=='value' && f.key!=='simValue' && !isGroupEdit;
+          // Every stat column is draggable now — Val/SVal were locked, which
+          // made it impossible to park Sim and SVal beside each other.
+          const isDraggable = !isGroupEdit;
           const headerLabel = f.key==='proj'
             ? `<span style="display:block;padding-right:5px;">${f.label}</span>`
             : f.label;
@@ -2328,14 +2338,6 @@ function renderPool(){
         <div class="cell-name" style="flex:1">${nameHtml}</div>
         ${!isGroupEdit&&dots?`<div class="grp-dots">${dots}</div>`:''}
       </div>
-      ${(_hasUFCSim||false) && !mobile
-        ? (p._simP50!=null
-            ? (()=>{ window._simDistMap=window._simDistMap||{}; if(p._simDist) window._simDistMap[p.id]=p._simDist;
-                return `<div class="cell-mono col-r" style="color:var(--green);font-weight:600;${p._simDist?'cursor:default;':''}"
-                  ${p._simDist ? `onmouseenter="showSimTooltipById(this,'${p.id}')" onmouseleave="hideSimTooltip()"` : ''}
-                >${p._simP50.toFixed(1)}</div>`; })()
-            : `<div class="cell-mono col-r" style="color:var(--muted);font-weight:600;">—</div>`)
-        : ''}
       <div class="cell-sal col-r" style="${mobile?'font-size:11px;':''}">${fmt(p.salary)}</div>
       ${mobile
         ? [mStat1, mStat2].filter(Boolean).map(f=>{
@@ -3889,6 +3891,14 @@ function sampleFightOutcome(a, b){
   const mlB = b && b.ml != null && b.ml !== '' ? parseFloat(b.ml) : null;
   const hasMlAnchor = (mlA != null && !isNaN(mlA)) || (mlB != null && !isNaN(mlB));
 
+  // One stoppage clock per fight: the fraction of the finish round completed
+  // when the fight ends. Shared by both fighters (same cage, same clock) —
+  // drives the smoothed duration caps and the DK Quick Win Bonus (R1 ≤ 0:60).
+  // Uniform within the round is a reasonable first-order model.
+  const withFrac = out => out.round==='dec'
+    ? {...out, frac: 1}
+    : {...out, frac: Math.random()};
+
   if(hasMlAnchor){
     const pA = vigRemovedWinProb(mlA, mlB);
     const sumA = aOut.reduce((s,o)=>s+o.prob, 0);
@@ -3909,9 +3919,9 @@ function sampleFightOutcome(a, b){
     let acc = 0;
     for(const o of outcomes){
       acc += o.prob;
-      if(r < acc) return {winner:o.winner, round:o.round};
+      if(r < acc) return withFrac({winner:o.winner, round:o.round});
     }
-    return {winner: Math.random() < pA ? 'a' : 'b', round:'dec'};
+    return withFrac({winner: Math.random() < pA ? 'a' : 'b', round:'dec'});
   }
 
   // No ML anywhere — legacy behavior: jointly normalize whatever MOV odds exist.
@@ -3919,7 +3929,7 @@ function sampleFightOutcome(a, b){
   aOut.forEach(o=>outcomes.push({winner:'a', round:o.round, prob:o.prob}));
   bOut.forEach(o=>outcomes.push({winner:'b', round:o.round, prob:o.prob}));
   if(outcomes.length === 0){
-    return {winner: Math.random() < (a._simWinProb||0.5) ? 'a' : 'b', round:'dec'};
+    return withFrac({winner: Math.random() < (a._simWinProb||0.5) ? 'a' : 'b', round:'dec'});
   }
   const rawTotal = outcomes.reduce((s,o)=>s+o.prob, 0);
   const norm = rawTotal > 0 ? 1/rawTotal : 1;
@@ -3927,30 +3937,39 @@ function sampleFightOutcome(a, b){
   let acc = 0;
   for(const o of outcomes){
     acc += o.prob * norm;
-    if(r < acc) return {winner:o.winner, round:o.round};
+    if(r < acc) return withFrac({winner:o.winner, round:o.round});
   }
-  return {winner: Math.random() < (a._simWinProb||0.5) ? 'a' : 'b', round:'dec'};
+  return withFrac({winner: Math.random() < (a._simWinProb||0.5) ? 'a' : 'b', round:'dec'});
 }
 
 // ── VOLUME CAPS BY FIGHT DURATION ─────────────────────────────
 // These caps enforce the negative correlation between early finish and volume.
 // A R1 finish means ~2-3 minutes of action max — you cannot land 80 sig strikes.
 // is5Round flag distinguishes 3-round decision (130 cap) from 5-round decision (200 cap).
-function ssCapForRound(round, is5Round){
-  if(round===1)    return 28;
-  if(round===2)    return 52;
-  if(round===3)    return 78;
-  if(round===4)    return 104;
-  if(round===5)    return 130;
-  return is5Round ? 200 : 130; // 5-round decision = 25 min, 3-round = 15 min
+//
+// SMOOTHED (was a step function): caps now interpolate within the finish round
+// using `frac` (fraction of the finish round completed, shared by both fighters
+// in the fight). The old per-round steps had two discontinuities that punished
+// late finishes absurdly: a stoppage at 4:59 of R3 capped at 78 SS while a
+// decision one second later capped at 130, and a 4:59-of-R5 finish capped at
+// 130 vs 200 for the 5R decision. The cumulative ladder's FINAL scheduled round
+// now ramps to the decision cap, so a near-distance finish approaches (never
+// exceeds) the decision ceiling, and round boundaries below it are unchanged.
+function ssCapForRound(round, is5Round, frac){
+  const cum  = is5Round ? [0,28,52,78,104,200] : [0,28,52,130];
+  const maxR = is5Round ? 5 : 3;
+  if(round==null || round==='dec' || typeof round!=='number') return cum[maxR];
+  const r = Math.max(1, Math.min(round, maxR));
+  const f = (frac!=null && frac>=0 && frac<=1) ? frac : 1;
+  return cum[r-1] + f*(cum[r]-cum[r-1]);
 }
-function tdCapForRound(round, is5Round){
-  if(round===1)    return 2;
-  if(round===2)    return 4;
-  if(round===3)    return 6;
-  if(round===4)    return 8;
-  if(round===5)    return 10;
-  return is5Round ? 15 : 10;
+function tdCapForRound(round, is5Round, frac){
+  const cum  = is5Round ? [0,2,4,6,8,15] : [0,2,4,10];
+  const maxR = is5Round ? 5 : 3;
+  if(round==null || round==='dec' || typeof round!=='number') return cum[maxR];
+  const r = Math.max(1, Math.min(round, maxR));
+  const f = (frac!=null && frac>=0 && frac<=1) ? frac : 1;
+  return cum[r-1] + f*(cum[r]-cum[r-1]);
 }
 
 // ── WIN BONUS ─────────────────────────────────────────────────
@@ -3967,7 +3986,7 @@ function winBonus(round){
 // Scores a fighter given the fight outcome. Volume is sampled from odds-derived
 // CDFs, capped by fight duration. This enforces the key insight: early finish
 // = win bonus + low volume; decision = no finish bonus + high volume opportunity.
-function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
+function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // 5-round detection: explicit user toggle (tagged onto the fighter as
   // _is5Round before the sim run) wins; otherwise infer from R4/R5 finish odds.
   // The toggle matters when a known 5-rounder has no R4/R5 alt lines posted —
@@ -3975,8 +3994,8 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
   const is5Round = fighter._is5Round != null
     ? fighter._is5Round
     : (fighter.finish_r4 != null || fighter.finish_r5 != null);
-  const ssCap = ssCapForRound(round, is5Round);
-  const tdCap = tdCapForRound(round, is5Round);
+  const ssCap = ssCapForRound(round, is5Round, frac);
+  const tdCap = tdCapForRound(round, is5Round, frac);
 
   // Sample sig strikes capped to what's achievable in this fight duration
   let ss = 0;
@@ -4028,17 +4047,24 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF){
   // DK scoring: sig strikes count as both strike (+0.2) and sig strike (+0.2) = +0.4 total
   let total = ss * 0.4 + td * 5 + ctrlSecs * 0.03 + kd * 10;
 
+  // Winner/loser volume split around the market's UNCONDITIONAL expectation.
+  // The SS/TD ladders are whole-fight markets (they already average over win
+  // and loss scenarios), and the duration caps above already truncate early-
+  // finish volume — so the old 0.55–0.82× loss multiplier double-counted the
+  // loss: once via the cap, again via the discount, pushing total simulated
+  // volume well below the O/U line the ladders were just calibrated to.
+  // Winners land ~55% of a fight's combined volume, losers ~45% — i.e. ~1.1×
+  // and ~0.9× their unconditional expectation. That split (roughly mass-
+  // conserving at even odds) is all that remains here; duration effects live
+  // entirely in the caps.
+  total *= won ? 1.08 : 0.90;
+
   if(won){
     total += winBonus(round);
-  } else {
-    // Loss: opponent controlled, absorbed damage — discount volume.
-    // Scale by fight duration: a R1 KO loss produces almost no volume (deep discount),
-    // a decision loss means 3-5 full rounds of action (shallow discount).
-    // Range: R1 loss ~0.55x, decision loss ~0.82x.
-    const roundsFought = round === 'dec' ? (is5Round ? 5 : 3) : round;
-    const maxRounds    = is5Round ? 5 : 3;
-    const lossMult     = 0.55 + (roundsFought / maxRounds) * 0.27;
-    total *= lossMult;
+    // DK Quick Win Bonus: +25 for a first-round win in 60 seconds or less.
+    // frac is the shared fight clock (fraction of the finish round completed);
+    // 60s of a 5:00 round = 0.2. Uniform frac ⇒ ~20% of R1 finishes qualify.
+    if(round === 1 && frac != null && frac <= 0.2) total += 25;
   }
   return Math.max(0, total);
 }
@@ -4127,8 +4153,19 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
       const alreadyInGroup = locked.filter(c => (g.playerIds||[]).includes(c.p.id)).length;
       const need = min - alreadyInGroup;
       if(need <= 0) continue;
-      // Pick top-scoring group members not already locked
-      const toAdd = groupMembers.filter(c => !lockedIds.has(c.p.id)).slice(0, need);
+      // Pick top-scoring group members not already locked. Under no-oppose,
+      // skip members who oppose an already-locked fighter — a group holding
+      // both sides of a fight with ruleMin ≥ 2 used to lock the pair straight
+      // into the base, and the greedy fallback then emitted an opposing pair
+      // (the search-level oppose check only screens NEW picks, and the leaf
+      // checkGroupRules rejection just meant "no valid lineup found").
+      const toAdd = [];
+      for(const c of groupMembers){
+        if(toAdd.length >= need) break;
+        if(lockedIds.has(c.p.id)) continue;
+        if(noOppose && (locked.some(x=>opposes(x.p, c.p)) || toAdd.some(x=>opposes(x.p, c.p)))) continue;
+        toAdd.push(c);
+      }
       toAdd.forEach(c => { locked.push(c); lockedIds.add(c.p.id); });
     }
   }
@@ -4291,12 +4328,15 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     }
     simsDone++;
     // Step 1: sample fight outcomes
-    const simWinner={}, simRound={};
+    const simWinner={}, simRound={}, simFrac={};
     pairs.forEach(({a,b})=>{
       const outcome = sampleFightOutcome(a,b);
       const aWon = outcome.winner==='a';
       simWinner[a.id]=aWon; if(b) simWinner[b.id]=!aWon;
       simRound[a.id]=outcome.round; if(b) simRound[b.id]=outcome.round;
+      // Shared fight clock: both fighters' duration caps (and the winner's
+      // Quick Win Bonus) key off the same stoppage time.
+      simFrac[a.id]=outcome.frac; if(b) simFrac[b.id]=outcome.frac;
     });
 
     // Step 2: score ALL fighters (incl. hidden) for correct fight context
@@ -4304,7 +4344,8 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     fullPool.forEach(p=>{
       const won   = simWinner[p.id]!==undefined ? simWinner[p.id] : true;
       const round = simRound[p.id]!==undefined  ? simRound[p.id]  : 'dec';
-      const sc = drawScoreOdds(p, won, round, ssCDFById[p.id], tdCDFById[p.id]);
+      const frac  = simFrac[p.id]!==undefined   ? simFrac[p.id]   : 1;
+      const sc = drawScoreOdds(p, won, round, ssCDFById[p.id], tdCDFById[p.id], frac);
       simScore[p.id] = sc;
       if(fighterAllScores[p.id] !== undefined) fighterAllScores[p.id].push(sc);
     });
@@ -4577,10 +4618,12 @@ async function runUFCSimGen(){
       const x = remaining[ri];
       const ids = new Set(x.lineup.map(p=>p.id));
 
-      // Check exposure caps
+      // Check exposure caps. 0% is a full exclusion (matches NASCAR/PGA) —
+      // Math.max(1, …) used to leak one lineup through a 0% cap.
       const exceedsCap = x.lineup.some(p=>{
         const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
         if(pct>=100) return false;
+        if(pct<=0) return true;
         return (outputExpCount[p.id]||0) >= Math.max(1,Math.ceil(pct/100*target));
       });
       if(exceedsCap) continue;
@@ -4834,7 +4877,7 @@ function nascarCalcScore(startPos, finishPos, lapsLed, fastestLaps){
 //  6. Track-specific decay rates, leader counts, and FL driver counts
 // ─────────────────────────────────────────────────────────────────────────────
 
-function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new Set()){
+async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new Set()){
   const FIELD   = pool.length;
   const isSuper = trackType === 'superspeedway';
 
@@ -4878,17 +4921,25 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
   // by extrapolation below off these corrected anchors.
   (function devigTiers(){
     const tiers = [['_nPWin',1.0,'Win'],['_nPTop3',3.0,'Top3'],['_nPTop5',5.0,'Top5'],['_nPTop10',10.0,'Top10']];
-    const removed = [];
+    const removed = [], skipped = [];
     tiers.forEach(([key, fair, lbl])=>{
       let sum=0, n=0;
       pool.forEach(p=>{ if(p[key]!=null){ sum+=p[key]; n++; } });
       if(n<2 || sum<=0) return;             // need a real market to normalize against
       const overround = sum / fair;          // e.g. win sum 1.28 → 1.28 overround
-      if(overround <= 1.001) return;          // already fair / no vig to remove
+      if(overround <= 1.001){
+        // Posted below the fair total — almost always a partially-posted tier
+        // (books price top-10 for 20 of 38 cars and the sum can't reach 10.0).
+        // De-vigging against the fair total would DEFLATE the posted drivers,
+        // so we leave it — but say so, since these probs still carry vig.
+        if(n < pool.length) skipped.push(`${lbl} (posted ${n}/${pool.length}, sum ${sum.toFixed(2)} < fair ${fair} — left un-devigged)`);
+        return;
+      }
       pool.forEach(p=>{ if(p[key]!=null){ p[key] = Math.max(0.0005, Math.min(0.999, p[key]/overround)); } });
       removed.push(`${lbl} −${((overround-1)*100).toFixed(0)}%`);
     });
     if(removed.length && typeof log==='function') log(`De-vig applied: ${removed.join(', ')}`);
+    if(skipped.length && typeof log==='function') log(`⚠ De-vig skipped: ${skipped.join('; ')}`);
   })();
 
   // ── Determine which odds tiers are available across the field ────────────
@@ -5030,7 +5081,21 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
   // per-driver, per-sim scoring loop — ~30M lookups at 20k sims otherwise).
   const poolIdxById = new Map(pool.map((p,i)=>[p.id,i]));
 
+  // Per-driver P1 count for the win-rate calibration log (finishPos === 1).
+  const winCount = new Array(FIELD).fill(0);
+
+  // Chunked + cancellable: the sim loop used to run fully synchronously, so at
+  // 10k sims the tab froze and the Cancel button couldn't interrupt the run —
+  // it was only checked BETWEEN pipeline steps. Yielding every 250 sims keeps
+  // the UI live and makes cancel take effect mid-run; simsDone is the honest
+  // denominator for every average/rate below (mirrors the UFC engine's fix).
+  let simsDone = 0;
   for(let s=0; s<numSims; s++){
+    if(s > 0 && s % 250 === 0){
+      await new Promise(r=>setTimeout(r,0));
+      if(window._genCancelled) break;
+    }
+    simsDone++;
 
     // ── 1. Draw incident count from historical track-specific distribution ──
     const numIncidents = nascarDrawIncidentCount(trackType);
@@ -5110,23 +5175,55 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
                           : trackType==='intermediate'  ? 0.35
                           : trackType==='short'         ? 0.40 : 0.45;
 
+    // ── Winner first, sequentially ────────────────────────────────────────
+    // The winner is drawn directly from the de-vigged win probs (renormalized
+    // over survivors). The old scheme let every driver draw a "win band"
+    // independently and sorted the collisions apart UNIFORMLY — with field win
+    // prob summing to ~1.0, ~a quarter of sims had 2+ drivers in the band, and
+    // a 25% favorite colliding with a 2% longshot kept P1 only half the time
+    // instead of ~92%. Sequential selection makes sim win rates match the
+    // market by construction (verified by the calibration log below).
+    // Unpriced drivers get a tiny epsilon so a P1 miracle stays possible.
+    let winnerIdx = -1;
+    {
+      let wSum = 0;
+      const wArr = survivorDrawn.map(d => {
+        const w = (d.p._nPWin > 0 ? d.p._nPWin : 0.0005);
+        wSum += w; return w;
+      });
+      let rW = Math.random() * wSum;
+      for(let wi=0; wi<survivorDrawn.length; wi++){
+        rW -= wArr[wi];
+        if(rW <= 0){ winnerIdx = wi; break; }
+      }
+      if(winnerIdx < 0) winnerIdx = 0;
+    }
+
     // Draw a raw position for every surviving driver from their odds distribution.
     // This is honest probability sampling — no floors, no ceilings, no forcing.
     // Good drivers naturally finish well more often because their odds say so.
+    // Non-winners draw from their tier probabilities CONDITIONED on not winning
+    // (P(top-k | not win) = (pTk − pW)/(1 − pW)) so the tier masses stay honest
+    // after the win mass has been spent on the sequential winner draw.
     survivorDrawn.forEach((d, skillIdx)=>{
+      if(skillIdx === winnerIdx){
+        d._rawPos = 0.5; // guaranteed P1 after the sort
+        return;
+      }
       const pW=d.p._nPWin||0, pT3=d.p._nPTop3||0, pT5=d.p._nPTop5||0, pT10=d.p._nPTop10||0;
+      const denom = Math.max(0.05, 1 - pW);
+      const cT3  = pT3  > pW ? (pT3  - pW)/denom : 0;
+      const cT5  = pT5  > pW ? (pT5  - pW)/denom : 0;
+      const cT10 = pT10 > pW ? (pT10 - pW)/denom : 0;
       const u = Math.random();
 
-      if(pW && u <= pW){
-        // Win: position 1
-        d._rawPos = 1 + Math.random()*0.4;
-      } else if(pT3 && u <= pT3){
+      if(cT3 && u <= cT3){
         // Top 3 (not win)
         d._rawPos = 1.5 + Math.random()*1.5;
-      } else if(pT5 && u <= pT5){
+      } else if(cT5 && u <= cT5){
         // Top 5 (not top 3)
         d._rawPos = 3.5 + Math.random()*1.5;
-      } else if(pT10 && u <= pT10){
+      } else if(cT10 && u <= cT10){
         // Top 10 (not top 5)
         d._rawPos = 5.5 + Math.random()*4.5;
       } else {
@@ -5351,15 +5448,34 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
       sumScore[idx]  += score;
       sumLapsLed[idx]+= d.lapsLed||0;
       simScores[idx].push(score);
+      if(d.finishPos === 1) winCount[idx]++;
       if(score > simBestScore){ simBestScore = score; simBestId = d.p.id; }
     });
     // Record top scorer for this sim
     simTopScorer[s] = { id: simBestId, score: simBestScore };
   }
 
+  // ── Win-rate calibration vs the de-vigged market ──────────────────────────
+  // The sim's P1 frequency should track each driver's de-vigged win prob (the
+  // winner is now drawn directly from it, so this is a regression guard more
+  // than a tuning knob). Flag drivers off by >3pts — attrition asymmetries and
+  // incident seeding legitimately move a point or two; more than that usually
+  // means an input problem (bad odds parse, monotonicity clamp, tiny sim count).
+  if(simsDone > 0 && typeof log === 'function'){
+    const flagged = pool.map((p,i)=>{
+      if(nascarMlToProb(p.win) == null || p._nPWin == null) return null;
+      const simW = winCount[i]/simsDone;
+      const diff = (simW - p._nPWin) * 100;
+      return Math.abs(diff) > 3 ? `${p.name.split(' ').slice(-1)[0]} sim ${(simW*100).toFixed(1)}% vs mkt ${(p._nPWin*100).toFixed(1)}%` : null;
+    }).filter(Boolean);
+    if(flagged.length) log(`⚠ Win-rate calibration: ${flagged.slice(0,5).join(', ')}${flagged.length>5?` (+${flagged.length-5} more)`:''}`);
+    else log(`Win-rate calibration: all priced drivers within 3pts of de-vigged market.`);
+  }
+
   // ── Build per-driver results ──────────────────────────────────────────────
+  const simsDenom = Math.max(1, simsDone);
   const driverResults = pool.map((p,i)=>{
-    const avg    = sumScore[i]/numSims;
+    const avg    = sumScore[i]/simsDenom;
     const sorted = simScores[i].slice().sort((a,b)=>a-b);
     const p50    = sorted[Math.floor(sorted.length*0.50)];
     const p75    = sorted[Math.floor(sorted.length*0.75)];
@@ -5375,7 +5491,9 @@ function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet = new
     return { player:p, avg, p50, p75, p90, composite, dist };
   });
 
-  return { driverResults, simTopScorer, simScoreArrays: simScores };
+  // Slice the top-scorer log to sims actually completed so a mid-run cancel
+  // doesn't hand the bucket engine a tail of undefined entries.
+  return { driverResults, simTopScorer: simTopScorer.slice(0, simsDone), simScoreArrays: simScores, simsDone };
 }
 
 
@@ -5583,7 +5701,7 @@ async function runNascarSimGen(){
 
   // ── Step 1: Run sims ──────────────────────────────────────────────────────
   const rearStarterSet = new Set(slate._rearStarters || []);
-  const { driverResults, simTopScorer, simScoreArrays } = runNascarSims(fullField, numSims, totalLaps, trackType, rearStarterSet);
+  const { driverResults, simTopScorer, simScoreArrays } = await runNascarSims(fullField, numSims, totalLaps, trackType, rearStarterSet);
 
   // Attach sim metadata to players for pool display.
   // The "Sim" column shows _simP50, so we feed it the COMPOSITE (the ceiling-
@@ -5612,7 +5730,8 @@ async function runNascarSimGen(){
   // driverResults is already indexed to fullField; match by player id
   const poolSimScoreArrays = pool.map(p=>{
     const idx = fullField.findIndex(q=>q.id===p.id);
-    return idx>=0 ? simScoreArrays[idx] : new Array(numSims).fill(0);
+    // simTopScorer.length = sims actually completed (a cancel can stop short)
+    return idx>=0 ? simScoreArrays[idx] : new Array(simTopScorer.length).fill(0);
   });
 
   // Leverage strength (0–100 slider → 0–1). Drives both bucket allocation and
@@ -5647,6 +5766,11 @@ async function runNascarSimGen(){
   const poolIdx   = new Map(pool.map((p,i)=>[p.id,i]));
   const globalSeenKeys = new Set((slate.savedLineups||[]).map(l=>lineupKey(l)));
   const allFinalLineups = [];
+  // Built-but-unselected survivors from every bucket — the swap material for
+  // the Min% pass. (Passing the FINAL lineups as their own candidate pool made
+  // enforceMinExposure a guaranteed no-op: every candidate's key was already
+  // "used", so zero swaps could ever occur and Min% silently did nothing.)
+  const allUnselectedCandidates = [];
 
   // Per-player global exposure cap
   const globalExpCount = {};
@@ -6002,6 +6126,22 @@ async function runNascarSimGen(){
 
     log(`  ✓ ${bucket.playerName}: ${filled.length}/${bucket.allocatedLineups} lineups built`);
     allFinalLineups.push(...filled);
+
+    // Keep the unselected survivors (already floor-cleared, gauntlet-cleared,
+    // ceiling-scored) as Min% swap candidates, tagged like the selected ones.
+    remaining.forEach(x=>{
+      const l=[...x.lu];
+      l._bucketId      = bucket.id;
+      l._bucketName    = bucket.playerName;
+      l._bucketIsField = bucket.isField;
+      l._simWinAvg     = x.score.toFixed(1);
+      l._simAvg        = x.score.toFixed(1);
+      l._simCeiling    = x.ceiling!=null ? x.ceiling.toFixed(1) : null;
+      l._simLev        = x.levScore!=null ? x.levScore.toFixed(1) : null;
+      l._chalkSum      = x.chalk!=null ? (x.chalk*100).toFixed(0) : null;
+      l._simWinRate    = '—';
+      allUnselectedCandidates.push(l);
+    });
   }
 
   if(!allFinalLineups.length){
@@ -6010,12 +6150,13 @@ async function runNascarSimGen(){
   }
 
   // ── Step 5: Min exposure enforcement ─────────────────────────────────────
+  // Candidate pool = the unselected bucket survivors (not the final lineups
+  // themselves, which can never produce a swap — see allUnselectedCandidates).
   const nascarMinOverrides = slate.playerMinOverrides||{};
   let finalLineups = allFinalLineups;
   if(Object.keys(nascarMinOverrides).some(id=>nascarMinOverrides[id]>0)){
-    const allCandidates = allFinalLineups.map(l=>{ const c=[...l]; c._simAvg=l._simAvg; c._simCeiling=l._simCeiling; c._simLev=l._simLev; c._chalkSum=l._chalkSum; c._bucketId=l._bucketId; c._bucketName=l._bucketName; return c; });
     const scoreFn = l => l.reduce((s,p)=>s+(p._simComposite||0),0);
-    finalLineups = enforceMinExposure(finalLineups, allCandidates, nascarMinOverrides, scoreFn, log, id => globalOutCap[id]);
+    finalLineups = enforceMinExposure(finalLineups, allUnselectedCandidates, nascarMinOverrides, scoreFn, log, id => globalOutCap[id]);
   }
 
   // ── Step 6: Interleave buckets for preview variety ────────────────────────
@@ -6613,6 +6754,60 @@ function runPgaTargetGen(ctx){
   initState();
   if(realize(L)===-1){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; return; }
 
+  // ── Hard Min% verification (post-pass) ──
+  // Target floors make Min% likely, not guaranteed — combinatorics (salary
+  // band, group rules, dup rejection) can leave a floor short. This pass makes
+  // the guarantee explicit: for each under-min golfer, swap him into existing
+  // lineups in place of the least-valuable, most-overshot golfer whose removal
+  // keeps the lineup legal (salary band, group rules, no duplicate key, no
+  // other met minimum broken, his own Max% cap respected). Logs any floor that
+  // remains genuinely unreachable instead of failing silently.
+  (function enforceMinsHard(){
+    const N = finalLineups.length; if(!N) return;
+    const minTgt = p => Math.ceil(((minOverrides[p.id]||0)/100)*N);
+    const deficits = pool.filter(p=>(minOverrides[p.id]||0)>0 && (built.get(p.id)||0) < minTgt(p))
+      .map(p=>({p, need: minTgt(p)-(built.get(p.id)||0)}))
+      .sort((a,b)=>b.need-a.need);
+    if(!deficits.length) return;
+    let swapsMade = 0;
+    deficits.forEach(({p})=>{
+      let need = minTgt(p) - (built.get(p.id)||0);
+      while(need > 0){
+        if((built.get(p.id)||0) >= hardCap.get(p.id)) break; // his own Max% binds
+        let best = null;
+        for(const lu of finalLineups){
+          if(lu.some(q=>q.id===p.id)) continue;
+          const total = lu.reduce((s,q)=>s+q.salary,0);
+          for(let li=0; li<lu.length; li++){
+            const out = lu[li];
+            // Removing `out` must not break out's own (met) minimum
+            const oTgt = minTgt(out);
+            if(oTgt>0 && (built.get(out.id)||0)-1 < oTgt) continue;
+            const nt = total - out.salary + p.salary;
+            if(nt < floorSal || nt > maxSal) continue;
+            const cand = lu.slice(); cand[li] = p;
+            if(!checkGroupRules(cand, groups)) continue;
+            const key = cand.map(q=>q.id).sort().join('|');
+            if(seen.has(key)) continue;
+            // Prefer removing the lowest-value golfer with the biggest overshoot
+            const ov = (built.get(out.id)||0) - (tgtSlots.get(out.id)||0);
+            const sc = vZ.get(out.id) - 0.25*Math.max(0,ov);
+            if(!best || sc < best.sc) best = {lu, li, out, key, sc};
+          }
+        }
+        if(!best) break;
+        seen.delete(best.lu.map(q=>q.id).sort().join('|'));
+        seen.add(best.key);
+        best.lu[best.li] = p;
+        built.set(p.id, (built.get(p.id)||0)+1);
+        built.set(best.out.id, (built.get(best.out.id)||0)-1);
+        swapsMade++; need--;
+      }
+      if(need > 0) log('⚠ Min% unreachable for '+p.name+': '+(built.get(p.id)||0)+'/'+minTgt(p)+' lineups after swaps (salary band / group rules / caps bind).');
+    });
+    if(swapsMade) log('Min% post-pass: '+swapsMade+' swap'+(swapsMade>1?'s':'')+' applied to hit user floors.');
+  })();
+
   // ── Report ──
   const dev=pool.map((p,i)=>({name:p.name, tgt:targets[i]/L, got:(built.get(p.id)||0)/Math.max(1,finalLineups.length)}))
     .filter(x=>x.tgt>0.005||x.got>0.005);
@@ -7160,6 +7355,24 @@ async function runAutoGen(){
       proj: lineup.reduce((s,p)=>s+(parseFloat(p.proj)||0),0)
     }));
 
+    // Unjustified ownership per player — the sim engines' lesson, ported to the
+    // optimize path: a player's ownership is "justified" up to his share of the
+    // pool's optimizer score (share of quality × total field ownership); only
+    // ownership beyond that is chalk worth culling. Raw-ownership culling taxed
+    // correctly-popular value plays identically to empty chalk. Null when Own%
+    // isn't mapped so the gauntlet skips the axis instead of rank-ordering
+    // an all-zeros column (which culled at random).
+    const _ownMappedGen = slate.columnMapping?.own != null;
+    const _unjOwnGen = {};
+    if(_ownMappedGen){
+      const _sumBase = pool.reduce((a,p)=>a+Math.max(0,getBaseScore(p)),0) || 1;
+      const _sumOwnAll = pool.reduce((a,p)=>a+Math.max(0,parseFloat(p.own)||0),0) || 1;
+      pool.forEach(p=>{
+        const justified = (Math.max(0,getBaseScore(p))/_sumBase) * _sumOwnAll;
+        _unjOwnGen[p.id] = Math.max(0, (parseFloat(p.own)||0) - justified);
+      });
+    }
+
     // Apply quality filter per quota bucket and collect final lineups
     const finalLineups = [];
     const outputExpCount = {}; // tracks per-player appearances across ALL buckets in final output
@@ -7187,13 +7400,15 @@ async function runAutoGen(){
       // bad on any axis. Weights: ownership 3 / equity 3 / proj 1 / rating 1.
       const annotated = bucketLineups.map(x=>({
         x,
-        gOwn:  x.lineup.reduce((s,p)=>s+(parseFloat(p.own)||0),0),
+        gOwn:  _ownMappedGen ? x.lineup.reduce((s,p)=>s+(_unjOwnGen[p.id]||0),0) : null,
         gEq:   oddsAvailable ? x.lineup.reduce((s,p)=>s+(p._oddsScore||0),0) : null,
         gProj: slate.columnMapping?.proj!=null ? x.lineup.reduce((s,p)=>s+(parseFloat(p.proj)||0),0) : null,
         gRtg:  slate.columnMapping?.rating!=null ? x.lineup.filter(p=>p.rating!=null&&!p._ratingImputed).reduce((s,p)=>s+(parseFloat(p.rating)||0),0) : null,
       }));
       const gauntletAxes = [
-        {key:'gOwn',  dir:'high', weight:3, label:'chalkiest'},
+        // minBad mirrors the sim engines: only lineups STACKED with unsupported
+        // ownership die on this axis, not any lineup holding one popular player.
+        {key:'gOwn',  dir:'high', weight:3, label:'most-unjustified-chalk', minBad:35},
         {key:'gEq',   dir:'low',  weight:3, label:'lowest-equity'},
         {key:'gProj', dir:'low',  weight:1, label:'lowest-proj'},
         {key:'gRtg',  dir:'low',  weight:1, label:'lowest-rating'},
@@ -7235,10 +7450,12 @@ async function runAutoGen(){
         for(let ri = 0; ri < remaining.length; ri++){
           const x = remaining[ri];
           const ids = new Set(x.lineup.map(p=>p.id));
-          // Skip if this lineup would push any player over their output exposure cap
+          // Skip if this lineup would push any player over their output exposure cap.
+          // 0% = full exclusion (matches NASCAR/PGA; Math.max(1,…) used to leak one).
           const exceedsOutputCap = x.lineup.some(p=>{
             const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
             if(pct >= 100) return false; // no cap
+            if(pct <= 0) return true;    // hard exclusion
             const cap = Math.max(1, Math.ceil(pct/100 * target));
             return (outputExpCount[p.id]||0) >= cap;
           });
@@ -7292,7 +7509,7 @@ async function runAutoGen(){
     // Min exposure enforcement via shared helper
     const allCandidateLineups = scoredValid.map(x => x.lineup);
     const scoreFnAutoGen = l => lineupScore(l, pool, optimizeBy, groups, blendWeights);
-    const pgaMaxCap = id => { const pct = overrides[id]!=null ? overrides[id] : maxExpPct; return pct>=100 ? null : Math.max(1, Math.ceil(target * pct / 100)); };
+    const pgaMaxCap = id => { const pct = overrides[id]!=null ? overrides[id] : maxExpPct; return pct>=100 ? null : (pct<=0 ? 0 : Math.max(1, Math.ceil(target * pct / 100))); };
     const enforcedLineups = enforceMinExposure(finalLineups, allCandidateLineups, minOverrides, scoreFnAutoGen, log, pgaMaxCap);
 
     const final = enforcedLineups;
