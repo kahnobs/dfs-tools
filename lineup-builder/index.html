@@ -3789,7 +3789,12 @@ function buildCDF(points, ouLine){
 
   const belowMass = Math.max(0, 1 - points[0].prob);
   const total = buckets.reduce((s,b)=>s+b.mass,0) + belowMass;
-  const useAnchor = ouLine != null && ouLine > 0 && points[0].threshold > ouLine * 1.5;
+  // Anchor below-first-rung draws to the O/U whenever the line sits below the
+  // ladder's first rung. The old 1.5× gate left a common case unanchored: a
+  // ladder starting at 55+ with a 49.5 line drew its below-rung mass UNIFORM
+  // 0–55 (mean ~27) when the market's median for that mass is ≈ the line —
+  // silently shorting every fighter whose book skips the low rungs.
+  const useAnchor = ouLine != null && ouLine > 0 && points[0].threshold > ouLine;
 
   return function sampleFromCDF(maxVal){
     const r = Math.random() * total;
@@ -4057,44 +4062,50 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   if(fighter._ssPace != null) ssCap = Math.min(ssCap, Math.max(8, SS_PACE_CEIL * fighter._ssPace * _elapsedMin));
   if(fighter._tdPace != null) tdCap = Math.min(tdCap, Math.max(1, TD_PACE_CEIL * fighter._tdPace * _elapsedMin));
 
-  // Sample sig strikes capped to what's achievable in this fight duration
+  // ── Duration-conditioned volume ────────────────────────────────────────
+  // The ladders and O/Us price WHOLE-FIGHT volume at the fight's EXPECTED
+  // duration (_expFightMin, from the joint MOV distribution). A draw is a
+  // pace realization: scale it by actual ÷ expected minutes, THEN clamp to
+  // the physical + pace caps. The old truncate-only model enforced the
+  // negative correlation (early KO → low volume) but never the positive one
+  // (long fight → high volume): a 5-round main-event decision drew ~17
+  // minutes' worth of strikes in a 25-minute fight, erasing exactly the
+  // late-round volume edge a 5R fighter is rostered for. E[scale] ≈ 1 across
+  // sims, so each fighter still re-averages to his own market line.
+  const durScale = (fighter._expFightMin > 0)
+    ? Math.max(0.05, Math.min(3, _elapsedMin / fighter._expFightMin))
+    : 1;
+
   let ss = 0;
   if(ssCDF){
-    ss = Math.max(0, Math.round(ssCDF(ssCap)));
+    ss = Math.max(0, Math.round(ssCDF(null) * durScale));
+    ss = Math.min(ss, Math.round(ssCap));
   } else {
-    // Fallback: use SS O/U line as the distribution anchor if available,
-    // otherwise derive from simulated outcome.
-    // ssCap already encodes fight duration (cumulative SS ceiling for rounds fought),
-    // so it's a natural anchor — no salary proxy needed.
-    // Winners land ~55% of total strikes; losers ~45%, with random spread around each.
-    let baseSS;
-    if(fighter.ss_ou){
-      const ouLine = parseFloat(fighter.ss_ou);
-      baseSS = isNaN(ouLine) ? (ssCap * (won ? 0.55 : 0.45)) : ouLine;
-    } else {
-      baseSS = ssCap * (won ? 0.55 : 0.45);
-    }
-    ss = Math.round(baseSS * (0.7 + Math.random() * 0.6));
-    ss = Math.max(0, Math.min(ssCap, ss));
+    // League-pace prior fallback. Missing SS markets used to inherit 55% of
+    // the PHYSICAL cap — a ceiling, not a typical value — which handed
+    // no-data fighters inflated volume. Base = the O/U if posted, else
+    // ~3.3 sig strikes/min at expected duration; winner/loser asymmetry is
+    // handled once, by the mass-conserving multiplier below.
+    const ouLine = fighter.ss_ou ? parseFloat(fighter.ss_ou) : NaN;
+    const baseSS = !isNaN(ouLine) ? ouLine : 3.3 * (fighter._expFightMin || (is5Round ? 12 : 10));
+    ss = Math.round(baseSS * (0.7 + Math.random() * 0.6) * durScale);
+    ss = Math.max(0, Math.min(Math.round(ssCap), ss));
   }
 
-  // Sample takedowns capped by duration
   let td = 0;
   if(tdCDF){
-    td = Math.max(0, Math.round(tdCDF(tdCap)));
+    td = Math.max(0, Math.round(tdCDF(null) * durScale));
+    td = Math.min(td, Math.floor(tdCap));
   } else {
-    // Fallback: use TD O/U line as the anchor if available,
-    // otherwise derive from simulated outcome.
-    // tdCap encodes rounds fought; winners attempt and land more TDs.
-    let baseTD;
-    if(fighter.td_ou){
-      const ouLine = parseFloat(fighter.td_ou);
-      baseTD = isNaN(ouLine) ? (tdCap * (won ? 0.45 : 0.30)) : ouLine;
-    } else {
-      baseTD = tdCap * (won ? 0.45 : 0.30);
-    }
-    td = Math.round(baseTD * (0.5 + Math.random() * 1.0));
-    td = Math.max(0, Math.min(tdCap, td));
+    // League-pace prior fallback (~0.08 landed TD/min ≈ 1.2 per 15 minutes).
+    // The old tdCap×0.45 fallback was the single biggest phantom-points
+    // source in the engine: a fighter with NO takedown market posted drew
+    // ~4.5 TDs (+~30 pts with control time) in every 3R decision — rewarding
+    // missing data with wrestler volume his markets never priced.
+    const ouT = fighter.td_ou ? parseFloat(fighter.td_ou) : NaN;
+    const baseTD = !isNaN(ouT) ? ouT : 0.08 * (fighter._expFightMin || (is5Round ? 12 : 10));
+    td = Math.round(baseTD * (0.5 + Math.random() * 1.0) * durScale);
+    td = Math.max(0, Math.min(Math.floor(tdCap), td));
   }
 
   // Control time derived from takedowns: each TD averages ~45-90s of control
