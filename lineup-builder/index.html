@@ -1139,6 +1139,11 @@ html { overscroll-behavior-y: contain; }
                     <input type="number" id="ufcEvSigma" value="35" min="0" max="100" step="5" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.ownSigma=parseFloat(this.value);save();}"
                       style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
                   </div>
+                  <div style="flex:1;">
+                    <div style="font-size:9px;color:var(--muted);margin-bottom:2px;" title="Risk constraint: no 2-fighter combination may appear in more than this % of your lineups. 100 = off. Pure EV tolerates huge pair concentration in large fields; this bounds the correlated-wipeout tail.">Max pair %</div>
+                    <input type="number" id="ufcEvPairCap" value="40" min="1" max="100" step="5" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.pairCap=parseFloat(this.value);save();}"
+                      style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
+                  </div>
                 </div>
                 <div style="margin-bottom:6px;">
                   <div style="font-size:9px;color:var(--muted);margin-bottom:3px;">Payout structure</div>
@@ -3162,6 +3167,7 @@ function renderGroupRulesSummary(){
     const evF = document.getElementById('ufcEvField'); if(evF && ev.fieldSize) evF.value = ev.fieldSize;
     const evFee = document.getElementById('ufcEvFee'); if(evFee && ev.fee!=null) evFee.value = ev.fee;
     const evSg = document.getElementById('ufcEvSigma'); if(evSg && ev.ownSigma!=null) evSg.value = ev.ownSigma;
+    const evPc = document.getElementById('ufcEvPairCap'); if(evPc && ev.pairCap!=null) evPc.value = ev.pairCap;
     const evC = document.getElementById('ufcEvCustom'); if(evC){ if(ev.custom!=null) evC.value = ev.custom; evC.style.display = (ev.preset==='custom')?'block':'none'; }
     const presetKey = ev.preset||'gpp';
     [['gpp','ufcEvPresetGpp'],['double','ufcEvPresetDouble'],['custom','ufcEvPresetCustom']].forEach(([k,id])=>{
@@ -4859,6 +4865,32 @@ async function runUFCContestEV(ctx){
   // when the column is wrong against it. ρ=0.5 splits the difference between
   // expectation and worst-case; wiggle 0% collapses scenarios → pure EV.
   const ROBUST_RHO = 0.5;
+  // ── Top-of-curve rank integration ──
+  // The sampled field (N) stands in for F real entries, so each sampled
+  // lineup represents F/N of them. A point-estimate rank can't resolve the
+  // top of the curve: beating ALL samples of a 50k field only bounds you to
+  // "top ~F/N", but payout(1) can be 15× payout(F/N) — collapsing that range
+  // to one number blinds the optimizer to exactly the region where unique
+  // builds earn their premium, so it concentrates on reliably-elite chalk
+  // skeletons instead. Fix: the TRUE beating count is ~Gamma(b+tied/2+0.5,
+  // F/N); integrate the payout over five Wilson–Hilferty quantiles of that
+  // posterior whenever the candidate is in the top region. Deep ranks keep
+  // the cheap point estimate (the curve is locally flat down there).
+  const WH_Z = [-1.2816,-0.5244,0,0.5244,1.2816];
+  const expPayout = (beating, tied, sampleN, dups, myBeats) => {
+    const shape  = beating + tied/2 + 0.5;
+    const scale  = F/sampleN;
+    const offset = 1 + dups/2 + myBeats;
+    if(shape > 30) return payout.at(shape*scale + offset);
+    let s=0;
+    const rt = 3*Math.sqrt(shape), corr = 1 - 1/(9*shape);
+    for(let q=0;q<5;q++){
+      const c = corr + WH_Z[q]/rt;
+      const T = shape * Math.max(0, c*c*c) * scale;
+      s += payout.at(T + offset);
+    }
+    return s/5;
+  };
   const robustAgg = (bSum, bCnt) => {
     let tot=0, n=0, minB=Infinity;
     for(let k=0;k<K;k++){
@@ -4900,11 +4932,7 @@ async function runUFCContestEV(ctx){
       while(lo2<hi2){ const mid=(lo2+hi2)>>1; if(arr[mid]<t) lo2=mid+1; else hi2=mid; }
       const beating = arr.length-lo;
       const tied    = lo-lo2;
-      // Laplace-smoothed rank: beating all N sampled lineups is evidence of
-      // being top ~F/N, not literal rank 1 — the +0.5/(N+1) smoothing prices
-      // that correctly instead of paying phantom first-place money.
-      const rank = ((beating + tied/2 + 0.5)/(arr.length+1))*F + 1 + dups/2;
-      bSum[s%K] += payout.at(rank); bCnt[s%K]++;
+      bSum[s%K] += expPayout(beating, tied, arr.length, dups, 0); bCnt[s%K]++;
     }
     e._ev = robustAgg(bSum, bCnt) - fee;
     if(c>0 && c%400===0){
@@ -4927,12 +4955,35 @@ async function runUFCContestEV(ctx){
   // the portfolio grows, so re-evaluate the top candidate and accept only if
   // it still beats the next cached value.
   const outputExpCount={}; const chosen=[]; const chosenBySim = fieldSorted.map(()=>[]);
-  const capBlocked = lu => lu.some(p=>{
-    const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
-    if(pct>=100) return false;
-    if(pct<=0) return true;
-    return (outputExpCount[p.id]||0) >= Math.max(1,Math.ceil(pct/100*target));
-  });
+  // Pair-exposure cap: a RISK constraint, not an EV correction. In large
+  // fields the self-crowding cost of many entries sharing a pair is tiny
+  // (a few dozen ranks among 10k paid), so pure EV happily rides one pair
+  // in 70+ lineups — and when that pair's dog side loses, most of the
+  // portfolio dies at once. EV is indifferent to that variance; bankrolls
+  // aren't. The cap bounds how much of the portfolio any single 2-fighter
+  // combination can carry, forcing the EV maximizer to diversify its
+  // correlation structure while it optimizes. User-set; 100 = off.
+  const pairCapPct = Math.max(1, Math.min(100, parseFloat(cfg.pairCap!=null?cfg.pairCap:40)));
+  const pairCapN   = Math.max(1, Math.ceil(pairCapPct/100*target));
+  const pairCount  = {};
+  const pairsOf = lu => {
+    const ids = lu.map(p=>p.id).sort(); const out=[];
+    for(let i=0;i<ids.length;i++) for(let j=i+1;j<ids.length;j++) out.push(ids[i]+'|'+ids[j]);
+    return out;
+  };
+  if(pairCapPct<100) log(`Pair exposure cap: no 2-fighter combo in more than ${pairCapPct}% of lineups.`);
+  const capBlocked = lu => {
+    if(lu.some(p=>{
+      const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
+      if(pct>=100) return false;
+      if(pct<=0) return true;
+      return (outputExpCount[p.id]||0) >= Math.max(1,Math.ceil(pct/100*target));
+    })) return true;
+    if(pairCapPct<100){
+      for(const k of pairsOf(lu)) if((pairCount[k]||0) >= pairCapN) return true;
+    }
+    return false;
+  };
   const totalsOf = e => {
     const idxs = e.lineup.map(p=>idxById.get(p.id)).filter(i=>i!=null);
     const out = new Float64Array(fieldSorted.length);
@@ -4956,8 +5007,7 @@ async function runUFCContestEV(ctx){
       let myBeats=0; const mine=chosenBySim[s];
       for(let k=0;k<mine.length;k++) if(mine[k]>t) myBeats++;
       const dupsS = e._dupsK ? e._dupsK[s%K] : 0;
-      const rank = ((beating + tied/2 + 0.5)/(arr.length+1))*F + 1 + dupsS/2 + myBeats;
-      bSum[s%K] += payout.at(rank); bCnt[s%K]++;
+      bSum[s%K] += expPayout(beating, tied, arr.length, dupsS, myBeats); bCnt[s%K]++;
     }
     return robustAgg(bSum, bCnt) - fee;
   };
@@ -4976,6 +5026,7 @@ async function runUFCContestEV(ctx){
       const tots = top.e._tots || (top.e._tots = totalsOf(top.e));
       for(let s=0;s<chosenBySim.length;s++) chosenBySim[s].push(tots[s]);
       top.e.lineup.forEach(p=>{ outputExpCount[p.id]=(outputExpCount[p.id]||0)+1; });
+      pairsOf(top.e.lineup).forEach(k=>{ pairCount[k]=(pairCount[k]||0)+1; });
       cands.shift();
     } else {
       top.val = marginalEV(top.e);
