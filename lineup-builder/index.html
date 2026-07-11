@@ -1143,6 +1143,16 @@ html { overscroll-behavior-y: contain; }
                     <button class="nascar-track-btn" id="ufcEvPresetCustom" onclick="setUfcEvPreset('custom',this)">Custom</button>
                   </div>
                 </div>
+                <div style="display:flex;gap:4px;margin-bottom:6px;align-items:center;">
+                  <select id="ufcEvSaved" onchange="applyContestPreset(this.value)"
+                    style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:10px;font-family:'DM Mono',monospace;outline:none;">
+                    <option value="">— saved contests —</option>
+                  </select>
+                  <button onclick="saveContestPreset()" title="Save the current field size / fee / payout structure for one-click reuse"
+                    style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);color:var(--green);padding:4px 8px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;">💾 Save</button>
+                  <button onclick="deleteContestPreset()" title="Delete the selected saved contest"
+                    style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 7px;border-radius:4px;font-size:10px;cursor:pointer;">✕</button>
+                </div>
                 <textarea id="ufcEvCustom" placeholder="1: 5000&#10;2-5: 1000&#10;6-100: 40" spellcheck="false"
                   onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.custom=this.value;save();}"
                   style="display:none;width:100%;min-height:56px;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-size:10px;font-family:'DM Mono',monospace;outline:none;margin-bottom:6px;"></textarea>
@@ -3318,6 +3328,14 @@ function renderGroupRulesSummary(){
     [['gpp','ufcEvPresetGpp'],['double','ufcEvPresetDouble'],['custom','ufcEvPresetCustom']].forEach(([k,id])=>{
       const b=document.getElementById(id); if(b) b.classList.toggle('active', presetKey===k);
     });
+    // Saved-contest library: populate the dropdown, and on a fresh slate with
+    // no contest settings yet, auto-apply the last-used saved contest so the
+    // structure never has to be re-entered week to week.
+    renderContestPresetSelect();
+    if(ev.fieldSize==null && ev.preset==null){
+      const last=localStorage.getItem('dfs_last_contest_preset');
+      if(last && (BUILTIN_CONTESTS.some(p=>p.id===last)||loadContestPresets().some(p=>p.id===last))) applyContestPreset(last, true);
+    }
   }
 
   if(slate.sport==='pga'){
@@ -4800,6 +4818,81 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
 // and the payout curve (user-supplied). Leverage stops being a slider and
 // becomes an output: being under-owned pays exactly when the payout curve
 // says it does, differently for a top-heavy GPP than a double-up.
+
+// ── Saved contest structures — global, survive across slates/weeks ──
+// DK reuses the same contests every week ($15K JAB $1 20-max, etc.), so the
+// field/fee/payout combo is saved once by name and reapplied in one click.
+// The last-used contest auto-loads on any fresh slate with no EV settings.
+// Built-in contests — always available, not deletable, live above saved ones.
+// The $3 main GPP rides the exact reference table inside buildPayoutFn (the
+// 'gpp' preset reproduces it to the dollar at these parameters); the $1 JAB
+// is the verified 24-tier table from the DK contest page ($15,000 total).
+const BUILTIN_CONTESTS=[
+  {id:'builtin_mini50', name:'UFC $25K Mini-Max · $0.50 × 59,453', fee:0.5, fieldSize:59453, preset:'custom',
+   custom:'1: 2500\n2: 1000\n3: 600\n4: 400\n5: 250\n6: 200\n7-8: 150\n9-10: 100\n11-14: 75\n15-19: 60\n20-25: 50\n26-35: 40\n36-45: 30\n46-55: 25\n56-70: 20\n71-90: 15\n91-120: 10\n121-160: 8\n161-210: 6\n211-290: 5\n291-460: 4\n461-880: 3\n881-1990: 2\n1991-4276: 1.50\n4277-12467: 1.00'},
+  {id:'builtin_jab1', name:'UFC $15K JAB · $1 × 17,835', fee:1, fieldSize:17835, preset:'custom',
+   custom:'1: 1000\n2: 600\n3: 400\n4: 300\n5: 250\n6: 200\n7-8: 150\n9-10: 100\n11-13: 75\n14-16: 60\n17-20: 50\n21-25: 40\n26-30: 30\n31-40: 25\n41-50: 20\n51-65: 15\n66-85: 10\n86-110: 8\n111-180: 6\n181-320: 5\n321-590: 4\n591-1155: 3\n1156-2362: 2\n2363-4636: 1.50'},
+  {id:'builtin_main3', name:'UFC Main GPP · $3 × 47,500', fee:3, fieldSize:47500, preset:'gpp', custom:''},
+];
+function loadContestPresets(){ try{ return JSON.parse(localStorage.getItem('dfs_contest_presets')||'[]'); }catch(e){ return []; } }
+function storeContestPresets(a){ try{ localStorage.setItem('dfs_contest_presets', JSON.stringify(a)); }catch(e){} }
+function renderContestPresetSelect(){
+  const sel=document.getElementById('ufcEvSaved'); if(!sel) return;
+  const presets=loadContestPresets();
+  const last=localStorage.getItem('dfs_last_contest_preset');
+  const opt=p=>`<option value="${p.id}"${p.id===last?' selected':''}>${p.name}</option>`;
+  sel.innerHTML='<option value="">— saved contests —</option>'
+    +BUILTIN_CONTESTS.map(opt).join('')
+    +(presets.length?'<optgroup label="My saved">'+presets.map(opt).join('')+'</optgroup>':'');
+}
+function saveContestPreset(){
+  const s=activeSlate(); if(!s) return;
+  const ev=s._ufcEv||{};
+  const fee=ev.fee!=null?ev.fee:(parseFloat(document.getElementById('ufcEvFee')?.value)||20);
+  const F=ev.fieldSize||parseInt(document.getElementById('ufcEvField')?.value)||10000;
+  const preset=ev.preset||'gpp';
+  const custom=(preset==='custom')?(ev.custom||document.getElementById('ufcEvCustom')?.value||''):'';
+  let suffix='';
+  if(preset==='custom'){
+    const lines=custom.split(/\n+/).filter(l=>/\d/.test(l)).length;
+    suffix=` (${lines} tiers)`;
+  }
+  const kind=preset==='custom'?'Custom':preset==='double'?'Double-Up':'GPP';
+  const name=`${kind} $${fee} × ${F.toLocaleString()}${suffix}`;
+  const presets=loadContestPresets();
+  const existing=presets.find(p=>p.name===name);
+  const rec={id:existing?existing.id:uid(), name, fee, fieldSize:F, preset, custom};
+  if(existing) Object.assign(existing, rec); else presets.push(rec);
+  storeContestPresets(presets);
+  localStorage.setItem('dfs_last_contest_preset', rec.id);
+  renderContestPresetSelect();
+  showToast(`✓ Saved contest "${name}" — auto-loads on future slates`,'ok');
+}
+function deleteContestPreset(){
+  const sel=document.getElementById('ufcEvSaved'); if(!sel||!sel.value) return;
+  if(sel.value.startsWith('builtin_')){ showToast('Built-in contests can\'t be deleted','err'); return; }
+  const rec=loadContestPresets().find(p=>p.id===sel.value);
+  storeContestPresets(loadContestPresets().filter(p=>p.id!==sel.value));
+  if(localStorage.getItem('dfs_last_contest_preset')===sel.value) localStorage.removeItem('dfs_last_contest_preset');
+  renderContestPresetSelect();
+  showToast(rec?`Deleted "${rec.name}"`:'Deleted','ok');
+}
+function applyContestPreset(id, silent){
+  if(!id) return;
+  const rec=BUILTIN_CONTESTS.find(p=>p.id===id)||loadContestPresets().find(p=>p.id===id); if(!rec) return;
+  const s=activeSlate(); if(!s) return;
+  s._ufcEv=Object.assign({}, s._ufcEv, {fieldSize:rec.fieldSize, fee:rec.fee, preset:rec.preset, custom:rec.custom});
+  save();
+  localStorage.setItem('dfs_last_contest_preset', id);
+  const evF=document.getElementById('ufcEvField'); if(evF) evF.value=rec.fieldSize;
+  const evFee=document.getElementById('ufcEvFee'); if(evFee) evFee.value=rec.fee;
+  const evC=document.getElementById('ufcEvCustom'); if(evC){ evC.value=rec.custom||''; evC.style.display=rec.preset==='custom'?'block':'none'; }
+  [['gpp','ufcEvPresetGpp'],['double','ufcEvPresetDouble'],['custom','ufcEvPresetCustom']].forEach(([k,bid])=>{
+    const b=document.getElementById(bid); if(b) b.classList.toggle('active', rec.preset===k);
+  });
+  const sel=document.getElementById('ufcEvSaved'); if(sel) sel.value=id;
+  if(!silent) showToast(`✓ Applied "${rec.name}"`,'ok');
+}
 
 // Payout curve builder. Returns { at(rank)→$, desc }.
 function buildPayoutFn(cfg){
