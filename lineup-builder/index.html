@@ -1511,6 +1511,143 @@ function applyAutoMap(headers, mapping) {
 
 const GROUP_COLORS = ['#f5c518','#e8421a','#22c55e','#3b82f6','#a855f7','#f97316','#ec4899','#14b8a6'];
 
+// ═══════════════════════════════════════════════════════════
+// PGA ARCHETYPES — field-relative tags from RRG cheat-sheet stats
+// ═══════════════════════════════════════════════════════════
+// Stat columns are read from the import CSV by header name (any alias below).
+// All strokes-gained archetypes use WEIGHTED SG (field-strength adjusted), so
+// production against weak fields doesn't inflate tags. Thresholds are
+// percentiles recomputed from the current slate's field every time, so they
+// self-calibrate week to week.
+const PGA_STAT_ALIASES = {
+  dist:['dist','driving_distance','driving_distance_avg'],
+  acc:['acc','driving_accuracy'],
+  gir:['gir'],
+  fptsg:['fptsg','f_pts_g'],
+  sg_ott:['sg_ott'], sg_app:['sg_app'], sg_arg:['sg_arg'],
+  sg_putt:['sg_putt'], sg_t2g:['sg_t2g'], sg_tot:['sg_tot'],
+  w_ott:['w_ott','w_sg_ott'], w_app:['w_app','w_sg_app'], w_arg:['w_arg','w_sg_arg'],
+  w_putt:['w_putt','w_sg_putt'], w_t2g:['w_t2g','w_sg_t2g'], w_tot:['w_tot','w_sg_tot'],
+};
+function applyPgaStats(p, row, headers){
+  const hdrs=(headers||[]).map(h=>(h||'').trim().toLowerCase());
+  const idx=names=>{for(const n of names){const i=hdrs.indexOf(n);if(i>=0)return i;}return -1;};
+  Object.entries(PGA_STAT_ALIASES).forEach(([key,names])=>{
+    const i=idx(names); if(i<0) return;
+    const v=parseFloat((row[i]||'').toString().replace('%',''));
+    if(!isNaN(v)) p[key]=v;
+  });
+  const ai=idx(['archetypes','archetype','tags']);
+  if(ai>=0){ const s=(row[ai]||'').trim(); if(s) p.archetypes=s; }
+}
+
+// Linear-interpolated percentile (matches pandas' default quantile method)
+function pctl(vals,q){
+  const a=(vals||[]).filter(v=>v!=null&&!isNaN(v)).sort((x,y)=>x-y);
+  if(!a.length) return null;
+  const pos=(a.length-1)*q, lo=Math.floor(pos), hi=Math.ceil(pos);
+  return lo===hi ? a[lo] : a[lo]+(a[hi]-a[lo])*(pos-lo);
+}
+
+const ARCHETYPE_DEFS=[
+  {name:'Elite Bomber',color:'#e8421a',desc:'Driving distance ≥ 90th percentile of field',
+   test:(p,T)=>p.dist!=null&&T.dist90!=null&&p.dist>=T.dist90},
+  {name:'Bomber',color:'#f97316',desc:'Driving distance 75th–90th percentile',
+   test:(p,T)=>p.dist!=null&&T.dist75!=null&&p.dist>=T.dist75&&p.dist<T.dist90},
+  {name:'Elite Accuracy',color:'#3b82f6',desc:'Driving accuracy ≥ 90th percentile of field',
+   test:(p,T)=>p.acc!=null&&T.acc90!=null&&p.acc>=T.acc90},
+  {name:'Accuracy',color:'#14b8a6',desc:'Driving accuracy 75th–90th percentile',
+   test:(p,T)=>p.acc!=null&&T.acc75!=null&&p.acc>=T.acc75&&p.acc<T.acc90},
+  {name:'Iron Specialist',color:'#a855f7',desc:'Weighted SG:APP ≥ 80th percentile',
+   test:(p,T)=>p.w_app!=null&&T.app80!=null&&p.w_app>=T.app80},
+  {name:'Short-Game Specialist',color:'#ec4899',desc:'Weighted ARG & PUTT both positive, combined ≥ 75th percentile',
+   test:(p,T)=>p.w_arg!=null&&p.w_putt!=null&&T.combo75!=null&&p.w_arg>0&&p.w_putt>0&&(p.w_arg+p.w_putt)>=T.combo75},
+  {name:'Elite Ball-Striker',color:'#f5c518',desc:'Weighted SG:T2G ≥ 90th percentile',
+   test:(p,T)=>p.w_t2g!=null&&T.t2g90!=null&&p.w_t2g>=T.t2g90},
+  {name:'Hot Putter',color:'#22c55e',desc:'Weighted SG:PUTT ≥ 80th percentile',
+   test:(p,T)=>p.w_putt!=null&&T.putt80!=null&&p.w_putt>=T.putt80},
+  {name:'Greens Machine',color:'#84cc16',desc:'GIR ≥ 75th percentile',
+   test:(p,T)=>p.gir!=null&&T.gir75!=null&&p.gir>=T.gir75},
+  {name:'All-Around',color:'#eab308',desc:'All four weighted SG categories ≥ field median',
+   test:(p,T)=>['w_ott','w_app','w_arg','w_putt'].every(k=>p[k]!=null)&&p.w_ott>=T.medOtt&&p.w_app>=T.medApp&&p.w_arg>=T.medArg&&p.w_putt>=T.medPutt},
+];
+
+function archetypeData(slate){
+  const ps=(slate.players||[]);
+  const col=c=>ps.map(p=>p[c]);
+  const T={
+    dist75:pctl(col('dist'),.75), dist90:pctl(col('dist'),.90),
+    acc75:pctl(col('acc'),.75), acc90:pctl(col('acc'),.90),
+    app80:pctl(col('w_app'),.80),
+    combo75:pctl(ps.filter(p=>p.w_arg!=null&&p.w_putt!=null).map(p=>p.w_arg+p.w_putt),.75),
+    t2g90:pctl(col('w_t2g'),.90),
+    putt80:pctl(col('w_putt'),.80),
+    gir75:pctl(col('gir'),.75),
+    medOtt:pctl(col('w_ott'),.50), medApp:pctl(col('w_app'),.50),
+    medArg:pctl(col('w_arg'),.50), medPutt:pctl(col('w_putt'),.50),
+  };
+  const out=ARCHETYPE_DEFS.map(d=>({name:d.name,color:d.color,desc:d.desc,
+    playerIds:ps.filter(p=>{try{return d.test(p,T);}catch(e){return false;}}).map(p=>p.id)}))
+    .filter(a=>a.playerIds.length>0);
+  if(out.length) return out;
+  // Fallback: no stat columns, but players carry a pre-computed Archetypes string
+  const map={};
+  ps.forEach(p=>{(p.archetypes||'').split(',').map(s=>s.trim()).filter(Boolean)
+    .forEach(t=>{(map[t]=map[t]||[]).push(p.id);});});
+  return Object.entries(map).map(([name,ids],i)=>{
+    const def=ARCHETYPE_DEFS.find(d=>d.name===name);
+    return {name,color:def?def.color:GROUP_COLORS[i%GROUP_COLORS.length],
+      desc:def?def.desc:'From imported Archetypes column',playerIds:ids};
+  });
+}
+
+function toggleArchetypePanel(){
+  const existing=document.getElementById('archetypePanel');
+  if(existing){existing.remove();return;}
+  const slate=activeSlate();if(!slate)return;
+  const archs=archetypeData(slate);
+  if(!archs.length){showToast('No archetype data — import a cheat sheet CSV with stat columns','err');return;}
+  const panel=document.createElement('div');
+  panel.id='archetypePanel';
+  panel.style.cssText='margin:10px 0;padding:12px;background:var(--surface2);border:1px solid rgba(168,85,247,.25);border-radius:8px;';
+  panel.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px;">
+      <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:.5px;">SELECT ARCHETYPES · thresholds are field-relative percentiles, weighted SG</div>
+      <div style="display:flex;gap:6px;">
+        <button onclick="document.querySelectorAll('#archetypePanel input').forEach(c=>c.checked=true)" style="padding:3px 8px;font-size:10px;font-family:'DM Mono',monospace;border:none;border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">All</button>
+        <button onclick="document.querySelectorAll('#archetypePanel input').forEach(c=>c.checked=false)" style="padding:3px 8px;font-size:10px;font-family:'DM Mono',monospace;border:none;border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">None</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;">
+      ${archs.map(a=>`<label title="${a.desc}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--surface);border-radius:6px;cursor:pointer;font-size:12px;font-family:'DM Sans',sans-serif;">
+        <input type="checkbox" data-arch="${a.name}">
+        <span style="width:10px;height:10px;border-radius:3px;background:${a.color};flex:none;"></span>
+        <span style="flex:1;">${a.name}</span>
+        <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">${a.playerIds.length}</span>
+      </label>`).join('')}
+    </div>
+    <button onclick="createArchetypeGroups()" style="margin-top:10px;background:rgba(168,85,247,.15);border:1px solid rgba(168,85,247,.4);color:var(--purple,#a855f7);padding:6px 14px;border-radius:6px;font-size:12px;font-family:'DM Sans',sans-serif;font-weight:600;cursor:pointer;">Create Selected Groups</button>`;
+  const header=document.querySelector('#groupsPanel .groups-header');
+  if(header) header.after(panel);
+}
+
+function createArchetypeGroups(){
+  const slate=activeSlate();if(!slate)return;
+  const checked=[...document.querySelectorAll('#archetypePanel input:checked')].map(c=>c.dataset.arch);
+  if(!checked.length){showToast('Select at least one archetype','err');return;}
+  const archs=archetypeData(slate).filter(a=>checked.includes(a.name));
+  // Replace any existing groups with the same names (fresh data wins), and
+  // clean up conditionals that pointed at the removed group ids.
+  const removedIds=(slate.groups||[]).filter(g=>checked.includes(g.name)).map(g=>g.id);
+  slate.groups=(slate.groups||[]).filter(g=>!checked.includes(g.name));
+  slate.groups.forEach(g=>{g.condGroups=(g.condGroups||[]).filter(c=>!removedIds.includes(c.targetGid));});
+  archs.forEach(a=>{slate.groups.push({id:uid(),name:a.name,color:a.color,ruleMin:0,ruleMax:0,correlation:0,ufcNoOppose:false,playerIds:a.playerIds.slice(),condGroups:[]});});
+  save();
+  const el=document.getElementById('archetypePanel'); if(el) el.remove();
+  showToast(`✓ Created ${archs.length} archetype group${archs.length>1?'s':''}`,'ok');
+  renderGroups();renderGroupRulesSummary();
+}
+
 let slates = [];
 let activeSlateId = null;
 let sortKey = 'salary';
@@ -2803,6 +2940,19 @@ function renderGroups(){
     btn.onclick = createAMPMGroups;
     addBtn.after(btn);
   } else if(!isPGA && ampmBtn){ ampmBtn.remove(); }
+
+  // Archetype auto-groups — PGA slates whose pool carries cheat-sheet stats
+  const hasArch = slate.sport==='pga' && archetypeData(slate).length>0;
+  const archBtn = document.getElementById('archGroupBtnGroups');
+  if(hasArch && !archBtn && addBtn){
+    const b=document.createElement('button');
+    b.id='archGroupBtnGroups';
+    b.textContent='🏷 Archetype Groups';
+    b.style.cssText='background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);color:var(--purple,#a855f7);padding:4px 10px;border-radius:5px;font-size:11px;font-family:"DM Sans",sans-serif;font-weight:600;cursor:pointer;white-space:nowrap;';
+    b.onclick=toggleArchetypePanel;
+    addBtn.after(b);
+  } else if(!hasArch && archBtn){ archBtn.remove(); }
+  if(!hasArch){ const ap=document.getElementById('archetypePanel'); if(ap) ap.remove(); }
   if(!groups.length){list.innerHTML='<div class="no-data">No groups yet. Click "+ New Group" to create one.</div>';return;}
   list.innerHTML=groups.map(g=>{
     const players=(g.playerIds||[]).map(id=>playerById(slate,id)).filter(Boolean);
@@ -4663,8 +4813,10 @@ function buildPayoutFn(cfg){
   }
   if(cfg.preset==='custom' && cfg.custom){
     const tiers=[];
+    // Accepts hand-typed "1-5: 100" AND DK's contest-page format pasted
+    // verbatim: "1st $1,000.00", "17th - 20th	$50.00", "2363rd - 4636th	$1.50"
     String(cfg.custom).split(/\n+/).forEach(line=>{
-      const m=line.match(/^\s*(\d[\d,]*)\s*(?:-\s*(\d[\d,]*))?\s*[:=]\s*\$?\s*([\d,]+(?:\.\d+)?)/);
+      const m=line.match(/^\s*(\d[\d,]*)\s*(?:st|nd|rd|th)?\s*(?:[-–—]\s*(\d[\d,]*)\s*(?:st|nd|rd|th)?)?\s*[:=\s]\s*\$?\s*([\d,]+(?:\.\d+)?)\s*$/i);
       if(!m) return;
       const lo=parseInt(m[1].replace(/,/g,'')), hi=m[2]?parseInt(m[2].replace(/,/g,'')):lo;
       const amt=parseFloat(m[3].replace(/,/g,''));
@@ -4702,6 +4854,18 @@ function buildPayoutFn(cfg){
     tiers.push({lo:lo2, hi:hi2, amt:amt*poolScale});
     prevHi = hi2;
   }
+  // Renormalize to the reference payout ratio. Scaling deep-tier BOUNDARIES
+  // by field size AND amounts by pool size double-shrinks those tiers
+  // (width × amount both scale), silently gutting the payout ratio — at
+  // $1/17.8k the curve paid out only 46.6% of entry dollars instead of
+  // 84.2%, which made every lineup's EV read ~50 points worse than reality.
+  // Rescaling all amounts by one factor restores the exact 84.21% ratio
+  // while preserving each tier's share of the pool (same shape as the
+  // reference table). At the reference parameters the factor is exactly 1,
+  // so the published table is still reproduced to the dollar.
+  const targetPool = F*fee*(120000/(REF_F*REF_FEE));
+  const actualPool = tiers.reduce((s,t)=>s+(t.hi-t.lo+1)*t.amt,0);
+  if(actualPool>0){ const k=targetPool/actualPool; tiers.forEach(t=>{t.amt*=k;}); }
   const lastPaid = tiers[tiers.length-1].hi;
   return {
     at: r => { for(const t of tiers){ if(r<t.lo) return 0; if(r<=t.hi) return t.amt; } return 0; },
@@ -9266,6 +9430,7 @@ async function refreshFromSheet(){
         p.ss_ou=get('SS O/U')||null;
         p.td_ou=get('TD O/U')||null;
       }
+      if(slate.sport==='pga') applyPgaStats(p, row, headers);
     });
 
     // Late adds: sheet rows whose id didn't match any player become new pool
@@ -9296,6 +9461,7 @@ async function refreshFromSheet(){
         p.ss_ou=get2('SS O/U')||null; p.td_ou=get2('TD O/U')||null;
         p.fightNum = parseInt(p.start)||null;
       }
+      if(slate.sport==='pga') applyPgaStats(p, row, headers);
       slate.players.push(p);
       lateAdds++;
     });
@@ -9643,6 +9809,9 @@ function createSlate(){
       p.td_ou = get('TD O/U') || null;
     }
 
+    // PGA: pick up cheat-sheet stat columns (dist/acc/gir + weighted SG) for archetypes
+    if(sport==='pga') applyPgaStats(p, row, parsedCSV.headers);
+
     players.push(p);
   });
 
@@ -9909,6 +10078,7 @@ function applyPoolUpdate(){
     // UFC: keep fightNum in sync when the update CSV carries a start (fight #) column
     if(slate.sport==='ufc' && cm.start!=null){ const _fn=parseInt(p.start); if(_fn) p.fightNum=_fn; }
     applyUfcOdds(p, row);
+    if(slate.sport==='pga') applyPgaStats(p, row, updateParsedCSV.headers);
     delete newDataByName[key]; // mark consumed
   });
 
@@ -9947,6 +10117,7 @@ function applyPoolUpdate(){
       }
     }
     applyUfcOdds(p, row);
+    if(slate.sport==='pga') applyPgaStats(p, row, updateParsedCSV.headers);
     slate.players.push(p);
     added++;
   });
