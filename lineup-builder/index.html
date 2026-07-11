@@ -1111,6 +1111,7 @@ html { overscroll-behavior-y: contain; }
               </div>
               <div style="font-size:9px;color:var(--muted);text-align:center;margin-top:4px;">Fades chalky lineups toward under-owned builds. Needs an <span style="color:var(--purple);">Own%</span> column mapped.</div>
             </div>
+            <div id="ufcEvHome"></div>
             <div style="margin-bottom:8px;padding-top:8px;border-top:1px solid var(--border);" id="ufcEvBlock">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
                 <div>
@@ -3285,6 +3286,7 @@ function renderGroupRulesSummary(){
       const nLevLb = document.getElementById('nascarLeverageLabel');
       if(nLevSl){ const lv = (slate._nascarLeverage!=null ? slate._nascarLeverage : 30); nLevSl.value = lv; if(nLevLb) nLevLb.textContent = lv; }
       renderRearStartersUI();
+      restoreContestEvUI(slate);
     }
   }
   if(slate.sport==='ufc'){
@@ -3317,25 +3319,7 @@ function renderGroupRulesSummary(){
     const ufcLevSl = document.getElementById('ufcLeverageSlider');
     const ufcLevLb = document.getElementById('ufcLeverageLabel');
     if(ufcLevSl){ const lv = (slate._ufcLeverage!=null ? slate._ufcLeverage : 30); ufcLevSl.value = lv; if(ufcLevLb) ufcLevLb.textContent = lv; }
-    // Restore Contest EV settings
-    const ev = slate._ufcEv||{};
-    const evT = document.getElementById('ufcEvToggle');
-    if(evT){ evT.checked = !!ev.on; const es=document.getElementById('ufcEvSettings'); if(es) es.style.display = ev.on?'block':'none'; }
-    const evF = document.getElementById('ufcEvField'); if(evF && ev.fieldSize) evF.value = ev.fieldSize;
-    const evFee = document.getElementById('ufcEvFee'); if(evFee && ev.fee!=null) evFee.value = ev.fee;
-    const evC = document.getElementById('ufcEvCustom'); if(evC){ if(ev.custom!=null) evC.value = ev.custom; evC.style.display = (ev.preset==='custom')?'block':'none'; }
-    const presetKey = ev.preset||'gpp';
-    [['gpp','ufcEvPresetGpp'],['double','ufcEvPresetDouble'],['custom','ufcEvPresetCustom']].forEach(([k,id])=>{
-      const b=document.getElementById(id); if(b) b.classList.toggle('active', presetKey===k);
-    });
-    // Saved-contest library: populate the dropdown, and on a fresh slate with
-    // no contest settings yet, auto-apply the last-used saved contest so the
-    // structure never has to be re-entered week to week.
-    renderContestPresetSelect();
-    if(ev.fieldSize==null && ev.preset==null){
-      const last=localStorage.getItem('dfs_last_contest_preset');
-      if(last && (BUILTIN_CONTESTS.some(p=>p.id===last)||loadContestPresets().some(p=>p.id===last))) applyContestPreset(last, true);
-    }
+    restoreContestEvUI(slate);
   }
 
   if(slate.sport==='pga'){
@@ -4828,6 +4812,12 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
 // 'gpp' preset reproduces it to the dollar at these parameters); the $1 JAB
 // is the verified 24-tier table from the DK contest page ($15,000 total).
 const BUILTIN_CONTESTS=[
+  {id:'builtin_nas_mini50', name:'NAS $25K Mini-Max · $0.50 × 59,453', fee:0.5, fieldSize:59453, preset:'custom',
+   custom:'1: 2500\n2: 1000\n3: 600\n4: 400\n5: 250\n6: 200\n7-8: 150\n9-10: 100\n11-14: 75\n15-19: 60\n20-25: 50\n26-35: 40\n36-45: 30\n46-55: 25\n56-70: 20\n71-90: 15\n91-120: 10\n121-160: 8\n161-210: 6\n211-290: 5\n291-460: 4\n461-880: 3\n881-1990: 2\n1991-4276: 1.50\n4277-12467: 1.00'},
+  {id:'builtin_nas_hh1', name:'NAS $20K Happy Hour · $1 × 23,700', fee:1, fieldSize:23700, preset:'custom',
+   custom:'1: 1000\n2: 600\n3: 400\n4: 300\n5: 250\n6: 200\n7-8: 150\n9-10: 100\n11-14: 75\n15-19: 60\n20-25: 50\n26-35: 40\n36-45: 30\n46-55: 25\n56-70: 20\n71-90: 15\n91-120: 10\n121-160: 8\n161-280: 6\n281-515: 5\n516-925: 4\n926-1680: 3\n1681-3220: 2\n3221-6420: 1.50'},
+  {id:'builtin_nas_chrome4', name:'NAS $80K Chrome Horn · $4 × 23,700', fee:4, fieldSize:23700, preset:'custom',
+   custom:'1: 7500\n2: 3000\n3: 2000\n4: 1500\n5: 1250\n6-7: 1000\n8-10: 750\n11-13: 600\n14-16: 500\n17-19: 400\n20-22: 300\n23-25: 250\n26-29: 200\n30-35: 150\n36-45: 100\n46-55: 75\n56-70: 60\n71-85: 50\n86-105: 40\n106-130: 30\n131-185: 25\n186-305: 20\n306-600: 15\n601-1365: 10\n1366-2842: 8\n2843-6181: 6'},
   {id:'builtin_mini50', name:'UFC $25K Mini-Max · $0.50 × 59,453', fee:0.5, fieldSize:59453, preset:'custom',
    custom:'1: 2500\n2: 1000\n3: 600\n4: 400\n5: 250\n6: 200\n7-8: 150\n9-10: 100\n11-14: 75\n15-19: 60\n20-25: 50\n26-35: 40\n36-45: 30\n46-55: 25\n56-70: 20\n71-90: 15\n91-120: 10\n121-160: 8\n161-210: 6\n211-290: 5\n291-460: 4\n461-880: 3\n881-1990: 2\n1991-4276: 1.50\n4277-12467: 1.00'},
   {id:'builtin_jab1', name:'UFC $15K JAB · $1 × 17,835', fee:1, fieldSize:17835, preset:'custom',
@@ -4892,6 +4882,37 @@ function applyContestPreset(id, silent){
   });
   const sel=document.getElementById('ufcEvSaved'); if(sel) sel.value=id;
   if(!silent) showToast(`✓ Applied "${rec.name}"`,'ok');
+}
+
+// Shared Contest-EV settings UI (UFC + NASCAR). One DOM node, unique ids —
+// relocated into whichever sport section is active, then restored from the
+// slate's saved settings. Fresh slates auto-apply the last-used saved contest.
+function restoreContestEvUI(slate){
+  const blk=document.getElementById('ufcEvBlock');
+  if(blk){
+    if(slate.sport==='nascar'){
+      const ns=document.getElementById('nascarSection');
+      if(ns && blk.parentElement!==ns) ns.appendChild(blk);
+    } else {
+      const home=document.getElementById('ufcEvHome');
+      if(home && home.nextElementSibling!==blk) home.after(blk);
+    }
+  }
+  const ev = slate._ufcEv||{};
+  const evT = document.getElementById('ufcEvToggle');
+  if(evT){ evT.checked = !!ev.on; const es=document.getElementById('ufcEvSettings'); if(es) es.style.display = ev.on?'block':'none'; }
+  const evF = document.getElementById('ufcEvField'); if(evF && ev.fieldSize) evF.value = ev.fieldSize;
+  const evFee = document.getElementById('ufcEvFee'); if(evFee && ev.fee!=null) evFee.value = ev.fee;
+  const evC = document.getElementById('ufcEvCustom'); if(evC){ if(ev.custom!=null) evC.value = ev.custom; evC.style.display = (ev.preset==='custom')?'block':'none'; }
+  const presetKey = ev.preset||'gpp';
+  [['gpp','ufcEvPresetGpp'],['double','ufcEvPresetDouble'],['custom','ufcEvPresetCustom']].forEach(([k,id])=>{
+    const b=document.getElementById(id); if(b) b.classList.toggle('active', presetKey===k);
+  });
+  renderContestPresetSelect();
+  if(ev.fieldSize==null && ev.preset==null){
+    const last=localStorage.getItem('dfs_last_contest_preset');
+    if(last && (BUILTIN_CONTESTS.some(p=>p.id===last)||loadContestPresets().some(p=>p.id===last))) applyContestPreset(last, true);
+  }
 }
 
 // Payout curve builder. Returns { at(rank)→$, desc }.
@@ -6825,6 +6846,71 @@ async function runNascarSimGen(){
     r.player._simDist      = r.dist || null;
   });
   if(typeof renderPool==='function') renderPool();
+
+  // ── Contest-EV mode: replaces the scenario-bucket selection stack ──
+  // Candidates = unique ex-post optimal lineups: the exact salary-capped
+  // 6-driver optimal for each simulated race (the NASCAR analog of the UFC
+  // engine's per-sim optimals). The shared contest-EV engine then prices
+  // every candidate against an Own%-modeled field and portfolio-selects on
+  // tournament win equity under the configured payout curve.
+  if(slate._ufcEv && slate._ufcEv.on){
+    const simsDone2 = simTopScorer.length;
+    const evPool = pool;
+    if(!evPool.some(p=>(parseFloat(p.own)||0)>0)){
+      log('⚠ Contest EV mode needs an Own% column mapped to model the field — falling back is unsafe, aborting. Map Own% or turn Contest EV off.');
+      done(); return;
+    }
+    const evScores = evPool.map(p=>{
+      const idx = fullField.findIndex(q=>q.id===p.id);
+      return idx>=0 ? simScoreArrays[idx] : new Array(simsDone2).fill(0);
+    });
+    const tick2=()=>new Promise(r=>setTimeout(r,0));
+    log(`Contest EV: computing per-sim optimal lineups (${simsDone2.toLocaleString()} races)...`);
+    const salArr = evPool.map(p=>p.salary||0);
+    const cheapSorted = salArr.slice().sort((a,b)=>a-b);
+    const cheapPre=[0]; cheapSorted.forEach((v,i)=>cheapPre.push(cheapPre[i]+v));
+    const rankedMap = new Map();
+    const nP = evPool.length;
+    const order = new Array(nP), sortScore = new Float64Array(nP), sortSal = new Float64Array(nP), preS = new Float64Array(nP+1);
+    for(let s=0; s<simsDone2; s++){
+      for(let i=0;i<nP;i++) order[i]=i;
+      order.sort((a,b)=>(evScores[b][s]||0)-(evScores[a][s]||0));
+      for(let i=0;i<nP;i++){ sortScore[i]=evScores[order[i]][s]||0; sortSal[i]=salArr[order[i]]; preS[i+1]=preS[i]+sortScore[i]; }
+      // Branch-and-bound over score-sorted drivers: bound = sum of the next k
+      // best scores (prefix sums); salary feasibility via k-cheapest suffix.
+      let bestScore=-Infinity, bestPick=null;
+      const pick=new Array(6);
+      const dfs=(idx,k,curSal,curScore)=>{
+        if(k===0){ if(curScore>bestScore){ bestScore=curScore; bestPick=pick.slice(); } return; }
+        for(let i=idx;i<=nP-k;i++){
+          if(curScore + (preS[i+k]-preS[i]) <= bestScore) return;
+          if(curSal + sortSal[i] + cheapPre[k-1] > maxSal) continue;
+          pick[6-k]=i;
+          dfs(i+1,k-1,curSal+sortSal[i],curScore+sortScore[i]);
+        }
+      };
+      dfs(0,6,0,0);
+      if(bestPick){
+        const ids = bestPick.map(i=>order[i]);
+        let t=0; for(const i of ids) t+=evScores[i][s]||0;
+        const key = ids.slice().sort((a,b)=>a-b).join('|');
+        const e = rankedMap.get(key);
+        if(e){ e.count++; e.totalScore+=t; } else rankedMap.set(key, {lineup: ids.map(i=>evPool[i]), count:1, totalScore:t});
+      }
+      if(s>0 && s%100===0){
+        if(s%500===0) log(`  per-sim optimals: ${s.toLocaleString()}/${simsDone2.toLocaleString()}...`);
+        await tick2(); if(window._genCancelled){ log('Cancelled.'); done(); return; }
+      }
+    }
+    const rankedNas = [...rankedMap.values()].sort((a,b)=>b.count-a.count);
+    log(`${rankedNas.length.toLocaleString()} unique ex-post optimal lineups across ${simsDone2.toLocaleString()} race sims.`);
+    const simScoresByIdNas = {};
+    evPool.forEach((p,i)=>{ simScoresByIdNas[p.id]=evScores[i]; });
+    const out = await runUFCContestEV({slate, pool: evPool, ranked: rankedNas, simScoresById: simScoresByIdNas, totalSims: simsDone2, target, maxExpPct, overrides});
+    if(out===null && window._genCancelled) log('Cancelled.');
+    done(); return;
+  }
+
   log(`Sim scores ready. Bucketing race scenarios...`);
   await new Promise(r=>setTimeout(r,0));
   if(window._genCancelled){ log('Cancelled.'); done(); return; }
