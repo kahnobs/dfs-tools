@@ -2501,7 +2501,7 @@ function refreshSavedSortControl(avail,sortBy){
   const sel=document.getElementById('savedSortMetric');
   const dirEl=document.getElementById('savedSortDir');
   if(!sel)return;
-  const LABELS=[['saved','Order saved'],['proj','Proj'],['sim','Sim'],['win','Win%'],['top5','Top5%'],['top10','Top10%'],['top20','Top20%'],['own','Own%'],['sal','Salary']];
+  const LABELS=[['saved','Order saved'],['proj','Proj'],['sim','Sim'],['ev','EV%'],['win','Win%'],['top5','Top5%'],['top10','Top10%'],['top20','Top20%'],['own','Own%'],['sal','Salary']];
   const activeMetric=sortBy==='saved'?'saved':sortBy.replace(/_desc$|_asc$/,'').replace(/^ml$/,'win');
   sel.innerHTML=LABELS.filter(([v])=>avail.has(v)).map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
   sel.value=avail.has(activeMetric)?activeMetric:'saved';
@@ -2545,11 +2545,13 @@ function renderSaved(){
   const meta=slate._lineupMeta||{};
   // A lineup carries a sim score only if its stored meta has a usable simWinAvg.
   const anySim=lineups.some(l=>{const v=meta[lineupKey(l)]?.simWinAvg;return v!=null&&v!==''&&!isNaN(parseFloat(v));});
+  const anyEv=lineups.some(l=>{const v=meta[lineupKey(l)]?.evPct;return v!=null&&!isNaN(parseFloat(v));});
   // Only offer sort metrics that actually render on the cards, so the dropdown can't
   // advertise a metric (e.g. Sim) that no saved lineup has.
   const avail=new Set(['saved','sal']);
   if(hasProj) avail.add('proj');
   if(anySim) avail.add('sim');
+  if(anyEv) avail.add('ev');
   if(isUfc?hasMl:hasWin) avail.add('win');
   if(hasTop5) avail.add('top5');
   if(hasTop10) avail.add('top10');
@@ -2585,13 +2587,15 @@ function renderSaved(){
     const lk=lineupKey(lineup);
     const rawSim=meta[lk]?.simWinAvg??lineup._simWinAvg;
     const simScore=(rawSim!=null&&rawSim!==''&&!isNaN(parseFloat(rawSim)))?parseFloat(rawSim):null;
+    const rawEv=meta[lk]?.evPct;
+    const evPct=(rawEv!=null&&!isNaN(parseFloat(rawEv)))?parseFloat(rawEv):null;
     const winEq  =hasWin  ?players.reduce((s,p)=>s+(nascarMlToProb(p.win)||0)/vigDiv.win,  0)*100:null;
     const top5Eq =hasTop5 ?players.reduce((s,p)=>s+(nascarMlToProb(p.top5)||0)/vigDiv.top5, 0)*100:null;
     const top10Eq=hasTop10?players.reduce((s,p)=>s+(nascarMlToProb(p.top10)||0)/vigDiv.top10,0)*100:null;
     const top20Eq=hasTop20?players.reduce((s,p)=>s+(nascarMlToProb(p.top20)||0)/vigDiv.top20,0)*100:null;
     const mlEq=isUfc&&hasMl?(players.reduce((s,p)=>s+(ufcWinProb[p.id]||0),0)/Math.max(1,players.length))*100:null;
     const own=hasOwn?players.reduce((s,p)=>s+(parseFloat(p.own)||0),0):null;
-    return {lineup,i,players,sal,proj,rtg,simScore,winEq,top5Eq,top10Eq,top20Eq,mlEq,own};
+    return {lineup,i,players,sal,proj,rtg,simScore,evPct,winEq,top5Eq,top10Eq,top20Eq,mlEq,own};
   });
   if(sortBy==='proj_desc')    entries.sort((a,b)=>b.proj-a.proj);
   else if(sortBy==='proj_asc')    entries.sort((a,b)=>a.proj-b.proj);
@@ -2599,6 +2603,8 @@ function renderSaved(){
   else if(sortBy==='sal_asc')     entries.sort((a,b)=>a.sal-b.sal);
   else if(sortBy==='sim_desc')    entries.sort((a,b)=>(b.simScore||0)-(a.simScore||0));
   else if(sortBy==='sim_asc')     entries.sort((a,b)=>(a.simScore||0)-(b.simScore||0));
+  else if(sortBy==='ev_desc')     entries.sort((a,b)=>(b.evPct??-Infinity)-(a.evPct??-Infinity));
+  else if(sortBy==='ev_asc')      entries.sort((a,b)=>(a.evPct??Infinity)-(b.evPct??Infinity));
   else if(sortBy==='win_desc')    entries.sort((a,b)=>(b.winEq||0)-(a.winEq||0));
   else if(sortBy==='win_asc')     entries.sort((a,b)=>(a.winEq||0)-(b.winEq||0));
   else if(sortBy==='ml_desc')     entries.sort((a,b)=>(b.mlEq||0)-(a.mlEq||0));
@@ -2611,11 +2617,12 @@ function renderSaved(){
   else if(sortBy==='top20_asc')   entries.sort((a,b)=>(a.top20Eq||0)-(b.top20Eq||0));
   else if(sortBy==='own_desc')    entries.sort((a,b)=>(b.own||0)-(a.own||0));
   else if(sortBy==='own_asc')     entries.sort((a,b)=>(a.own||0)-(b.own||0));
-  list.innerHTML=entries.map(({i,players,sal,proj,rtg,simScore,winEq,top5Eq,top10Eq,top20Eq,mlEq,own})=>{
+  list.innerHTML=entries.map(({i,players,sal,proj,rtg,simScore,evPct,winEq,top5Eq,top10Eq,top20Eq,mlEq,own})=>{
     const stats=[];
     if(hasProj)        stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Proj</span>${proj.toFixed(2)}</span>`);
     if(hasRtg)         stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Rtg</span>${rtg.toFixed(1)}</span>`);
     if(simScore!=null) stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Sim</span>${simScore.toFixed(1)}</span>`);
+    if(evPct!=null)    stats.push(`<span class="saved-stat" style="color:${evPct>=0?'var(--green)':'var(--red)'};"><span class="saved-stat-lbl" style="color:${evPct>=0?'var(--green)':'var(--red)'};opacity:.7;">EV</span>${evPct>=0?'+':''}${evPct.toFixed(0)}%</span>`);
     if(mlEq!=null)     stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Win%</span>${mlEq.toFixed(1)}%</span>`);
     if(winEq!=null)    stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Win%</span>${winEq.toFixed(1)}%</span>`);
     if(top5Eq!=null)   stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top5%</span>${top5Eq.toFixed(1)}%</span>`);
@@ -5112,10 +5119,19 @@ async function runUFCContestEV(ctx){
   const rest = evList.filter(e=>!chosenKeySet.has(e.lineup.map(p=>p.id).sort().join('|')));
   if(!chosen.length){ log('No lineups selected — relax caps.'); return null; }
 
+  // Per-fighter mean sim score over the sampled sims — by linearity the sum
+  // across a lineup equals the lineup's expected DK total, so the SIM display
+  // slot carries honest SIM POINTS (the saved panel and its sort read this
+  // field as points; stuffing dollars in it showed "SIM 2.4" nonsense).
+  const meanById = {};
+  pool.forEach((p,i)=>{ const a=scoreArr[i]; let s2=0; for(const si of simIdx) s2+=(a[si]||0); meanById[p.id]=s2/Math.max(1,simIdx.length); });
   const decorate = e => { const l=[...e.lineup];
-    l._ev=e._ev; l._simWinAvg=e._ev.toFixed(2);
-    l._simAvg=(e.totalScore/e.count).toFixed(1);
-    l._simWinRate=((e.count/Math.max(1,totalSims))*100).toFixed(1);
+    l._ev = e._ev;
+    // EV as % of the entry fee — "+33%" differentiates far better than "$1.00"
+    l._evPct = (e._ev/Math.max(0.01,fee))*100;
+    l._simWinAvg = e.lineup.reduce((s2,p)=>s2+(meanById[p.id]||0),0).toFixed(1);
+    l._simAvg    = (e.totalScore/e.count).toFixed(1);
+    l._simWinRate= ((e.count/Math.max(1,totalSims))*100).toFixed(1);
     return l; };
   let finalLineups = chosen.map(decorate);
   if(Object.keys(minOverrides).some(id=>minOverrides[id]>0)){
@@ -8769,6 +8785,7 @@ function renderPreviewLineupsList(){
     if(hasProj)stats.push(`<span class="preview-stat"><span class="preview-stat-lbl">Proj</span>${proj.toFixed(2)}</span>`);
     if(hasRtg)stats.push(`<span class="preview-stat"><span class="preview-stat-lbl">Rtg</span>${rtg.toFixed(1)}</span>`);
     if(simTotal!=null)stats.push(`<span class="preview-stat" style="color:var(--green);"><span class="preview-stat-lbl" style="color:var(--green);opacity:.7;">Sim</span>${simTotal.toFixed(1)}</span>`);
+    if(lineup._evPct!=null&&!isNaN(lineup._evPct))stats.push(`<span class="preview-stat" style="color:${lineup._evPct>=0?'var(--green)':'var(--red)'};"><span class="preview-stat-lbl" style="color:${lineup._evPct>=0?'var(--green)':'var(--red)'};opacity:.7;">EV</span>${lineup._evPct>=0?'+':''}${lineup._evPct.toFixed(0)}%</span>`);
     if(lineup._simCeiling!=null)stats.push(`<span class="preview-stat" style="color:var(--accent2);"><span class="preview-stat-lbl" style="color:var(--accent2);opacity:.7;">Ceil</span>${lineup._simCeiling}</span>`);
     if(ownTotal>0)stats.push(`<span class="preview-stat" style="color:var(--muted);"><span class="preview-stat-lbl" style="color:var(--muted);opacity:.7;">Own</span>${ownTotal.toFixed(1)}%</span>`);
     // Archetype tag
@@ -9018,9 +9035,10 @@ function addSelectedToSaved(){
     existingKeys.add(key);
     const ids = lineup.map(p=>p.id);
     slate.savedLineups.push(ids);
-    if(lineup._simAvg||lineup._simWinAvg){
+    if(lineup._simAvg||lineup._simWinAvg||lineup._evPct!=null){
       slate._lineupMeta=slate._lineupMeta||{};
-      slate._lineupMeta[key]={simAvg:lineup._simAvg||null,simWinRate:lineup._simWinRate||null,simWinAvg:lineup._simWinAvg||null};
+      slate._lineupMeta[key]={simAvg:lineup._simAvg||null,simWinRate:lineup._simWinRate||null,simWinAvg:lineup._simWinAvg||null,
+        evPct:(lineup._evPct!=null&&!isNaN(lineup._evPct))?Math.round(lineup._evPct*10)/10:null};
     }
     added++;
   });
