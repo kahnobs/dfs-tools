@@ -6611,13 +6611,17 @@ const NASCAR_INCIDENT_DIST = {
   road:         [[0.245,0,0],[0.455,1,2],[0.120,6,7],[0.105,8,9],[0.075,9,9]],
   intermediate: [[0.083,0,0],[0.303,1,2],[0.165,3,5],[0.167,6,7],[0.108,8,9],[0.108,10,11],[0.068,12,17]],
   short:        [[0.115,0,0],[0.270,1,2],[0.115,3,5],[0.250,6,7],[0.145,8,9],[0.105,10,10]],
-  // superspeedway probs renormalized to sum to 1.0 (originally summed to 0.527,
-  // which forced ~47% of sims to a fallback of exactly 16 wrecks and inflated
-  // mean attrition to ~12 cars). Renormalizing preserves the intended heavy tail
-  // and brings mean attrition to ~9.7 cars/race. (Tail shape unverified vs real
-  // caution data — a candidate for future calibration.)
-  superspeedway:[[0.0664,0,0],[0.1120,1,2],[0.1120,3,5],[0.1499,6,7],[0.0455,8,8],[0.0702,9,10],
-                 [0.0702,11,11],[0.1044,12,12],[0.0702,13,13],[0.0702,14,14],[0.0702,15,15],[0.0588,16,24]]
+  // superspeedway tail fattened 2026-07-12: the old table averaged 8.8 cars
+  // eliminated with P(15+)≈13% / P(20+)≈3%, which underweighted the demolition
+  // races where the whole back-row value tier cashes (real plate DNF counts
+  // run 12-16 routinely, 20+ in ~5-8% of races). Now: mean ≈10.2, P(15+)≈23%,
+  // P(20+)≈7%, clean-race buckets mostly intact. Survival conditioning keeps
+  // win/top-10 pinned to the market — only the JOINT outcomes shift (who
+  // profits when the field destroys itself). Calibrate from NASCAR History
+  // results once enough races are banked.
+  superspeedway:[[0.060,0,0],[0.085,1,2],[0.100,3,5],[0.115,6,7],[0.045,8,8],[0.070,9,10],
+                 [0.065,11,11],[0.090,12,12],[0.070,13,13],[0.070,14,14],[0.075,15,16],
+                 [0.085,17,19],[0.070,20,24]]
 };
 
 // Accident exit timing — what fraction of race is completed before crash
@@ -6946,6 +6950,9 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
   const simScores      = pool.map(()=>[]);
   // Per-sim top scorer ID — used by bucket engine in runNascarSimGen
   const simTopScorer   = new Array(numSims);
+  // Per-sim cars eliminated — lets the candidate generator recognize
+  // demolition races (chaos-leverage lineups live there)
+  const simIncidents   = new Array(numSims);
 
   // Fraction of incident events that are single-car (vs multi-car clusters)
   const incidentSoloP = (NASCAR_WRECK_CLUSTER[trackType]||NASCAR_WRECK_CLUSTER.intermediate).soloP;
@@ -7085,6 +7092,8 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
       });
       toPlace -= collected.length;
     }
+
+    simIncidents[s] = incidentSet.size;
 
     // ── 5. Survivor finish order ──────────────────────────────────────────
     // Every surviving driver gets a position drawn from their odds distribution.
@@ -7464,7 +7473,7 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
 
   // Slice the top-scorer log to sims actually completed so a mid-run cancel
   // doesn't hand the bucket engine a tail of undefined entries.
-  return { driverResults, simTopScorer: simTopScorer.slice(0, simsDone), simScoreArrays: simScores, simsDone };
+  return { driverResults, simTopScorer: simTopScorer.slice(0, simsDone), simScoreArrays: simScores, simIncidents: simIncidents.slice(0, simsDone), simsDone };
 }
 
 
@@ -7672,7 +7681,7 @@ async function runNascarSimGen(){
 
   // ── Step 1: Run sims ──────────────────────────────────────────────────────
   const rearStarterSet = new Set(slate._rearStarters || []);
-  const { driverResults, simTopScorer, simScoreArrays } = await runNascarSims(fullField, numSims, totalLaps, trackType, rearStarterSet);
+  const { driverResults, simTopScorer, simScoreArrays, simIncidents } = await runNascarSims(fullField, numSims, totalLaps, trackType, rearStarterSet);
 
   // Attach sim metadata to players for pool display.
   // The "Sim" column shows _simP50, so we feed it the COMPOSITE (the ceiling-
@@ -7711,6 +7720,20 @@ async function runNascarSimGen(){
     const rankedMap = new Map();
     const nP = evPool.length;
     const order = new Array(nP), sortScore = new Float64Array(nP), sortSal = new Float64Array(nP), preS = new Float64Array(nP+1);
+
+    // ── Chaos candidates: the disjoint runner-up ─────────────────────────
+    // In a demolition race the ex-post OPTIMAL almost always still contains
+    // surviving back-row chalk, so the coherent claim on the chaos world
+    // (the next tier of survivors banking free place differential as the
+    // good cars wreck out together) is never a candidate at all — the EV
+    // engine can't bid on builds it never sees. In high-attrition sims we
+    // ALSO record the best lineup sharing ZERO drivers with that sim's
+    // optimal. No salary or ownership axis — the sim's own outcome decides
+    // what the alternative build looks like. Selection stays pure
+    // EV/coverage — if these don't earn their coverage, the greedy skips them.
+    const CHAOS_MIN_INC = 13;
+    let chaosCands = 0, chaosSims = 0;
+
     for(let s=0; s<simsDone2; s++){
       for(let i=0;i<nP;i++) order[i]=i;
       order.sort((a,b)=>(evScores[b][s]||0)-(evScores[a][s]||0));
@@ -7736,6 +7759,37 @@ async function runNascarSimGen(){
         const e = rankedMap.get(key);
         if(e){ e.count++; e.totalScore+=t; } else rankedMap.set(key, {lineup: ids.map(i=>evPool[i]), count:1, totalScore:t});
       }
+      // Chaos sim → also record the disjoint runner-up for this world:
+      // best lineup with zero overlap vs the optimal just found above
+      if(simIncidents && (simIncidents[s]||0) >= CHAOS_MIN_INC && bestPick){
+        chaosSims++;
+        const usedIdx = new Set(bestPick.map(i=>order[i]));
+        const ord2 = [];
+        for(let i=0;i<nP;i++) if(!usedIdx.has(order[i])) ord2.push(order[i]);
+        const n2 = ord2.length;
+        if(n2 >= 6){
+          const sc2=new Float64Array(n2), sl2=new Float64Array(n2), pre2=new Float64Array(n2+1);
+          for(let i=0;i<n2;i++){ sc2[i]=evScores[ord2[i]][s]||0; sl2[i]=salArr[ord2[i]]; pre2[i+1]=pre2[i]+sc2[i]; }
+          let bS=-Infinity, bP=null; const pk=new Array(6);
+          const dfs2=(idx,k,curSal,curScore)=>{
+            if(k===0){ if(curScore>bS){ bS=curScore; bP=pk.slice(); } return; }
+            for(let i=idx;i<=n2-k;i++){
+              if(curScore + (pre2[i+k]-pre2[i]) <= bS) return;
+              if(curSal + sl2[i] + cheapPre[k-1] > maxSal) continue;
+              pk[6-k]=i; dfs2(i+1,k-1,curSal+sl2[i],curScore+sc2[i]);
+            }
+          };
+          dfs2(0,6,0,0);
+          if(bP){
+            const ids2 = bP.map(i=>ord2[i]);
+            let t2=0; for(const i of ids2) t2+=evScores[i][s]||0;
+            const key2 = ids2.slice().sort((a,b)=>a-b).join('|');
+            const e2 = rankedMap.get(key2);
+            if(e2){ e2.count++; e2.totalScore+=t2; }
+            else { rankedMap.set(key2, {lineup: ids2.map(i=>evPool[i]), count:1, totalScore:t2}); chaosCands++; }
+          }
+        }
+      }
       if(s>0 && s%100===0){
         if(s%500===0) log(`  per-sim optimals: ${s.toLocaleString()}/${simsDone2.toLocaleString()}...`);
         await tick2(); if(window._genCancelled){ log('Cancelled.'); done(); return; }
@@ -7743,6 +7797,7 @@ async function runNascarSimGen(){
     }
     const rankedNas = [...rankedMap.values()].sort((a,b)=>b.count-a.count);
     log(`${rankedNas.length.toLocaleString()} unique ex-post optimal lineups across ${simsDone2.toLocaleString()} race sims.`);
+    if(chaosSims) log(`Chaos candidates: ${chaosCands.toLocaleString()} disjoint runner-up builds from ${chaosSims.toLocaleString()} high-attrition sims (${CHAOS_MIN_INC}+ cars out).`);
     const simScoresByIdNas = {};
     evPool.forEach((p,i)=>{ simScoresByIdNas[p.id]=evScores[i]; });
     const out = await runUFCContestEV({slate, pool: evPool, ranked: rankedNas, simScoresById: simScoresByIdNas, totalSims: simsDone2, target, maxExpPct, overrides});
