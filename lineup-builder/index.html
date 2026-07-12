@@ -1084,6 +1084,16 @@ html { overscroll-behavior-y: contain; }
                 oninput="document.getElementById('pgaSimCountLabel').textContent=this.value;const _s=activeSlate();if(_s){_s._simCount=parseInt(this.value);save();}">
               <span id="pgaSimCountLabel" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--green);font-weight:600;min-width:38px;">2000</span>
             </div>
+            <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
+                <span class="setting-label">Skill Correlation</span>
+                <button onclick="autoFillPgaFactors()" title="Pull this course's key-stat profile and set the sliders from what historically separates players here"
+                  style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);color:var(--green);padding:3px 8px;border-radius:4px;font-size:9px;font-weight:600;cursor:pointer;">⟳ Auto from course data</button>
+              </div>
+              <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">Each simulated tournament draws "how the course played" — sims where an axis swings lift every golfer strong in that skill together, so correlated skill-set lineups emerge naturally. Higher = that skill separates the field harder here.</div>
+              <div id="pgaFactorRows"></div>
+              <div id="pgaFactorSrc" style="font-size:9px;color:var(--muted);margin-top:2px;"></div>
+            </div>
             <div id="pgaEvHome"></div>
           </div>
           <div class="autogen-section" id="ufcSection" style="display:none;">
@@ -1329,8 +1339,15 @@ html { overscroll-behavior-y: contain; }
           <div class="mapper-req-title">★ Required Columns — auto-detected, confirm mapping</div>
           <div class="mapper-grid" id="mapperRequired"></div>
         </div>
+        <div id="mapperAutoWrap" style="display:none;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;" onclick="const g=document.getElementById('mapperAutoGrid');const arr=document.getElementById('autoMapArrow');g.style.display=g.style.display==='none'?'grid':'none';arr.textContent=g.style.display==='none'?'&#9658;':'&#9660;';">
+            <span id="mapperAutoTitle" style="font-family:'DM Mono',monospace;font-size:10px;font-weight:600;color:var(--green);text-transform:uppercase;letter-spacing:.05em;">&#10003; Columns auto-mapped</span>
+            <span id="autoMapArrow" style="font-size:9px;color:var(--muted);">&#9658;</span>
+          </div>
+          <div class="mapper-grid" id="mapperAutoGrid" style="display:none;margin-top:6px;"></div>
+        </div>
         <div id="mapperOptionalWrap">
-          <div class="mapper-opt-title">Optional Columns — label any you want to include</div>
+          <div class="mapper-opt-title" id="mapperOptTitle">Optional Columns — label any you want to include</div>
           <div class="mapper-grid" id="mapperOptional"></div>
         </div>
         <div id="mapperSimInputs" style="display:none;margin-top:10px;">
@@ -1339,6 +1356,13 @@ html { overscroll-behavior-y: contain; }
             <span id="simInputsArrow" style="font-size:9px;color:var(--muted);">&#9658;</span>
           </div>
           <div id="mapperSimGrid" style="display:none;margin-top:6px;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;max-height:180px;overflow-y:auto;grid-template-columns:1fr 1fr;gap:2px;"></div>
+        </div>
+        <div id="mapperStatInputs" style="display:none;margin-top:8px;">
+          <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;" onclick="const g=document.getElementById('mapperStatGrid');const arr=document.getElementById('statInputsArrow');g.style.display=g.style.display==='none'?'grid':'none';arr.textContent=g.style.display==='none'?'&#9658;':'&#9660;';">
+            <span id="mapperStatTitle" style="font-family:'DM Mono',monospace;font-size:10px;font-weight:600;color:var(--green);text-transform:uppercase;letter-spacing:.05em;">&#127793; Golf stats detected</span>
+            <span id="statInputsArrow" style="font-size:9px;color:var(--muted);">&#9658;</span>
+          </div>
+          <div id="mapperStatGrid" style="display:none;margin-top:6px;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;max-height:180px;overflow-y:auto;grid-template-columns:1fr 1fr;gap:2px;"></div>
         </div>
         <div class="mapper-title" style="margin-top:10px;margin-bottom:5px;">Preview (first 3 rows of mapped columns)</div>
         <div style="overflow-x:auto;"><table class="preview-table" id="previewTable"></table></div>
@@ -3358,6 +3382,7 @@ function renderGroupRulesSummary(){
       pgaSlider.value = pCount;
       if(pgaLabel) pgaLabel.textContent = pCount;
     }
+    renderPgaFactorSliders();
     restoreContestEvUI(slate);
     // Default PGA to the equity model (de-vigged odds + your rating + projection)
     const opt = document.getElementById('genOptimize');
@@ -5008,6 +5033,80 @@ function updateContestEvSummary(){
   el.style.display='block';
 }
 
+// ── PGA Skill Correlation (course-condition factors) ────────────────────────
+// Slider strengths live per-slate in slate._pgaFactors {drv,acc,app,arg,putt}
+// (0–100; σ strokes/round = v/100 × 0.5). "Auto from course data" pulls the
+// course key-stats recipe from the Apps Script brain and maps its stat picks
+// onto the five axes — courses with one dominant separating skill get one hot
+// axis (portfolio goes heavy), multi-path courses get spread (portfolio splits).
+const PGA_FACTOR_URL='https://script.google.com/macros/s/AKfycbyS9p6fMoKWb-9xqLp0RtNkvU5TSNsXHXszcoNrXQW7LbwG5PQi1R4Rd_Fnn5F3lLln/exec';
+const PGA_FACTOR_TOKEN='rrg-sync-7281';
+const PGA_FACTOR_AXES=[
+  ['drv','Driving Dist','#e8421a'],
+  ['acc','Accuracy','#3b82f6'],
+  ['app','Approach','#a855f7'],
+  ['arg','Short Game','#ec4899'],
+  ['putt','Putting','#22c55e'],
+];
+function renderPgaFactorSliders(){
+  const host=document.getElementById('pgaFactorRows'); if(!host) return;
+  const s=activeSlate(); if(!s) return;
+  const f=s._pgaFactors||{};
+  host.innerHTML=PGA_FACTOR_AXES.map(([k,label,color])=>{
+    const v=f[k]!=null?+f[k]:PGA_FACTOR_DEFAULT;
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+      <span style="font-size:10px;color:var(--muted);width:74px;flex:none;">${label}</span>
+      <input type="range" min="0" max="100" value="${v}" data-fax="${k}" style="width:100%;accent-color:${color};"
+        oninput="this.parentElement.querySelector('.faxv').textContent=this.value;const _s=activeSlate();if(_s){_s._pgaFactors=Object.assign({},_s._pgaFactors,{${k}:parseInt(this.value),src:'manual'});save();const el=document.getElementById('pgaFactorSrc');if(el)el.textContent='manually adjusted';}">
+      <span class="faxv" style="font-family:'DM Mono',monospace;font-size:10px;color:${color};font-weight:600;min-width:24px;text-align:right;">${v}</span>
+    </div>`;
+  }).join('');
+  const src=document.getElementById('pgaFactorSrc');
+  if(src) src.textContent = f.src==='auto' ? `auto: ${f.course||'course profile'}` : (f.src==='manual'?'manually adjusted':'defaults — click Auto to load this course\'s profile');
+}
+// recipe → axis strengths. Buckets mirror the recipe's stat clusters; SG:T2G
+// splits evenly across drv/app/arg. Scale: base 12 + 3×(recipe weight points
+// mapped to the axis), capped at 85 — one 20-point axis reads ~72, a dead
+// axis stays at a mild 12 so no skill is ever fully switched off.
+function recipeToPgaFactors(j){
+  const w=j.weights||{};
+  const add={drv:0,acc:0,app:0,arg:0,putt:0};
+  Object.keys(w).forEach(k=>{
+    const v=w[k]||0;
+    if(/^w?_?sg_ott$|driving_distance|total_driving/.test(k)) add.drv+=v;
+    else if(/driving_accuracy/.test(k)) add.acc+=v;
+    else if(/^w?_?sg_app$|^gir$|^sum_approaches_|^approaches_/.test(k)) add.app+=v;
+    else if(/^w?_?sg_arg$|scrambling|sand_save/.test(k)) add.arg+=v;
+    else if(/^w?_?sg_putt$|^putts_|greens$|^sg_(slow|medium|fast)_greens$/.test(k)) add.putt+=v;
+    else if(/^w?_?sg_t2g$/.test(k)){ add.drv+=v/3; add.app+=v/3; add.arg+=v/3; }
+    // scoring composites (sg_tot, bob, bogey_avoid, implied_win, course
+    // history) describe WHO is good, not WHICH skill separates — no axis.
+  });
+  const out={};
+  Object.keys(add).forEach(k=>out[k]=Math.min(85,Math.round(12+3*add[k])));
+  return out;
+}
+async function autoFillPgaFactors(){
+  const s=activeSlate(); if(!s){ showToast('No active slate','err'); return; }
+  let guess=(s.name||'').replace(/^PGA\s*[-–]\s*/i,'').replace(/\s*\d{1,2}\/\d{1,2}(\/\d{2,4})?.*$/,'').trim();
+  guess=guess.replace(/\b(showdown|weekend|r\d)\b/gi,'').trim();
+  const name=prompt('Tournament name for the course lookup:', guess||'');
+  if(!name) return;
+  showToast('Fetching course profile…','ok');
+  try{
+    const r=await fetch(PGA_FACTOR_URL+'?token='+PGA_FACTOR_TOKEN+'&action=recipe&slate='+encodeURIComponent(name));
+    const j=await r.json();
+    if(j.ok===false||j.error) throw new Error(j.error||'course lookup failed');
+    const prof=recipeToPgaFactors(j);
+    s._pgaFactors=Object.assign({},s._pgaFactors,prof,{src:'auto',course:j.course_name||''});
+    save(); renderPgaFactorSliders();
+    const desc=PGA_FACTOR_AXES.map(([k,l])=>`${l.split(' ')[0]} ${prof[k]}`).join(' · ');
+    showToast(`✓ ${j.course_name}: ${desc}`,'ok');
+  }catch(e){
+    showToast('Course profile fetch failed — '+(e.message||e)+'. Sliders unchanged.','err');
+  }
+}
+
 // Shared Contest-EV settings UI (UFC + NASCAR). One DOM node, unique ids —
 // relocated into whichever sport section is active, then restored from the
 // slate's saved settings. Fresh slates auto-apply the last-used saved contest.
@@ -5602,6 +5701,8 @@ async function runUFCContestEV(ctx){
 const PGA_SIG_ROUND = 2.7;   // per-round score SD vs field (strokes)
 const PGA_SIG_WAVE  = 0.55;  // shared AM/PM wave shock SD (strokes)
 const PGA_CUT_N     = 65;    // cut line: top 65 (+ties, continuous scores)
+const PGA_FACTOR_DEFAULT = 25;  // default Skill Correlation slider value
+const PGA_FACTOR_SCALE = 0.6;   // slider 100 → σ 0.6 strokes/round, week-persistent
 
 function pgaGaussFactory(){
   let spare=null;
@@ -5654,6 +5755,47 @@ async function runPgaSims(pool, numSims, log){
     return h<12?0:1;
   });
 
+  // ── Skill-factor correlation: "how the course played" ──
+  // Each simulated tournament draws a week-persistent condition vector across
+  // five skill axes (driving distance, accuracy, approach, short game,
+  // putting). Golfers load on each axis by field-relative percentile of the
+  // matching stat columns, so a sim where the approach axis swings positive
+  // lifts every strong iron player TOGETHER — similar skill sets rise as a
+  // group, with idiosyncratic noise still dominating any single golfer.
+  // Axis strengths come from the Skill Correlation sliders (per-slate,
+  // auto-fillable from the course key-stats recipe). Factors are inside
+  // simOnce BEFORE calibration, so market win/cut probabilities stay true;
+  // what changes is the joint distribution — who wins together. Per-round
+  // idiosyncratic noise is renormalized down by each golfer's factor variance
+  // so total round variance stays ~PGA_SIG_ROUND.
+  const FAXES=['drv','acc','app','arg','putt'];
+  const fcfg=(activeSlate()&&activeSlate()._pgaFactors)||{};
+  const fsig=FAXES.map(ax=>Math.max(0,Math.min(100,fcfg[ax]!=null?+fcfg[ax]:PGA_FACTOR_DEFAULT))/100*PGA_FACTOR_SCALE);
+  const pctLoad=vals=>{
+    const ok=vals.map((v,i)=>({v,i})).filter(x=>x.v!=null&&!isNaN(x.v)).sort((a,b)=>a.v-b.v);
+    const out=new Float64Array(N); // stays 0 (neutral) when the stat is missing
+    if(ok.length>1) ok.forEach((x,r)=>out[x.i]=(r/(ok.length-1))*2-1);
+    return out;
+  };
+  const Ldist=pctLoad(pool.map(p=>parseFloat(p.dist))), Lott=pctLoad(pool.map(p=>parseFloat(p.w_ott)));
+  const Lgir=pctLoad(pool.map(p=>parseFloat(p.gir)));
+  const fload=[
+    new Float64Array(N).map((_,i)=>Ldist[i]*0.7+Lott[i]*0.3),        // drv
+    pctLoad(pool.map(p=>parseFloat(p.acc))),                          // acc
+    (function(){const L=pctLoad(pool.map(p=>parseFloat(p.w_app)));    // app
+      return new Float64Array(N).map((_,i)=>L[i]*0.8+Lgir[i]*0.2);})(),
+    pctLoad(pool.map(p=>parseFloat(p.w_arg))),                        // arg
+    pctLoad(pool.map(p=>parseFloat(p.w_putt))),                       // putt
+  ];
+  const nAxes=FAXES.length;
+  const fShift=new Float64Array(N);      // per-sim combined skill shift
+  const sigInd=new Float64Array(N);      // renormalized idiosyncratic sigma
+  for(let i=0;i<N;i++){
+    let V=0; for(let a=0;a<nAxes;a++){ const t=fsig[a]*fload[a][i]; V+=t*t; }
+    sigInd[i]=Math.sqrt(Math.max(3.24, PGA_SIG_ROUND*PGA_SIG_ROUND - V)); // floor σ=1.8
+  }
+  const factorsOn=fsig.some(s=>s>0);
+
   // Init strength from the curve's mid-rung; no-odds golfers start at field-worst
   const mu=new Float64Array(N);
   let worst=0;
@@ -5669,12 +5811,23 @@ async function runPgaSims(pool, numSims, log){
   const idx=[...Array(N).keys()];
   function simOnce(withRounds){
     const w1=gauss()*PGA_SIG_WAVE, w2=gauss()*PGA_SIG_WAVE;
+    if(factorsOn){
+      // week-persistent course conditions: one draw per axis per tournament
+      for(let i=0;i<N;i++) fShift[i]=0;
+      for(let a=0;a<nAxes;a++){
+        if(fsig[a]<=0) continue;
+        const f=gauss()*fsig[a];
+        const L=fload[a];
+        for(let i=0;i<N;i++) fShift[i]+=f*L[i];
+      }
+    }
     for(let i=0;i<N;i++){
       const wv=wave[i];
       const a1=wv===0?w1:wv===1?-w1:0;
       const a2=wv===0?-w2:wv===1?w2:0;
-      x1[i]=mu[i]+a1+gauss()*PGA_SIG_ROUND;
-      x2[i]=mu[i]+a2+gauss()*PGA_SIG_ROUND;
+      const sk=factorsOn?-fShift[i]:0;   // positive axis draw helps loaded golfers (fewer strokes)
+      x1[i]=mu[i]+sk+a1+gauss()*sigInd[i];
+      x2[i]=mu[i]+sk+a2+gauss()*sigInd[i];
       r12[i]=x1[i]+x2[i];
     }
     idx.sort((a,b)=>r12[a]-r12[b]);
@@ -5682,8 +5835,9 @@ async function runPgaSims(pool, numSims, log){
     for(let j=0;j<Math.min(PGA_CUT_N,N);j++) made[idx[j]]=1;
     for(let i=0;i<N;i++){
       if(made[i]){
-        x3[i]=mu[i]+gauss()*PGA_SIG_ROUND;
-        x4[i]=mu[i]+gauss()*PGA_SIG_ROUND;
+        const sk=factorsOn?-fShift[i]:0;
+        x3[i]=mu[i]+sk+gauss()*sigInd[i];
+        x4[i]=mu[i]+sk+gauss()*sigInd[i];
         tot[i]=r12[i]+x3[i]+x4[i];
       } else tot[i]=1e6+r12[i];
     }
@@ -5820,7 +5974,8 @@ async function runPgaSims(pool, numSims, log){
     if(s%200===0){ if(log&&s>0) log(`  ${s.toLocaleString()}/${numSims.toLocaleString()} tournaments…`);
       await tick(); if(window._genCancelled) break; }
   }
-  return { simScores, simsDone, winCnt, cutRate, mu };
+  return { simScores, simsDone, winCnt, cutRate, mu,
+           factors:{ axes:FAXES, sig:fsig, load:fload } };
 }
 
 // Per-sim optimal 6-golfer lineup (salary-capped branch & bound with a node
@@ -5889,6 +6044,10 @@ async function runPgaSimGen(){
     done(); return;
   }
 
+  { const f=slate._pgaFactors||{};
+    const parts=[['drv','Driving'],['acc','Accuracy'],['app','Approach'],['arg','Short'],['putt','Putting']]
+      .map(([k,l])=>`${l} ${f[k]!=null?f[k]:PGA_FACTOR_DEFAULT}`);
+    log(`Skill correlation (${f.src==='auto'?('auto: '+(f.course||'course')):f.src==='manual'?'manual':'defaults'}): ${parts.join(' · ')}`); }
   log(`Running ${numSims.toLocaleString()} simulated tournaments (${pool.length} golfers, cut after R2)…`);
   await new Promise(r=>setTimeout(r,0));
   const res=await runPgaSims(pool, numSims, log);
@@ -5934,6 +6093,33 @@ async function runPgaSimGen(){
   pool.forEach((p,i)=>{ simScoresById[p.id]=simScores[i]; });
   const out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, target, maxExpPct, overrides});
   if(out===null&&window._genCancelled) log('Cancelled.');
+
+  // ── Theme readout: which skill set / wave each lineup is built around ──
+  if(out&&out.length&&res.factors){
+    const AX_LABEL={drv:'Distance',acc:'Accuracy',app:'Approach',arg:'Short-game',putt:'Putting'};
+    const idxById={}; pool.forEach((p,i)=>idxById[p.id]=i);
+    const themeCount={};
+    out.forEach(l=>{
+      // tag only ACTIVE axes (slider ≥ ~17) — a lineup that happens to share a
+      // skill the course doesn't reward isn't a theme, it's a coincidence
+      const ax=res.factors.axes.map((k,a)=>{
+        if(res.factors.sig[a]<0.1) return {k, m:-1};
+        let m=0,n2=0; l.forEach(p=>{ const i=idxById[p.id]; if(i!=null){ m+=res.factors.load[a][i]; n2++; } });
+        return {k, m:n2?m/n2:0};
+      }).sort((p,q)=>q.m-p.m);
+      const tags=[];
+      if(ax[0].m>=0.30) tags.push(AX_LABEL[ax[0].k]);
+      if(ax[1]&&ax[1].m>=0.30) tags.push(AX_LABEL[ax[1].k]);
+      let am=0; l.forEach(p=>{ const m2=String(p.start||'').match(/(\d{1,2}):\d{2}/); if(m2&&+m2[1]<12) am++; });
+      if(am>=5) tags.push('AM stack'); else if(am<=1) tags.push('PM stack');
+      const theme=tags.length?tags.join(' + '):'Balanced';
+      l._theme=theme;
+      themeCount[theme]=(themeCount[theme]||0)+1;
+    });
+    const summary=Object.entries(themeCount).sort((a,b)=>b[1]-a[1])
+      .map(([t,c])=>`${t} ×${c}`).join(', ');
+    log(`Theme allocation: ${summary}`);
+  }
   done();
 }
 
@@ -9938,6 +10124,33 @@ function hideToast(){document.getElementById('toast').classList.remove('show');}
 const SHEET_ID  = '1IXx0Jmt6j9dY4X6qUeQw_i3u8uGHk41hlebSYJCcAHw';
 const SHEET_KEY = ['AIzaSyADsP-BJm','EYFIPzXpydw1x','CIQImDTz53jk'].join('');
 
+// Parse a sheet tab name into {sport, series, event, dateStr}. Slate tabs are
+// named "SPORT - <series?> <date> <event>" (e.g. "PGA - SCOTTISH OPEN 7/9/2026",
+// "NASCAR - CUP 7/12/2026 QUAKER STATE 400"). Tabs without a sport prefix are
+// admin tabs (Console Meta, Model History, Recipe Log…) — not importable.
+const SLATE_SPORT_ICON={pga:'⛳',ufc:'🥊',nascar:'🏁',nfl:'🏈',nba:'🏀',mlb:'⚾',nhl:'🏒'};
+function parseSlateTab(title){
+  const m=String(title).match(/^\s*(PGA|GOLF|UFC|MMA|NASCAR|NFL|NBA|MLB|NHL)\s*[-–—:]\s*(.+)$/i);
+  if(!m) return null;
+  const raw=m[1].toLowerCase();
+  const sport=raw==='golf'?'pga':raw==='mma'?'ufc':raw;
+  let rest=m[2].trim(), dateStr='';
+  rest=rest.replace(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/,(s,mo,d)=>{
+    const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    dateStr=`${M[Math.max(0,Math.min(11,+mo-1))]} ${+d}`; return ' ';
+  }).replace(/\s+/g,' ').trim();
+  let series='';
+  if(sport==='nascar'){
+    const sm=rest.match(/^(CUP|XFINITY|ORLY|O'?REILLY|TRUCKS?|ARCA)\b\s*/i);
+    if(sm){ series=sm[1].toUpperCase(); rest=rest.slice(sm[0].length).trim(); }
+  }
+  const KEEP_CAPS=new Set(['UFC','PGA','TPC','LIV','II','III','IV']);
+  const event=rest.split(' ').map(w=>{
+    if(KEEP_CAPS.has(w.toUpperCase())) return w.toUpperCase();
+    return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase();
+  }).join(' ')||String(title);
+  return {sport, series, event, dateStr, icon:SLATE_SPORT_ICON[sport]||'📋'};
+}
 function detectSportFromTab(title){
   const t = title.toLowerCase();
   if(t.startsWith('ufc'))    return 'ufc';
@@ -10199,16 +10412,27 @@ async function fetchSheetSlatesInModal(){
     const data = await res.json();
     const tabs = (data.sheets||[]).map(s=>s.properties).filter(p=>p.title.trim());
     if(!tabs.length){ listEl.innerHTML='<div class="sheet-error">No tabs found in sheet.</div>'; return; }
+    // Only sport-prefixed tabs are slates; admin tabs (Console Meta, Model
+    // History, Recipe Log…) don't parse and are hidden. If NOTHING parses the
+    // sheet uses a different naming scheme — fall back to showing everything.
+    let items = tabs.map(tab=>({tab, p:parseSlateTab(tab.title.trim())})).filter(x=>x.p);
+    if(!items.length) items = tabs.map(tab=>({tab, p:null}));
     listEl.innerHTML = '';
-    tabs.forEach(tab => {
+    items.forEach(({tab, p}) => {
       const title = tab.title.trim();
-      const sport = detectSportFromTab(title);
+      const sport = p ? p.sport : detectSportFromTab(title);
       const item  = document.createElement('div');
       item.className = 'sheet-slate-item';
+      const nameHtml = p
+        ? `<span style="margin-right:8px;">${p.icon}</span>${p.event}`
+        : title;
+      const metaHtml = p
+        ? [p.dateStr, p.series].filter(Boolean).join(' · ') || 'Click to import'
+        : 'Click to import';
       item.innerHTML = `
         <div>
-          <div class="sheet-slate-name">${title}</div>
-          <div class="sheet-slate-meta">Click to import</div>
+          <div class="sheet-slate-name">${nameHtml}</div>
+          <div class="sheet-slate-meta">${metaHtml}</div>
         </div>
         <span class="sheet-sport-tag">${sport.toUpperCase()}</span>
       `;
@@ -10279,6 +10503,14 @@ function buildMapper(){
   }
   const pgaModelRows = [];
 
+  // Golf stat columns are read straight off the headers at import time
+  // (applyPgaStats) — they power archetypes and skill correlation without any
+  // mapping, so they collapse into a summary panel instead of 20 dropdowns.
+  const PGA_STAT_HEADERS = new Set(
+    Object.values(PGA_STAT_ALIASES).flat().concat(['rrg fit','archetypes','archetype','tags']));
+  const statColRows = [];
+  const autoMappedRows = [];
+
   // Optional section — skip required-mapped cols and UFC sim cols
   const requiredMappedCols = new Set(REQUIRED_ROLES.map(r=>colMapping[r.value]).filter(v=>v!=null));
   const optEl=document.getElementById('mapperOptional');
@@ -10292,6 +10524,12 @@ function buildMapper(){
       pgaModelRows.push({h:`${h}  (${win} · ${wt}%)`, sample});
       return '';
     }
+    if(isPGAUpload && PGA_STAT_HEADERS.has(h.trim().toLowerCase())
+       && !Object.entries(colMapping).some(([k,v])=>v===i)){
+      const sample=(parsedCSV.rows[0]?.[i]||'').toString().slice(0,20);
+      statColRows.push({h, sample});
+      return '';
+    }
     if(isUFCUpload && UFC_SIM_COLS.has(h.trim().toLowerCase())){
       const sample=(parsedCSV.rows[0]?.[i]||'').toString().slice(0,20);
       simColRows.push({h, sample});
@@ -10299,7 +10537,7 @@ function buildMapper(){
     }
     const optRole=Object.entries(colMapping).find(([k,v])=>v===i&&OPTIONAL_ROLES.find(r=>r.value===k))?.[0]||'';
     const sample=(parsedCSV.rows[0]?.[i]||'').toString().slice(0,25);
-    return `<div class="mapper-row">
+    const rowHtml=`<div class="mapper-row">
       <div class="mapper-col-name" title="${h}">${h}</div>
       <div class="mapper-col-sample">${sample}</div>
       <select class="mapper-select${optRole?' mapped':''}" data-col="${i}" onchange="onRoleChange(this,'opt')">
@@ -10307,6 +10545,10 @@ function buildMapper(){
         ${OPTIONAL_ROLES.map(r=>`<option value="${r.value}"${optRole===r.value?' selected':''}>${r.label}</option>`).join('')}
       </select>
     </div>`;
+    // Auto-mapped optional columns collapse behind a "✓ mapped" summary —
+    // nothing to decide unless the auto-detection got one wrong.
+    if(optRole){ autoMappedRows.push({html:rowHtml, h, role:(OPTIONAL_ROLES.find(r=>r.value===optRole)||{}).label||optRole}); return ''; }
+    return rowHtml;
   }).join('');
 
   // Collapsed inputs section — UFC sim columns or PGA model-blend columns
@@ -10330,6 +10572,44 @@ function buildMapper(){
       }
     } else {
       simWrap.style.display='none';
+    }
+  }
+
+  // Auto-mapped optional columns → collapsed "✓ mapped" panel
+  const autoWrap=document.getElementById('mapperAutoWrap');
+  if(autoWrap){
+    if(autoMappedRows.length){
+      autoWrap.style.display='block';
+      const t=document.getElementById('mapperAutoTitle');
+      if(t) t.innerHTML=`&#10003; ${autoMappedRows.length} columns auto-mapped (${autoMappedRows.map(r=>r.role).join(', ')}) — click to adjust`;
+      const g=document.getElementById('mapperAutoGrid');
+      if(g) g.innerHTML=autoMappedRows.map(r=>r.html).join('');
+    } else autoWrap.style.display='none';
+  }
+  // Hide the optional section entirely when nothing needs a decision
+  {
+    const wrapEl=document.getElementById('mapperOptionalWrap');
+    const hasRows=/mapper-row/.test(optEl.innerHTML);
+    if(wrapEl) wrapEl.style.display=hasRows?'block':'none';
+    const t2=document.getElementById('mapperOptTitle');
+    if(t2) t2.textContent='Unmapped columns — label any you want to include (or leave skipped)';
+  }
+
+  // Collapsed golf-stats panel (auto-read, no mapping needed)
+  const statWrap = document.getElementById('mapperStatInputs');
+  if(statWrap){
+    if(statColRows.length > 0){
+      statWrap.style.display='block';
+      const t=document.getElementById('mapperStatTitle');
+      if(t) t.innerHTML=`&#127793; ${statColRows.length} golf stat columns auto-detected &rarr; archetypes + skill correlation`;
+      const g=document.getElementById('mapperStatGrid');
+      if(g) g.innerHTML=statColRows.map(row=>
+        '<div style="display:flex;align-items:center;gap:8px;padding:2px 0;">'
+        +'<span style="font-family:\'DM Mono\',monospace;font-size:10px;color:var(--green);min-width:120px;">'+row.h+'</span>'
+        +'<span style="font-family:\'DM Mono\',monospace;font-size:10px;color:var(--muted);">'+(row.sample||'—')+'</span>'
+        +'</div>').join('');
+    } else {
+      statWrap.style.display='none';
     }
   }
 
