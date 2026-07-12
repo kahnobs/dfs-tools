@@ -4861,6 +4861,14 @@ const BUILTIN_CONTESTS=[
   {id:'builtin_jab1', sport:'ufc', name:'UFC $15K JAB · $1 × 17,835', fee:1, fieldSize:17835, preset:'custom',
    custom:'1: 1000\n2: 600\n3: 400\n4: 300\n5: 250\n6: 200\n7-8: 150\n9-10: 100\n11-13: 75\n14-16: 60\n17-20: 50\n21-25: 40\n26-30: 30\n31-40: 25\n41-50: 20\n51-65: 15\n66-85: 10\n86-110: 8\n111-180: 6\n181-320: 5\n321-590: 4\n591-1155: 3\n1156-2362: 2\n2363-4636: 1.50'},
   {id:'builtin_main3', sport:'ufc', name:'UFC Main GPP · $3 × 47,500', fee:3, fieldSize:47500, preset:'gpp', custom:''},
+  // PGA built-ins — DK field sizes shown rounded ("71.3K"); tier tables are
+  // exact and each sums to the advertised prize pool to the dollar.
+  {id:'builtin_pga_mini50', sport:'pga', name:'PGA $30K Mini-Max · $0.50 × 71,300', fee:0.5, fieldSize:71300, preset:'custom',
+   custom:'1: 3000\n2: 1500\n3: 750\n4: 500\n5: 250\n6: 200\n7-8: 150\n9-10: 100\n11-14: 75\n15-19: 60\n20-25: 50\n26-35: 40\n36-45: 30\n46-55: 25\n56-70: 20\n71-90: 15\n91-120: 10\n121-160: 8\n161-210: 6\n211-345: 5\n346-615: 4\n616-1175: 3\n1176-2545: 2\n2546-5185: 1.50\n5186-14980: 1.00'},
+  {id:'builtin_pga_sg1', sport:'pga', name:'PGA $17.5K Short Game · $1 × 20,800', fee:1, fieldSize:20800, preset:'custom',
+   custom:'1: 1000\n2: 500\n3: 300\n4: 200\n5: 150\n6-7: 125\n8-10: 100\n11-14: 75\n15-19: 60\n20-25: 50\n26-35: 40\n36-45: 30\n46-55: 25\n56-70: 20\n71-90: 15\n91-120: 10\n121-160: 8\n161-245: 6\n246-415: 5\n416-745: 4\n746-1430: 3\n1431-2865: 2\n2866-5615: 1.50'},
+  {id:'builtin_pga_birdie3', sport:'pga', name:'PGA $60K Birdie · $3 × 23,800', fee:3, fieldSize:23800, preset:'custom',
+   custom:'1: 6000\n2: 3000\n3: 2000\n4: 1250\n5: 1000\n6-7: 750\n8-10: 600\n11-13: 500\n14-16: 400\n17-19: 300\n20-22: 250\n23-25: 200\n26-29: 150\n30-35: 100\n36-45: 75\n46-55: 60\n56-65: 50\n66-80: 40\n81-100: 30\n101-125: 25\n126-165: 20\n166-245: 15\n246-485: 10\n486-1050: 8\n1051-2250: 6\n2251-5751: 5'},
 ];
 function loadContestPresets(){ try{ return JSON.parse(localStorage.getItem('dfs_contest_presets')||'[]'); }catch(e){ return []; } }
 function storeContestPresets(a){ try{ localStorage.setItem('dfs_contest_presets', JSON.stringify(a)); }catch(e){} }
