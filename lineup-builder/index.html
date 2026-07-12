@@ -5017,7 +5017,13 @@ function updateContestEvSummary(){
   const fee=Math.max(0.01, parseFloat(ev.fee)||20);
   const payout=buildPayoutFn({fieldSize:F, fee, preset:ev.preset||'gpp', custom:ev.custom});
   let pool=0, lastPaid=0;
-  for(let r=1;r<=F;r++){ const a=payout.at(r); if(a>0){ pool+=a; lastPaid=r; } }
+  // Payout tables are contiguous — once we're well past the last paid rank,
+  // stop scanning (guards the UI against a typo'd 10-million field size).
+  for(let r=1;r<=F;r++){
+    const a=payout.at(r);
+    if(a>0){ pool+=a; lastPaid=r; }
+    else if(lastPaid>0 && r-lastPaid>5000) break;
+  }
   const first=payout.at(1);
   const money=v=> v>=1000 ? '$'+Math.round(v).toLocaleString() : '$'+(+v.toFixed(2));
   const feeStr = fee<1 ? '$'+fee.toFixed(2) : '$'+(+fee.toFixed(2));
@@ -10589,6 +10595,15 @@ function buildMapper(){
       statColRows.push({h, sample});
       return '';
     }
+    // NASCAR: practice columns + extra rating columns are auto-read (residual
+    // tilts use "Practice Score"; the rating role already claimed one column)
+    if(document.getElementById('slateSport')?.value==='nascar'
+       && /^(prac\b|practice|.*rating)/i.test(h.trim())
+       && !Object.entries(colMapping).some(([k,v])=>v===i)){
+      const sample=(parsedCSV.rows[0]?.[i]||'').toString().slice(0,20);
+      statColRows.push({h, sample});
+      return '';
+    }
     if(isUFCUpload && UFC_SIM_COLS.has(h.trim().toLowerCase())){
       const sample=(parsedCSV.rows[0]?.[i]||'').toString().slice(0,20);
       simColRows.push({h, sample});
@@ -10660,7 +10675,9 @@ function buildMapper(){
     if(statColRows.length > 0){
       statWrap.style.display='block';
       const t=document.getElementById('mapperStatTitle');
-      if(t) t.innerHTML=`&#127793; ${statColRows.length} golf stat columns auto-detected &rarr; archetypes + skill correlation`;
+      if(t) t.innerHTML = isPGAUpload
+        ? `&#127793; ${statColRows.length} golf stat columns auto-detected &rarr; archetypes + skill correlation`
+        : `&#127793; ${statColRows.length} stat columns auto-detected &rarr; sim inputs`;
       const g=document.getElementById('mapperStatGrid');
       if(g) g.innerHTML=statColRows.map(row=>
         '<div style="display:flex;align-items:center;gap:8px;padding:2px 0;">'
