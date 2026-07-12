@@ -10978,6 +10978,22 @@ function createSlate(){
   }
 
   const slate={id:uid(),name,sport,columnMapping:{...colMapping},players,savedLineups:[],currentLineup:[],hiddenIds:[],groups:[],sheetTab:parsedCSV._fromSheet?name:null};
+  // NASCAR: pre-select track type from the rating column headers — the console
+  // writes fastlap's track-type rating with the type in the name ("Super
+  // speedway Rating", "Road Course Rating"…). Auto-selecting prevents simming
+  // a plate race on intermediate physics by accident; the buttons still override.
+  if(sport==='nascar'){
+    const H=parsedCSV.headers.join(' | ').toLowerCase();
+    const tt = /super\s*speedway/.test(H) ? 'superspeedway'
+             : /road\s*course/.test(H)    ? 'road'
+             : /short\s*track/.test(H)    ? 'short'
+             : /intermediate/.test(H)     ? 'intermediate' : null;
+    if(tt){
+      slate._nascarTrackType=tt;
+      slate._nascarLaps={road:100,intermediate:300,short:500,superspeedway:188}[tt];
+      showToast(`Track type auto-selected: ${tt} (from "${parsedCSV.headers.find(h=>new RegExp(tt==='superspeedway'?'super\\s*speedway':tt==='road'?'road\\s*course':tt==='short'?'short\\s*track':'intermediate','i').test(h))}")`,'ok');
+    }
+  }
   imputeMissingRatings(slate);
   slates.push(slate);activeSlateId=slate.id;save();closeSlateModal();renderTopBar();renderSlate();
 }
