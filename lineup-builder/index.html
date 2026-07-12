@@ -2045,6 +2045,7 @@ function slateFieldsBase(slate){
   // Show sim-derived p50 projection for NASCAR slates after sims have been run
   if(slate.sport==='nascar' && (slate.players||[]).some(p=>p._simP50!=null)){
     f.push({key:'_simP50', label:'Sim', cls:'col-r'});
+    f.push({key:'simValue', label:'SVal', cls:'col-r', computed:true});
   }
   if(slate.sport==='pga' && (slate.players||[]).some(p=>p._simP50!=null)){
     f.push({key:'_simP50', label:'Sim', cls:'col-r'});
@@ -6579,8 +6580,11 @@ const NASCAR_GREEN_MULT = { road:0.94, intermediate:0.94, short:0.97, superspeed
 // laps led are among the top finishers. Derived from ratio of 2nd/1st LL share.
 // road=0.75, intermediate=0.71, short=0.58, superspeedway=0.75
 // Variance ±0.25-0.35 per sim to model different race dynamics.
-const NASCAR_LL_DECAY_CENTER = { road:0.75, intermediate:0.71, short:0.58, superspeedway:0.75 };
-const NASCAR_LL_DECAY_RANGE  = { road:0.30, intermediate:0.30, short:0.25, superspeedway:0.35 };
+// superspeedway 0.75→0.30: plate racing swaps the lead constantly — the old
+// steep decay handed the P1 starter ~38% of all green laps (77 avg at Atlanta),
+// roughly double any realistic expectation for a drafting track.
+const NASCAR_LL_DECAY_CENTER = { road:0.75, intermediate:0.71, short:0.58, superspeedway:0.30 };
+const NASCAR_LL_DECAY_RANGE  = { road:0.30, intermediate:0.30, short:0.25, superspeedway:0.15 };
 
 // Number of drivers who lead meaningful laps (2%+ of race)
 // Source: avg meaningful leaders per race by track type
@@ -6952,6 +6956,67 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
 
   // Per-driver P1 count for the win-rate calibration log (finishPos === 1).
   const winCount = new Array(FIELD).fill(0);
+  // Per-driver top-10 count for the tier calibration log.
+  const t10Cnt = new Array(FIELD).fill(0);
+
+  // ── Survival-rate pre-pass + tier conditioning ────────────────────────────
+  // Market finish-tier odds already PRICE wreck risk; the sim then applies
+  // wrecks separately. Drawing tiers from the RAW probs only among survivors
+  // — while the skill-anchored fallback re-landed elites inside the top 10 —
+  // erased front-chalk downside twice over: Blaney at Atlanta simmed 69%
+  // top-10 vs a 47% market. Estimate each driver's P(survive) with cheap
+  // incident-only sims (same seeding + clustering as the real loop), then
+  // condition every tier draw on it (p/surv — the same de-vig the PGA engine
+  // applies to cut odds). Overall tier frequencies then match the market by
+  // construction: surv × (p/surv) = p.
+  const survEst = new Float64Array(FIELD).fill(1);
+  {
+    const PRE_SIMS = 400;
+    const crashCnt = new Array(FIELD).fill(0);
+    const sw = pool.map((p, i) => {
+      const rp = ((p._nSkillRank || i + 1) - 1) / Math.max(1, FIELD - 1);
+      return 1 + 0.8 * rp;
+    });
+    for(let ps = 0; ps < PRE_SIMS; ps++){
+      const numInc = nascarDrawIncidentCount(trackType);
+      const rSet = new Set();
+      const ro = pool.map((p, i) => {
+        const _v1 = Math.max(1e-10, Math.random()), _v2 = Math.random();
+        return (p._nSkillRank || (i + 1)) + Math.sqrt(-2 * Math.log(_v1)) * Math.cos(2 * Math.PI * _v2) * 7;
+      });
+      const pio = new Array(FIELD);
+      pool.map((_, i) => i).sort((a, b) => ro[a] - ro[b]).forEach((ci, pos) => { pio[ci] = pos; });
+      let toP = Math.min(numInc, FIELD - 2), g2 = 0;
+      while(toP > 0 && rSet.size < FIELD - 2 && g2++ < 100){
+        const avail = [];
+        for(let i = 0; i < FIELD; i++) if(!rSet.has(i)) avail.push(i);
+        if(!avail.length) break;
+        let wS = 0; for(const i of avail) wS += sw[i];
+        let rr = Math.random() * wS, seed = avail[avail.length - 1];
+        for(const i of avail){ rr -= sw[i]; if(rr <= 0){ seed = i; break; } }
+        const isSolo = (toP === 1) || (Math.random() < incidentSoloP);
+        const size = isSolo ? 1 : Math.min(toP, avail.length, nascarDrawClusterSize(trackType));
+        const seedPos = pio[seed];
+        const coll = (size === 1) ? [seed]
+          : avail.slice().sort((a, b) => Math.abs(pio[a] - seedPos) - Math.abs(pio[b] - seedPos)).slice(0, size);
+        coll.forEach(ci => rSet.add(ci));
+        toP -= coll.length;
+      }
+      for(const ci of rSet) crashCnt[ci]++;
+    }
+    for(let i = 0; i < FIELD; i++) survEst[i] = Math.max(0.5, 1 - crashCnt[i] / PRE_SIMS);
+  }
+  pool.forEach((p, i) => {
+    const c = q => q == null ? null : Math.min(0.97, q / survEst[i]);
+    p._nSurv    = survEst[i];
+    p._nPWinC   = c(p._nPWin);
+    p._nPTop3C  = c(p._nPTop3);
+    p._nPTop5C  = c(p._nPTop5);
+    p._nPTop10C = c(p._nPTop10);
+    if(p._nPTop3C  != null && p._nPWinC  != null && p._nPTop3C  < p._nPWinC)  p._nPTop3C  = p._nPWinC;
+    if(p._nPTop5C  != null && p._nPTop3C != null && p._nPTop5C  < p._nPTop3C) p._nPTop5C  = p._nPTop3C;
+    if(p._nPTop10C != null && p._nPTop5C != null && p._nPTop10C < p._nPTop5C) p._nPTop10C = p._nPTop5C;
+  });
 
   // Chunked + cancellable: the sim loop used to run fully synchronously, so at
   // 10k sims the tab froze and the Cancel button couldn't interrupt the run —
@@ -7057,7 +7122,9 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
     {
       let wSum = 0;
       const wArr = survivorDrawn.map(d => {
-        const w = (d.p._nPWin > 0 ? d.p._nPWin : 0.0005);
+        // Survival-conditioned win prob: crash-prone drivers get their spent
+        // wreck mass back in the sims where they DID survive.
+        const w = (d.p._nPWinC > 0 ? d.p._nPWinC : 0.0005);
         wSum += w; return w;
       });
       let rW = Math.random() * wSum;
@@ -7079,7 +7146,9 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
         d._rawPos = 0.5; // guaranteed P1 after the sort
         return;
       }
-      const pW=d.p._nPWin||0, pT3=d.p._nPTop3||0, pT5=d.p._nPTop5||0, pT10=d.p._nPTop10||0;
+      // Survival-conditioned tier probs (P(top-k | survives)) — raw market
+      // tiers include wreck risk, which the incident model already charged.
+      const pW=d.p._nPWinC||0, pT3=d.p._nPTop3C||0, pT5=d.p._nPTop5C||0, pT10=d.p._nPTop10C||0;
       const denom = Math.max(0.05, 1 - pW);
       const cT3  = pT3  > pW ? (pT3  - pW)/denom : 0;
       const cT5  = pT5  > pW ? (pT5  - pW)/denom : 0;
@@ -7135,7 +7204,17 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
         // than gaining 10 on pace. A symmetric spread was handing every
         // fallback driver top-15 tails at the same rate as blowup tails.
         z = z < 0 ? z * 0.65 : z * 1.15;
-        d._rawPos = Math.max(1, anchor + z*stdDev);
+        // Tier mass already consumed: a driver whose conditional top-10 (or
+        // deepest posted tier) probability was spent in the draws above must
+        // NOT re-enter that tier via the fallback — that double-dip is what
+        // erased front-chalk downside. Floor the draw outside the deepest
+        // missed tier and anchor at the market's residual "shuffled out"
+        // outcome instead of raw skill rank.
+        let anchorF = anchor, floorPos = 1;
+        if(cT10 > 0){ floorPos = 10.5; anchorF = Math.max(anchor, 14); }
+        else if(cT5 > 0){ floorPos = 5.5; anchorF = Math.max(anchor, 9); }
+        else if(cT3 > 0){ floorPos = 3.5; anchorF = Math.max(anchor, 7); }
+        d._rawPos = Math.max(floorPos, anchorF + z*stdDev);
       }
     });
 
@@ -7225,12 +7304,16 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
         // Win-prob based dominance weight: exponential so big favorites get
         // a much larger share. Use sqrt to prevent one driver eating everything.
         const pWin = d.p._nPWin || 0.001;
-        const winW = Math.sqrt(pWin);
+        // Superspeedways: flatter win-prob exponent — the draft shuffles the
+        // lead constantly, so dominance concentrates far less than raw win
+        // odds imply at unrestricted tracks.
+        const winW = Math.pow(pWin, isSuper ? 0.35 : 0.5);
 
         // Skill rank dampener — prevents lucky low-odds finishers from
         // getting outsized laps led. Steeper than before (0.25 vs 0.15)
         // to ensure odds-based weight is the primary differentiator.
-        const skillW = Math.exp(-0.25*(d.p._nSkillRank-1));
+        // Flattened at superspeedways for the same drafting reason.
+        const skillW = Math.exp(-(isSuper ? 0.10 : 0.25)*(d.p._nSkillRank-1));
 
         // Early phase: actual on-track start position drives who leads early laps.
         // Rear starters have _nLLGrid = FIELD so their early weight collapses to ~0.
@@ -7294,7 +7377,8 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
         d.lapsLed = reclaimed; // crashed driver credited exactly what was reclaimed
       });
       survivorDrawnFinal.forEach(d=>{
-        d.lapsLed = Math.min(d.lapsLed, Math.round(greenLaps*0.95));
+        // Supers: no single car can realistically lead 40%+ of a drafting race
+        d.lapsLed = Math.min(d.lapsLed, Math.round(greenLaps*(isSuper ? 0.40 : 0.95)));
       });
     }
 
@@ -7324,6 +7408,7 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
       sumLapsLed[idx]+= d.lapsLed||0;
       simScores[idx].push(score);
       if(d.finishPos === 1) winCount[idx]++;
+      if(d.finishPos <= 10) t10Cnt[idx]++;
       if(score > simBestScore){ simBestScore = score; simBestId = d.p.id; }
     });
     // Record top scorer for this sim
@@ -7345,6 +7430,17 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
     }).filter(Boolean);
     if(flagged.length) log(`⚠ Win-rate calibration: ${flagged.slice(0,5).join(', ')}${flagged.length>5?` (+${flagged.length-5} more)`:''}`);
     else log(`Win-rate calibration: all priced drivers within 3pts of de-vigged market.`);
+    // Tier guard: sim P(top-10) should track the raw market prob (which
+    // includes wreck risk) — survival conditioning makes this hold by
+    // construction; a drift here means the double-dip is back.
+    const flagged10 = pool.map((p,i)=>{
+      if(p._nPTop10 == null) return null;
+      const simT = t10Cnt[i]/simsDone;
+      const diff = (simT - p._nPTop10) * 100;
+      return Math.abs(diff) > 5 ? `${p.name.split(' ').slice(-1)[0]} sim ${(simT*100).toFixed(0)}% vs mkt ${(p._nPTop10*100).toFixed(0)}%` : null;
+    }).filter(Boolean);
+    if(flagged10.length) log(`⚠ Top-10 calibration: ${flagged10.slice(0,5).join(', ')}${flagged10.length>5?` (+${flagged10.length-5} more)`:''}`);
+    else log(`Top-10 calibration: all priced drivers within 5pts of market.`);
   }
 
   // ── Build per-driver results ──────────────────────────────────────────────
