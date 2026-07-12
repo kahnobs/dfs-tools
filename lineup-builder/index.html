@@ -1584,6 +1584,11 @@ const PGA_STAT_ALIASES = {
   sg_putt:['sg_putt'], sg_t2g:['sg_t2g'], sg_tot:['sg_tot'],
   w_ott:['w_ott','w_sg_ott'], w_app:['w_app','w_sg_app'], w_arg:['w_arg','w_sg_arg'],
   w_putt:['w_putt','w_sg_putt'], w_t2g:['w_t2g','w_sg_t2g'], w_tot:['w_tot','w_sg_tot'],
+  // style stats — shape the PGA sim's hole scoring (birdie rate, double-bogey
+  // share, eagle odds per golfer); merged into slate tabs by the pipeline
+  bob:['bob','birdie or better','birdie to bogey ratio'],
+  bogey_avoid:['bogey_avoid','bogey avoidance'],
+  sg_par_5:['sg_par_5','sg par 5','sg: par 5'],
 };
 function applyPgaStats(p, row, headers){
   const hdrs=(headers||[]).map(h=>(h||'').trim().toLowerCase());
@@ -6871,6 +6876,43 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
   // signal only. A proj-implied-finish skill component was tried and removed
   // per explicit user direction (3rd-party source, adds noise).
 
+  // ── Residual tilts: rating & practice vs the odds board ──────────────────
+  // The market is the prior; ratings and practice only matter where they
+  // DISAGREE with it. Each signal converts to a field percentile and is
+  // compared to the odds-implied percentile — the residual (signal − odds)
+  // is zero when the book already priced the information, so nothing is
+  // double counted; if the market is efficient the tilts vanish on their own.
+  // Residuals then:
+  //   • tilt skill score by at most ±8%. Skill drives the fallback finish
+  //     anchor beyond posted tiers, run order, and wreck clustering — the
+  //     mid/backfield where books are coarsest. The winner draw and posted-
+  //     tier draws stay pure market, so win/top-N calibration is untouched.
+  //   • tilt laps-led / fastest-lap weights harder (±35% / ±25% at maximum
+  //     disagreement): DK's dominator categories have NO betting market, so
+  //     practice race-pace is un-priced information there by definition.
+  (function residualTilts(){
+    const pctRank=vals=>{
+      const ok=vals.filter(x=>x.v!=null&&!isNaN(x.v)).sort((a,b)=>a.v-b.v);
+      const m=new Map();
+      ok.forEach((x,r)=>m.set(x.i, ok.length>1?r/(ok.length-1):0.5));
+      return m;
+    };
+    const oddsPct=pctRank(pool.map((p,i)=>({i, v:(p._nSkillScore>0&&p._nOddsScore>0)?p._nOddsScore:null})));
+    const ratePct=pctRank(pool.map((p,i)=>{const r=parseFloat(p.rating); return {i, v:r>0?r:null};}));
+    const pracVals=pool.map((p,i)=>{const v=parseFloat(p.practice); return {i, v:!isNaN(v)?v:null};});
+    const pracN=pracVals.filter(x=>x.v!=null).length;
+    const pracPct=pracN>=6?pctRank(pracVals):new Map(); // needs real coverage to rank against
+    pool.forEach((p,i)=>{
+      const o=oddsPct.get(i);
+      p._nResidR=(o!=null&&ratePct.has(i))?(ratePct.get(i)-o):0;
+      p._nResidP=(o!=null&&pracPct.has(i))?(pracPct.get(i)-o):0;
+      if(p._nSkillScore>0){
+        const tilt=Math.max(-0.08,Math.min(0.08, 0.05*p._nResidR + 0.08*p._nResidP));
+        p._nSkillScore*=(1+tilt);
+      }
+    });
+  })();
+
   // Primary sort by skill score
   const skillSorted = [...pool].sort((a,b)=> b._nSkillScore - a._nSkillScore);
   skillSorted.forEach((p,i)=>{ p._nSkillRank = i+1; });
@@ -7178,6 +7220,11 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
         // Late phase: finish position drives who leads
         const lateW  = Math.exp(-lapDecayRate*(d.finishPos-1));
 
+        // Dominator residual: practice race-pace (and a touch of rating) shift
+        // laps-led share where they disagree with the odds — no betting market
+        // prices laps led, so this is un-priced signal, not double counting.
+        const domW = Math.max(0.6, 1 + 0.35*(d.p._nResidP||0) + 0.10*(d.p._nResidR||0));
+
         // Combined: win prob sets the ceiling, skill rank dampens flukes,
         // grid/finish drive phase-specific allocation
         const isQualifier = li >= baseLapLeaders.length;
@@ -7185,10 +7232,10 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
           const gridRank = d.p._nLLGrid;
           const oddsRank = winOddsSorted.findIndex(x => x.p === d.p) + 1;
           const qualScale = Math.max(0.20, 1 - (gridRank + oddsRank - 2) / 18);
-          return (earlyW * earlyLaps + lateW * lateLaps * 0.25) * skillW * winW * qualScale;
+          return (earlyW * earlyLaps + lateW * lateLaps * 0.25) * skillW * winW * qualScale * domW;
         }
 
-        return (earlyW * earlyLaps + lateW * lateLaps) * skillW * winW;
+        return (earlyW * earlyLaps + lateW * lateLaps) * skillW * winW * domW;
       });
       const totalLapW = lapWeights.reduce((s,w)=>s+w,0);
       lapLeaders.forEach((d,i)=>{
@@ -7237,7 +7284,8 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
     // FL pool = all green flag laps (every lap has one fastest driver)
     // Track-specific decay and driver count — superspeedway most spread
     const fastLeaders = survivorDrawnFinal.slice(0, Math.min(FL_DRIVERS, numSurvivors));
-    const fastWeights = fastLeaders.map(d=>Math.exp(-FL_DECAY*(d.finishPos-1)));
+    const fastWeights = fastLeaders.map(d=>Math.exp(-FL_DECAY*(d.finishPos-1))
+      * Math.max(0.7, 1 + 0.25*(d.p._nResidP||0)));
     const totalFastW  = fastWeights.reduce((s,w)=>s+w,0);
     if(totalFastW > 0){
       fastLeaders.forEach((d,i)=>{
@@ -10193,17 +10241,28 @@ async function importSheetSlate(tabTitle, gid, sport){
     document.getElementById('slateName').value  = tabTitle;
     document.getElementById('slateSport').value = sport;
 
-    // Show the manual content area with mapper (sheet data pre-loaded)
+    // Auto-map first — sheet tabs are OUR format, so detection almost always
+    // finds everything and there is nothing for the user to confirm.
     parsedCSV._fromSheet = true;
     colMapping = {};
     document.getElementById('uploadFileName').textContent = `⬇ ${tabTitle}`;
     document.getElementById('createSlateBtn').disabled = true;
     document.getElementById('validationMsg').className = 'validation-msg';
-    // Switch to manual content area which has the mapper + create button
+    autoMapColumns(sport);
+
+    // One-click import: required columns + projection + ownership all
+    // detected → create the slate immediately, no mapping screen. The mapper
+    // only appears when detection came up short (or via manual CSV upload).
+    const missingReq = REQUIRED_ROLES.filter(r=>colMapping[r.value]==null);
+    if(!missingReq.length && colMapping.proj!=null && colMapping.own!=null){
+      createSlate();
+      const ns=slates[slates.length-1];
+      showToast(`✓ Imported ${ns?ns.name:tabTitle} — ${ns?(ns.players||[]).length:'?'} players, columns auto-mapped`,'ok');
+      return;
+    }
+    // Detection incomplete — show the mapper for manual attention
     document.getElementById('slatePathSheetContent').style.display='none';
     document.getElementById('slatePathManualContent').style.display='block';
-    // Trigger auto-mapping
-    autoMapColumns(sport);
 
   } catch(e){
     if(listEl) listEl.innerHTML = `<div class="sheet-error">Failed to load tab data.<br>${e.message}</div>`;
@@ -10762,6 +10821,14 @@ function createSlate(){
 
     // PGA: pick up cheat-sheet stat columns (dist/acc/gir + weighted SG) for archetypes
     if(sport==='pga') applyPgaStats(p, row, parsedCSV.headers);
+
+    // NASCAR: practice composite (console's "Practice Score" column) — read
+    // straight off the header like the UFC sim columns; feeds the sim's
+    // residual tilts (un-priced dominator signal).
+    if(sport==='nascar'){
+      const pi2=parsedCSV.headers.findIndex(h=>/^practice([\s_]?score)?$/i.test((h||'').trim()));
+      if(pi2>=0){ const v=parseFloat(row[pi2]); if(!isNaN(v)) p.practice=v; }
+    }
 
     players.push(p);
   });
