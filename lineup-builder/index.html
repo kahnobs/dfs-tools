@@ -2027,6 +2027,11 @@ function slateFieldsBase(slate){
   if(cm.proj!=null)   f.push({key:'value', label:'Val',  cls:'col-r', computed:true});
   if(cm.own!=null)    f.push({key:'own',   label:'Own%', cls:'col-r'});
   if(cm.rating!=null) f.push({key:'rating',label:'Rtg',  cls:'col-r'});
+  // NASCAR practice composite (console's Practice Score) — shown whenever the
+  // slate carries it; also feeds the sim's residual tilts
+  if(slate.sport==='nascar' && (slate.players||[]).some(p=>p.practice!=null)){
+    f.push({key:'practice', label:'Prac', cls:'col-r'});
+  }
   if(cm.team!=null)   f.push({key:'team',  label:'Team', cls:''});
   if(cm.ml!=null)     f.push({key:'ml',    label:'ML',    cls:'col-r'});
   if(cm.itd!=null)    f.push({key:'itd',   label:'ITD',   cls:'col-r'});
@@ -2547,6 +2552,13 @@ function renderPool(){
           const rv=parseFloat(p.rating);
           if(isNaN(rv)||p.rating==null||p.rating==='') return `<div class="cell-mono ${f.cls}" style="color:var(--muted)">—</div>`;
           return `<div class="cell-mono ${f.cls}">${rv%1===0?rv:rv.toFixed(1)}</div>`;
+        }
+        if(f.key==='practice'){
+          const pv=parseFloat(p.practice);
+          if(isNaN(pv)) return `<div class="cell-mono ${f.cls}" style="color:var(--muted)">—</div>`;
+          // composite is a 0–100 field-percentile blend: fast = green, slow = red
+          const c = pv>=70 ? 'var(--green)' : pv>=55 ? 'var(--text)' : pv>=40 ? 'var(--muted)' : 'var(--red)';
+          return `<div class="cell-mono ${f.cls}" style="color:${c};" title="Practice composite: 10-lap avg ×.5 · 5-lap ×.3 · best lap ×.2, field percentile">${pv%1===0?pv:pv.toFixed(1)}</div>`;
         }
       return `<div class="cell-mono ${f.cls}">${v}</div>`;
     }).join('');
