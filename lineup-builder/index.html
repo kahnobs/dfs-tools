@@ -6221,6 +6221,8 @@ async function runPgaSimGen(){
   if(out===null&&window._genCancelled) log('Cancelled.');
 
   // ── Theme readout: which skill set / wave each lineup is built around ──
+  // NOTE: runUFCContestEV renders the preview modal BEFORE returning, so after
+  // tagging we re-open it — otherwise the pills never appear on first render.
   if(out&&out.length&&res.factors){
     const AX_LABEL={drv:'Distance',acc:'Accuracy',app:'Approach',arg:'Short-game',putt:'Putting'};
     const idxById={}; pool.forEach((p,i)=>idxById[p.id]=i);
@@ -6233,18 +6235,24 @@ async function runPgaSimGen(){
         let m=0,n2=0; l.forEach(p=>{ const i=idxById[p.id]; if(i!=null){ m+=res.factors.load[a][i]; n2++; } });
         return {k, m:n2?m/n2:0};
       }).sort((p,q)=>q.m-p.m);
+      // dominant axis tags at a friendlier bar (0.20 = clearly above-median
+      // group on that skill); a second axis needs to be nearly as strong
       const tags=[];
-      if(ax[0].m>=0.30) tags.push(AX_LABEL[ax[0].k]);
+      if(ax[0].m>=0.20) tags.push(AX_LABEL[ax[0].k]);
       if(ax[1]&&ax[1].m>=0.30) tags.push(AX_LABEL[ax[1].k]);
-      let am=0; l.forEach(p=>{ const m2=String(p.start||'').match(/(\d{1,2}):\d{2}/); if(m2&&+m2[1]<12) am++; });
-      if(am>=5) tags.push('AM stack'); else if(am<=1) tags.push('PM stack');
+      // wave composition → the existing AM/PM pill + wave filter chips
+      let am=0, pm=0;
+      l.forEach(p=>{ const w=getPlayerAMPM(p); if(w==='AM') am++; else if(w==='PM') pm++; });
+      l._waveTag = am>=4 ? 'am' : pm>=4 ? 'pm' : null;
       const theme=tags.length?tags.join(' + '):'Balanced';
       l._theme=theme;
-      themeCount[theme]=(themeCount[theme]||0)+1;
+      const themeKey=theme+(l._waveTag?` (${l._waveTag.toUpperCase()} heavy)`:'');
+      themeCount[themeKey]=(themeCount[themeKey]||0)+1;
     });
     const summary=Object.entries(themeCount).sort((a,b)=>b[1]-a[1])
       .map(([t,c])=>`${t} ×${c}`).join(', ');
     log(`Theme allocation: ${summary}`);
+    openPreviewModal(out, 'proj'); // re-render with theme + wave tags attached
   }
   done();
 }
@@ -10139,12 +10147,23 @@ function renderPreviewLineupsList(){
     const arcTag = arcGroup ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${arcGroup.color}22;color:${arcGroup.color};border:1px solid ${arcGroup.color}44;margin-left:4px;">${arcGroup.name}</span>` : '';
     const wTag = waveTag ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${waveTag==='am'?'rgba(34,197,94,.15)':'rgba(245,197,24,.15)'};color:${waveTag==='am'?'var(--green)':'var(--accent)'};border:1px solid ${waveTag==='am'?'rgba(34,197,94,.3)':'rgba(245,197,24,.3)'};margin-left:4px;">${waveTag==='am'?'AM':'PM'}</span>` : '';
     const bTag = bucketName ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(232,66,26,.1);color:var(--accent2);border:1px solid rgba(232,66,26,.3);margin-left:4px;">🏁 ${bucketName.split(' ').slice(-1)[0]}</span>` : '';
+    // Sim-mode theme: split the "Approach + AM stack" string into per-tag pills
+    const themeTags = (lineup._theme && lineup._theme!=='Balanced')
+      ? lineup._theme.split(' + ').map(t=>{
+          const isWave = /stack$/.test(t);
+          const isAM = t==='AM stack';
+          const bg = isWave ? (isAM?'rgba(34,197,94,.15)':'rgba(245,197,24,.15)') : 'rgba(168,85,247,.12)';
+          const fg = isWave ? (isAM?'var(--green)':'var(--accent)') : 'var(--purple,#a855f7)';
+          const bd = isWave ? (isAM?'rgba(34,197,94,.3)':'rgba(245,197,24,.3)') : 'rgba(168,85,247,.35)';
+          return `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${bg};color:${fg};border:1px solid ${bd};margin-left:4px;">${t}</span>`;
+        }).join('')
+      : '';
 
     // Find original index in full previewLineups array for checkbox id
     const origIdx = previewLineups.indexOf(lineup);
     return `<div class="preview-lineup-card">
       <div class="preview-lineup-top">
-        <div style="display:flex;align-items:center;gap:4px;"><div class="preview-lineup-num">Lineup ${origIdx+1}</div>${arcTag}${wTag}${bTag}</div>
+        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;"><div class="preview-lineup-num">Lineup ${origIdx+1}</div>${arcTag}${wTag}${bTag}${themeTags}</div>
         <div style="display:flex;align-items:center;gap:8px">
           <div class="preview-lineup-meta">${fmt(sal)}</div>
           <input type="checkbox" class="preview-check" id="pc${origIdx}" checked onchange="renderPreviewExposure()">
