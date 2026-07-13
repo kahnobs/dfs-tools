@@ -5855,21 +5855,55 @@ async function runPgaSims(pool, numSims, log){
     return null;
   }
 
-  // Calibration targets from each golfer's fitted survival curve
-  const RUNGS=[5,10,20,40];
-  const targets=pool.map(p=>p._curve? RUNGS.map(k=>S_at(p._curve,k)) : null);
-
   // Cut-odds targets when the cut market is mapped & broadly posted
+  // (built before the model blend so the blend can re-weight them too)
   const cm=(activeSlate()&&activeSlate().columnMapping)||{};
-  let cutTargets=null;
+  let cutTargets0=null;
   if(cm.cut!=null){
     const probs=pool.map(p=>nascarMlToProb(p.cut));
     const posted=probs.filter(v=>v!=null);
     if(posted.length>=0.8*N){
       const div=Math.max(0.5, posted.reduce((a,b)=>a+b,0)/Math.min(PGA_CUT_N,N));
-      cutTargets=probs.map(v=>v!=null?clampP(v/div):null);
+      cutTargets0=probs.map(v=>v!=null?clampP(v/div):null);
     }
   }
+
+  // Calibration targets from each golfer's fitted survival curve
+  const RUNGS=[5,10,20,40];
+  const targets=pool.map(p=>p._curve? RUNGS.map(k=>S_at(p._curve,k)) : null);
+
+  // ── MODEL BLEND: your custom-model score as a structural balance against
+  // the market ─────────────────────────────────────────────────────────────
+  // The model score is a RANKING of the field. Quantile mapping turns it into
+  // probabilities without inventing any: the model-implied curve for golfer i
+  // is the MARKET curve of the golfer at i's MODEL rank — so the field's
+  // aggregate probability mass is exactly preserved (the market's curves are
+  // just re-dealt in model order), and calibration totals stay sane. Final
+  // targets are a fixed 70% market / 30% model blend. Golfers missing a
+  // rating keep pure market targets. Not a knob — a base part of the sim.
+  const MODEL_BLEND = 0.30;
+  {
+    const both=[]; // indices with a curve AND a rating
+    pool.forEach((p,i)=>{ const r=parseFloat(p.rating); if(targets[i]&&!isNaN(r)) both.push(i); });
+    if(both.length >= Math.max(20, 0.6*withCurve.length)){
+      const byMarket=both.slice().sort((a,b)=>targets[b][1]-targets[a][1]); // strongest first (P(top10))
+      const byModel =both.slice().sort((a,b)=>parseFloat(pool[b].rating)-parseFloat(pool[a].rating));
+      const marketTargetsInOrder=byMarket.map(i=>targets[i]);
+      const marketCutInOrder = cutTargets0 ? byMarket.map(i=>cutTargets0[i]) : null;
+      byModel.forEach((i,rank)=>{
+        const mT=marketTargetsInOrder[rank];
+        targets[i]=targets[i].map((v,r)=>clampP((1-MODEL_BLEND)*v + MODEL_BLEND*mT[r]));
+        if(marketCutInOrder && cutTargets0 && cutTargets0[i]!=null && marketCutInOrder[rank]!=null){
+          cutTargets0[i]=clampP((1-MODEL_BLEND)*cutTargets0[i] + MODEL_BLEND*marketCutInOrder[rank]);
+        }
+      });
+      if(log) log(`Model blend: 70% market / 30% model — ${both.length} golfers re-weighted by your rating rank.`);
+    } else if(log){
+      log('Model blend skipped — rating column missing for most of the field (market-pure sim).');
+    }
+  }
+
+  const cutTargets = cutTargets0;
 
   // Wave from tee time (R1); R2 flips. -1 = unknown → no wave shock.
   const wave=pool.map(p=>{
@@ -5925,13 +5959,15 @@ async function runPgaSims(pool, numSims, log){
   }
   const factorsOn=fsig.some(s=>s>0);
 
-  // Init strength from the curve's mid-rung; no-odds golfers start at field-worst
+  // Init strength from the BLENDED targets' mid-rung (market×model); no-odds
+  // golfers start at field-worst. Calibration then converges to the blended
+  // finish rates, so the model's re-ranking survives into the final sims.
   const mu=new Float64Array(N);
   let worst=0;
   pool.forEach((p,i)=>{
-    if(p._curve){ mu[i]=-logit(S_at(p._curve,15))*0.85; if(mu[i]>worst) worst=mu[i]; }
+    if(targets[i]){ mu[i]=-logit((targets[i][0]+targets[i][1])/2)*0.85; if(mu[i]>worst) worst=mu[i]; }
   });
-  pool.forEach((p,i)=>{ if(!p._curve) mu[i]=worst+0.6; });
+  pool.forEach((p,i)=>{ if(!targets[i]) mu[i]=worst+0.6; });
 
   // One simulated tournament: per-round scores, cut, final ranks
   const x1=new Float64Array(N),x2=new Float64Array(N),x3=new Float64Array(N),x4=new Float64Array(N);
