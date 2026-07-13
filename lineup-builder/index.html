@@ -1083,7 +1083,7 @@ html { overscroll-behavior-y: contain; }
               <span class="setting-label">Simulations</span>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
-              <input type="range" min="500" max="5000" step="500" value="2000" id="pgaSimCountSlider"
+              <input type="range" min="500" max="10000" step="500" value="2000" id="pgaSimCountSlider"
                 style="width:100%;accent-color:var(--green);"
                 oninput="document.getElementById('pgaSimCountLabel').textContent=this.value;const _s=activeSlate();if(_s){_s._simCount=parseInt(this.value);save();}">
               <span id="pgaSimCountLabel" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--green);font-weight:600;min-width:38px;">2000</span>
@@ -1097,6 +1097,23 @@ html { overscroll-behavior-y: contain; }
               <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">Each simulated tournament draws "how the course played" — sims where an axis swings lift every golfer strong in that skill together, so correlated skill-set lineups emerge naturally. Higher = that skill separates the field harder here.</div>
               <div id="pgaFactorRows"></div>
               <div id="pgaFactorSrc" style="font-size:9px;color:var(--muted);margin-top:2px;"></div>
+            </div>
+            <div style="border-top:1px solid var(--border);margin:10px 0 8px;padding-top:8px;">
+              <span class="setting-label">Tee Wave</span>
+              <div style="font-size:9px;color:var(--muted);line-height:1.5;margin:3px 0 6px;">Each sim draws AM/PM session shocks (R1, flipped in R2, feeding the cut). <b>Volatility</b> = how much the draw matters this week — crank it for links/weather weeks, cut it for calm small-field events. <b>Lean</b> = a known forecast edge: shifts the average two-round draw toward one wave while keeping the randomness.</div>
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                <span style="font-size:10px;color:var(--muted);width:74px;flex:none;">Volatility</span>
+                <input type="range" min="0" max="200" step="10" value="100" id="pgaWaveVol" style="width:100%;accent-color:var(--accent);"
+                  oninput="const _s=activeSlate();if(_s){_s._pgaWave=Object.assign({},_s._pgaWave,{vol:parseInt(this.value)});save();}updatePgaWaveLabels();">
+                <span id="pgaWaveVolLabel" style="font-family:'DM Mono',monospace;font-size:10px;color:var(--accent);font-weight:600;min-width:58px;text-align:right;">±0.55 str</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:10px;color:var(--muted);width:74px;flex:none;">Lean</span>
+                <input type="range" min="-100" max="100" step="5" value="0" id="pgaWaveLean" style="width:100%;accent-color:var(--green);"
+                  oninput="const _s=activeSlate();if(_s){_s._pgaWave=Object.assign({},_s._pgaWave,{lean:parseInt(this.value)});save();}updatePgaWaveLabels();">
+                <span id="pgaWaveLeanLabel" style="font-family:'DM Mono',monospace;font-size:10px;color:var(--green);font-weight:600;min-width:58px;text-align:right;">even</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-top:2px;"><span>← favors PM wave</span><span>favors AM wave →</span></div>
             </div>
             <div id="pgaEvHome"></div>
           </div>
@@ -3331,13 +3348,11 @@ function renderGroupRulesSummary(){
   const simTab = document.getElementById('modeTabSimulate');
   const hasSimulation = slate.sport==='ufc' || slate.sport==='nascar' || slate.sport==='pga';
   if(simTab) simTab.style.display = hasSimulation ? '' : 'none';
-  // Default mode per slate: simulate for UFC/NASCAR, optimize for PGA.
-  // Honour a manual override the user has set on this slate; otherwise default
-  // to the sport-appropriate mode every time we switch to this slate.
+  // Default mode per slate: simulate wherever simulation exists (incl. PGA —
+  // the sim engine is the golf builder's primary mode). A manual override the
+  // user set on this slate always wins.
   if(slate._genModeOverride){
     switchGenMode(slate._genModeOverride);
-  } else if(slate.sport==='pga'){
-    switchGenMode('optimize');
   } else if(hasSimulation){
     switchGenMode('simulate');
   } else {
@@ -3434,7 +3449,10 @@ function renderGroupRulesSummary(){
 
   const waveSection = document.getElementById('waveSection');
   if(waveSection){
-    const showWave = slate.sport==='pga' && slate.columnMapping?.start!=null;
+    // Hidden in sim mode: the simulation prices the draw itself (wave shocks
+    // + the Tee Wave volatility/lean controls in the PGA Simulation panel).
+    const simOn = slate.sport==='pga' && slate._ufcEv && slate._ufcEv.on;
+    const showWave = slate.sport==='pga' && slate.columnMapping?.start!=null && !simOn;
     waveSection.style.display = showWave ? 'block' : 'none';
   }
 
@@ -5110,6 +5128,22 @@ function renderPgaFactorSliders(){
   const src=document.getElementById('pgaFactorSrc');
   if(src) src.textContent = f.src==='auto' ? `auto: ${f.course||'course profile'}` : (f.src==='manual'?'manually adjusted':'defaults — click Auto to load this course\'s profile');
   maybeAutoLoadPgaFactors();
+  restorePgaWaveUI();
+}
+function updatePgaWaveLabels(){
+  const vol=parseInt(document.getElementById('pgaWaveVol')?.value||100);
+  const lean=parseInt(document.getElementById('pgaWaveLean')?.value||0);
+  const vl=document.getElementById('pgaWaveVolLabel');
+  if(vl) vl.textContent='±'+(PGA_SIG_WAVE*vol/100).toFixed(2)+' str';
+  const ll=document.getElementById('pgaWaveLeanLabel');
+  if(ll) ll.textContent=lean===0?'even':((lean>0?'AM +':'PM +')+Math.abs(lean/100*0.5).toFixed(2)+' str');
+}
+function restorePgaWaveUI(){
+  const s=activeSlate(); if(!s) return;
+  const w=s._pgaWave||{};
+  const v=document.getElementById('pgaWaveVol'); if(v) v.value=w.vol!=null?w.vol:100;
+  const l=document.getElementById('pgaWaveLean'); if(l) l.value=w.lean!=null?w.lean:0;
+  updatePgaWaveLabels();
 }
 // recipe → axis strengths. Buckets mirror the recipe's stat clusters; SG:T2G
 // splits evenly across drv/app/arg. Scale: base 12 + 3×(recipe weight points
@@ -5892,8 +5926,15 @@ async function runPgaSims(pool, numSims, log){
   const r12=new Float64Array(N), tot=new Float64Array(N);
   const made=new Uint8Array(N), rank=new Int32Array(N);
   const idx=[...Array(N).keys()];
+  // Tee Wave controls: volatility scales the shock SD (0–200% of the 0.55-
+  // stroke default); lean shifts the MEAN of the R1 shock — a known forecast
+  // edge worth up to ±0.5 strokes net over two rounds for one wave, with the
+  // randomness intact (positive lean favors AM: lower strokes for wave 0).
+  const wcfg=(activeSlate()&&activeSlate()._pgaWave)||{};
+  const wSig=PGA_SIG_WAVE*Math.max(0,Math.min(200,wcfg.vol!=null?+wcfg.vol:100))/100;
+  const wLean=Math.max(-100,Math.min(100,wcfg.lean!=null?+wcfg.lean:0))/100*0.5;
   function simOnce(withRounds){
-    const w1=gauss()*PGA_SIG_WAVE, w2=gauss()*PGA_SIG_WAVE;
+    const w1=gauss()*wSig - wLean, w2=gauss()*wSig;
     if(factorsOn){
       // week-persistent course conditions: one draw per axis per tournament
       for(let i=0;i<N;i++) fShift[i]=0;
@@ -9132,8 +9173,9 @@ async function runAutoGen(){
   // against it (Stage 2) — see runPgaTargetGen. The candidate-oversample →
   // gauntlet → greedy path below remains for other sports/metrics.
   if(slate.sport==='pga' && optimizeBy==='blend3'){
-    const waveAM = parseInt(document.getElementById('waveSlider_am')?.value||0);
-    const wavePM = parseInt(document.getElementById('waveSlider_pm')?.value||0);
+    const _simQuotasOff = slate._ufcEv && slate._ufcEv.on; // sim prices the draw itself
+    const waveAM = _simQuotasOff ? 0 : parseInt(document.getElementById('waveSlider_am')?.value||0);
+    const wavePM = _simQuotasOff ? 0 : parseInt(document.getElementById('waveSlider_pm')?.value||0);
     const archetypeBoost = parseFloat(document.getElementById('archetypeBoostSlider')?.value||4);
     return runPgaTargetGen({ slate, pool, groups, target, maxExpPct, overrides,
       minOverrides, minSal, maxSal, randomness, wEquity, wModel, wProj,
@@ -9172,9 +9214,9 @@ async function runAutoGen(){
   const archetypes = _pgaSimOn ? [] : groups.filter(g=>g.isArchetype && (g.playerIds||[]).length>0 && (g.archetypePct||0)>0);
   const archetypeBoost = parseFloat(document.getElementById('archetypeBoostSlider')?.value||4);
 
-  // Wave allocation (PGA only)
-  const waveAM = parseInt(document.getElementById('waveSlider_am')?.value||0);
-  const wavePM = parseInt(document.getElementById('waveSlider_pm')?.value||0);
+  // Wave allocation (PGA only) — ignored in sim mode, the sim prices the draw
+  const waveAM = _pgaSimOn ? 0 : parseInt(document.getElementById('waveSlider_am')?.value||0);
+  const wavePM = _pgaSimOn ? 0 : parseInt(document.getElementById('waveSlider_pm')?.value||0);
   const useWave = (waveAM > 0 || wavePM > 0) && slate.sport==='pga' && slate.columnMapping?.start!=null;
   const hasTeeMapping = slate.sport==='pga' && slate.columnMapping?.start!=null;
   // Build AM/PM sets whenever tee times are mapped — needed for wave tagging even at 0% allocation
