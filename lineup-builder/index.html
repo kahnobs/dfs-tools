@@ -5536,6 +5536,70 @@ async function runUFCContestEV(ctx){
   // chalk clustering) scaled to field size; (b) analytic Π(own)×DUP_K as the
   // floor for candidates too unique to appear in the sample. Take the max.
   const idxById = new Map(pool.map((p,i)=>[p.id,i]));
+
+  // ── Dominance repair ──────────────────────────────────────────────────────
+  // A lineup that leaves real salary on a weak player is making a false claim:
+  // that no affordable, unused, clearly-better golfer exists. Per-sim optimals
+  // often carry such a slot — a cheap golfer who spiked in the ONE draw that
+  // made the lineup optimal, but who is dominated out-of-sample. Before any EV
+  // is priced, repair every candidate: while a lineup contains a player who
+  // could be swapped for an affordable, unused golfer whose out-of-sample
+  // expected points exceed his by more than a leverage margin, make the best
+  // such swap. Near-ties survive (that's genuine leverage); clearly-worse
+  // plays get upgraded. EV is then priced on the repaired lineups, so nothing
+  // is stale and dominated builds can't be selected — they no longer exist.
+  if(ctx.dominanceRepair){
+    const capSal = ctx.maxSal || 50000;
+    const meanIdx = new Float64Array(pool.length);
+    for(let i=0;i<pool.length;i++){ const a=scoreArr[i]; let s=0; for(const si of simIdx) s+=(a[si]||0); meanIdx[i]=s/Math.max(1,simIdx.length); }
+    const salIdx = pool.map(p=>p.salary||0);
+    // leverage margin: only swap when the upgrade clears ~0.18σ of the field's
+    // out-of-sample scoring spread — big enough to keep near-tie leverage,
+    // small enough to catch a genuinely dominated cheap play.
+    let mu0=0,n0=0; for(let i=0;i<pool.length;i++){ mu0+=meanIdx[i]; n0++; }
+    mu0/=Math.max(1,n0);
+    let v0=0; for(let i=0;i<pool.length;i++){ const d=meanIdx[i]-mu0; v0+=d*d; }
+    const sd=Math.sqrt(v0/Math.max(1,n0));
+    const MARGIN=0.18*sd;
+    const byMeanDesc=[...Array(pool.length).keys()].sort((a,b)=>meanIdx[b]-meanIdx[a]);
+    const seen=new Map();
+    let swaps=0, dominated=0;
+    const repaired=[];
+    for(const e of ranked){
+      let idxs=e.lineup.map(p=>idxById.get(p.id)).filter(x=>x!=null);
+      if(idxs.length!==6){ repaired.push(e); continue; }
+      let touched=false;
+      for(let iter=0; iter<4; iter++){
+        const inSet=new Set(idxs);
+        const used=idxs.reduce((s,i)=>s+salIdx[i],0);
+        const leftover=capSal-used;
+        // find the slot with the largest available upgrade gain
+        let bestGain=MARGIN, bestSlot=-1, bestUp=-1;
+        for(const pI of idxs){
+          const budget=salIdx[pI]+leftover;
+          for(const q of byMeanDesc){
+            if(meanIdx[q]-meanIdx[pI]<=bestGain) break; // sorted desc → no better remains
+            if(inSet.has(q)) continue;
+            if(salIdx[q]>budget) continue;
+            bestGain=meanIdx[q]-meanIdx[pI]; bestSlot=pI; bestUp=q; break;
+          }
+        }
+        if(bestSlot<0) break;
+        idxs=idxs.map(i=>i===bestSlot?bestUp:i);
+        touched=true; swaps++;
+      }
+      if(touched) dominated++;
+      const key=idxs.slice().sort((a,b)=>a-b).join('|');
+      const rep=seen.get(key);
+      if(rep){ rep.count+=(e.count||1); continue; } // merge duplicates created by repair
+      const ne={lineup:idxs.map(i=>pool[i]), count:e.count||1, totalScore:e.totalScore||0};
+      seen.set(key, ne); repaired.push(ne);
+    }
+    // replace the candidate list in place (repaired already dedup'd by key)
+    ranked.length=0; for(const e of new Set(repaired)) ranked.push(e);
+    log(`Dominance repair: ${swaps.toLocaleString()} upgrades across ${dominated.toLocaleString()} candidates (margin ${MARGIN.toFixed(1)} pts) — dominated plays removed before EV pricing.`);
+  }
+
   const DUP_K = 4;
   // ── Robust aggregation across ownership scenarios ──
   // Averaging scenario EVs does NOT penalize input-fragile positions — under
@@ -6303,56 +6367,9 @@ async function runPgaSimGen(){
   // is higher. Propose one-swap upgrades that spend the leftover, then let
   // the SAME contest-EV pricing judge originals and neighbors on equal
   // footing. Nothing is forced: if the cheap build carries more EV, it wins.
-  {
-    const idxOf=new Map(); pool.forEach((p,i)=>idxOf.set(p.id,i));
-    // Upgrades target FINISH-POSITION EQUITY (the de-vigged odds-ladder
-    // survival curve integrated against DK placement points), not raw sim
-    // mean — leftover salary should buy players who finish up top more
-    // often. Mean sim score is the fallback when no odds are mapped.
-    const meanScore=new Float64Array(pool.length);
-    for(let i=0;i<pool.length;i++){ let s=0; for(let k=0;k<simsDone;k++) s+=simScores[i][k]; meanScore[i]=s/simsDone; }
-    const hasEq = ensureOddsScores(pool, slate);
-    const eqOf = i => hasEq ? (pool[i]._oddsScore||0) : meanScore[i];
-    const byEqDesc=[...Array(pool.length).keys()].sort((a,b)=>eqOf(b)-eqOf(a));
-    let added=0; const CAP_ADD=600;
-    const baseCands=ranked.slice(0, 800);
-    for(const e of baseCands){
-      if(added>=CAP_ADD) break;
-      const sal=e.lineup.reduce((s,p)=>s+(p.salary||0),0);
-      const leftover=maxSal-sal;
-      if(leftover<500) continue;
-      const inIds=new Set(e.lineup.map(p=>p.id));
-      // try upgrading each of the two lowest-equity slots (they're where
-      // unspent salary converts to finish equity most directly)
-      const slots=e.lineup.slice().sort((x,y)=>eqOf(idxOf.get(x.id))-eqOf(idxOf.get(y.id))).slice(0,2);
-      for(const outP of slots){
-        if(added>=CAP_ADD) break;
-        const outIdx=idxOf.get(outP.id); if(outIdx==null) continue;
-        const budget=(outP.salary||0)+leftover;
-        let pick=null;
-        for(const i of byEqDesc){
-          if(eqOf(i)<=eqOf(outIdx)) break;                // only strict finish-equity upgrades
-          const p=pool[i];
-          if(inIds.has(p.id)) continue;
-          if((p.salary||0)<=(outP.salary||0)) continue;   // must actually spend the leftover
-          if((p.salary||0)>budget) continue;
-          pick=p; break;
-        }
-        if(!pick) continue;
-        const neighbor=e.lineup.map(p=>p.id===outP.id?pick:p);
-        const key=neighbor.map(p=>idxOf.get(p.id)).sort((a,b)=>a-b).join('|');
-        if(rankedMap.has(key)) continue;
-        rankedMap.set(key,{lineup:neighbor,count:1,totalScore:0});
-        ranked.push(rankedMap.get(key));
-        added++;
-      }
-    }
-    if(added) log(`+${added.toLocaleString()} salary-jammed neighbors added (upgrades by finish-position equity) — EV pricing decides, nothing forced.`);
-  }
-
   const simScoresById={};
   pool.forEach((p,i)=>{ simScoresById[p.id]=simScores[i]; });
-  const out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, target, maxExpPct, overrides, oosParity:1, sharpShare:0.15});
+  const out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, target, maxExpPct, overrides, oosParity:1, sharpShare:0.15, dominanceRepair:true, maxSal});
   if(out===null&&window._genCancelled) log('Cancelled.');
 
   // ── Theme readout: which skill set / wave each lineup is built around ──
