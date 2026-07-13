@@ -5857,15 +5857,18 @@ async function runPgaSims(pool, numSims, log){
     if(ok.length>1) ok.forEach((x,r)=>out[x.i]=(r/(ok.length-1))*2-1);
     return out;
   };
-  const Ldist=pctLoad(pool.map(p=>parseFloat(p.dist))), Lott=pctLoad(pool.map(p=>parseFloat(p.w_ott)));
+  // Axis loadings use BLENDED SG (60% weighted / 40% raw, same as the model
+  // and archetypes) so non-PGA-tour players load correctly on hot axes.
+  const blNaN=(p,cat)=>{const v=blSG(p,cat);return v==null?NaN:v;};
+  const Ldist=pctLoad(pool.map(p=>parseFloat(p.dist))), Lott=pctLoad(pool.map(p=>blNaN(p,'ott')));
   const Lgir=pctLoad(pool.map(p=>parseFloat(p.gir)));
   const fload=[
     new Float64Array(N).map((_,i)=>Ldist[i]*0.7+Lott[i]*0.3),        // drv
     pctLoad(pool.map(p=>parseFloat(p.acc))),                          // acc
-    (function(){const L=pctLoad(pool.map(p=>parseFloat(p.w_app)));    // app
+    (function(){const L=pctLoad(pool.map(p=>blNaN(p,'app')));         // app
       return new Float64Array(N).map((_,i)=>L[i]*0.8+Lgir[i]*0.2);})(),
-    pctLoad(pool.map(p=>parseFloat(p.w_arg))),                        // arg
-    pctLoad(pool.map(p=>parseFloat(p.w_putt))),                       // putt
+    pctLoad(pool.map(p=>blNaN(p,'arg'))),                             // arg
+    pctLoad(pool.map(p=>blNaN(p,'putt'))),                            // putt
   ];
   const nAxes=FAXES.length;
   const fShift=new Float64Array(N);      // per-sim combined skill shift
