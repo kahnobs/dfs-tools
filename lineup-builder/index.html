@@ -205,8 +205,9 @@ input[type=text]:focus{border-color:var(--accent);}
 .groups-panel{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:10px;}
 .groups-panel::-webkit-scrollbar{width:4px;}
 .groups-panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
-.groups-header{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
-.btn-add-group{background:rgba(168,85,247,.15);border:1px solid rgba(168,85,247,.3);color:var(--purple);padding:5px 10px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;}
+.groups-header{display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;flex-shrink:0;}
+.groups-header .section-title{margin-right:auto;}
+.btn-add-group{background:rgba(168,85,247,.15);border:1px solid rgba(168,85,247,.3);color:var(--purple);padding:4px 10px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;white-space:nowrap;flex-shrink:0;line-height:1.4;}
 .btn-add-group:hover{background:rgba(168,85,247,.25);}
 .group-card{background:var(--surface);border:1px solid var(--border);border-radius:7px;overflow:hidden;}
 .group-header{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);}
@@ -1571,9 +1572,12 @@ const GROUP_COLORS = ['#f5c518','#e8421a','#22c55e','#3b82f6','#a855f7','#f97316
 // PGA ARCHETYPES — field-relative tags from RRG cheat-sheet stats
 // ═══════════════════════════════════════════════════════════
 // Stat columns are read from the import CSV by header name (any alias below).
-// All strokes-gained archetypes use WEIGHTED SG (field-strength adjusted), so
-// production against weak fields doesn't inflate tags. Thresholds are
-// percentiles recomputed from the current slate's field every time, so they
+// All strokes-gained archetypes use BLENDED SG — 60% raw + 40% field-strength
+// weighted (same RAW_SHARE as the model). Raw keeps strong players from
+// non-PGA tours representable in open fields (an Open Championship DP World
+// regular has no route to a good weighted-only number); the weighted portion
+// still separates players who beat harder fields. Thresholds are percentiles
+// recomputed from the current slate's field every time, so they
 // self-calibrate week to week.
 const PGA_STAT_ALIASES = {
   dist:['dist','driving_distance','driving_distance_avg'],
@@ -1610,6 +1614,18 @@ function pctl(vals,q){
   return lo===hi ? a[lo] : a[lo]+(a[hi]-a[lo])*(pos-lo);
 }
 
+// Blended strokes gained: 60% raw + 40% weighted (falls back to whichever
+// version exists when one is missing).
+const BLEND_RAW=0.6;
+function blSG(p,cat){
+  const r=parseFloat(p['sg_'+cat]), w=parseFloat(p['w_'+cat]);
+  const hasR=!isNaN(r), hasW=!isNaN(w);
+  if(hasR&&hasW) return BLEND_RAW*r+(1-BLEND_RAW)*w;
+  if(hasW) return w;
+  if(hasR) return r;
+  return null;
+}
+
 const ARCHETYPE_DEFS=[
   {name:'Elite Bomber',color:'#e8421a',desc:'Driving distance ≥ 90th percentile of field',
    test:(p,T)=>p.dist!=null&&T.dist90!=null&&p.dist>=T.dist90},
@@ -1619,33 +1635,35 @@ const ARCHETYPE_DEFS=[
    test:(p,T)=>p.acc!=null&&T.acc90!=null&&p.acc>=T.acc90},
   {name:'Accuracy',color:'#14b8a6',desc:'Driving accuracy 75th–90th percentile',
    test:(p,T)=>p.acc!=null&&T.acc75!=null&&p.acc>=T.acc75&&p.acc<T.acc90},
-  {name:'Iron Specialist',color:'#a855f7',desc:'Weighted SG:APP ≥ 80th percentile',
-   test:(p,T)=>p.w_app!=null&&T.app80!=null&&p.w_app>=T.app80},
-  {name:'Short-Game Specialist',color:'#ec4899',desc:'Weighted ARG & PUTT both positive, combined ≥ 75th percentile',
-   test:(p,T)=>p.w_arg!=null&&p.w_putt!=null&&T.combo75!=null&&p.w_arg>0&&p.w_putt>0&&(p.w_arg+p.w_putt)>=T.combo75},
-  {name:'Elite Ball-Striker',color:'#f5c518',desc:'Weighted SG:T2G ≥ 90th percentile',
-   test:(p,T)=>p.w_t2g!=null&&T.t2g90!=null&&p.w_t2g>=T.t2g90},
-  {name:'Hot Putter',color:'#22c55e',desc:'Weighted SG:PUTT ≥ 80th percentile',
-   test:(p,T)=>p.w_putt!=null&&T.putt80!=null&&p.w_putt>=T.putt80},
+  {name:'Iron Specialist',color:'#a855f7',desc:'Blended SG:APP (60% raw / 40% weighted) ≥ 80th percentile',
+   test:(p,T)=>{const v=blSG(p,'app');return v!=null&&T.app80!=null&&v>=T.app80;}},
+  {name:'Short-Game Specialist',color:'#ec4899',desc:'Blended ARG & PUTT both positive, combined ≥ 75th percentile',
+   test:(p,T)=>{const a=blSG(p,'arg'),u=blSG(p,'putt');return a!=null&&u!=null&&T.combo75!=null&&a>0&&u>0&&(a+u)>=T.combo75;}},
+  {name:'Elite Ball-Striker',color:'#f5c518',desc:'Blended SG:T2G (60% raw / 40% weighted) ≥ 90th percentile',
+   test:(p,T)=>{const v=blSG(p,'t2g');return v!=null&&T.t2g90!=null&&v>=T.t2g90;}},
+  {name:'Hot Putter',color:'#22c55e',desc:'Blended SG:PUTT (60% raw / 40% weighted) ≥ 80th percentile',
+   test:(p,T)=>{const v=blSG(p,'putt');return v!=null&&T.putt80!=null&&v>=T.putt80;}},
   {name:'Greens Machine',color:'#84cc16',desc:'GIR ≥ 75th percentile',
    test:(p,T)=>p.gir!=null&&T.gir75!=null&&p.gir>=T.gir75},
-  {name:'All-Around',color:'#eab308',desc:'All four weighted SG categories ≥ field median',
-   test:(p,T)=>['w_ott','w_app','w_arg','w_putt'].every(k=>p[k]!=null)&&p.w_ott>=T.medOtt&&p.w_app>=T.medApp&&p.w_arg>=T.medArg&&p.w_putt>=T.medPutt},
+  {name:'All-Around',color:'#eab308',desc:'All four blended SG categories ≥ field median',
+   test:(p,T)=>{const o=blSG(p,'ott'),a=blSG(p,'app'),g=blSG(p,'arg'),u=blSG(p,'putt');
+     return o!=null&&a!=null&&g!=null&&u!=null&&o>=T.medOtt&&a>=T.medApp&&g>=T.medArg&&u>=T.medPutt;}},
 ];
 
 function archetypeData(slate){
   const ps=(slate.players||[]);
   const col=c=>ps.map(p=>p[c]);
+  const bcol=c=>ps.map(p=>blSG(p,c));
   const T={
     dist75:pctl(col('dist'),.75), dist90:pctl(col('dist'),.90),
     acc75:pctl(col('acc'),.75), acc90:pctl(col('acc'),.90),
-    app80:pctl(col('w_app'),.80),
-    combo75:pctl(ps.filter(p=>p.w_arg!=null&&p.w_putt!=null).map(p=>p.w_arg+p.w_putt),.75),
-    t2g90:pctl(col('w_t2g'),.90),
-    putt80:pctl(col('w_putt'),.80),
+    app80:pctl(bcol('app'),.80),
+    combo75:pctl(ps.map(p=>{const a=blSG(p,'arg'),u=blSG(p,'putt');return a!=null&&u!=null?a+u:null;}),.75),
+    t2g90:pctl(bcol('t2g'),.90),
+    putt80:pctl(bcol('putt'),.80),
     gir75:pctl(col('gir'),.75),
-    medOtt:pctl(col('w_ott'),.50), medApp:pctl(col('w_app'),.50),
-    medArg:pctl(col('w_arg'),.50), medPutt:pctl(col('w_putt'),.50),
+    medOtt:pctl(bcol('ott'),.50), medApp:pctl(bcol('app'),.50),
+    medArg:pctl(bcol('arg'),.50), medPutt:pctl(bcol('putt'),.50),
   };
   const out=ARCHETYPE_DEFS.map(d=>({name:d.name,color:d.color,desc:d.desc,
     playerIds:ps.filter(p=>{try{return d.test(p,T);}catch(e){return false;}}).map(p=>p.id)}))
@@ -1673,7 +1691,7 @@ function toggleArchetypePanel(){
   panel.style.cssText='margin:10px 0;padding:12px;background:var(--surface2);border:1px solid rgba(168,85,247,.25);border-radius:8px;';
   panel.innerHTML=`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px;">
-      <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:.5px;">SELECT ARCHETYPES · thresholds are field-relative percentiles, weighted SG</div>
+      <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:.5px;">SELECT ARCHETYPES · thresholds are field-relative percentiles, blended SG (60% raw / 40% weighted)</div>
       <div style="display:flex;gap:6px;">
         <button onclick="document.querySelectorAll('#archetypePanel input').forEach(c=>c.checked=true)" style="padding:3px 8px;font-size:10px;font-family:'DM Mono',monospace;border:none;border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">All</button>
         <button onclick="document.querySelectorAll('#archetypePanel input').forEach(c=>c.checked=false)" style="padding:3px 8px;font-size:10px;font-family:'DM Mono',monospace;border:none;border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">None</button>
