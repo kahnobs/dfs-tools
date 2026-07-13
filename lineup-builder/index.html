@@ -3972,6 +3972,7 @@ function stepRule(gid, field, delta){
 let _genMode = 'simulate';
 
 function switchGenMode(mode, manual=false){
+  const _modeChanged = _genMode !== mode;
   _genMode = mode;
   if(manual){ const s=activeSlate(); if(s){ s._genModeOverride=mode; save(); } }
   const optBtn = document.getElementById('modeTabOptimize');
@@ -3986,6 +3987,7 @@ function switchGenMode(mode, manual=false){
   const btn = document.getElementById('genBtn');
   if(btn) btn.textContent = mode==='simulate' ? '🎲 Run Simulation' : '⚡ Generate Lineups';
   toggleBlendRow();
+  if(_modeChanged && typeof renderGroupRulesSummary==='function') renderGroupRulesSummary();
 }
 
 function toggleNascarSimMode(){
@@ -8677,7 +8679,7 @@ function runPgaTargetGen(ctx){
   const useWave = (waveAM>0||wavePM>0) && slate.columnMapping?.start!=null;
   const amIds = new Set(useWave ? pool.filter(p=>getPlayerAMPM(p)==='AM').map(p=>p.id) : []);
   const pmIds = new Set(useWave ? pool.filter(p=>getPlayerAMPM(p)==='PM').map(p=>p.id) : []);
-  const _pgaSimOn = slate.sport==='pga' && slate._ufcEv && slate._ufcEv.on;
+  const _pgaSimOn = slate.sport==='pga' && _genMode==='simulate';
   const archetypes = _pgaSimOn ? [] : groups.filter(g=>g.isArchetype && (g.playerIds||[]).length>0 && (g.archetypePct||0)>0);
   // Old-engine archetype semantics: user slider drives both a member boost and
   // a non-member suppression on archetype-scheduled lineups.
@@ -9210,7 +9212,7 @@ async function runAutoGen(){
   });
   const generated=[];
   // Archetype allocation — build a schedule of which archetype (if any) to boost per lineup slot
-  const _pgaSimOn = slate.sport==='pga' && slate._ufcEv && slate._ufcEv.on;
+  const _pgaSimOn = slate.sport==='pga' && _genMode==='simulate';
   const archetypes = _pgaSimOn ? [] : groups.filter(g=>g.isArchetype && (g.playerIds||[]).length>0 && (g.archetypePct||0)>0);
   const archetypeBoost = parseFloat(document.getElementById('archetypeBoostSlider')?.value||4);
 
