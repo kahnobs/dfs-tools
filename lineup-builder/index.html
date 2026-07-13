@@ -1643,10 +1643,8 @@ const ARCHETYPE_DEFS=[
    test:(p,T)=>{const a=blSG(p,'arg'),u=blSG(p,'putt');return a!=null&&u!=null&&T.combo75!=null&&a>0&&u>0&&(a+u)>=T.combo75;}},
   {name:'Elite Ball-Striker',color:'#f5c518',desc:'Blended SG:T2G (60% raw / 40% weighted) ≥ 90th percentile',
    test:(p,T)=>{const v=blSG(p,'t2g');return v!=null&&T.t2g90!=null&&v>=T.t2g90;}},
-  {name:'Hot Putter',color:'#22c55e',desc:'Blended SG:PUTT (60% raw / 40% weighted) ≥ 80th percentile',
+  {name:'Elite Putter',color:'#22c55e',desc:'Blended SG:PUTT (60% raw / 40% weighted) ≥ 80th percentile',
    test:(p,T)=>{const v=blSG(p,'putt');return v!=null&&T.putt80!=null&&v>=T.putt80;}},
-  {name:'Greens Machine',color:'#84cc16',desc:'GIR ≥ 75th percentile',
-   test:(p,T)=>p.gir!=null&&T.gir75!=null&&p.gir>=T.gir75},
   {name:'All-Around',color:'#eab308',desc:'All four blended SG categories ≥ field median',
    test:(p,T)=>{const o=blSG(p,'ott'),a=blSG(p,'app'),g=blSG(p,'arg'),u=blSG(p,'putt');
      return o!=null&&a!=null&&g!=null&&u!=null&&o>=T.medOtt&&a>=T.medApp&&g>=T.medArg&&u>=T.medPutt;}},
@@ -1663,7 +1661,6 @@ function archetypeData(slate){
     combo75:pctl(ps.map(p=>{const a=blSG(p,'arg'),u=blSG(p,'putt');return a!=null&&u!=null?a+u:null;}),.75),
     t2g90:pctl(bcol('t2g'),.90),
     putt80:pctl(bcol('putt'),.80),
-    gir75:pctl(col('gir'),.75),
     medOtt:pctl(bcol('ott'),.50), medApp:pctl(bcol('app'),.50),
     medArg:pctl(bcol('arg'),.50), medPutt:pctl(bcol('putt'),.50),
   };
