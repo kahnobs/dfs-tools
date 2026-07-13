@@ -5425,7 +5425,17 @@ async function runUFCContestEV(ctx){
   // Sampled sims (stride) — EV needs breadth, not every sim
   const SIMS = Math.min(1500, totalSims);
   const simIdx = [];
-  { const stride = totalSims/SIMS; for(let k=0;k<SIMS;k++) simIdx.push(Math.floor(k*stride)); }
+  if(ctx.oosParity!=null){
+    // OUT-OF-SAMPLE pricing: candidates were generated from the other parity's
+    // sims — price only on held-out sims so a lineup can't cash the exact
+    // draws that created it.
+    const avail=[]; for(let t=ctx.oosParity; t<totalSims; t+=2) avail.push(t);
+    const n=Math.min(SIMS, avail.length);
+    const stride=avail.length/n;
+    for(let k=0;k<n;k++) simIdx.push(avail[Math.floor(k*stride)]);
+  } else {
+    const stride = totalSims/SIMS; for(let k=0;k<SIMS;k++) simIdx.push(Math.floor(k*stride));
+  }
 
   // 1) OWNERSHIP-UNCERTAINTY SCENARIOS + field models.
   // Ownership projections are point estimates of the least-knowable input, and
@@ -6198,7 +6208,12 @@ async function runPgaSimGen(){
   const cheapPre=[0]; cheapSorted.forEach((v,i)=>cheapPre.push(cheapPre[i]+v));
   const rankedMap=new Map();
   const colScores=new Float64Array(pool.length);
-  for(let s=0;s<simsDone;s++){
+  // TRAIN/TEST SPLIT: candidates are ex-post optimals of EVEN sims only; EV
+  // is priced on the held-out ODD sims (oosParity below). Pricing a lineup
+  // on the sims that created it hands it guaranteed rank-1 finishes there —
+  // in-sample optimism that especially inflates thin high-variance stacks
+  // which are optimal only in the freak draws that birthed them.
+  for(let s=0;s<simsDone;s+=2){
     for(let i=0;i<pool.length;i++) colScores[i]=simScores[i][s];
     const lu=pgaOptimalForSim(pool, colScores, salArr, cheapPre, maxSal);
     if(lu){
@@ -6214,10 +6229,65 @@ async function runPgaSimGen(){
     }
   }
   const ranked=[...rankedMap.values()].sort((a,b)=>b.count-a.count);
-  log(`${ranked.length.toLocaleString()} unique optimal lineups across ${simsDone.toLocaleString()} tournaments.`);
+  log(`${ranked.length.toLocaleString()} unique optimal lineups from ${Math.ceil(simsDone/2).toLocaleString()} generation sims (EV priced on the ${Math.floor(simsDone/2).toLocaleString()} held-out sims).`);
+
+  // ── Candidate augmentation: salary-jammed neighbors ──────────────────────
+  // Per-sim optimals systematically under-spend: a cheap spike wins its own
+  // sim, while the "same lineup, cheap slot upgraded" variant is optimal in
+  // NO single sim — so it never enters the pool even when its across-sim EV
+  // is higher. Propose one-swap upgrades that spend the leftover, then let
+  // the SAME contest-EV pricing judge originals and neighbors on equal
+  // footing. Nothing is forced: if the cheap build carries more EV, it wins.
+  {
+    const idxOf=new Map(); pool.forEach((p,i)=>idxOf.set(p.id,i));
+    // Upgrades target FINISH-POSITION EQUITY (the de-vigged odds-ladder
+    // survival curve integrated against DK placement points), not raw sim
+    // mean — leftover salary should buy players who finish up top more
+    // often. Mean sim score is the fallback when no odds are mapped.
+    const meanScore=new Float64Array(pool.length);
+    for(let i=0;i<pool.length;i++){ let s=0; for(let k=0;k<simsDone;k++) s+=simScores[i][k]; meanScore[i]=s/simsDone; }
+    const hasEq = ensureOddsScores(pool, slate);
+    const eqOf = i => hasEq ? (pool[i]._oddsScore||0) : meanScore[i];
+    const byEqDesc=[...Array(pool.length).keys()].sort((a,b)=>eqOf(b)-eqOf(a));
+    let added=0; const CAP_ADD=600;
+    const baseCands=ranked.slice(0, 800);
+    for(const e of baseCands){
+      if(added>=CAP_ADD) break;
+      const sal=e.lineup.reduce((s,p)=>s+(p.salary||0),0);
+      const leftover=maxSal-sal;
+      if(leftover<500) continue;
+      const inIds=new Set(e.lineup.map(p=>p.id));
+      // try upgrading each of the two lowest-equity slots (they're where
+      // unspent salary converts to finish equity most directly)
+      const slots=e.lineup.slice().sort((x,y)=>eqOf(idxOf.get(x.id))-eqOf(idxOf.get(y.id))).slice(0,2);
+      for(const outP of slots){
+        if(added>=CAP_ADD) break;
+        const outIdx=idxOf.get(outP.id); if(outIdx==null) continue;
+        const budget=(outP.salary||0)+leftover;
+        let pick=null;
+        for(const i of byEqDesc){
+          if(eqOf(i)<=eqOf(outIdx)) break;                // only strict finish-equity upgrades
+          const p=pool[i];
+          if(inIds.has(p.id)) continue;
+          if((p.salary||0)<=(outP.salary||0)) continue;   // must actually spend the leftover
+          if((p.salary||0)>budget) continue;
+          pick=p; break;
+        }
+        if(!pick) continue;
+        const neighbor=e.lineup.map(p=>p.id===outP.id?pick:p);
+        const key=neighbor.map(p=>idxOf.get(p.id)).sort((a,b)=>a-b).join('|');
+        if(rankedMap.has(key)) continue;
+        rankedMap.set(key,{lineup:neighbor,count:1,totalScore:0});
+        ranked.push(rankedMap.get(key));
+        added++;
+      }
+    }
+    if(added) log(`+${added.toLocaleString()} salary-jammed neighbors added (upgrades by finish-position equity) — EV pricing decides, nothing forced.`);
+  }
+
   const simScoresById={};
   pool.forEach((p,i)=>{ simScoresById[p.id]=simScores[i]; });
-  const out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, target, maxExpPct, overrides});
+  const out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, target, maxExpPct, overrides, oosParity:1});
   if(out===null&&window._genCancelled) log('Cancelled.');
 
   // ── Theme readout: which skill set / wave each lineup is built around ──
@@ -10147,15 +10217,12 @@ function renderPreviewLineupsList(){
     const arcTag = arcGroup ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${arcGroup.color}22;color:${arcGroup.color};border:1px solid ${arcGroup.color}44;margin-left:4px;">${arcGroup.name}</span>` : '';
     const wTag = waveTag ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${waveTag==='am'?'rgba(34,197,94,.15)':'rgba(245,197,24,.15)'};color:${waveTag==='am'?'var(--green)':'var(--accent)'};border:1px solid ${waveTag==='am'?'rgba(34,197,94,.3)':'rgba(245,197,24,.3)'};margin-left:4px;">${waveTag==='am'?'AM':'PM'}</span>` : '';
     const bTag = bucketName ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(232,66,26,.1);color:var(--accent2);border:1px solid rgba(232,66,26,.3);margin-left:4px;">🏁 ${bucketName.split(' ').slice(-1)[0]}</span>` : '';
-    // Sim-mode theme: split the "Approach + AM stack" string into per-tag pills
+    // Sim-mode theme pills, colored to match the skill-correlation sliders
+    const THEME_COLORS={'Distance':'#e8421a','Accuracy':'#3b82f6','Approach':'#a855f7','Short-game':'#ec4899','Putting':'#22c55e'};
     const themeTags = (lineup._theme && lineup._theme!=='Balanced')
       ? lineup._theme.split(' + ').map(t=>{
-          const isWave = /stack$/.test(t);
-          const isAM = t==='AM stack';
-          const bg = isWave ? (isAM?'rgba(34,197,94,.15)':'rgba(245,197,24,.15)') : 'rgba(168,85,247,.12)';
-          const fg = isWave ? (isAM?'var(--green)':'var(--accent)') : 'var(--purple,#a855f7)';
-          const bd = isWave ? (isAM?'rgba(34,197,94,.3)':'rgba(245,197,24,.3)') : 'rgba(168,85,247,.35)';
-          return `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${bg};color:${fg};border:1px solid ${bd};margin-left:4px;">${t}</span>`;
+          const c = THEME_COLORS[t] || '#a855f7';
+          return `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${c}1f;color:${c};border:1px solid ${c}55;margin-left:4px;">${t}</span>`;
         }).join('')
       : '';
 
