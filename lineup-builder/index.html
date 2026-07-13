@@ -1147,7 +1147,7 @@ html { overscroll-behavior-y: contain; }
                   <div style="font-size:9px;color:var(--muted);margin-top:1px;">Select by simulated payout vs an Own%-modeled field</div>
                 </div>
                 <label class="toggle-switch">
-                  <input type="checkbox" id="ufcEvToggle" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.on=this.checked;save();}const es=document.getElementById('ufcEvSettings');if(es)es.style.display=this.checked?'block':'none';if(this.checked){renderContestPresetSelect();updateContestEvSummary();}">
+                  <input type="checkbox" id="ufcEvToggle" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.on=this.checked;save();}const es=document.getElementById('ufcEvSettings');if(es)es.style.display=this.checked?'block':'none';if(this.checked){renderContestPresetSelect();updateContestEvSummary();}if(typeof renderGroupRulesSummary==='function')renderGroupRulesSummary();">
                   <span class="toggle-slider"></span>
                 </label>
               </div>
@@ -3441,8 +3441,12 @@ function renderGroupRulesSummary(){
   // Always hide archetype section for non-PGA slates — must happen before the
   // early return below so an empty-groups UFC slate doesn't leave it visible
   // from a prior PGA render.
+  // ...and hide it in PGA sim (Contest EV) mode: the simulation's skill-axis
+  // correlation surfaces archetype-tilted builds naturally, so manual
+  // allocation would double-steer.
+  const pgaSimOn = slate.sport === 'pga' && slate._ufcEv && slate._ufcEv.on;
   const arcSec = document.getElementById('archetypeSection');
-  if(arcSec) arcSec.style.display = (slate.sport === 'pga') ? '' : 'none';
+  if(arcSec) arcSec.style.display = (slate.sport === 'pga' && !pgaSimOn) ? '' : 'none';
 
   const el=document.getElementById('groupRulesSummary');
   if(!groups.length){el.textContent='No groups defined yet.';return;}
@@ -3473,7 +3477,7 @@ function renderGroupRulesSummary(){
   // Archetype sliders — section visibility already set above; just populate if PGA
   const archetypes = groups.filter(g=>g.isArchetype && (g.playerIds||[]).length > 0);
   const arcSliders = document.getElementById('archetypeSliders');
-  if(!arcSliders || !archetypes.length || slate.sport !== 'pga') return;
+  if(!arcSliders || !archetypes.length || slate.sport !== 'pga' || pgaSimOn) return;
   arcSec.style.display='block';
   arcSliders.innerHTML = archetypes.map(g=>{
     const pct = g.archetypePct||0;
@@ -5081,7 +5085,7 @@ function updateContestEvSummary(){
 // course key-stats recipe from the Apps Script brain and maps its stat picks
 // onto the five axes — courses with one dominant separating skill get one hot
 // axis (portfolio goes heavy), multi-path courses get spread (portfolio splits).
-const PGA_FACTOR_URL='https://script.google.com/macros/s/AKfycbyS9p6fMoKWb-9xqLp0RtNkvU5TSNsXHXszcoNrXQW7LbwG5PQi1R4Rd_Fnn5F3lLln/exec';
+const PGA_FACTOR_URL='https://script.google.com/macros/s/AKfycbytrdWIU7WZHZxJK4Y2OnHBSBU3H0kUMx1hApDjFVTS5bIPfVXyC3B68kqQodMpVqzm/exec';
 const PGA_FACTOR_TOKEN='rrg-sync-7281';
 const PGA_FACTOR_AXES=[
   ['drv','Driving Dist','#e8421a'],
@@ -5105,6 +5109,7 @@ function renderPgaFactorSliders(){
   }).join('');
   const src=document.getElementById('pgaFactorSrc');
   if(src) src.textContent = f.src==='auto' ? `auto: ${f.course||'course profile'}` : (f.src==='manual'?'manually adjusted':'defaults — click Auto to load this course\'s profile');
+  maybeAutoLoadPgaFactors();
 }
 // recipe → axis strengths. Buckets mirror the recipe's stat clusters; SG:T2G
 // splits evenly across drv/app/arg. Scale: base 12 + 3×(recipe weight points
@@ -5128,25 +5133,55 @@ function recipeToPgaFactors(j){
   Object.keys(add).forEach(k=>out[k]=Math.min(85,Math.round(12+3*add[k])));
   return out;
 }
+function pgaFactorGuess(s){
+  let guess=(s.name||'').replace(/^PGA\s*[-–]\s*/i,'').replace(/\s*\d{1,2}\/\d{1,2}(\/\d{2,4})?.*$/,'').trim();
+  return guess.replace(/\b(showdown|weekend|r\d)\b/gi,'').trim();
+}
+async function fetchPgaFactors(s, name){
+  const r=await fetch(PGA_FACTOR_URL+'?token='+PGA_FACTOR_TOKEN+'&action=recipe&slate='+encodeURIComponent(name));
+  const j=await r.json();
+  if(j.ok===false||j.error) throw new Error(j.error||'course lookup failed');
+  const prof=recipeToPgaFactors(j);
+  s._pgaFactors=Object.assign({},s._pgaFactors,prof,{src:'auto',course:j.course_name||''});
+  save(); renderPgaFactorSliders();
+  return {j, prof};
+}
 async function autoFillPgaFactors(){
   const s=activeSlate(); if(!s){ showToast('No active slate','err'); return; }
-  let guess=(s.name||'').replace(/^PGA\s*[-–]\s*/i,'').replace(/\s*\d{1,2}\/\d{1,2}(\/\d{2,4})?.*$/,'').trim();
-  guess=guess.replace(/\b(showdown|weekend|r\d)\b/gi,'').trim();
-  const name=prompt('Tournament name for the course lookup:', guess||'');
-  if(!name) return;
+  const guess=pgaFactorGuess(s);
   showToast('Fetching course profile…','ok');
   try{
-    const r=await fetch(PGA_FACTOR_URL+'?token='+PGA_FACTOR_TOKEN+'&action=recipe&slate='+encodeURIComponent(name));
-    const j=await r.json();
-    if(j.ok===false||j.error) throw new Error(j.error||'course lookup failed');
-    const prof=recipeToPgaFactors(j);
-    s._pgaFactors=Object.assign({},s._pgaFactors,prof,{src:'auto',course:j.course_name||''});
-    save(); renderPgaFactorSliders();
-    const desc=PGA_FACTOR_AXES.map(([k,l])=>`${l.split(' ')[0]} ${prof[k]}`).join(' · ');
-    showToast(`✓ ${j.course_name}: ${desc}`,'ok');
+    let res;
+    try{
+      if(!guess) throw new Error('no tournament name in slate title');
+      res=await fetchPgaFactors(s, guess);
+    }catch(e1){
+      const name=prompt('Tournament name for the course lookup:', guess||'');
+      if(!name) return;
+      res=await fetchPgaFactors(s, name);
+    }
+    const desc=PGA_FACTOR_AXES.map(([k,l])=>`${l.split(' ')[0]} ${res.prof[k]}`).join(' · ');
+    showToast(`✓ ${res.j.course_name}: ${desc}`,'ok');
   }catch(e){
     showToast('Course profile fetch failed — '+(e.message||e)+'. Sliders unchanged.','err');
   }
+}
+// Auto-load the course profile the first time a PGA slate's sliders render
+// with plain defaults — the user can still adjust or re-pull manually.
+const _pgaFactorAutoTried=new Set();
+async function maybeAutoLoadPgaFactors(){
+  const s=activeSlate(); if(!s||s.sport!=='pga') return;
+  const f=s._pgaFactors||{};
+  if(f.src) return; // already auto-loaded or manually adjusted
+  const key=s.id||s.name||'x';
+  if(_pgaFactorAutoTried.has(key)) return;
+  _pgaFactorAutoTried.add(key);
+  const guess=pgaFactorGuess(s);
+  if(!guess) return;
+  try{
+    const res=await fetchPgaFactors(s, guess);
+    showToast(`✓ Skill correlation auto-set from ${res.j.course_name}`,'ok');
+  }catch(e){ /* keep defaults; the Auto button remains for a manual retry */ }
 }
 
 // Shared Contest-EV settings UI (UFC + NASCAR). One DOM node, unique ids —
@@ -5167,6 +5202,9 @@ function restoreContestEvUI(slate){
     }
   }
   const ev = slate._ufcEv||{};
+  // PGA slates default to simulation (Contest EV) mode — the sim engine is
+  // the golf builder's whole point; users can still toggle it off per slate.
+  if(slate.sport==='pga' && ev.on==null){ ev.on=true; slate._ufcEv=Object.assign({}, slate._ufcEv, {on:true}); save(); }
   const evT = document.getElementById('ufcEvToggle');
   if(evT){ evT.checked = !!ev.on; const es=document.getElementById('ufcEvSettings'); if(es) es.style.display = ev.on?'block':'none'; }
   const evF = document.getElementById('ufcEvField'); if(evF && ev.fieldSize) evF.value = ev.fieldSize;
@@ -8595,7 +8633,8 @@ function runPgaTargetGen(ctx){
   const useWave = (waveAM>0||wavePM>0) && slate.columnMapping?.start!=null;
   const amIds = new Set(useWave ? pool.filter(p=>getPlayerAMPM(p)==='AM').map(p=>p.id) : []);
   const pmIds = new Set(useWave ? pool.filter(p=>getPlayerAMPM(p)==='PM').map(p=>p.id) : []);
-  const archetypes = groups.filter(g=>g.isArchetype && (g.playerIds||[]).length>0 && (g.archetypePct||0)>0);
+  const _pgaSimOn = slate.sport==='pga' && slate._ufcEv && slate._ufcEv.on;
+  const archetypes = _pgaSimOn ? [] : groups.filter(g=>g.isArchetype && (g.playerIds||[]).length>0 && (g.archetypePct||0)>0);
   // Old-engine archetype semantics: user slider drives both a member boost and
   // a non-member suppression on archetype-scheduled lineups.
   const archBoostFactor    = 1 + ((archetypeBoost-1)*0.25);
@@ -9126,7 +9165,8 @@ async function runAutoGen(){
   });
   const generated=[];
   // Archetype allocation — build a schedule of which archetype (if any) to boost per lineup slot
-  const archetypes = groups.filter(g=>g.isArchetype && (g.playerIds||[]).length>0 && (g.archetypePct||0)>0);
+  const _pgaSimOn = slate.sport==='pga' && slate._ufcEv && slate._ufcEv.on;
+  const archetypes = _pgaSimOn ? [] : groups.filter(g=>g.isArchetype && (g.playerIds||[]).length>0 && (g.archetypePct||0)>0);
   const archetypeBoost = parseFloat(document.getElementById('archetypeBoostSlider')?.value||4);
 
   // Wave allocation (PGA only)
