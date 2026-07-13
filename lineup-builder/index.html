@@ -205,8 +205,8 @@ input[type=text]:focus{border-color:var(--accent);}
 .groups-panel{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:10px;}
 .groups-panel::-webkit-scrollbar{width:4px;}
 .groups-panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
-.groups-header{display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;flex-shrink:0;}
-.groups-header .section-title{margin-right:auto;}
+.groups-header{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;flex-shrink:0;}
+.groups-header-btns{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto;}
 .btn-add-group{background:rgba(168,85,247,.15);border:1px solid rgba(168,85,247,.3);color:var(--purple);padding:4px 10px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;white-space:nowrap;flex-shrink:0;line-height:1.4;}
 .btn-add-group:hover{background:rgba(168,85,247,.25);}
 .group-card{background:var(--surface);border:1px solid var(--border);border-radius:7px;overflow:hidden;}
@@ -921,7 +921,9 @@ html { overscroll-behavior-y: contain; }
       <div class="groups-panel" id="groupsPanel">
         <div class="groups-header">
           <div class="section-title">Player Groups</div>
-          <button class="btn-add-group" id="addGroupBtn" onclick="addGroup()">＋ New Group</button>
+          <div class="groups-header-btns">
+            <button class="btn-add-group" id="addGroupBtn" onclick="addGroup()">＋ New Group</button>
+          </div>
         </div>
         <div id="groupsList"></div>
       </div>
@@ -1629,12 +1631,12 @@ function blSG(p,cat){
 const ARCHETYPE_DEFS=[
   {name:'Elite Bomber',color:'#e8421a',desc:'Driving distance ≥ 90th percentile of field',
    test:(p,T)=>p.dist!=null&&T.dist90!=null&&p.dist>=T.dist90},
-  {name:'Bomber',color:'#f97316',desc:'Driving distance 75th–90th percentile',
-   test:(p,T)=>p.dist!=null&&T.dist75!=null&&p.dist>=T.dist75&&p.dist<T.dist90},
+  {name:'Bomber',color:'#f97316',desc:'Driving distance ≥ 75th percentile (includes Elite Bombers)',
+   test:(p,T)=>p.dist!=null&&T.dist75!=null&&p.dist>=T.dist75},
   {name:'Elite Accuracy',color:'#3b82f6',desc:'Driving accuracy ≥ 90th percentile of field',
    test:(p,T)=>p.acc!=null&&T.acc90!=null&&p.acc>=T.acc90},
-  {name:'Accuracy',color:'#14b8a6',desc:'Driving accuracy 75th–90th percentile',
-   test:(p,T)=>p.acc!=null&&T.acc75!=null&&p.acc>=T.acc75&&p.acc<T.acc90},
+  {name:'Accuracy',color:'#14b8a6',desc:'Driving accuracy ≥ 75th percentile (includes Elite Accuracy)',
+   test:(p,T)=>p.acc!=null&&T.acc75!=null&&p.acc>=T.acc75},
   {name:'Iron Specialist',color:'#a855f7',desc:'Blended SG:APP (60% raw / 40% weighted) ≥ 80th percentile',
    test:(p,T)=>{const v=blSG(p,'app');return v!=null&&T.app80!=null&&v>=T.app80;}},
   {name:'Short-Game Specialist',color:'#ec4899',desc:'Blended ARG & PUTT both positive, combined ≥ 75th percentile',
@@ -3042,7 +3044,7 @@ function renderGroups(){
   if(hasArch && !archBtn && addBtn){
     const b=document.createElement('button');
     b.id='archGroupBtnGroups';
-    b.textContent='🏷 Archetype Groups';
+    b.textContent='Archetype Groups';
     b.style.cssText='background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);color:var(--purple,#a855f7);padding:4px 10px;border-radius:5px;font-size:11px;font-family:"DM Sans",sans-serif;font-weight:600;cursor:pointer;white-space:nowrap;';
     b.onclick=toggleArchetypePanel;
     addBtn.after(b);
