@@ -5465,12 +5465,41 @@ async function runUFCContestEV(ctx){
     scenarios.push(o.map(v=>Math.max(0.1, v*ownBudget/s2)));
   }
   log(`Ownership uncertainty: ${K} scenarios at a standard ±${Math.round(sigma*100)}% (budget-preserving); sims split across them.`);
+
+  // ── Sharp share ───────────────────────────────────────────────────────────
+  // An Own%-sampled field is all recreational chalk — but real large-field
+  // GPPs contain entrants running the same public signals we are. Modeling
+  // the whole field from Own% understates the top of the score curve (exactly
+  // where head payouts are decided) and understates duplication of consensus
+  // builds. So a fixed slice of field entries is drawn from our own candidate
+  // pool, frequency-weighted: multiply-optimal builds are what independent
+  // optimizers converge on. This deflates EV honestly — hardest on consensus
+  // chalk (dup pressure), least on genuinely unique strong builds.
+  const sharpShare = ctx.sharpShare||0;
+  let sharpPool=null;
+  if(sharpShare>0 && ctx.ranked && ctx.ranked.length){
+    const top=ctx.ranked.slice(0, 300);
+    const idxOfP=new Map(pool.map((p,i)=>[p.id,i]));
+    const asIdx=top.map(e=>({idxs:e.lineup.map(p=>idxOfP.get(p.id)).filter(x=>x!=null), w:Math.max(1,e.count||1)}))
+      .filter(x=>x.idxs.length===6);
+    const totW=asIdx.reduce((s,x)=>s+x.w,0);
+    if(asIdx.length && totW>0){ sharpPool={asIdx, totW}; log(`Field realism: ${Math.round(sharpShare*100)}% of modeled entries play like optimizers (drawn from the candidate pool), not Own% chalk.`); }
+  }
+
   const NF = 2000;
   const fields=[], fieldKeyCounts=[];
   let dev0=0, dev0Name='';
   for(let k=0;k<K;k++){
     const {field, maxDev, maxName} = sampleUfcField(pool, NF, scenarios[k]);
     if(!field.length){ log('⚠ Field sampler produced no lineups — check Own% column.'); return null; }
+    if(sharpPool){
+      const nSharp=Math.floor(field.length*sharpShare);
+      for(let j=0;j<nSharp;j++){
+        let r=Math.random()*sharpPool.totW, pick=sharpPool.asIdx[0];
+        for(const x of sharpPool.asIdx){ r-=x.w; if(r<=0){ pick=x; break; } }
+        field[(Math.random()*field.length)|0]=pick.idxs.slice();
+      }
+    }
     fields.push(field);
     const m=new Map();
     field.forEach(l=>{ const kk=l.slice().sort((a,b)=>a-b).join('|'); m.set(kk,(m.get(kk)||0)+1); });
@@ -6323,7 +6352,7 @@ async function runPgaSimGen(){
 
   const simScoresById={};
   pool.forEach((p,i)=>{ simScoresById[p.id]=simScores[i]; });
-  const out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, target, maxExpPct, overrides, oosParity:1});
+  const out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, target, maxExpPct, overrides, oosParity:1, sharpShare:0.15});
   if(out===null&&window._genCancelled) log('Cancelled.');
 
   // ── Theme readout: which skill set / wave each lineup is built around ──
