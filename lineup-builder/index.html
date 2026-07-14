@@ -1632,6 +1632,9 @@ const PGA_STAT_ALIASES = {
   sg_putt:['sg_putt'], sg_t2g:['sg_t2g'], sg_tot:['sg_tot'],
   w_ott:['w_ott','w_sg_ott'], w_app:['w_app','w_sg_app'], w_arg:['w_arg','w_sg_arg'],
   w_putt:['w_putt','w_sg_putt'], w_t2g:['w_t2g','w_sg_t2g'], w_tot:['w_tot','w_sg_tot'],
+  // measured SG-round count (deepest window) — sample-size half of the sim's
+  // axis-reliability lens (paired with the raw-vs-weighted divergence).
+  sg_rounds:['sg_rounds','sg rounds'],
   // style stats — shape the PGA sim's hole scoring (birdie rate, double-bogey
   // share, eagle odds per golfer); merged into slate tabs by the pipeline
   bob:['bob','birdie or better','birdie to bogey ratio'],
@@ -6221,6 +6224,33 @@ async function runPgaSims(pool, numSims, log){
     pctLoad(pool.map(p=>blNaN(p,'arg'))),                             // arg
     pctLoad(pool.map(p=>blNaN(p,'putt'))),                            // putt
   ];
+  // ── Axis-loading reliability: the SAME field-strength trust lens the model
+  // score uses, applied to the correlation loadings. Without it, a weak-field-
+  // inflated player (senior-tour accuracy %, weak-tour SG) loads strongly on an
+  // axis off his raw stats and rises with the genuine skill studs whenever that
+  // axis swings — sneaking garbage in through the CORRELATION door even though
+  // his model score (the marginal) is correctly buried. We shrink each
+  // untrusted player's loadings toward neutral (0) so he just doesn't ride the
+  // skill factors. Trust = the SAME two signals the webhook's model-score
+  // reliability uses: FIELD STRENGTH (raw total SG vs field-weighted total SG,
+  // field-relative) and SAMPLE SIZE (sg_rounds — measured-round count, deepest
+  // window). R = R_sample · R_field, each in [floor,1]. Missing signal → full
+  // trust for that half (so a pre-column sheet degrades to field-strength-only).
+  {
+    const gaps=pool.map(p=>{ const r=parseFloat(p.sg_tot), w=parseFloat(p.w_tot); return (!isNaN(r)&&!isNaN(w))?r-w:null; });
+    const g=gaps.filter(v=>v!=null).sort((a,b)=>a-b);
+    const medGap=g.length?g[g.length>>1]:0;
+    const AX_DIV_K=0.9, AX_DEAD=0.15, AX_DIV_FLOOR=0.25;   // field-strength taper
+    const AX_SG_FULL=28, AX_SAMP_FLOOR=0.25;               // sample-size taper (28≈full)
+    const axR=gaps.map((gp,i)=>{
+      let rd=1; if(gp!=null){ const ex=(gp-medGap)-AX_DEAD; rd=Math.max(AX_DIV_FLOOR,Math.min(1,1-AX_DIV_K*Math.max(0,ex))); }
+      const sr=parseFloat(pool[i].sg_rounds);
+      const rs=isNaN(sr)?1:Math.max(AX_SAMP_FLOOR,Math.min(1,sr/AX_SG_FULL));
+      return rd*rs;
+    });
+    for(let a=0;a<fload.length;a++){ const L=fload[a]; for(let i=0;i<N;i++) L[i]*=axR[i]; }
+    if(log){ const shrunk=axR.filter(r=>r<0.75).length; if(shrunk) log(`Axis reliability: ${shrunk} low-trust golfer${shrunk!==1?'s':''} (weak-field and/or thin sample) damped toward skill-neutral so shaky stats can't ride the correlation axes.`); }
+  }
   const nAxes=FAXES.length;
   const fShift=new Float64Array(N);      // per-sim combined skill shift
   const sigInd=new Float64Array(N);      // renormalized idiosyncratic sigma
