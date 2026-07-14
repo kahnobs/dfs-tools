@@ -1096,6 +1096,11 @@ html { overscroll-behavior-y: contain; }
                 style="width:56px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:5px;font-size:11px;font-family:'DM Mono',monospace;"
                 oninput="const _s=activeSlate();if(_s){_s._pgaCut=parseInt(this.value)||0;save();syncPgaCutUI();}">
               <span id="pgaCutAuto" style="font-size:9px;color:var(--muted);line-height:1.4;cursor:pointer;" onclick="const _s=activeSlate();if(_s){delete _s._pgaCut;save();syncPgaCutUI();}"></span>
+              <span class="setting-label" style="flex:none;margin-left:8px;">Par</span>
+              <input type="number" id="pgaParInput" min="68" max="74" step="1" value="71"
+                style="width:44px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:5px;font-size:11px;font-family:'DM Mono',monospace;"
+                title="Course par — sets the DK 'all 4 rounds under 70' bonus threshold (on a par-70 track, under 70 = under par)"
+                oninput="const _s=activeSlate();if(_s){_s._pgaPar=parseInt(this.value)||71;save();}">
             </div>
             <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
@@ -5971,9 +5976,12 @@ const CUT_TIE_BUFFER = 3;
 function inferPgaCut(name){
   const s=String(name||'').toLowerCase();
   let base=65, label='Tour (65+ties)';
+  // US Open MUST be tested before the Open Championship: the USGA's official
+  // name is "U.S. Open Championship", which contains "open champ" and would
+  // otherwise hit the 70+ties branch.
   if(/pga\s+champ/.test(s))                              { base=70; label='PGA Championship (70+ties)'; }
+  else if(/u\.?\s?s\.?\s*open|\bus\s+open/.test(s))      { base=60; label='US Open (60+ties)'; }
   else if(/open\s+champ|the\s+open|british\s+open/.test(s)){ base=70; label='The Open (70+ties)'; }
-  else if(/u\.?\s?s\.?\s+open|us\s+open/.test(s))        { base=60; label='US Open (60+ties)'; }
   else if(/masters/.test(s))                             { base=50; label='Masters (50+ties)'; }
   return { n: base+CUT_TIE_BUFFER, base, label };
 }
@@ -5990,6 +5998,8 @@ function syncPgaCutUI(){
   const inf=inferPgaCut(s.name);
   const manual=!!s._pgaCut;
   if(el) el.value = manual ? s._pgaCut : inf.n;
+  const parEl=document.getElementById('pgaParInput');
+  if(parEl) parEl.value = s._pgaPar || 71;
   if(lbl){
     lbl.textContent = manual
       ? `manual · click to auto (${inf.label} → ${inf.n})`
@@ -6013,6 +6023,13 @@ function pgaGaussFactory(){
 
 async function runPgaSims(pool, numSims, log){
   const N=pool.length;
+  // Clear stale per-golfer sim results from ANY prior run first — a golfer
+  // hidden after run 1 would otherwise keep old _simDist and show up in the
+  // Sim CSV export next to fresh run-2 rows.
+  {(activeSlate()&&activeSlate().players||[]).forEach(p=>{
+    delete p._simDist; delete p._simWin; delete p._simT5; delete p._simT10;
+    delete p._simT20; delete p._simCut; delete p._simP50;
+  });}
   // Cut line is tournament-specific (Open/PGA Champ 70+ties≈72, US Open≈62,
   // Masters≈53, regular tour 65+ties≈68). Per-slate, defaults to 72.
   const CUT_N=effectivePgaCut(activeSlate());
@@ -6037,13 +6054,23 @@ async function runPgaSims(pool, numSims, log){
     const probs=pool.map(p=>nascarMlToProb(p.cut));
     const posted=probs.filter(v=>v!=null);
     if(posted.length>=0.8*N){
-      const div=Math.max(0.5, posted.reduce((a,b)=>a+b,0)/Math.min(CUT_N,N));
+      // Fair total for the POSTED subset only: unposted golfers (up to 20% of
+      // the field, mostly deep longshots) still occupy real cut slots in every
+      // sim (~20% each), so forcing the posted sum to the FULL CUT_N made the
+      // targets jointly infeasible — calibration pushed the whole priced field
+      // up and crushed the uncalibrated names to compensate.
+      const estUnposted=Math.min(0.5*Math.min(CUT_N,N), 0.20*(N-posted.length));
+      const div=Math.max(0.5, posted.reduce((a,b)=>a+b,0)/Math.max(1,Math.min(CUT_N,N)-estUnposted));
       cutTargets0=probs.map(v=>v!=null?clampP(v/div):null);
     }
   }
 
-  // Calibration targets from each golfer's fitted survival curve
-  const RUNGS=[5,10,20,40];
+  // Calibration targets from each golfer's fitted survival curve.
+  // k=1 (win) is a calibration rung too: without it, win probability was
+  // whatever the equal-variance Gaussian race implied from the mid-rungs, and
+  // longshots' live win equity (flat market curves) was compressed — SimWin%
+  // wasn't market-faithful even though win odds were fitted into the curve.
+  const RUNGS=[1,5,10,20,40];
   const targets=pool.map(p=>p._curve? RUNGS.map(k=>S_at(p._curve,k)) : null);
 
   // ── MODEL BLEND: your custom-model score as a structural balance against
@@ -6060,11 +6087,29 @@ async function runPgaSims(pool, numSims, log){
     const both=[]; // indices with a curve AND a rating
     pool.forEach((p,i)=>{ const r=parseFloat(p.rating); if(targets[i]&&!isNaN(r)) both.push(i); });
     if(both.length >= Math.max(20, 0.6*withCurve.length)){
-      const byMarket=both.slice().sort((a,b)=>targets[b][1]-targets[a][1]); // strongest first (P(top10))
+      const byMarket=both.slice().sort((a,b)=>targets[b][2]-targets[a][2]); // strongest first (P(top10))
       const byModel =both.slice().sort((a,b)=>parseFloat(pool[b].rating)-parseFloat(pool[a].rating));
       const marketTargetsInOrder=byMarket.map(i=>targets[i]);
-      const marketCutInOrder = cutTargets0 ? byMarket.map(i=>cutTargets0[i]) : null;
       const marketRankOf={}; byMarket.forEach((i,r)=>{ marketRankOf[i]=r; });
+      // Cut re-deal gets its OWN ordering: cut probability isn't monotone in
+      // top-10 strength (grinders make cuts at rates bombers don't), so
+      // re-dealing cut curves by the top-10 ordering handed golfers values
+      // from the wrong player. Only golfers WITH a cut target participate —
+      // that also stops a null slot from silently eating a real golfer's mass.
+      let cutRedeal=null;
+      if(cutTargets0){
+        const cutIdx=both.filter(i=>cutTargets0[i]!=null);
+        const byMarketCut=cutIdx.slice().sort((a,b)=>cutTargets0[b]-cutTargets0[a]);
+        const byModelCut =cutIdx.slice().sort((a,b)=>parseFloat(pool[b].rating)-parseFloat(pool[a].rating));
+        cutRedeal={};
+        byModelCut.forEach((i,r)=>{ cutRedeal[i]=cutTargets0[byMarketCut[r]]; });
+      }
+      // Pre-blend column sums — the per-golfer taper makes the quantile re-deal
+      // only APPROXIMATELY mass-preserving, so we renormalize each rung after
+      // blending back to its pre-blend total (keeps Σwin=Σmarket etc. exact and
+      // calibration targets jointly feasible).
+      const preSum=RUNGS.map((_,r)=>both.reduce((s,i)=>s+targets[i][r],0));
+      let preCutSum=0; if(cutRedeal) both.forEach(i=>{ if(cutTargets0[i]!=null) preCutSum+=cutTargets0[i]; });
       // GROUND IN THE ODDS, SMOOTHLY: the model is a REFINEMENT of the market,
       // so its influence should fade the more it disagrees with the market —
       // not via a hard cutoff, but continuously. Per golfer, the 30% model
@@ -6084,16 +6129,26 @@ async function runPgaSims(pool, numSims, log){
       const FLOOR=0.25;
       const groundFactor=gap=>{ const t=Math.max(0,Math.min(1,(gap-LO)/Math.max(1,HI-LO))); const s=1-t*t*(3-2*t); return FLOOR+(1-FLOOR)*s; }; // smoothstep rolloff to FLOOR
       let grounded=0, wSum=0;
+      const wOf={};
       byModel.forEach((i,modelRank)=>{
         const gap=Math.abs(modelRank - marketRankOf[i]);
         const w=MODEL_BLEND*groundFactor(gap);
-        wSum+=w; if(w < MODEL_BLEND*0.4) grounded++;
+        wOf[i]=w; wSum+=w; if(w < MODEL_BLEND*0.4) grounded++;
         const mT=marketTargetsInOrder[modelRank];
         targets[i]=targets[i].map((v,r)=>clampP((1-w)*v + w*mT[r]));
-        if(marketCutInOrder && cutTargets0 && cutTargets0[i]!=null && marketCutInOrder[modelRank]!=null){
-          cutTargets0[i]=clampP((1-w)*cutTargets0[i] + w*marketCutInOrder[modelRank]);
+        if(cutRedeal && cutTargets0[i]!=null){
+          cutTargets0[i]=clampP((1-w)*cutTargets0[i] + w*cutRedeal[i]);
         }
       });
+      // Renormalize each rung column to its pre-blend mass (see preSum above).
+      RUNGS.forEach((_,r)=>{
+        const post=both.reduce((s,i)=>s+targets[i][r],0);
+        if(post>0){ const k=preSum[r]/post; both.forEach(i=>{ targets[i][r]=clampP(targets[i][r]*k); }); }
+      });
+      if(cutRedeal && preCutSum>0){
+        let post=0; both.forEach(i=>{ if(cutTargets0[i]!=null) post+=cutTargets0[i]; });
+        if(post>0){ const k=preCutSum/post; both.forEach(i=>{ if(cutTargets0[i]!=null) cutTargets0[i]=clampP(cutTargets0[i]*k); }); }
+      }
       if(log) log(`Model blend: up to ${Math.round(MODEL_BLEND*100)}% model, smoothly grounded to the odds by disagreement (avg ${Math.round(100*wSum/Math.max(1,both.length))}% applied; ${grounded} golfer${grounded!==1?'s':''} heavily grounded).`);
     } else if(log){
       log('Model blend skipped — rating column missing for most of the field (market-pure sim).');
@@ -6103,13 +6158,14 @@ async function runPgaSims(pool, numSims, log){
   const cutTargets = cutTargets0;
 
   // Wave from tee time (R1); R2 flips. -1 = unknown → no wave shock.
+  // Single source of truth: detectTeeAMPM (handles ISO datetimes, explicit
+  // AM/PM, and bare 12-hour times where "1:05" means 1:05 PM). The sim used to
+  // re-implement the old broken h<12 rule here, which silently flipped the
+  // whole PM wave to AM on suffix-less CSVs — and disagreed with the AM/PM
+  // labels shown in the UI.
   const wave=pool.map(p=>{
-    const t=String(p.start||'');
-    const m=t.match(/(\d{1,2}):\d{2}/);
-    if(!m) return -1;
-    let h=+m[1];
-    if(/pm/i.test(t)&&h<12) h+=12;
-    return h<12?0:1;
+    const w=detectTeeAMPM(p.start);
+    return w==='AM'?0:w==='PM'?1:-1;
   });
 
   // ── Skill-factor correlation: "how the course played" ──
@@ -6162,7 +6218,7 @@ async function runPgaSims(pool, numSims, log){
   const mu=new Float64Array(N);
   let worst=0;
   pool.forEach((p,i)=>{
-    if(targets[i]){ mu[i]=-logit((targets[i][0]+targets[i][1])/2)*0.85; if(mu[i]>worst) worst=mu[i]; }
+    if(targets[i]){ mu[i]=-logit((targets[i][1]+targets[i][2])/2)*0.85; if(mu[i]>worst) worst=mu[i]; } // init from top5/top10 mid-rung
   });
   // ── Unpriced golfers: strength from SALARY, not a flat field-worst ─────────
   // A player the sportsbooks never quoted has no finish signal of his own. The
@@ -6182,8 +6238,15 @@ async function runPgaSims(pool, numSims, log){
     const sal=i=>parseFloat(pool[i].salary)||0;
     if(priced.length>=8){
       const muAsc=priced.map(i=>mu[i]).sort((a,b)=>a-b);          // strongest→weakest
-      const salsSorted=pool.map((p,i)=>sal(i)).sort((a,b)=>a-b);
-      const salPct=s=>{ let lo=0,hi=salsSorted.length; while(lo<hi){const m=(lo+hi)>>1; if(salsSorted[m]<=s)lo=m+1;else hi=m;} return (lo-1)/Math.max(1,salsSorted.length-1); };
+      // Percentile within PRICED salaries only — muAsc is a priced-only ladder,
+      // so ranking against the full pool (where unpriced names cluster cheap)
+      // systematically mapped unpriced golfers onto stronger priced mus than
+      // any same-salary priced peer. Midrank for ties so the big min-salary
+      // block doesn't all take the top of its tie range.
+      const salsSorted=priced.map(i=>sal(i)).sort((a,b)=>a-b);
+      const salPct=s=>{ let below=0,ties=0;
+        for(let k=0;k<salsSorted.length;k++){ if(salsSorted[k]<s)below++; else if(salsSorted[k]===s)ties++; }
+        return Math.max(0,Math.min(1,(below+(ties-1)/2)/Math.max(1,salsSorted.length-1))); }; // midrank
       pool.forEach((p,i)=>{ if(!targets[i]){
         const q=Math.max(0,Math.min(1,salPct(sal(i))));           // 1 = most expensive
         const idx=Math.round((1-q)*(muAsc.length-1));             // expensive → strongest priced mu
@@ -6208,8 +6271,13 @@ async function runPgaSims(pool, numSims, log){
   const wcfg=(activeSlate()&&activeSlate()._pgaWave)||{};
   const wSig=PGA_SIG_WAVE*Math.max(0,Math.min(200,wcfg.vol!=null?+wcfg.vol:100))/100;
   const wLean=Math.max(-100,Math.min(100,wcfg.lean!=null?+wcfg.lean:0))/100*0.5;
+  // The lean is a MEAN shift — if it's active during calibration, the loop
+  // absorbs it into mu (a constant shift is collinear with strength) and the
+  // knob becomes a silent no-op. Calibrate with the lean OFF, then switch it
+  // on for the production sims so the directional edge actually survives.
+  let leanActive=0;
   function simOnce(withRounds){
-    const w1=gauss()*wSig - wLean, w2=gauss()*wSig;
+    const w1=gauss()*wSig - leanActive, w2=gauss()*wSig;
     if(factorsOn){
       // week-persistent course conditions: one draw per axis per tournament
       for(let i=0;i<N;i++) fShift[i]=0;
@@ -6279,10 +6347,13 @@ async function runPgaSims(pool, numSims, log){
     for(let s=0;s<600;s++){ simOnce(false); for(let i=0;i<N;i++){ if(rank[i]<=20) cnt20[i]++; if(made[i]) cutCnt[i]++; } }
     let worstMiss=0, worstName='', sumMiss=0, nn=0;
     pool.forEach((p,i)=>{ if(!targets[i]) return;
-      const miss=Math.abs(cnt20[i]/600 - targets[i][2]); sumMiss+=miss; nn++;
+      const miss=Math.abs(cnt20[i]/600 - targets[i][3]); sumMiss+=miss; nn++;
       if(miss>worstMiss){ worstMiss=miss; worstName=p.name; } });
     log(`Calibration: mean |sim−market| at top-20 = ${(100*sumMiss/Math.max(1,nn)).toFixed(1)}pts, worst ${(100*worstMiss).toFixed(1)}pts (${worstName}).`);
   }
+  // Calibration done — arm the wave lean for all production sims from here on.
+  leanActive=wLean;
+  if(wLean!==0 && log) log(`Tee-wave lean armed post-calibration: ${(wLean>0?'AM':'PM')} favored by ${Math.abs(wLean).toFixed(2)} strokes on the R1 shock.`);
 
   // ── Style parameters for DK hole scoring ──
   const pctOf=vals=>{
@@ -6291,6 +6362,12 @@ async function runPgaSims(pool, numSims, log){
     ok.forEach((x,r)=>out[x.i]=ok.length>1?r/(ok.length-1):0.5);
     return out;
   };
+  // DK "all 4 rounds under 70" bonus is an ABSOLUTE score (≤69), so the field-
+  // relative threshold depends on course par: par 72 → ~3 under, par 70 → under
+  // par. xp ≈ strokes vs par, integer scores round from continuous, so ≤69
+  // ⇔ xp ≤ 69.4 − par. Old hardcoded −2.0 assumed ~par 71.4 everywhere.
+  const PGA_PAR=(activeSlate()&&activeSlate()._pgaPar)||71;
+  const U70_THRESH=69.4-PGA_PAR;
   const bobP =pctOf(pool.map(p=>parseFloat(p.bob)));
   const bavP =pctOf(pool.map(p=>parseFloat(p.bogey_avoid)));
   const p5P  =pctOf(pool.map(p=>parseFloat(p.sg_par_5)));
@@ -6315,7 +6392,7 @@ async function runPgaSims(pool, numSims, log){
     const k2=b+e;
     const pStreak=k2>=7?0.82:k2===6?0.62:k2===5?0.42:k2===4?0.22:k2===3?0.08:0;
     if(Math.random()<pStreak) pts+=3;     // 3+ birdie streak (max 1/round)
-    return {pts, under70: xp<=-2.0};
+    return {pts, under70: xp<=U70_THRESH};
   }
 
   function dkOnce(deltas){
