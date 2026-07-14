@@ -792,6 +792,7 @@ html { overscroll-behavior-y: contain; }
       <button class="show-hidden-btn" id="resetMaxExpBtn" onclick="resetMaxExposures()" style="display:none;" title="Clear all MAX% overrides back to default (100)">↺ Reset Max</button>
       <button class="show-hidden-btn" id="updatePoolBtn" onclick="openUpdatePoolModal()" title="Re-upload CSV to refresh projections, ownership, salary, tee times">↺ Update</button>
       <button class="show-hidden-btn" id="refreshSheetBtn" onclick="refreshFromSheet()" title="Re-fetch latest data from Google Sheet" style="display:none;border-color:rgba(52,168,83,0.3);color:#34a853;">↺ Refresh</button>
+      <button class="show-hidden-btn" id="simCsvBtn" onclick="exportSimCSV()" title="Export each golfer's simulated outcome distribution (mean, floor/ceiling, finish rates) to CSV" style="display:none;border-color:rgba(34,197,94,0.35);color:var(--green);">⬇ Sim CSV</button>
     </div>
     <!-- UPDATE POOL MODAL -->
     <div id="updatePoolModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9000;align-items:center;justify-content:center;backdrop-filter:blur(2px);">
@@ -2893,6 +2894,30 @@ function exportCSV(){
   const pos=cfg.pos;
   const csv=[[pos,pos,pos,pos,pos,pos].join(','),...(slate.savedLineups||[]).map(l=>l.join(','))].join('\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download=slate.name.replace(/\s+/g,'_').toLowerCase()+'_lineups.csv';a.click();
+}
+
+// Export each golfer's simulated DK-outcome distribution (the data behind the
+// SIM score): summary stats + percentiles + simulated finish rates.
+function exportSimCSV(){
+  const slate=activeSlate(); if(!slate){ return; }
+  const rows=(slate.players||[]).filter(p=>p._simDist!=null);
+  if(!rows.length){ showToast('Run a simulation first — no sim data to export.','err'); return; }
+  const esc=v=>{ const s=(v==null?'':String(v)); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
+  // Inputs first (name/salary/tee/proj/own/model score), then the sim score,
+  // then the full simulated-outcome distribution behind it.
+  const header=['Name','Salary','Tee','Proj','Own%','ModelScore','SimScore','Mean','Floor(P10)','P25','Median','P75','Ceiling(P90)','Min','Max','SimWin%','SimTop5%','SimTop10%','SimTop20%','MadeCut%'];
+  const lines=[header.join(',')];
+  rows.sort((a,b)=>(parseFloat(b._simP50)||0)-(parseFloat(a._simP50)||0)).forEach(p=>{
+    const d=p._simDist;
+    lines.push([p.name,p.salary,p.start||'',p.proj,p.own,p.rating,p._simP50,d.mean,d.p10,d.p25,d.p50,d.p75,d.p90,d.min,d.max,
+                p._simWin,p._simT5,p._simT10,p._simT20,p._simCut].map(esc).join(','));
+  });
+  const csv=lines.join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download=(slate.name||'slate').replace(/\s+/g,'_').toLowerCase()+'_sim_distributions.csv';
+  a.click();
+  showToast(`Exported ${rows.length} golfers' sim distributions.`,'ok');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -6242,19 +6267,23 @@ async function runPgaSims(pool, numSims, log){
   // ── Final run ──
   const simScores=pool.map(()=>new Float64Array(numSims));
   const winCnt=new Float64Array(N), cutRate=new Float64Array(N);
+  const t5=new Float64Array(N), t10=new Float64Array(N), t20=new Float64Array(N);
   let simsDone=0;
   for(let s=0;s<numSims;s++){
     const o=dkOnce(null);
     for(let i=0;i<N;i++){
       simScores[i][s]=o[i];
       if(rank[i]===1) winCnt[i]++;
+      if(rank[i]<=5) t5[i]++;
+      if(rank[i]<=10) t10[i]++;
+      if(rank[i]<=20) t20[i]++;
       if(made[i]) cutRate[i]++;
     }
     simsDone=s+1;
     if(s%200===0){ if(log&&s>0) log(`  ${s.toLocaleString()}/${numSims.toLocaleString()} tournaments…`);
       await tick(); if(window._genCancelled) break; }
   }
-  return { simScores, simsDone, winCnt, cutRate, mu,
+  return { simScores, simsDone, winCnt, cutRate, t5, t10, t20, mu,
            factors:{ axes:FAXES, sig:fsig, load:fload } };
 }
 
@@ -6332,17 +6361,37 @@ async function runPgaSimGen(){
   await new Promise(r=>setTimeout(r,0));
   const res=await runPgaSims(pool, numSims, log);
   if(!res){ log('Cancelled or insufficient data.'); done(); return; }
-  const {simScores, simsDone, winCnt, cutRate}=res;
+  const {simScores, simsDone, winCnt, cutRate, t5, t10, t20}=res;
   if(window._genCancelled){ log('Cancelled.'); done(); return; }
 
-  // Pool display: composite sim score (ceiling-weighted like UFC/NASCAR)
+  // Pool display: composite sim score (ceiling-weighted like UFC/NASCAR),
+  // plus the full DK-outcome distribution (histogram + percentiles) that
+  // produced it, and simulated finish rates — all exposed on hover + CSV.
+  const NBINS=32;
   pool.forEach((p,i)=>{
-    const arr=Array.from(simScores[i].slice(0,simsDone)).sort((a,b)=>a-b);
-    const q=f=>arr[Math.min(arr.length-1,Math.floor(arr.length*f))];
-    p._simP50=Math.round((0.6*q(0.8)+0.4*(arr.reduce((a,b)=>a+b,0)/arr.length))*10)/10;
-    p._simDist={p10:q(0.1),p25:q(0.25),p50:q(0.5),p75:q(0.75),p90:q(0.9)};
+    const raw=simScores[i].slice(0,simsDone);
+    const arr=Array.from(raw).sort((a,b)=>a-b);
+    const n=arr.length||1;
+    const q=f=>arr[Math.min(n-1,Math.floor(n*f))];
+    const mean=arr.reduce((a,b)=>a+b,0)/n;
+    p._simP50=Math.round((0.6*q(0.8)+0.4*mean)*10)/10;
+    // Histogram over a robust domain (1st–99th pct) so a lone win-blowup
+    // doesn't flatten the shape; outliers fall into the end bins.
+    const domainMin=Math.floor(q(0.01)), domainMax=Math.ceil(Math.max(q(0.99), domainMin+1));
+    const span=(domainMax-domainMin)||1;
+    const bins=new Array(NBINS).fill(0);
+    for(let k=0;k<n;k++){ let bi=Math.floor((arr[k]-domainMin)/span*NBINS); if(bi<0)bi=0; if(bi>=NBINS)bi=NBINS-1; bins[bi]++; }
+    p._simDist={ p10:q(0.1),p25:q(0.25),p50:q(0.5),p75:q(0.75),p90:q(0.9),
+                 mean:Math.round(mean*10)/10, min:Math.round(arr[0]*10)/10, max:Math.round(arr[n-1]*10)/10,
+                 bins, domainMin, domainMax };
     p._simCut=Math.round(100*cutRate[i]/simsDone);
+    p._simWin=Math.round(1000*winCnt[i]/simsDone)/10;
+    p._simT5 =Math.round(1000*t5[i]/simsDone)/10;
+    p._simT10=Math.round(1000*t10[i]/simsDone)/10;
+    p._simT20=Math.round(1000*t20[i]/simsDone)/10;
   });
+  window._pgaSimReady=true;
+  const xb=document.getElementById('simCsvBtn'); if(xb) xb.style.display='';
   if(typeof renderPool==='function') renderPool();
 
   // Candidates: unique ex-post optimal lineups, one per simulated tournament
