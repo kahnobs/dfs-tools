@@ -2912,11 +2912,16 @@ function exportSimCSV(){
   const esc=v=>{ const s=(v==null?'':String(v)); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
   // Inputs first (name/salary/tee/proj/own/model score), then the sim score,
   // then the full simulated-outcome distribution behind it.
-  const header=['Name','Salary','Tee','Proj','Own%','ModelScore','SimScore','Mean','Floor(P10)','P25','Median','P75','Ceiling(P90)','Min','Max','SimWin%','SimTop5%','SimTop10%','SimTop20%','MadeCut%'];
+  // Trimmed to what the sim actually produces: identity (name/salary), the two
+  // scores (model + sim), and the simulated outcome distribution. Tee/Proj/Own%
+  // are inputs the sim no longer consumes (projection isn't a sim variable; tee
+  // & ownership don't shape a golfer's own finish), and Min/Max are pure tail
+  // whiskers — all dropped. P10 (floor) / P90 (ceiling) are the usable bounds.
+  const header=['Name','Salary','ModelScore','SimScore','Mean','Floor(P10)','P25','Median','P75','Ceiling(P90)','SimWin%','SimTop5%','SimTop10%','SimTop20%','MadeCut%'];
   const lines=[header.join(',')];
   rows.sort((a,b)=>(parseFloat(b._simP50)||0)-(parseFloat(a._simP50)||0)).forEach(p=>{
     const d=p._simDist;
-    lines.push([p.name,p.salary,p.start||'',p.proj,p.own,p.rating,p._simP50,d.mean,d.p10,d.p25,d.p50,d.p75,d.p90,d.min,d.max,
+    lines.push([p.name,p.salary,p.rating,p._simP50,d.mean,d.p10,d.p25,d.p50,d.p75,d.p90,
                 p._simWin,p._simT5,p._simT10,p._simT20,p._simCut].map(esc).join(','));
   });
   const csv=lines.join('\n');
@@ -6151,15 +6156,45 @@ async function runPgaSims(pool, numSims, log){
   }
   const factorsOn=fsig.some(s=>s>0);
 
-  // Init strength from the BLENDED targets' mid-rung (market×model); no-odds
-  // golfers start at field-worst. Calibration then converges to the blended
-  // finish rates, so the model's re-ranking survives into the final sims.
+  // Init strength from the BLENDED targets' mid-rung (market×model); unpriced
+  // golfers anchored to salary (below). Calibration then converges the priced
+  // field to the blended finish rates, so the model re-ranking survives.
   const mu=new Float64Array(N);
   let worst=0;
   pool.forEach((p,i)=>{
     if(targets[i]){ mu[i]=-logit((targets[i][0]+targets[i][1])/2)*0.85; if(mu[i]>worst) worst=mu[i]; }
   });
-  pool.forEach((p,i)=>{ if(!targets[i]) mu[i]=worst+0.6; });
+  // ── Unpriced golfers: strength from SALARY, not a flat field-worst ─────────
+  // A player the sportsbooks never quoted has no finish signal of his own. The
+  // old fallback pinned every such player at (field-worst + 0.6), which let
+  // unpriced names float ABOVE genuinely-priced longshots and manufacture top-5
+  // equity out of nothing — an unpriced $5.9k name (odds row failed to map, or
+  // a true club-pro/amateur) showing 2%+ top-5. But a blanket field-worst is
+  // also wrong: DK's SALARY is itself a market read, so we map each unpriced
+  // player's salary PERCENTILE onto the strength that priced players occupy at
+  // the same percentile, plus a small "if he really had a chance a book would've
+  // quoted him" penalty. This buries the true min-salary bums without nuking a
+  // mid-priced player whose odds simply didn't map. Percentile-to-percentile
+  // (not raw salary→mu) keeps it monotonic and robust to scale mismatch.
+  {
+    const priced=[]; pool.forEach((p,i)=>{ if(targets[i]) priced.push(i); });
+    const NOODDS_PENALTY=0.5;   // logits weaker than a priced peer of equal salary
+    const sal=i=>parseFloat(pool[i].salary)||0;
+    if(priced.length>=8){
+      const muAsc=priced.map(i=>mu[i]).sort((a,b)=>a-b);          // strongest→weakest
+      const salsSorted=pool.map((p,i)=>sal(i)).sort((a,b)=>a-b);
+      const salPct=s=>{ let lo=0,hi=salsSorted.length; while(lo<hi){const m=(lo+hi)>>1; if(salsSorted[m]<=s)lo=m+1;else hi=m;} return (lo-1)/Math.max(1,salsSorted.length-1); };
+      pool.forEach((p,i)=>{ if(!targets[i]){
+        const q=Math.max(0,Math.min(1,salPct(sal(i))));           // 1 = most expensive
+        const idx=Math.round((1-q)*(muAsc.length-1));             // expensive → strongest priced mu
+        mu[i]=Math.min(6, muAsc[idx]+NOODDS_PENALTY);
+      }});
+      const nUnp=N-priced.length;
+      if(log && nUnp>0) log(`${nUnp} unpriced golfer${nUnp!==1?'s':''} anchored to salary-implied strength (no fabricated finish equity).`);
+    } else {
+      pool.forEach((p,i)=>{ if(!targets[i]) mu[i]=worst+0.6; });   // too few anchors → old fallback
+    }
+  }
 
   // One simulated tournament: per-round scores, cut, final ranks
   const x1=new Float64Array(N),x2=new Float64Array(N),x3=new Float64Array(N),x4=new Float64Array(N);
