@@ -40,10 +40,11 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min
 .btn-start:hover{background:#ffd640;}
 
 /* MAIN LAYOUT */
-#appWrap{max-width:1440px;margin:0 auto;display:flex;flex-direction:column;height:100vh;border-left:1px solid var(--border);border-right:1px solid var(--border);}
-#mainLayout{display:none;grid-template-columns:1fr 340px;flex:1;overflow:hidden;}
-@media(min-width:1200px){ #mainLayout{grid-template-columns:1fr 360px;} }
-@media(min-width:1440px){ #mainLayout{grid-template-columns:1fr 380px;} }
+#appWrap{max-width:1860px;margin:0 auto;display:flex;flex-direction:column;height:100vh;border-left:1px solid var(--border);border-right:1px solid var(--border);}
+#mainLayout{display:none;grid-template-columns:1fr 380px;flex:1;overflow:hidden;}
+@media(min-width:1200px){ #mainLayout{grid-template-columns:1fr 440px;} }
+@media(min-width:1440px){ #mainLayout{grid-template-columns:1fr 480px;} }
+@media(min-width:1760px){ #mainLayout{grid-template-columns:1fr 520px;} }
 
 /* POOL */
 .pool-panel{display:flex;flex-direction:column;border-right:1px solid var(--border);overflow:hidden;}
@@ -5983,14 +5984,37 @@ async function runPgaSims(pool, numSims, log){
       const byModel =both.slice().sort((a,b)=>parseFloat(pool[b].rating)-parseFloat(pool[a].rating));
       const marketTargetsInOrder=byMarket.map(i=>targets[i]);
       const marketCutInOrder = cutTargets0 ? byMarket.map(i=>cutTargets0[i]) : null;
-      byModel.forEach((i,rank)=>{
-        const mT=marketTargetsInOrder[rank];
-        targets[i]=targets[i].map((v,r)=>clampP((1-MODEL_BLEND)*v + MODEL_BLEND*mT[r]));
-        if(marketCutInOrder && cutTargets0 && cutTargets0[i]!=null && marketCutInOrder[rank]!=null){
-          cutTargets0[i]=clampP((1-MODEL_BLEND)*cutTargets0[i] + MODEL_BLEND*marketCutInOrder[rank]);
+      const marketRankOf={}; byMarket.forEach((i,r)=>{ marketRankOf[i]=r; });
+      // GROUND IN THE ODDS, SMOOTHLY: the model is a REFINEMENT of the market,
+      // so its influence should fade the more it disagrees with the market —
+      // not via a hard cutoff, but continuously. Per golfer, the 30% model
+      // weight is scaled by a smooth factor of how far his model rank sits
+      // from his market rank: ~full weight for ordinary disagreements, tapering
+      // toward zero for extreme ones (Jackson Suber: model top-20 vs a 380-1
+      // market longshot → the market keeps the last word). No cliff — a golfer
+      // 30 spots off and one 31 spots off are treated almost identically. The
+      // taper thresholds scale with field size so small-field events behave.
+      const n=both.length;
+      const LO=0.15*n, HI=0.55*n;        // full model weight below LO, floor above HI
+      // Decays toward FLOOR, not zero: even when the market strongly disagrees,
+      // the model keeps a residual say — occasionally it's right about a
+      // mispricing the market hasn't caught, and we don't want to silence it
+      // entirely. FLOOR = the fraction of normal model weight retained at max
+      // disagreement (0.25 → the model always keeps ~a quarter of its voice).
+      const FLOOR=0.25;
+      const groundFactor=gap=>{ const t=Math.max(0,Math.min(1,(gap-LO)/Math.max(1,HI-LO))); const s=1-t*t*(3-2*t); return FLOOR+(1-FLOOR)*s; }; // smoothstep rolloff to FLOOR
+      let grounded=0, wSum=0;
+      byModel.forEach((i,modelRank)=>{
+        const gap=Math.abs(modelRank - marketRankOf[i]);
+        const w=MODEL_BLEND*groundFactor(gap);
+        wSum+=w; if(w < MODEL_BLEND*0.4) grounded++;
+        const mT=marketTargetsInOrder[modelRank];
+        targets[i]=targets[i].map((v,r)=>clampP((1-w)*v + w*mT[r]));
+        if(marketCutInOrder && cutTargets0 && cutTargets0[i]!=null && marketCutInOrder[modelRank]!=null){
+          cutTargets0[i]=clampP((1-w)*cutTargets0[i] + w*marketCutInOrder[modelRank]);
         }
       });
-      if(log) log(`Model blend: 70% market / 30% model — ${both.length} golfers re-weighted by your rating rank.`);
+      if(log) log(`Model blend: up to ${Math.round(MODEL_BLEND*100)}% model, smoothly grounded to the odds by disagreement (avg ${Math.round(100*wSum/Math.max(1,both.length))}% applied; ${grounded} golfer${grounded!==1?'s':''} heavily grounded).`);
     } else if(log){
       log('Model blend skipped — rating column missing for most of the field (market-pure sim).');
     }
