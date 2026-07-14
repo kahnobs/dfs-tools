@@ -55,6 +55,16 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min
 input[type=text]{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 9px;border-radius:5px;font-size:12px;font-family:'DM Sans',sans-serif;outline:none;}
 input[type=text]:focus{border-color:var(--accent);}
 #searchInput{width:130px;}
+/* Skill-correlation sliders: explicit gradient track so every axis renders the
+   same dark unfilled track. accent-color tinted the unfilled track a faint
+   version of the accent, so green read as grey while brighter accents read
+   near-white. */
+input.skill-slider{-webkit-appearance:none;appearance:none;height:5px;border-radius:3px;outline:none;cursor:pointer;background:var(--surface2);}
+input.skill-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:13px;height:13px;border-radius:50%;background:var(--fill,#888);border:2px solid var(--bg);box-shadow:0 0 0 1px var(--border);cursor:pointer;margin-top:-4px;}
+input.skill-slider::-webkit-slider-runnable-track{height:5px;border-radius:3px;background:transparent;}
+input.skill-slider::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:var(--fill,#888);border:2px solid var(--bg);cursor:pointer;}
+input.skill-slider::-moz-range-track{height:5px;border-radius:3px;background:var(--surface2);}
+input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:var(--fill,#888);}
 .sort-btns{display:flex;gap:3px;margin-left:auto;flex-wrap:wrap;}
 .sort-btn{background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:3px 6px;border-radius:4px;font-size:10px;font-family:'DM Mono',monospace;cursor:pointer;transition:all .15s;}
 .sort-btn:hover,.sort-btn.active{border-color:var(--accent);color:var(--accent);}
@@ -5166,8 +5176,8 @@ function renderPgaFactorSliders(){
     const v=f[k]!=null?+f[k]:PGA_FACTOR_DEFAULT;
     return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
       <span style="font-size:10px;color:var(--muted);width:74px;flex:none;">${label}</span>
-      <input type="range" min="0" max="100" value="${v}" data-fax="${k}" style="width:100%;accent-color:${color};"
-        oninput="this.parentElement.querySelector('.faxv').textContent=this.value;const _s=activeSlate();if(_s){_s._pgaFactors=Object.assign({},_s._pgaFactors,{${k}:parseInt(this.value),src:'manual'});save();const el=document.getElementById('pgaFactorSrc');if(el)el.textContent='manually adjusted';}">
+      <input type="range" min="0" max="100" value="${v}" data-fax="${k}" class="skill-slider" style="width:100%;--fill:${color};background:linear-gradient(to right,${color} 0%,${color} ${v}%,var(--surface2) ${v}%,var(--surface2) 100%);"
+        oninput="this.style.background='linear-gradient(to right,${color} 0%,${color} '+this.value+'%,var(--surface2) '+this.value+'%,var(--surface2) 100%)';this.parentElement.querySelector('.faxv').textContent=this.value;const _s=activeSlate();if(_s){_s._pgaFactors=Object.assign({},_s._pgaFactors,{${k}:parseInt(this.value),src:'manual'});save();const el=document.getElementById('pgaFactorSrc');if(el)el.textContent='manually adjusted';}">
       <span class="faxv" style="font-family:'DM Mono',monospace;font-size:10px;color:${color};font-weight:600;min-width:24px;text-align:right;">${v}</span>
     </div>`;
   }).join('');
