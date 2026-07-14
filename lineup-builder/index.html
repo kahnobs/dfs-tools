@@ -1090,6 +1090,13 @@ html { overscroll-behavior-y: contain; }
                 oninput="document.getElementById('pgaSimCountLabel').textContent=this.value;const _s=activeSlate();if(_s){_s._simCount=parseInt(this.value);save();}">
               <span id="pgaSimCountLabel" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--green);font-weight:600;min-width:38px;">2000</span>
             </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+              <span class="setting-label" style="flex:none;">Make cut (top N)</span>
+              <input type="number" id="pgaCutInput" min="10" max="156" step="1" value="73"
+                style="width:56px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:5px;font-size:11px;font-family:'DM Mono',monospace;"
+                oninput="const _s=activeSlate();if(_s){_s._pgaCut=parseInt(this.value)||0;save();syncPgaCutUI();}">
+              <span id="pgaCutAuto" style="font-size:9px;color:var(--muted);line-height:1.4;cursor:pointer;" onclick="const _s=activeSlate();if(_s){delete _s._pgaCut;save();syncPgaCutUI();}"></span>
+            </div>
             <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
                 <span class="setting-label">Skill Correlation</span>
@@ -3452,6 +3459,7 @@ function renderGroupRulesSummary(){
   const pgaSection = document.getElementById('pgaSection');
   if(pgaSection) pgaSection.style.display = slate.sport==='pga' ? 'block' : 'none';
   if(slate.sport==='pga'){
+    syncPgaCutUI();
     const pgaSlider = document.getElementById('pgaSimCountSlider');
     const pgaLabel  = document.getElementById('pgaSimCountLabel');
     if(pgaSlider){
@@ -5945,7 +5953,46 @@ async function runUFCContestEV(ctx){
 // variance, cut risk and correlation, not re-inventing the projections.
 const PGA_SIG_ROUND = 2.7;   // per-round score SD vs field (strokes)
 const PGA_SIG_WAVE  = 0.55;  // shared AM/PM wave shock SD (strokes)
-const PGA_CUT_N     = 65;    // cut line: top 65 (+ties, continuous scores)
+// ── Auto cut-line inference ────────────────────────────────────────────────
+// Cut rule is fixed per tournament, so we key off the slate name and bake in a
+// small tie buffer (+TIE) because the sim uses continuous scores that never tie
+// — so CUT_N must equal the expected TIE-INCLUSIVE count, not the base number.
+//   The Open / PGA Championship … top 70 and ties
+//   US Open ……………………………………………… top 60 and ties
+//   Masters ……………………………………………… top 50 and ties
+//   standard PGA / DP World Tour … top 65 and ties
+// A user value in the "Make cut" box always wins (slate._pgaCut, set on edit).
+const CUT_TIE_BUFFER = 3;
+function inferPgaCut(name){
+  const s=String(name||'').toLowerCase();
+  let base=65, label='Tour (65+ties)';
+  if(/pga\s+champ/.test(s))                              { base=70; label='PGA Championship (70+ties)'; }
+  else if(/open\s+champ|the\s+open|british\s+open/.test(s)){ base=70; label='The Open (70+ties)'; }
+  else if(/u\.?\s?s\.?\s+open|us\s+open/.test(s))        { base=60; label='US Open (60+ties)'; }
+  else if(/masters/.test(s))                             { base=50; label='Masters (50+ties)'; }
+  return { n: base+CUT_TIE_BUFFER, base, label };
+}
+// Effective cut for a slate: manual box value if the user set one, else inferred.
+function effectivePgaCut(slate){
+  if(slate && slate._pgaCut) return slate._pgaCut;          // manual override
+  return inferPgaCut(slate&&slate.name).n;
+}
+// Refresh the "Make cut" input + its rule label to match the active slate.
+function syncPgaCutUI(){
+  const s=activeSlate(); if(!s) return;
+  const el=document.getElementById('pgaCutInput');
+  const lbl=document.getElementById('pgaCutAuto');
+  const inf=inferPgaCut(s.name);
+  const manual=!!s._pgaCut;
+  if(el) el.value = manual ? s._pgaCut : inf.n;
+  if(lbl){
+    lbl.textContent = manual
+      ? `manual · click to auto (${inf.label} → ${inf.n})`
+      : `auto: ${inf.label}`;
+    lbl.style.color = manual ? 'var(--amber, #f59e0b)' : 'var(--muted)';
+    lbl.title = manual ? 'Click to clear your manual value and use the auto-detected cut' : '';
+  }
+}
 const PGA_FACTOR_DEFAULT = 25;  // default Skill Correlation slider value
 const PGA_FACTOR_SCALE = 0.6;   // slider 100 → σ 0.6 strokes/round, week-persistent
 
@@ -5961,6 +6008,9 @@ function pgaGaussFactory(){
 
 async function runPgaSims(pool, numSims, log){
   const N=pool.length;
+  // Cut line is tournament-specific (Open/PGA Champ 70+ties≈72, US Open≈62,
+  // Masters≈53, regular tour 65+ties≈68). Per-slate, defaults to 72.
+  const CUT_N=effectivePgaCut(activeSlate());
   const tick=()=>new Promise(r=>setTimeout(r,0));
   const clampP=q=>Math.min(0.995,Math.max(0.0005,q));
   const logit=q=>{const c=clampP(q);return Math.log(c/(1-c));};
@@ -5982,7 +6032,7 @@ async function runPgaSims(pool, numSims, log){
     const probs=pool.map(p=>nascarMlToProb(p.cut));
     const posted=probs.filter(v=>v!=null);
     if(posted.length>=0.8*N){
-      const div=Math.max(0.5, posted.reduce((a,b)=>a+b,0)/Math.min(PGA_CUT_N,N));
+      const div=Math.max(0.5, posted.reduce((a,b)=>a+b,0)/Math.min(CUT_N,N));
       cutTargets0=probs.map(v=>v!=null?clampP(v/div):null);
     }
   }
@@ -6146,7 +6196,7 @@ async function runPgaSims(pool, numSims, log){
     }
     idx.sort((a,b)=>r12[a]-r12[b]);
     made.fill(0);
-    for(let j=0;j<Math.min(PGA_CUT_N,N);j++) made[idx[j]]=1;
+    for(let j=0;j<Math.min(CUT_N,N);j++) made[idx[j]]=1;
     for(let i=0;i<N;i++){
       if(made[i]){
         const sk=factorsOn?-fShift[i]:0;
