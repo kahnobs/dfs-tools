@@ -6203,33 +6203,24 @@ async function runPgaSims(pool, numSims, log){
     return out;
   }
 
-  // ── Anchor means to the projection column ──
-  const ANCHOR_SIMS=500;
-  const meanRaw=new Float64Array(N), madeCnt=new Float64Array(N);
-  for(let s=0;s<ANCHOR_SIMS;s++){
-    const o=dkOnce(null);
-    for(let i=0;i<N;i++){ meanRaw[i]+=o[i]; }
-    for(let i=0;i<N;i++) if(made[i]) madeCnt[i]++;
-    if(s%150===0){ await tick(); if(window._genCancelled) return null; }
-  }
-  const deltas=new Float64Array(N);
-  let anchored=0;
-  pool.forEach((p,i)=>{
-    const proj=parseFloat(p.proj);
-    if(isNaN(proj)||proj<=0) return;
-    const mean=meanRaw[i]/ANCHOR_SIMS;
-    const expRounds=2+2*(madeCnt[i]/ANCHOR_SIMS);
-    deltas[i]=Math.max(-6,Math.min(6,(proj-mean)/expRounds));
-    anchored++;
-  });
-  log(`Anchored ${anchored}/${N} golfers to projections (per-round shifts).`);
+  // ── Projection is NOT a sim variable ──────────────────────────────────────
+  // The sim is driven purely by odds + your model (finish position), skill-
+  // correlation and tee waves (joint structure), and style stats (scoring
+  // shape). The projection column is a separate, partly-redundant quality view
+  // that only distorts the sim when it disagrees (it buried Tom Kim: elite
+  // rating + good odds, outlier-low projection). It's removed from the sim
+  // entirely — the absolute DK level it used to "correct" is irrelevant to
+  // selection anyway (EV compares your lineups to a field scored by the SAME
+  // sim, so any level offset cancels). Projection remains available to the
+  // lineup-selection layer if we ever want it there.
+  log('Projection excluded from sim — golfer strength is odds + model only.');
 
   // ── Final run ──
   const simScores=pool.map(()=>new Float64Array(numSims));
   const winCnt=new Float64Array(N), cutRate=new Float64Array(N);
   let simsDone=0;
   for(let s=0;s<numSims;s++){
-    const o=dkOnce(deltas);
+    const o=dkOnce(null);
     for(let i=0;i<N;i++){
       simScores[i][s]=o[i];
       if(rank[i]===1) winCnt[i]++;
