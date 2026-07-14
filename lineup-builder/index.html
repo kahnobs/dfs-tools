@@ -6128,6 +6128,14 @@ async function runPgaSims(pool, numSims, log){
       // disagreement (0.25 → the model always keeps ~a quarter of its voice).
       const FLOOR=0.25;
       const groundFactor=gap=>{ const t=Math.max(0,Math.min(1,(gap-LO)/Math.max(1,HI-LO))); const s=1-t*t*(3-2*t); return FLOOR+(1-FLOOR)*s; }; // smoothstep rolloff to FLOOR
+      // RUNG DAMPING: the model gets LESS say the sharper the market rung. The
+      // win/top-5 prices are the market's sharpest, hardest-to-beat numbers, and
+      // a stats-ranking model is far better at "who plays well" (top-20/40) than
+      // at "who WINS a major" — where variance dominates and the book is sharp.
+      // Without this, a model-#2 longshot inherits a stud's win prob via the
+      // quantile map (Alex Fitzpatrick: 1% market → ~2.7% sim). Indexed to
+      // RUNGS=[1,5,10,20,40]: model muted at the winner tail, full at the floor.
+      const RUNG_DAMP=[0.30,0.55,0.75,1.0,1.0];
       let grounded=0, wSum=0;
       const wOf={};
       byModel.forEach((i,modelRank)=>{
@@ -6135,9 +6143,9 @@ async function runPgaSims(pool, numSims, log){
         const w=MODEL_BLEND*groundFactor(gap);
         wOf[i]=w; wSum+=w; if(w < MODEL_BLEND*0.4) grounded++;
         const mT=marketTargetsInOrder[modelRank];
-        targets[i]=targets[i].map((v,r)=>clampP((1-w)*v + w*mT[r]));
+        targets[i]=targets[i].map((v,r)=>{ const wr=w*RUNG_DAMP[r]; return clampP((1-wr)*v + wr*mT[r]); });
         if(cutRedeal && cutTargets0[i]!=null){
-          cutTargets0[i]=clampP((1-w)*cutTargets0[i] + w*cutRedeal[i]);
+          cutTargets0[i]=clampP((1-w)*cutTargets0[i] + w*cutRedeal[i]); // cut is a broad rung → full model weight
         }
       });
       // Renormalize each rung column to its pre-blend mass (see preSum above).
