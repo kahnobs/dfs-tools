@@ -5619,14 +5619,34 @@ async function runUFCContestEV(ctx){
     const meanIdx = new Float64Array(pool.length);
     for(let i=0;i<pool.length;i++){ const a=scoreArr[i]; let s=0; for(const si of simIdx) s+=(a[si]||0); meanIdx[i]=s/Math.max(1,simIdx.length); }
     const salIdx = pool.map(p=>p.salary||0);
-    // leverage margin: only swap when the upgrade clears ~0.18σ of the field's
-    // out-of-sample scoring spread — big enough to keep near-tie leverage,
-    // small enough to catch a genuinely dominated cheap play.
+    // TRUE-dominance margin. The old 0.18σ margin sat inside Monte-Carlo noise
+    // for same-price golfers with equal market odds: a 1-2pt realized-mean gap
+    // between two market-identical plays (Keith Mitchell 38.2 vs Poston 36.8)
+    // triggered WHOLESALE substitution of one for the other across the entire
+    // candidate pool — the "jam one twin to 29%, fade the identical other to
+    // 4%" artifact traced exactly here (candidate frequency 64/64 before
+    // repair, 135/43 after). A swap is only a true upgrade when the gap is
+    // large relative to the field's spread AND consistent across simulated
+    // tournaments — not one lucky mean. Equal-odds golfers now keep their
+    // near-equal candidate shares; only truly better plays separate.
     let mu0=0,n0=0; for(let i=0;i<pool.length;i++){ mu0+=meanIdx[i]; n0++; }
     mu0/=Math.max(1,n0);
     let v0=0; for(let i=0;i<pool.length;i++){ const d=meanIdx[i]-mu0; v0+=d*d; }
     const sd=Math.sqrt(v0/Math.max(1,n0));
-    const MARGIN=0.18*sd;
+    const MARGIN=0.5*sd;
+    const DOM_CONSIST=0.60;      // upgrade must beat the incumbent in ≥60% of sims
+    const _beatsCache=new Map();
+    const beatsEnough=(q,pI)=>{
+      const key=q*pool.length+pI;
+      let r=_beatsCache.get(key);
+      if(r===undefined){
+        const aq=scoreArr[q], ap=scoreArr[pI]; let w=0,n2=0;
+        for(const si of simIdx){ if((aq[si]||0)>(ap[si]||0)) w++; n2++; }
+        r=(w/Math.max(1,n2))>=DOM_CONSIST;
+        _beatsCache.set(key,r);
+      }
+      return r;
+    };
     const byMeanDesc=[...Array(pool.length).keys()].sort((a,b)=>meanIdx[b]-meanIdx[a]);
     const seen=new Map();
     let swaps=0, dominated=0;
@@ -5647,6 +5667,7 @@ async function runUFCContestEV(ctx){
             if(meanIdx[q]-meanIdx[pI]<=bestGain) break; // sorted desc → no better remains
             if(inSet.has(q)) continue;
             if(salIdx[q]>budget) continue;
+            if(!beatsEnough(q,pI)) continue; // mean gap alone ≠ dominance — must beat him sim by sim
             bestGain=meanIdx[q]-meanIdx[pI]; bestSlot=pI; bestUp=q; break;
           }
         }
@@ -5663,7 +5684,7 @@ async function runUFCContestEV(ctx){
     }
     // replace the candidate list in place (repaired already dedup'd by key)
     ranked.length=0; for(const e of new Set(repaired)) ranked.push(e);
-    log(`Dominance repair: ${swaps.toLocaleString()} upgrades across ${dominated.toLocaleString()} candidates (margin ${MARGIN.toFixed(1)} pts) — dominated plays removed before EV pricing.`);
+    log(`Dominance repair (true-dominance rule): ${swaps.toLocaleString()} upgrades across ${dominated.toLocaleString()} candidates (margin ${MARGIN.toFixed(1)} pts + beats-him-in-60%-of-sims) — near-equal plays keep their shares; only truly dominated plays removed.`);
   }
 
   const DUP_K = 4;
