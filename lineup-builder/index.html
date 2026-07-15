@@ -5506,10 +5506,15 @@ async function runUFCContestEV(ctx){
   // positions carry their EV across scenarios. sigma is user-set (default
   // ±35% relative), 0 = trust the projections exactly (old behavior).
   const K = 5;
-  // Standard ownership-error allowance — not a setting. If the user distrusts
-  // a specific projection, the honest fix is editing that Own% value; the
-  // fixed ±35% covers ordinary projection noise for everyone identically.
-  const sigma = 0.35;
+  // Ownership-error allowance — not a setting. Ownership is the softest input in
+  // the model (hard to project, swings on late news/weather/tee times), while the
+  // Vegas odds are the sharp signal; so we distrust ownership WIDELY (±55%) to
+  // keep leverage a modest thumb on the scale rather than the primary driver of
+  // exposure. Wider σ pulls both extremes toward the odds-implied equity: low-
+  // owned darts price in the worlds where they're actually more owned, and faded
+  // chalk prices in the worlds where it's actually lighter. (±35% left the
+  // relative ordering intact and let ownership dominate the build.)
+  const sigma = 0.55;
   const gaussEV = ()=>{ const u=Math.max(1e-9,Math.random()), v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); };
   const baseOwn = pool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
   const ownBudget = baseOwn.reduce((a,b)=>a+b,0);
