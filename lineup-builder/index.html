@@ -6699,7 +6699,13 @@ async function runPgaSimGen(){
   const maxSal=Math.min(SALARY_CAP, parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP);
   const numSims=slate._simCount||parseInt(document.getElementById('pgaSimCountSlider')?.value)||2000;
   const hidden=slate.hiddenIds||[];
-  const pool=(slate.players||[]).filter(p=>!hidden.includes(p.id)&&p.salary>0);
+  // Removing golfers takes them out of LINEUP SELECTION only — NOT the
+  // tournament simulation. The sim must always run the FULL field so the cut
+  // (top ~70+ties) still bites and make-cut / finish rates stay real; a reduced
+  // field would keep everyone (make-cut reads 100%) and silently defeat the
+  // make-cut exposure cap. simPool = everyone; pool = the golfers we build from.
+  const simPool=(slate.players||[]).filter(p=>p.salary>0);
+  const pool=simPool.filter(p=>!hidden.includes(p.id));
   const overrides=slate.playerExpOverrides||{};
 
   document.getElementById('genBtn').disabled=true;
@@ -6717,7 +6723,7 @@ async function runPgaSimGen(){
   const done=()=>{ document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); };
 
   // The sim samples finishes from the market curves — they must exist.
-  const hasCurves=ensureOddsScores(pool, slate) && pool.some(p=>p._curve);
+  const hasCurves=ensureOddsScores(simPool, slate) && simPool.some(p=>p._curve);
   if(!hasCurves){
     alert('PGA Simulation needs the sportsbook odds ladder mapped (Win/Top 5/10/20 + ideally Top 30/40) — pull odds into the slate first.');
     done(); return;
@@ -6735,9 +6741,9 @@ async function runPgaSimGen(){
     const parts=[['drv','Driving'],['acc','Accuracy'],['app','Approach'],['arg','Short'],['putt','Putting']]
       .map(([k,l])=>`${l} ${f[k]!=null?f[k]:PGA_FACTOR_DEFAULT}`);
     log(`Skill correlation (${f.src==='auto'?('auto: '+(f.course||'course')):f.src==='manual'?'manual':'defaults'}): ${parts.join(' · ')}`); }
-  log(`Running ${numSims.toLocaleString()} simulated tournaments (${pool.length} golfers, cut after R2)…`);
+  log(`Running ${numSims.toLocaleString()} simulated tournaments (${simPool.length} golfers in field${pool.length<simPool.length?`, ${pool.length} in selection pool`:''}, cut after R2)…`);
   await new Promise(r=>setTimeout(r,0));
-  const res=await runPgaSims(pool, numSims, log);
+  const res=await runPgaSims(simPool, numSims, log);
   if(!res){ log('Cancelled or insufficient data.'); done(); return; }
   const {simScores, simsDone, winCnt, cutRate, t5, t10, t20}=res;
   if(window._genCancelled){ log('Cancelled.'); done(); return; }
@@ -6746,7 +6752,7 @@ async function runPgaSimGen(){
   // plus the full DK-outcome distribution (histogram + percentiles) that
   // produced it, and simulated finish rates — all exposed on hover + CSV.
   const NBINS=32;
-  pool.forEach((p,i)=>{
+  simPool.forEach((p,i)=>{
     const raw=simScores[i].slice(0,simsDone);
     const arr=Array.from(raw).sort((a,b)=>a-b);
     const n=arr.length||1;
@@ -6772,6 +6778,13 @@ async function runPgaSimGen(){
   const xb=document.getElementById('simCsvBtn'); if(xb) xb.style.display='';
   if(typeof renderPool==='function') renderPool();
 
+  // Sim scores are indexed by the FULL field; key them by id, then pull the
+  // ACTIVE pool's per-golfer arrays for candidate generation. Removed golfers
+  // keep their (real, full-field) sim numbers but are never built into lineups.
+  const simScoresById={};
+  simPool.forEach((p,i)=>{ simScoresById[p.id]=simScores[i]; });
+  const poolScores=pool.map(p=>simScoresById[p.id]);
+
   // Candidates: unique ex-post optimal lineups, one per simulated tournament
   log('Computing per-sim optimal lineups…');
   const salArr=pool.map(p=>p.salary||0);
@@ -6788,7 +6801,7 @@ async function runPgaSimGen(){
   // in-sample optimism that especially inflates thin high-variance stacks
   // which are optimal only in the freak draws that birthed them.
   for(let s=0;s<simsDone;s+=2){
-    for(let i=0;i<pool.length;i++) colScores[i]=simScores[i][s];
+    for(let i=0;i<pool.length;i++) colScores[i]=poolScores[i][s];
     addCand(pgaOptimalForSim(pool, colScores, salArr, cheapPre, maxSal));
     if(s>0&&s%100===0){
       if(s%500===0) log(`  optimals: ${s.toLocaleString()}/${simsDone.toLocaleString()}…`);
@@ -6813,7 +6826,7 @@ async function runPgaSimGen(){
     for(const {i:gi} of chalk){
       const before=rankedMap.size;
       for(let s=0;s<simsDone;s+=2){
-        for(let i=0;i<pool.length;i++) colScores[i]=simScores[i][s];
+        for(let i=0;i<pool.length;i++) colScores[i]=poolScores[i][s];
         colScores[gi]=-1e9;
         addCand(pgaOptimalForSim(pool, colScores, salArr, cheapPre, maxSal), true);
       }
@@ -6832,8 +6845,6 @@ async function runPgaSimGen(){
   // is higher. Propose one-swap upgrades that spend the leftover, then let
   // the SAME contest-EV pricing judge originals and neighbors on equal
   // footing. Nothing is forced: if the cheap build carries more EV, it wins.
-  const simScoresById={};
-  pool.forEach((p,i)=>{ simScoresById[p.id]=simScores[i]; });
   const out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, oosParity:1, sharpShare:0.15, dominanceRepair:true, maxSal});
   if(out===null&&window._genCancelled) log('Cancelled.');
 
@@ -6842,7 +6853,7 @@ async function runPgaSimGen(){
   // tagging we re-open it — otherwise the pills never appear on first render.
   if(out&&out.length&&res.factors){
     const AX_LABEL={drv:'Distance',acc:'Accuracy',app:'Approach',arg:'Short-game',putt:'Putting'};
-    const idxById={}; pool.forEach((p,i)=>idxById[p.id]=i);
+    const idxById={}; simPool.forEach((p,i)=>idxById[p.id]=i);   // factor loads are full-field-indexed
     const themeCount={};
     out.forEach(l=>{
       // tag only ACTIVE axes (slider ≥ ~17) — a lineup that happens to share a
