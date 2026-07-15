@@ -879,9 +879,9 @@ html { overscroll-behavior-y: contain; }
                 <option value="proj">Proj</option>
                 <option value="sim">Sim</option>
                 <option value="win">Win%</option>
-                <option value="top5">Top5%</option>
-                <option value="top10">Top10%</option>
-                <option value="top20">Top20%</option>
+                <option value="top5">Top5</option>
+                <option value="top10">Top10</option>
+                <option value="top20">Top20</option>
                 <option value="own">Own%</option>
                 <option value="sal">Salary</option>
               </select>
@@ -2777,7 +2777,7 @@ function refreshSavedSortControl(avail,sortBy){
   const sel=document.getElementById('savedSortMetric');
   const dirEl=document.getElementById('savedSortDir');
   if(!sel)return;
-  const LABELS=[['saved','Order saved'],['proj','Proj'],['sim','Sim'],['ev','EV%'],['win','Win%'],['top5','Top5%'],['top10','Top10%'],['top20','Top20%'],['own','Own%'],['sal','Salary']];
+  const LABELS=[['saved','Order saved'],['proj','Proj'],['sim','Sim'],['ev','EV%'],['win','Win%'],['top5','Top5'],['top10','Top10'],['top20','Top20'],['own','Own%'],['sal','Salary']];
   const activeMetric=sortBy==='saved'?'saved':sortBy.replace(/_desc$|_asc$/,'').replace(/^ml$/,'win');
   sel.innerHTML=LABELS.filter(([v])=>avail.has(v)).map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
   sel.value=avail.has(activeMetric)?activeMetric:'saved';
@@ -2838,13 +2838,10 @@ function renderSaved(){
   if(!avail.has(activeMetric)){sortBy='saved';slate._savedSort='saved';save();}
   refreshSavedSortControl(avail,sortBy);
   if(!lineups.length){list.innerHTML='<div class="empty-saved">No lineups saved yet.</div>';return;}
-  // Vig removal for PGA/NASCAR: divide by sum of raw implied probs across full field
-  const vigDiv={
-    win:   hasWin  ?Math.max(0.01,pool.reduce((s,p)=>s+(nascarMlToProb(p.win)||0),  0)):1,
-    top5:  hasTop5 ?Math.max(0.01,pool.reduce((s,p)=>s+(nascarMlToProb(p.top5)||0), 0)):1,
-    top10: hasTop10?Math.max(0.01,pool.reduce((s,p)=>s+(nascarMlToProb(p.top10)||0),0)):1,
-    top20: hasTop20?Math.max(0.01,pool.reduce((s,p)=>s+(nascarMlToProb(p.top20)||0),0)):1,
-  };
+  // Vegas equity per lineup = SUM of the six golfers' implied probabilities for
+  // that market (raw implied, straight off the odds — matches "10%+5%+3%… = 22%").
+  // Win sums well under 100%; Top-N sums are expected COUNTS of top-N finishers,
+  // so they legitimately exceed 100% (e.g. two ~40% top-20 golfers → 80%+ each).
   // UFC win equity: vig-remove per fight so each bout sums to 100%, then average across lineup
   const ufcWinProb={};
   if(isUfc&&hasMl){
@@ -2865,10 +2862,10 @@ function renderSaved(){
     const simScore=(rawSim!=null&&rawSim!==''&&!isNaN(parseFloat(rawSim)))?parseFloat(rawSim):null;
     const rawEv=meta[lk]?.evPct;
     const evPct=(rawEv!=null&&!isNaN(parseFloat(rawEv)))?parseFloat(rawEv):null;
-    const winEq  =hasWin  ?players.reduce((s,p)=>s+(nascarMlToProb(p.win)||0)/vigDiv.win,  0)*100:null;
-    const top5Eq =hasTop5 ?players.reduce((s,p)=>s+(nascarMlToProb(p.top5)||0)/vigDiv.top5, 0)*100:null;
-    const top10Eq=hasTop10?players.reduce((s,p)=>s+(nascarMlToProb(p.top10)||0)/vigDiv.top10,0)*100:null;
-    const top20Eq=hasTop20?players.reduce((s,p)=>s+(nascarMlToProb(p.top20)||0)/vigDiv.top20,0)*100:null;
+    const winEq  =hasWin  ?players.reduce((s,p)=>s+(nascarMlToProb(p.win)||0),  0)*100:null;
+    const top5Eq =hasTop5 ?players.reduce((s,p)=>s+(nascarMlToProb(p.top5)||0), 0)*100:null;
+    const top10Eq=hasTop10?players.reduce((s,p)=>s+(nascarMlToProb(p.top10)||0),0)*100:null;
+    const top20Eq=hasTop20?players.reduce((s,p)=>s+(nascarMlToProb(p.top20)||0),0)*100:null;
     const mlEq=isUfc&&hasMl?(players.reduce((s,p)=>s+(ufcWinProb[p.id]||0),0)/Math.max(1,players.length))*100:null;
     const own=hasOwn?players.reduce((s,p)=>s+(parseFloat(p.own)||0),0):null;
     return {lineup,i,players,sal,proj,rtg,simScore,evPct,winEq,top5Eq,top10Eq,top20Eq,mlEq,own};
@@ -2901,9 +2898,9 @@ function renderSaved(){
     if(evPct!=null)    stats.push(`<span class="saved-stat" style="color:${evPct>=0?'var(--green)':'var(--red)'};"><span class="saved-stat-lbl" style="color:${evPct>=0?'var(--green)':'var(--red)'};opacity:.7;">EV</span>${evPct>=0?'+':''}${evPct.toFixed(0)}%</span>`);
     if(mlEq!=null)     stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Win%</span>${mlEq.toFixed(1)}%</span>`);
     if(winEq!=null)    stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Win%</span>${winEq.toFixed(1)}%</span>`);
-    if(top5Eq!=null)   stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top5%</span>${top5Eq.toFixed(1)}%</span>`);
-    if(top10Eq!=null)  stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top10%</span>${top10Eq.toFixed(1)}%</span>`);
-    if(top20Eq!=null)  stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top20%</span>${top20Eq.toFixed(1)}%</span>`);
+    if(top5Eq!=null)   stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top5</span>${(top5Eq/100).toFixed(1)}</span>`);
+    if(top10Eq!=null)  stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top10</span>${(top10Eq/100).toFixed(1)}</span>`);
+    if(top20Eq!=null)  stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top20</span>${(top20Eq/100).toFixed(1)}</span>`);
     if(own!=null)      stats.push(`<span class="saved-stat" style="color:var(--muted);"><span class="saved-stat-lbl" style="opacity:.7;">Own</span>${own.toFixed(1)}%</span>`);
     return `<div class="saved-lineup" id="saved-${i}">
       <div class="saved-top"><div class="saved-num">Lineup #${i+1}</div>
@@ -5471,6 +5468,7 @@ function sampleUfcField(pool, N, ownArr){
 // history/preview; returns null on cancel.
 async function runUFCContestEV(ctx){
   const {slate, pool, ranked, simScoresById, totalSims, target, maxExpPct, overrides} = ctx;
+  const genSims = ctx.genSims || totalSims;  // # of generation sims (PGA uses even sims only)
   const minOverrides = slate.playerMinOverrides||{};
   const cfg  = slate._ufcEv||{};
   const F    = Math.max(target, parseInt(cfg.fieldSize)||10000);
@@ -6026,7 +6024,7 @@ async function runUFCContestEV(ctx){
     l._evPct = (e._ev/Math.max(0.01,fee))*100;
     l._simWinAvg = e.lineup.reduce((s2,p)=>s2+(meanById[p.id]||0),0).toFixed(1);
     l._simAvg    = (e.totalScore/e.count).toFixed(1);
-    l._simWinRate= ((e.count/Math.max(1,totalSims))*100).toFixed(1);
+    l._simWinRate= ((e.count/Math.max(1,genSims))*100).toFixed(1);
     return l; };
   let finalLineups = chosen.map(decorate);
   if(Object.keys(minOverrides).some(id=>minOverrides[id]>0)){
@@ -6629,7 +6627,7 @@ async function runPgaSimGen(){
   const slate=activeSlate(); if(!slate) return;
   const target=parseInt(document.getElementById('genCount').value)||20;
   const maxExpPct=parseInt(document.getElementById('genMaxExp').value)||100;
-  const maxSal=parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP;
+  const maxSal=Math.min(SALARY_CAP, parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP);
   const numSims=slate._simCount||parseInt(document.getElementById('pgaSimCountSlider')?.value)||2000;
   const hidden=slate.hiddenIds||[];
   const pool=(slate.players||[]).filter(p=>!hidden.includes(p.id)&&p.salary>0);
@@ -6744,7 +6742,7 @@ async function runPgaSimGen(){
   // footing. Nothing is forced: if the cheap build carries more EV, it wins.
   const simScoresById={};
   pool.forEach((p,i)=>{ simScoresById[p.id]=simScores[i]; });
-  const out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, target, maxExpPct, overrides, oosParity:1, sharpShare:0.15, dominanceRepair:true, maxSal});
+  const out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, oosParity:1, sharpShare:0.15, dominanceRepair:true, maxSal});
   if(out===null&&window._genCancelled) log('Cancelled.');
 
   // ── Theme readout: which skill set / wave each lineup is built around ──
@@ -6789,7 +6787,7 @@ async function runUFCSimGen(){
   const target     = parseInt(document.getElementById('genCount').value)||20;
   const maxExpPct  = parseInt(document.getElementById('genMaxExp').value)||100;
   const minSal     = parseInt(document.getElementById('genMinSal').value)||0;
-  const maxSal     = parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP;
+  const maxSal     = Math.min(SALARY_CAP, parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP);
   const numSims    = activeSlate()?._simCount || parseInt(document.getElementById('ufcSimCountSlider')?.value) || 2000;
   const groups     = slate.groups||[];
   const hidden     = slate.hiddenIds||[];
@@ -8275,7 +8273,7 @@ async function runNascarSimGen(){
   const target    = parseInt(document.getElementById('genCount').value)||20;
   const maxExpPct = parseInt(document.getElementById('genMaxExp').value)||100;
   const minSal    = parseInt(document.getElementById('genMinSal').value)||0;
-  const maxSal    = parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP;
+  const maxSal    = Math.min(SALARY_CAP, parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP);
   const totalLaps = parseInt(document.getElementById('nascarTotalLaps')?.value)||300;
   const numSims   = activeSlate()?._simCount || parseInt(document.getElementById('nascarSimCountSlider')?.value) || 2000;
   // Track type: prefer the explicit type persisted by setNascarTrack (survives
@@ -9570,7 +9568,7 @@ async function runAutoGen(){
   const maxExpPct=parseInt(document.getElementById('genMaxExp').value)||100;
   const minOverrides=slate.playerMinOverrides||{};
   const minSal=parseInt(document.getElementById('genMinSal').value)||0;
-  const maxSal=parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP;
+  const maxSal=Math.min(SALARY_CAP, parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP);
    ufcNoOpposeGlobal = slate.sport==='ufc' && (document.getElementById('genUfcNoOppose')?.checked||false);
 
   // 3-signal mix weights (equity/model/proj) from the active preset toggle
