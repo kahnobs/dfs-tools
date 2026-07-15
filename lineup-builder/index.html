@@ -5569,20 +5569,26 @@ async function runUFCContestEV(ctx){
   // 2) Field score distribution per sampled sim (sorted for rank lookup).
   // Sim s is evaluated against scenario (s mod K)'s field.
   const scoreArr = pool.map(p=>simScoresById[p.id]||[]);
-  const fieldSorted = [];
-  for(let s=0; s<simIdx.length; s++){
-    const si = simIdx[s];
-    const field = fields[s%K];
-    const arr = new Float64Array(field.length);
-    for(let f=0; f<field.length; f++){
-      const l=field[f]; let t=0;
-      for(let k=0;k<6;k++) t += (scoreArr[l[k]][si]||0);
-      arr[f]=t;
+  // Field scorer, reusable so auto-exposure can re-score the same sampled field
+  // under a "model wrong about the pillar" world.
+  const buildFieldSorted = (arrs) => {
+    const out=[];
+    for(let s=0; s<simIdx.length; s++){
+      const si = simIdx[s];
+      const field = fields[s%K];
+      const arr = new Float64Array(field.length);
+      for(let f=0; f<field.length; f++){
+        const l=field[f]; let t=0;
+        for(let k=0;k<6;k++) t += (arrs[l[k]][si]||0);
+        arr[f]=t;
+      }
+      arr.sort();
+      out.push(arr);
     }
-    arr.sort();
-    fieldSorted.push(arr);
-    if(s>0 && s%150===0){ await tick(); if(window._genCancelled) return null; }
-  }
+    return out;
+  };
+  const fieldSorted = buildFieldSorted(scoreArr);
+  await tick(); if(window._genCancelled) return null;
 
   // 3) EV per candidate (all unique ex-post optimals).
   // Duplication is CONDITIONAL, not marginal: an expensive stud funnels his
@@ -5780,9 +5786,14 @@ async function runUFCContestEV(ctx){
   // from constraints. Also makes the objective submodular, which the lazy
   // greedy formally requires (marginals only shrink as the portfolio grows).
   log(`Objective: TOURNAMENT WIN EQUITY — head = top ${Math.max(10, Math.round(F*0.001)).toLocaleString()} places, coverage-credited per outcome, dup-adjusted; cash EV is a tiebreak, not a goal. (Flat curves like double-ups revert to pure cash EV.)`);
+  // ── Portfolio selection, wrapped so AUTO-EXPOSURE can re-run it with
+  // per-pillar caps and compare WHOLE PORTFOLIOS. pillarCap: Map(id→capPct);
+  // it only ever TIGHTENS the user's manual caps, never loosens them.
+  const runGreedy = async (pillarCap) => {
   const outputExpCount={}; const chosen=[];
   const capBlocked = lu => lu.some(p=>{
-    const pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
+    let pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
+    if(pillarCap && pillarCap.has(p.id)) pct = Math.min(pct, pillarCap.get(p.id)); // auto-exposure (tightens only)
     if(pct>=100) return false;
     if(pct<=0) return true;
     return (outputExpCount[p.id]||0) >= Math.max(1,Math.ceil(pct/100*target));
@@ -5909,6 +5920,96 @@ async function runUFCContestEV(ctx){
       if(++evalCount % 60 === 0){ await tick(); if(window._genCancelled) return null; }
     }
   }
+    return { chosen, portNet, expCount: outputExpCount, bestHead };
+  };
+
+  // Honest whole-portfolio evaluation under a given world's scores: every
+  // entry ranked in the sampled field (tie- and dup-adjusted, own better
+  // entries counted ahead), summed to portfolio gross per sim.
+  const evalPortfolio = (sel, arrs, fsrt) => {
+    const stake = fee*sel.chosen.length;
+    let netSum=0, dead=0;
+    const ents = sel.chosen.map(e=>({ idxs:e.lineup.map(p=>idxById.get(p.id)).filter(i=>i!=null), dups:e._dupsK }));
+    for(let s=0; s<fsrt.length; s++){
+      const si=simIdx[s];
+      const tots = ents.map(en=>{ let t=0; for(const i of en.idxs) t+=(arrs[i][si]||0); return {t, dups:en.dups?en.dups[s%K]:0}; })
+        .sort((a,b)=>b.t-a.t);
+      const arr=fsrt[s];
+      let gross=0;
+      for(let mi=0; mi<tots.length; mi++){
+        const t=tots[mi].t;
+        let lo=0, hi=arr.length;
+        while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid]<=t) lo=mid+1; else hi=mid; }
+        let lo2=0, hi2=lo;
+        while(lo2<hi2){ const mid=(lo2+hi2)>>1; if(arr[mid]<t) lo2=mid+1; else hi2=mid; }
+        gross += expPayout(arr.length-lo, lo-lo2, arr.length, tots[mi].dups, mi);
+      }
+      netSum += gross-stake;
+      if(gross < 0.10*stake) dead++;
+    }
+    return { ev: netSum/Math.max(1,fsrt.length), dead: dead/Math.max(1,fsrt.length) };
+  };
+
+  // ── AUTO-EXPOSURE (make-cut rule; no knobs, no extra decisions) ────────────
+  // Risk-neutral win-equity correctly concentrates on a genuinely underpriced
+  // golfer — but in golf the missed cut is a CORRELATED-ruin event: when a
+  // portfolio pillar misses, every lineup holding him dies together on Friday.
+  // Exhaustive testing (coverage boosts, concave portfolio utility, Kelly
+  // greedy, whole-portfolio log-growth, projection-error scenarios) showed no
+  // utility function trims this for free: fades don't cash in the pillar's
+  // miss-worlds, so every trim buys risk reduction with real EV. So the trim
+  // is a FIXED STANDARD, in the spirit of the ±35% ownership-error allowance:
+  //   a cut-risky pillar's exposure is capped at HIS OWN MAKE-CUT PROBABILITY
+  //   — never more exposed to a golfer than his chance of playing the weekend.
+  // Self-scaling: an 87% make-cut stud is barely touched, a coin-flip value
+  // trims hard, players with make-cut ≥88% (or sports with no cut — UFC,
+  // NASCAR, where _simCut is absent) never trigger. The PRICE of the rule is
+  // measured every slate — the same portfolio machinery evaluates capped vs
+  // uncapped in the as-projected world AND a "model wrong about the pillar"
+  // world (his edge above salary expectation stripped from his made-cut sims,
+  // field re-scored identically) — and reported in one log line.
+  let sel = await runGreedy(null);
+  if(sel===null) return null;
+  if(window._genCancelled) return null;
+  {
+    const pillars = pool.filter(p => p._simCut!=null && p._simCut<88 &&
+      (sel.expCount[p.id]||0) >= 0.5*target);
+    if(pillars.length){
+      const meanIdxAll = pool.map((p,i)=>{ const a=scoreArr[i]; let s2=0; for(const si of simIdx) s2+=(a[si]||0); return s2/Math.max(1,simIdx.length); });
+      let sx=0,sy=0,sxx=0,sxy=0; const nP=pool.length;
+      pool.forEach((p,i)=>{ const x=p.salary||0, y=meanIdxAll[i]; sx+=x; sy+=y; sxx+=x*x; sxy+=x*y; });
+      const beta=(nP*sxy-sx*sy)/Math.max(1e-9,(nP*sxx-sx*sx)), alpha=(sy-beta*sx)/nP;
+      const excess={};
+      pillars.forEach(p=>{ const i=idxById.get(p.id); excess[i]=Math.max(0, meanIdxAll[i]-(alpha+beta*(p.salary||0))); });
+      const scoreArrW = scoreArr.map((a,i)=>{
+        if(excess[i]==null || !(excess[i]>0)) return a;
+        const made=Math.max(0.05,(pool[i]._simCut||50)/100);
+        const shift=excess[i]/made;             // his edge lives in the made-cut sims
+        const b=new Float64Array(a.length);
+        for(let s2=0;s2<a.length;s2++) b[s2] = a[s2]>=40 ? Math.max(40, a[s2]-shift) : a[s2];
+        return b;
+      });
+      const capMap=new Map(pillars.map(p=>[p.id, Math.max(5, Math.round(p._simCut))]));
+      const needs=pillars.some(p=> (sel.expCount[p.id]||0) > Math.ceil(capMap.get(p.id)/100*target));
+      if(needs){
+        const fieldSortedW = buildFieldSorted(scoreArrW);
+        await tick(); if(window._genCancelled) return null;
+        const rU=evalPortfolio(sel,scoreArr,fieldSorted), wU=evalPortfolio(sel,scoreArrW,fieldSortedW);
+        const un={sel, evR:rU.ev, evW:wU.ev, deadR:rU.dead, deadW:wU.dead};
+        const s2=await runGreedy(capMap);
+        if(s2===null) return null;
+        if(window._genCancelled) return null;
+        const r=evalPortfolio(s2,scoreArr,fieldSorted), w=evalPortfolio(s2,scoreArrW,fieldSortedW);
+        const win={sel:s2, evR:r.ev, evW:w.ev, deadR:r.dead, deadW:w.dead};
+        sel=win.sel;
+        const pdesc=pillars.filter(p=>(un.sel.expCount[p.id]||0)!==(win.sel.expCount[p.id]||0))
+          .map(p=>`${p.name} ${Math.round(100*(un.sel.expCount[p.id]||0)/target)}%→${Math.round(100*(win.sel.expCount[p.id]||0)/target)}% (his make-cut: ${p._simCut}%)`).join(', ');
+        log(`Auto-exposure (make-cut rule): ${pdesc} — capped at his weekend odds. Price if the model is RIGHT: $${Math.round(un.evR-win.evR)}/slate; if WRONG about him: ${win.evW>=un.evW?'saves $'+Math.round(win.evW-un.evW):'costs $'+Math.round(un.evW-win.evW)}; dead-slates ${(100*un.deadR).toFixed(0)}%→${(100*win.deadR).toFixed(0)}% (right) ${(100*un.deadW).toFixed(0)}%→${(100*win.deadW).toFixed(0)}% (wrong).`);
+      }
+    }
+  }
+  const chosen=sel.chosen, portNet=sel.portNet;
+  const simN2 = fieldSorted.length;
   const chosenKeySet = new Set(chosen.map(e=>e.lineup.map(p=>p.id).sort().join('|')));
   const rest = evList.filter(e=>!chosenKeySet.has(e.lineup.map(p=>p.id).sort().join('|')));
   if(!chosen.length){ log('No lineups selected — relax caps.'); return null; }
@@ -5940,19 +6041,19 @@ async function runUFCContestEV(ctx){
   // exact object the utility optimized. Mean net is the linear-EV view;
   // the loss probabilities are what the log-utility actually managed.
   const spent  = fee*finalLineups.length;
-  const meanNet = portNet.reduce((a,b)=>a+b,0)/Math.max(1,simN);
+  const meanNet = portNet.reduce((a,b)=>a+b,0)/Math.max(1,simN2);
   let bustAll=0, bustHalf=0;
-  for(let s=0;s<simN;s++){
+  for(let s=0;s<simN2;s++){
     if(portNet[s] <= -0.9*spent) bustAll++;
     if(portNet[s] <= -0.5*spent) bustHalf++;
   }
   let worstBlock=Infinity;
-  for(let k=0;k<K;k++){ let s2=0,n2=0; for(let s=k;s<simN;s+=K){ s2+=portNet[s]; n2++; } if(n2 && s2/n2<worstBlock) worstBlock=s2/n2; }
+  for(let k=0;k<K;k++){ let s2=0,n2=0; for(let s=k;s<simN2;s+=K){ s2+=portNet[s]; n2++; } if(n2 && s2/n2<worstBlock) worstBlock=s2/n2; }
   log(`Done! ${finalLineups.length} lineups selected on tournament win equity. Mean net ${meanNet>=0?'+':''}$${meanNet.toFixed(0)} on $${spent.toFixed(0)} entered (${((meanNet/Math.max(1,spent))*100).toFixed(0)}% ROI if inputs hold); worst ownership scenario ${worstBlock>=0?'+':''}$${worstBlock.toFixed(0)}.`);
-  log(`Risk profile: loses ≥50% of entries in ${(bustHalf/simN*100).toFixed(0)}% of sims, ≥90% in ${(bustAll/simN*100).toFixed(0)}%.`);
-  let _cov=0; for(let s=0;s<simN;s++) if(bestHead[s]>0) _cov++;
-  log(`Tournament coverage: portfolio holds a top-${HEAD_RANK.toLocaleString()} caliber finish in ${(_cov/simN*100).toFixed(0)}% of sims.`);
-  const expRows = pool.map(p=>({p, e:(outputExpCount[p.id]||0)}))
+  log(`Risk profile: loses ≥50% of entries in ${(bustHalf/simN2*100).toFixed(0)}% of sims, ≥90% in ${(bustAll/simN2*100).toFixed(0)}%.`);
+  let _cov=0; for(let s=0;s<simN2;s++) if(sel.bestHead[s]>0) _cov++;
+  log(`Tournament coverage: portfolio holds a top-${HEAD_RANK.toLocaleString()} caliber finish in ${(_cov/simN2*100).toFixed(0)}% of sims.`);
+  const expRows = pool.map(p=>({p, e:(sel.expCount[p.id]||0)}))
     .filter(r=>r.e>0).sort((a,b)=>b.e-a.e).slice(0,6);
   log(`Top exposure: ${expRows.map(r=>`${r.p.name.split(' ').slice(-1)[0]} ${Math.round(r.e/finalLineups.length*100)}%`).join(', ')}`);
 
