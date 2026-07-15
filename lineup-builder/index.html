@@ -5654,6 +5654,7 @@ async function runUFCContestEV(ctx){
     for(const e of ranked){
       let idxs=e.lineup.map(p=>idxById.get(p.id)).filter(x=>x!=null);
       if(idxs.length!==6){ repaired.push(e); continue; }
+      if(e._pivot){ repaired.push(e); continue; } // deliberate pillar-free pivot — never "repair" the pillar back in
       let touched=false;
       for(let iter=0; iter<4; iter++){
         const inSet=new Set(idxs);
@@ -5942,6 +5943,37 @@ async function runUFCContestEV(ctx){
       let i=1; while(i<cands.length && cands[i].val>top.val) i++;
       if(i>1){ cands.splice(0,1); cands.splice(i-1,0,top); }
       if(++evalCount % 60 === 0){ await tick(); if(window._genCancelled) return null; }
+    }
+  }
+  // ── Fill completion ────────────────────────────────────────────────────────
+  // Coverage-greedy stops once marginal win equity hits zero — correct for
+  // chasing the top, but in a THIN pool (or under a make-cut cap) it can stop
+  // before the slate is full, leaving the capped pillar at ~100% of a short
+  // build. Complete the slate from the full candidate list (pillar-free pivots
+  // included), best EV first: pass 1 honors every cap; pass 2 (tiny pools only)
+  // relaxes caps as a last resort because a COMPLETE slate beats a short one.
+  // Never creates a duplicate lineup.
+  if(chosen.length < target){
+    const key=e=>e.lineup.map(p=>p.id).sort().join('|');
+    const have=new Set(chosen.map(key));
+    const extra=evList.filter(e=>!have.has(key(e))).sort((a,b)=>(b._ev||0)-(a._ev||0));
+    const take=e=>{ chosen.push(e); e._mev=0; have.add(key(e));
+      if(!e._tots) e._tots=totalsOf(e);
+      acceptEntry(e);
+      e.lineup.forEach(p=>{ outputExpCount[p.id]=(outputExpCount[p.id]||0)+1; }); };
+    for(const e of extra){
+      if(chosen.length>=target) break;
+      if(have.has(key(e)) || capBlocked(e.lineup)) continue;
+      take(e);
+      if(chosen.length % 12 === 0){ await tick(); if(window._genCancelled) return null; }
+    }
+    if(chosen.length < target){
+      for(const e of extra){
+        if(chosen.length>=target) break;
+        if(have.has(key(e))) continue;
+        take(e);
+        if(chosen.length % 12 === 0){ await tick(); if(window._genCancelled) return null; }
+      }
     }
   }
     return { chosen, portNet, expCount: outputExpCount, bestHead };
@@ -6736,6 +6768,9 @@ async function runPgaSimGen(){
   const cheapPre=[0]; cheapSorted.forEach((v,i)=>cheapPre.push(cheapPre[i]+v));
   const rankedMap=new Map();
   const colScores=new Float64Array(pool.length);
+  const addCand=(lu,pivot)=>{ if(!lu) return; let t=0; for(const i of lu) t+=colScores[i];
+    const key=lu.slice().sort((a,b)=>a-b).join('|'); const e=rankedMap.get(key);
+    if(e){ e.count++; e.totalScore+=t; } else rankedMap.set(key,{lineup:lu.map(i=>pool[i]),count:1,totalScore:t,_pivot:!!pivot}); };
   // TRAIN/TEST SPLIT: candidates are ex-post optimals of EVEN sims only; EV
   // is priced on the held-out ODD sims (oosParity below). Pricing a lineup
   // on the sims that created it hands it guaranteed rank-1 finishes there —
@@ -6743,18 +6778,34 @@ async function runPgaSimGen(){
   // which are optimal only in the freak draws that birthed them.
   for(let s=0;s<simsDone;s+=2){
     for(let i=0;i<pool.length;i++) colScores[i]=simScores[i][s];
-    const lu=pgaOptimalForSim(pool, colScores, salArr, cheapPre, maxSal);
-    if(lu){
-      let t=0; for(const i of lu) t+=colScores[i];
-      const key=lu.slice().sort((a,b)=>a-b).join('|');
-      const e=rankedMap.get(key);
-      if(e){ e.count++; e.totalScore+=t; } else rankedMap.set(key,{lineup:lu.map(i=>pool[i]),count:1,totalScore:t});
-    }
+    addCand(pgaOptimalForSim(pool, colScores, salArr, cheapPre, maxSal));
     if(s>0&&s%100===0){
       if(s%500===0) log(`  optimals: ${s.toLocaleString()}/${simsDone.toLocaleString()}…`);
       await new Promise(r=>setTimeout(r,0));
       if(window._genCancelled){ log('Cancelled.'); done(); return; }
     }
+  }
+  // ── Pivot passes ──────────────────────────────────────────────────────────
+  // A golfer optimal in most sims (chalk pillar) collapses the candidate pool
+  // to his lineups only — so when the make-cut rule trims him there is nothing
+  // to fill the freed slots and he snaps back toward 100% in a reduced pool.
+  // For each such over-represented golfer, generate the per-sim BEST lineup
+  // that EXCLUDES him, guaranteeing pillar-free pivots exist. Self-limiting: in
+  // a healthy pool no one dominates, so no pivot passes run.
+  {
+    let tot=0; const app={};
+    for(const e of rankedMap.values()){ tot+=e.count; for(const p of e.lineup) app[p.id]=(app[p.id]||0)+e.count; }
+    const chalk=pool.map((p,i)=>({p,i})).filter(({p})=>(app[p.id]||0)/Math.max(1,tot) > 0.50).map(({i})=>i);
+    for(const gi of chalk){
+      for(let s=0;s<simsDone;s+=2){
+        for(let i=0;i<pool.length;i++) colScores[i]=simScores[i][s];
+        colScores[gi]=-1e9;
+        addCand(pgaOptimalForSim(pool, colScores, salArr, cheapPre, maxSal), true);
+      }
+      await new Promise(r=>setTimeout(r,0));
+      if(window._genCancelled){ log('Cancelled.'); done(); return; }
+    }
+    if(chalk.length) log(`Pivot generation: added pillar-free alternatives for ${chalk.length} over-represented golfer(s) so caps always have pivots to fill.`);
   }
   const ranked=[...rankedMap.values()].sort((a,b)=>b.count-a.count);
   log(`${ranked.length.toLocaleString()} unique optimal lineups from ${Math.ceil(simsDone/2).toLocaleString()} generation sims (EV priced on the ${Math.floor(simsDone/2).toLocaleString()} held-out sims).`);
