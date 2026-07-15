@@ -5968,6 +5968,8 @@ async function runUFCContestEV(ctx){
       if(chosen.length % 12 === 0){ await tick(); if(window._genCancelled) return null; }
     }
     if(chosen.length < target){
+      const shortBy = target - chosen.length;
+      if(pillarCap) log(`Fill: caps left ${shortBy} slot(s) unfillable from ${extra.length} candidates — RELAXING caps to complete the slate (this is where a capped golfer creeps back up; means too few cap-respecting lineups exist).`);
       for(const e of extra){
         if(chosen.length>=target) break;
         if(have.has(key(e))) continue;
@@ -6018,17 +6020,26 @@ async function runUFCContestEV(ctx){
   //   a cut-risky pillar's exposure is capped at HIS OWN MAKE-CUT PROBABILITY
   //   — never more exposed to a golfer than his chance of playing the weekend.
   // Self-scaling: an 87% make-cut stud is barely touched, a coin-flip value
-  // trims hard, players with make-cut ≥88% (or sports with no cut — UFC,
-  // NASCAR, where _simCut is absent) never trigger. The PRICE of the rule is
-  // measured every slate — the same portfolio machinery evaluates capped vs
-  // uncapped in the as-projected world AND a "model wrong about the pillar"
-  // world (his edge above salary expectation stripped from his made-cut sims,
-  // field re-scored identically) — and reported in one log line.
+  // trims hard. Applies to ANY golfer used in ≥50% of the slate (threshold 99
+  // so a near-lock at 92% make-cut caps at 92% — never at 100% — while a golfer
+  // who never misses is a no-op; sports with no cut — UFC, NASCAR, _simCut
+  // absent — never trigger). The reduced-pool "Si Woo back to ~100%" case was
+  // exactly a dominant favorite whose make-cut sat above the old 88 gate, so he
+  // sailed past the cap entirely. The PRICE of the rule is measured every slate
+  // — the same portfolio machinery evaluates capped vs uncapped in the
+  // as-projected world AND a "model wrong about the pillar" world (his edge
+  // above salary expectation stripped from his made-cut sims, field re-scored
+  // identically) — and reported in one log line.
   let sel = await runGreedy(null);
   if(sel===null) return null;
   if(window._genCancelled) return null;
   {
-    const pillars = pool.filter(p => p._simCut!=null && p._simCut<88 &&
+    // DIAGNOSTIC: show what the make-cut rule sees for the most-used golfers.
+    const _diag = pool.map(p=>({p, e:(sel.expCount[p.id]||0)})).filter(r=>r.e>0)
+      .sort((a,b)=>b.e-a.e).slice(0,6)
+      .map(r=>`${r.p.name.split(' ').slice(-1)[0]} ${Math.round(100*r.e/target)}% (cut ${r.p._simCut==null?'n/a':r.p._simCut+'%'})`).join(', ');
+    log(`Pre-cap exposures: ${_diag} — cap triggers for cut<99% at ≥50% use.`);
+    const pillars = pool.filter(p => p._simCut!=null && p._simCut<99 &&
       (sel.expCount[p.id]||0) >= 0.5*target);
     if(pillars.length){
       const meanIdxAll = pool.map((p,i)=>{ const a=scoreArr[i]; let s2=0; for(const si of simIdx) s2+=(a[si]||0); return s2/Math.max(1,simIdx.length); });
@@ -6795,8 +6806,12 @@ async function runPgaSimGen(){
   {
     let tot=0; const app={};
     for(const e of rankedMap.values()){ tot+=e.count; for(const p of e.lineup) app[p.id]=(app[p.id]||0)+e.count; }
-    const chalk=pool.map((p,i)=>({p,i})).filter(({p})=>(app[p.id]||0)/Math.max(1,tot) > 0.50).map(({i})=>i);
-    for(const gi of chalk){
+    // Pivot for any golfer in >30% of optimals (was 50%). A cut-risky value the
+    // greedy will later concentrate can sit below 50% at the candidate level yet
+    // get jammed in the output — generate his pivots pre-emptively.
+    const chalk=pool.map((p,i)=>({p,i,f:(app[p.id]||0)/Math.max(1,tot)})).filter(x=>x.f>0.30);
+    for(const {i:gi} of chalk){
+      const before=rankedMap.size;
       for(let s=0;s<simsDone;s+=2){
         for(let i=0;i<pool.length;i++) colScores[i]=simScores[i][s];
         colScores[gi]=-1e9;
@@ -6805,7 +6820,7 @@ async function runPgaSimGen(){
       await new Promise(r=>setTimeout(r,0));
       if(window._genCancelled){ log('Cancelled.'); done(); return; }
     }
-    if(chalk.length) log(`Pivot generation: added pillar-free alternatives for ${chalk.length} over-represented golfer(s) so caps always have pivots to fill.`);
+    if(chalk.length) log(`Pivot generation: ${chalk.map(x=>`${x.p.name.split(' ').slice(-1)[0]} (${Math.round(100*x.f)}% of optimals)`).join(', ')} — generated pillar-free alternatives; ${rankedMap.size.toLocaleString()} total candidates now.`);
   }
   const ranked=[...rankedMap.values()].sort((a,b)=>b.count-a.count);
   log(`${ranked.length.toLocaleString()} unique optimal lineups from ${Math.ceil(simsDone/2).toLocaleString()} generation sims (EV priced on the ${Math.floor(simsDone/2).toLocaleString()} held-out sims).`);
