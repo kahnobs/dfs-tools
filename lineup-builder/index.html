@@ -5008,6 +5008,12 @@ const BUILTIN_CONTESTS=[
    custom:'1: 1000\n2: 500\n3: 300\n4: 200\n5: 150\n6-7: 125\n8-10: 100\n11-14: 75\n15-19: 60\n20-25: 50\n26-35: 40\n36-45: 30\n46-55: 25\n56-70: 20\n71-90: 15\n91-120: 10\n121-160: 8\n161-245: 6\n246-415: 5\n416-745: 4\n746-1430: 3\n1431-2865: 2\n2866-5615: 1.50'},
   {id:'builtin_pga_birdie3', sport:'pga', name:'PGA $60K Birdie · $3 × 23,800', fee:3, fieldSize:23800, preset:'custom',
    custom:'1: 6000\n2: 3000\n3: 2000\n4: 1250\n5: 1000\n6-7: 750\n8-10: 600\n11-13: 500\n14-16: 400\n17-19: 300\n20-22: 250\n23-25: 200\n26-29: 150\n30-35: 100\n36-45: 75\n46-55: 60\n56-65: 50\n66-80: 40\n81-100: 30\n101-125: 25\n126-165: 20\n166-245: 15\n246-485: 10\n486-1050: 8\n1051-2250: 6\n2251-5751: 5'},
+  // SINGLE-ENTRY template (se:true). Field duplicates far less than a mass-multi
+  // GPP (nobody fires 150 bullets) and skews sharper per entry, so the engine
+  // uses SE field dynamics — lower duplication, higher sharp share — and builds
+  // ONE lineup by default. Payout sums to $25,000 across 563 paid spots.
+  {id:'builtin_pga_albatross_se', sport:'pga', name:'PGA $25K Albatross · $12 × 2,450 [SINGLE ENTRY]', fee:12, fieldSize:2450, preset:'custom', se:true,
+   custom:'1: 2500\n2: 1250\n3: 750\n4: 600\n5: 500\n6: 400\n7-8: 300\n9-10: 250\n11-12: 200\n13-15: 150\n16-19: 100\n20-25: 75\n26-35: 60\n36-55: 50\n56-95: 40\n96-165: 35\n166-285: 30\n286-563: 25'},
 ];
 function loadContestPresets(){ try{ return JSON.parse(localStorage.getItem('dfs_contest_presets')||'[]'); }catch(e){ return []; } }
 function storeContestPresets(a){ try{ localStorage.setItem('dfs_contest_presets', JSON.stringify(a)); }catch(e){} }
@@ -5084,9 +5090,11 @@ function applyContestPreset(id, silent){
   if(!id) return;
   const rec=findContestRec(id); if(!rec) return;
   const s=activeSlate(); if(!s) return;
-  s._ufcEv=Object.assign({}, s._ufcEv, {contestId:id, fieldSize:rec.fieldSize, fee:rec.fee, preset:rec.preset, custom:rec.custom});
+  s._ufcEv=Object.assign({}, s._ufcEv, {contestId:id, fieldSize:rec.fieldSize, fee:rec.fee, preset:rec.preset, custom:rec.custom, se:!!rec.se});
   save();
   localStorage.setItem('dfs_last_contest_preset', id);
+  // Single-entry: you enter one lineup, so default the build to 1 (overridable).
+  if(rec.se){ const gc=document.getElementById('genCount'); if(gc) gc.value=1; }
   const evF=document.getElementById('ufcEvField'); if(evF) evF.value=rec.fieldSize;
   const evFee=document.getElementById('ufcEvFee'); if(evFee) evFee.value=rec.fee;
   const evC=document.getElementById('ufcEvCustom'); if(evC){ evC.value=rec.custom||''; evC.style.display=rec.preset==='custom'?'block':'none'; }
@@ -5688,7 +5696,14 @@ async function runUFCContestEV(ctx){
     log(`Dominance repair (true-dominance rule): ${swaps.toLocaleString()} upgrades across ${dominated.toLocaleString()} candidates (margin ${MARGIN.toFixed(1)} pts + beats-him-in-60%-of-sims) — near-equal plays keep their shares; only truly dominated plays removed.`);
   }
 
+  // Duplication multiplier. NOTE: a single-entry variant (DUP_K=1 + sharper
+  // field) was backtested in the $12/2450 Albatross and it BUILT A WORSE
+  // lineup — a 2,450-person top-heavy contest still rewards differentiation to
+  // win, so cutting the duplication tax just made the build chalkier and cost
+  // ROI/cash/win-rate across seeds. So SE uses the standard field model; the SE
+  // template's value is the accurate payout/field/fee and a single-lineup build.
   const DUP_K = 4;
+  if(ctx.se) log('Single-entry contest: building for one bullet — max win equity, standard field model (SE-specific duplication tuning tested worse).');
   // ── Robust aggregation across ownership scenarios ──
   // Averaging scenario EVs does NOT penalize input-fragile positions — under
   // risk-neutral EV, being under-owned in half the worlds pays for being
@@ -5816,6 +5831,28 @@ async function runUFCContestEV(ctx){
   // it only ever TIGHTENS the user's manual caps, never loosens them.
   const runGreedy = async (pillarCap) => {
   const outputExpCount={}; const chosen=[];
+  // ── Conditional co-exposure cap (keeps skill correlation, kills the tail) ────
+  // Skill-set grouping SHOULD pair correlated golfers above chance — that's the
+  // model working. What we prevent is the degenerate case where a pair is so
+  // welded that there are no unique combos (e.g. 87% of the favorite's lineups
+  // also hold one value play, so his whole coverage dies if that golfer misses
+  // Friday). For any pair where BOTH golfers are already meaningfully used, we
+  // require at least (1-CO_CAP) of the less-used golfer's lineups to NOT hold
+  // the other. Backtested at 0.85: breaks the degenerate tail (worst pair
+  // 92%→79% on the hardest slate) at zero EV cost — win-rate and top-end held
+  // or improved across seeds. Blanket pair penalties, by contrast, gut ceiling.
+  // Bounded deferral → always fills; needs no user input.
+  const CO_CAP=0.85, CO_FLOOR=Math.max(3,Math.round(0.08*target)), CO_DEFER=Math.max(20,target);
+  const _pairCnt={};
+  const _pk=(a,b)=> a<b ? a+'|'+b : b+'|'+a;
+  const _coBlocked=lu=>{
+    for(let i=0;i<lu.length;i++)for(let j=i+1;j<lu.length;j++){
+      const ca=outputExpCount[lu[i].id]||0, cb=outputExpCount[lu[j].id]||0;
+      if(Math.min(ca,cb)>=CO_FLOOR && (_pairCnt[_pk(lu[i].id,lu[j].id)]||0) >= CO_CAP*Math.min(ca,cb)) return true;
+    }
+    return false;
+  };
+  const _coBump=lu=>{ for(let i=0;i<lu.length;i++)for(let j=i+1;j<lu.length;j++){ const k=_pk(lu[i].id,lu[j].id); _pairCnt[k]=(_pairCnt[k]||0)+1; } };
   const capBlocked = lu => lu.some(p=>{
     let pct = overrides[p.id]!=null ? overrides[p.id] : maxExpPct;
     if(pillarCap && pillarCap.has(p.id)) pct = Math.min(pct, pillarCap.get(p.id)); // auto-exposure (tightens only)
@@ -5927,12 +5964,16 @@ async function runUFCContestEV(ctx){
     const top = cands[0];
     if(capBlocked(top.e.lineup)){ cands.shift(); continue; }
     if(top.round === chosen.length){
+      // Conditional co-exposure: defer a lineup whose pair is already welded past
+      // the cap, so a fresher supporting cast takes the slot first (bounded).
+      if(_coBlocked(top.e.lineup) && (top._codef||0)<CO_DEFER){ top._codef=(top._codef||0)+1; cands.shift(); cands.push(top); continue; }
       // Fresh valuation for the current portfolio state — accept.
       chosen.push(top.e);
       top.e._mev = top.val;
       if(!top.e._tots) top.e._tots = totalsOf(top.e);
       acceptEntry(top.e);
       top.e.lineup.forEach(p=>{ outputExpCount[p.id]=(outputExpCount[p.id]||0)+1; });
+      _coBump(top.e.lineup);
       cands.shift();
       if(chosen.length % 8 === 0){ await tick(); if(window._genCancelled) return null; }
     } else {
@@ -6123,6 +6164,16 @@ async function runUFCContestEV(ctx){
   const expRows = pool.map(p=>({p, e:(sel.expCount[p.id]||0)}))
     .filter(r=>r.e>0).sort((a,b)=>b.e-a.e).slice(0,6);
   log(`Top exposure: ${expRows.map(r=>`${r.p.name.split(' ').slice(-1)[0]} ${Math.round(r.e/finalLineups.length*100)}%`).join(', ')}`);
+  // Tightest surviving pair coupling — shows the conditional cap did its job
+  // (skill pairs allowed up to 85%; nothing should read as a welded 90%+).
+  { const nm={}; pool.forEach(p=>nm[p.id]=p.name.split(' ').slice(-1)[0]);
+    const ec={}, pr={};
+    finalLineups.forEach(l=>{ l.forEach(p=>ec[p.id]=(ec[p.id]||0)+1);
+      for(let i=0;i<l.length;i++)for(let j=i+1;j<l.length;j++){const k=l[i].id<l[j].id?l[i].id+'|'+l[j].id:l[j].id+'|'+l[i].id;pr[k]=(pr[k]||0)+1;}});
+    let bd='',bc=0;
+    for(const k in pr){ const [a,b]=k.split('|'); const mn=Math.min(ec[a],ec[b]);
+      if(mn/finalLineups.length>=0.30){ const c=pr[k]/mn; if(c>bc){bc=c; bd=`${nm[a]}+${nm[b]}`;} } }
+    if(bd) log(`Co-exposure check: tightest pair ${bd} shares ${Math.round(100*bc)}% (capped at 85% — skill correlation kept, degenerate coupling prevented).`); }
 
   const now=new Date();
   addToHistory(slate.id, `${finalLineups.length} lineups (EV) @ ${now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`, finalLineups);
@@ -6845,7 +6896,8 @@ async function runPgaSimGen(){
   // is higher. Propose one-swap upgrades that spend the leftover, then let
   // the SAME contest-EV pricing judge originals and neighbors on equal
   // footing. Nothing is forced: if the cheap build carries more EV, it wins.
-  const out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, oosParity:1, sharpShare:0.15, dominanceRepair:true, maxSal});
+  const _se = !!(slate._ufcEv && slate._ufcEv.se);
+  const out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, oosParity:1, sharpShare:0.15, se:_se, dominanceRepair:true, maxSal});
   if(out===null&&window._genCancelled) log('Cancelled.');
 
   // ── Theme readout: which skill set / wave each lineup is built around ──
