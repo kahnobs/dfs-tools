@@ -802,7 +802,7 @@ html { overscroll-behavior-y: contain; }
       <button class="show-hidden-btn" id="resetMaxExpBtn" onclick="resetMaxExposures()" style="display:none;" title="Clear all MAX% overrides back to default (100)">↺ Reset Max</button>
       <button class="show-hidden-btn" id="updatePoolBtn" onclick="openUpdatePoolModal()" title="Re-upload CSV to refresh projections, ownership, salary, tee times">↺ Update</button>
       <button class="show-hidden-btn" id="refreshSheetBtn" onclick="refreshFromSheet()" title="Re-fetch latest data from Google Sheet" style="display:none;border-color:rgba(52,168,83,0.3);color:#34a853;">↺ Refresh</button>
-      <button class="show-hidden-btn" id="simCsvBtn" onclick="exportSimCSV()" title="Export each golfer's simulated outcome distribution (mean, floor/ceiling, finish rates) to CSV" style="display:none;border-color:rgba(34,197,94,0.35);color:var(--green);">⬇ Sim CSV</button>
+      <button class="show-hidden-btn" id="simCsvBtn" onclick="exportSimCSV()" title="Export each player's simulated outcome distribution (mean, floor/ceiling, finish rates) to CSV" style="display:none;border-color:rgba(34,197,94,0.35);color:var(--green);">⬇ Sim CSV</button>
     </div>
     <!-- UPDATE POOL MODAL -->
     <div id="updatePoolModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9000;align-items:center;justify-content:center;backdrop-filter:blur(2px);">
@@ -2932,19 +2932,30 @@ function exportSimCSV(){
   // are inputs the sim no longer consumes (projection isn't a sim variable; tee
   // & ownership don't shape a golfer's own finish), and Min/Max are pure tail
   // whiskers — all dropped. P10 (floor) / P90 (ceiling) are the usable bounds.
-  const header=['Name','Salary','ModelScore','SimScore','Mean','Floor(P10)','P25','Median','P75','Ceiling(P90)','SimWin%','SimTop5%','SimTop10%','SimTop20%','MadeCut%'];
+  // Sport-aware tail columns: PGA has finish rates + made-cut; NASCAR has
+  // finish rates + the usable-score rate (P(30+ DK pts) — the punt-ruin
+  // guard's input) but no top-20 market; UFC scoring has no finish positions
+  // at all, so it exports the distribution only.
+  const sport=slate.sport, nas=sport==='nascar', ufc=sport==='ufc';
+  const tailH = nas ? ['SimWin%','SimTop5%','SimTop10%','Usable30+%']
+              : ufc ? []
+              :       ['SimWin%','SimTop5%','SimTop10%','SimTop20%','MadeCut%'];
+  const tailV = p => nas ? [p._simWin,p._simT5,p._simT10,p._simCut]
+                   : ufc ? []
+                   :       [p._simWin,p._simT5,p._simT10,p._simT20,p._simCut];
+  const header=['Name','Salary',nas?'Rating':'ModelScore','SimScore','Mean','Floor(P10)','P25','Median','P75','Ceiling(P90)',...tailH];
   const lines=[header.join(',')];
   rows.sort((a,b)=>(parseFloat(b._simP50)||0)-(parseFloat(a._simP50)||0)).forEach(p=>{
     const d=p._simDist;
     lines.push([p.name,p.salary,p.rating,p._simP50,d.mean,d.p10,d.p25,d.p50,d.p75,d.p90,
-                p._simWin,p._simT5,p._simT10,p._simT20,p._simCut].map(esc).join(','));
+                ...tailV(p)].map(esc).join(','));
   });
   const csv=lines.join('\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download=(slate.name||'slate').replace(/\s+/g,'_').toLowerCase()+'_sim_distributions.csv';
   a.click();
-  showToast(`Exported ${rows.length} golfers' sim distributions.`,'ok');
+  showToast(`Exported ${rows.length} ${nas?'drivers':ufc?'fighters':'golfers'}' sim distributions.`,'ok');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -7123,6 +7134,9 @@ async function runUFCSimGen(){
     p._simP50 = compositeScoreById[p.id] ?? (medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null);
     p._simDist = distById[p.id] || null;
   });
+  // Sim distributions attached — enable the ⬇ Sim CSV export (UFC exports the
+  // outcome distribution only; no finish-position columns).
+  { const xb=document.getElementById('simCsvBtn'); if(xb) xb.style.display=''; }
   if(typeof renderPool==='function') renderPool();
 
   log(`${ranked.length} unique optimal lineups found across ${totalSims.toLocaleString()} sims.`);
@@ -7906,6 +7920,8 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
 
   // Per-driver P1 count for the win-rate calibration log (finishPos === 1).
   const winCount = new Array(FIELD).fill(0);
+  // Per-driver top-5 count for the sim-distribution CSV export.
+  const t5Cnt = new Array(FIELD).fill(0);
   // Per-driver top-10 count for the tier calibration log.
   const t10Cnt = new Array(FIELD).fill(0);
 
@@ -8360,6 +8376,7 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
       sumLapsLed[idx]+= d.lapsLed||0;
       simScores[idx].push(score);
       if(d.finishPos === 1) winCount[idx]++;
+      if(d.finishPos <= 5)  t5Cnt[idx]++;
       if(d.finishPos <= 10) t10Cnt[idx]++;
       if(score > simBestScore){ simBestScore = score; simBestId = d.p.id; }
     });
@@ -8411,7 +8428,12 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
     const composite = avg*0.40 + p75*0.30 + p90*0.30;
 
     const dist = buildSimDist(simScores[i], 'nascar');
-    return { player:p, avg, p50, p75, p90, composite, dist };
+    // Simulated finish rates (percent, 1dp) for the Sim CSV export — same
+    // shape the PGA path exposes (_simWin/_simT5/_simT10).
+    const winPct = Math.round(1000*winCount[i]/simsDenom)/10;
+    const t5Pct  = Math.round(1000*t5Cnt[i]/simsDenom)/10;
+    const t10Pct = Math.round(1000*t10Cnt[i]/simsDenom)/10;
+    return { player:p, avg, p50, p75, p90, composite, dist, winPct, t5Pct, t10Pct };
   });
 
   // Slice the top-scorer log to sims actually completed so a mid-run cancel
@@ -8623,6 +8645,13 @@ async function runNascarSimGen(){
   if(window._genCancelled){ log('Cancelled.'); done(); return; }
 
   // ── Step 1: Run sims ──────────────────────────────────────────────────────
+  // Clear stale per-driver sim results from ANY prior run first — a $0-salary
+  // scratch (excluded from fullField) would otherwise keep old _simDist and
+  // show up in the Sim CSV export next to fresh rows (PGA-path parity).
+  (slate.players||[]).forEach(p=>{
+    delete p._simDist; delete p._simWin; delete p._simT5; delete p._simT10;
+    delete p._simT20; delete p._simCut; delete p._simP50; delete p._simComposite;
+  });
   const rearStarterSet = new Set(slate._rearStarters || []);
   const { driverResults, simTopScorer, simScoreArrays, simIncidents } = await runNascarSims(fullField, numSims, totalLaps, trackType, rearStarterSet);
 
@@ -8645,7 +8674,14 @@ async function runNascarSimGen(){
     const arr = simScoreArrays[i] || [];
     let usable = 0; for(const v of arr) if(v >= 30) usable++;
     r.player._simCut = arr.length ? Math.round(100 * usable / arr.length) : null;
+    // Simulated finish rates for the Sim CSV export (percent, 1dp — PGA parity).
+    r.player._simWin = r.winPct ?? null;
+    r.player._simT5  = r.t5Pct  ?? null;
+    r.player._simT10 = r.t10Pct ?? null;
   });
+  // Full sim outcomes are now attached — enable the ⬇ Sim CSV export.
+  window._nasSimReady = true;
+  { const xb=document.getElementById('simCsvBtn'); if(xb) xb.style.display=''; }
   if(typeof renderPool==='function') renderPool();
 
   // ── Contest-EV mode: replaces the scenario-bucket selection stack ──
@@ -12743,7 +12779,8 @@ function buildSimDist(scoresArr, sport) {
     bins[bi]++;
   });
 
-  return { bins, domainMin, domainMax, p10, p25, p50, p75, p90 };
+  const mean = Math.round((sorted.reduce((a, b) => a + b, 0) / n) * 10) / 10;
+  return { bins, domainMin, domainMax, p10, p25, p50, p75, p90, mean };
 }
 
 // ── Tooltip show/hide ────────────────────────────────────────────────────────
