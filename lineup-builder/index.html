@@ -4501,26 +4501,53 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
     td = Math.max(0, Math.min(Math.floor(tdCap), td));
   }
 
-  // Control time derived from takedowns: each TD averages ~45-90s of control
-  const ctrlSecs = td * (45 + Math.random() * 45);
+  // ── Control time ──────────────────────────────────────────────────────────
+  // Two components (was: takedowns only at 45-90s each, which capped even a
+  // 3-TD wrestler at ~4.5 min while real top-control wrestlers post 8-12 min,
+  // and gave clinch-pressure fighters with zero TDs literally 0 control):
+  //   • per-TD ground control: 60-150s each (ride time after the shot)
+  //   • positional/clinch control: 2-7% of elapsed fight time for everyone
+  // Winners control more (×1.15 — you win rounds BY controlling), and no one
+  // controls more than 75% of the fight (the opponent and referee exist).
+  // Opponents' control should be negatively correlated (shared clock); left
+  // independent since opposing fighters are never rostered together.
+  const _elapsedSecs = _elapsedMin * 60;
+  let ctrlSecs = td * (60 + Math.random() * 90) + _elapsedSecs * (0.02 + Math.random() * 0.05);
+  if(won) ctrlSecs *= 1.15;
+  ctrlSecs = Math.min(ctrlSecs, 0.75 * _elapsedSecs);
 
-  // Knockdowns: odds-derived instead of a flat 12%. On a finish win, KD
-  // likelihood scales with the fighter's own market finish tendency
-  // (_finishRate = finish mass ÷ total win mass from his MOV ladder): a pure
-  // decision grinder finishing early (rare, likely a sub) draws ~6%, a
-  // KO-heavy finisher ~30%. Decisions and losses keep the low base rate —
-  // KDs en route to a decision or in a losing effort happen but are rare.
+  // ── Knockdowns ────────────────────────────────────────────────────────────
+  // On a finish win: KO/TKO wins carry a scored knockdown well over half the
+  // time, and occasionally two. Without a KO-vs-sub market split in the sheet,
+  // _finishRate proxies KO-heaviness: a pure finisher draws ~65% one-KD (plus
+  // a small second-KD chance), a decision grinder who happens to finish ~20%
+  // (his rare finishes skew sub). Old caps (30% max, one KD) were clipping
+  // 3-5 pts off exactly the spike outcomes the ceiling-weighted composite is
+  // built to reward. Decisions keep a small en-route rate; losses lower still.
   let kdProb;
   if(won && round !== 'dec'){
     const fr = fighter._finishRate != null ? fighter._finishRate : 0.5;
-    kdProb = 0.06 + 0.24*fr;
+    kdProb = 0.15 + 0.50*fr;
+  } else if(won){
+    kdProb = 0.08;
   } else {
-    kdProb = 0.05;
+    kdProb = 0.04;
   }
-  const kd = Math.random() < kdProb ? 1 : 0;
+  let kd = Math.random() < kdProb ? 1 : 0;
+  if(kd && won && round !== 'dec' && Math.random() < 0.15) kd = 2;
 
-  // DK scoring: sig strikes count as both strike (+0.2) and sig strike (+0.2) = +0.4 total
-  let total = ss * 0.4 + td * 5 + ctrlSecs * 0.03 + kd * 10;
+  // ── Non-significant strikes ───────────────────────────────────────────────
+  // DK scores non-sig strikes at +0.2 each; they were previously not modeled
+  // at all — silently shorting clinch/ground fighters 4-10 pts (short ground
+  // strikes are mostly non-sig). Model: a share of standing output (~10-25%
+  // of sig strikes) plus ground output riding on control time (4-10 landed
+  // per control minute), capped by a physical rate on time actually fought.
+  let nsig = Math.round(ss * (0.10 + Math.random() * 0.15) + (ctrlSecs / 60) * (4 + Math.random() * 6));
+  nsig = Math.max(0, Math.min(nsig, Math.round(_elapsedMin * 14)));
+
+  // DK scoring: sig strikes 0.4 (strike 0.2 + significant 0.2), non-sig 0.2,
+  // TD 5, control 0.03/s, KD 10.
+  let total = ss * 0.4 + nsig * 0.2 + td * 5 + ctrlSecs * 0.03 + kd * 10;
 
   // Winner/loser volume split with EXACT mass conservation per fight.
   // The SS/TD ladders are whole-fight markets: E[V] = p·E[V|win] + (1−p)·E[V|loss].
@@ -4756,7 +4783,13 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
 // ── UFC SIMULATION-FIRST ENGINE ───────────────────────────────
 // For each sim: sample fight outcomes → score all fighters → pick optimal lineup.
 // After N sims: aggregate lineup frequencies → select top lineups by count + diversity.
-async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, noOppose, minSal){
+async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, noOppose, minSal, evMode){
+  // evMode (Contest-EV on): TRAIN/TEST SPLIT — candidates are ex-post optimals
+  // of EVEN sims only; EV is later priced on the held-out ODD sims (oosParity).
+  // Pricing a lineup on the sims that created it hands it guaranteed rank-1
+  // finishes there — in-sample optimism that especially inflates thin
+  // high-variance builds. The PGA path has had this since its EV engine
+  // shipped; UFC was still generating and pricing on the same sims.
   const pairs = buildFightPairs(fullPool);
 
   // Tag 5-rounders: user toggle OR presence of R4/R5 finish odds. Tagged here so
@@ -4813,7 +4846,11 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
         const mlV  = (f.ml  != null && f.ml  !== '') ? parseFloat(f.ml)  : null;
         const itdV = (f.itd != null && f.itd !== '') ? parseFloat(f.itd) : null;
         const pW = (mlV != null && !isNaN(mlV)) ? mlToProb(mlV) : null;
-        const pI = (itdV != null && !isNaN(itdV)) ? (mlToProb(itdV)||0)/1.045 : null; // flat de-vig, mirrors itdCheck
+        // No extra de-vig: the odds pipeline pair-de-vigs ITD at the books that
+        // post both sides and normalizes ITD+Decision to the de-vigged ML, so
+        // the sheet's ITD is already a true probability — the old ÷1.045 here
+        // was a double haircut on top of that.
+        const pI = (itdV != null && !isNaN(itdV)) ? (mlToProb(itdV)||0) : null;
         if(pW > 0 && pI != null) f._itdFinish = Math.max(0.03, Math.min(0.95, pI/pW));
       }
       if(f._itdFinish != null && f._finishRate == null) f._finishRate = f._itdFinish;
@@ -4830,6 +4867,19 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     const blind    = noLadder.filter(p=>p._itdFinish==null);
     if(viaItd.length) log(`ITD fallback (no finish ladder posted — finish/decision split taken from ITD price): ${viaItd.map(lastName).join(', ')}`);
     if(blind.length)  log(`⚠ No finish ladder OR ITD — simmed as decision-only (finishing equity invisible): ${blind.map(lastName).join(', ')}`);
+    // Volume-market coverage: the SS/TD O/U lines are the calibration anchors
+    // for the whole volume model (ladder de-vig target, personal pace caps,
+    // below-rung draw anchor). Their absence silently degrades every volume
+    // draw to flat-haircut ladders and league-pace priors — say so before the
+    // user builds on it. Books usually post totals fight day: re-pull.
+    const noSsLadder = fullPool.filter(p=>![35,40,45,50,55,60,65,70,75,80,85,90,95,100,105,110,115,120,125].some(t=>p['ss_'+t]!=null));
+    const noOu = fullPool.filter(p=>!p.ss_ou);
+    if(noOu.length === fullPool.length){
+      log(`⚠ NO SS O/U lines on this slate — volume ladders get a flat vig haircut instead of O/U-anchored calibration, and pace ceilings are off. Re-pull odds closer to lock (books post totals fight day).`);
+    } else if(noOu.length > fullPool.length/2){
+      log(`⚠ SS O/U missing for ${noOu.length}/${fullPool.length} fighters — their volume is uncalibrated (flat haircut + league-pace prior).`);
+    }
+    if(noSsLadder.length) log(`SS ladder missing (league-pace volume fallback): ${noSsLadder.map(lastName).join(', ')}`);
     const fiveR = [...new Set(pairs.filter(({a,b})=>a._is5Round||(b&&b._is5Round)).map(({fightNum})=>fightNum).filter(Boolean))].sort((x,y)=>x-y);
     log(fiveR.length
       ? `5-round fights: ${fiveR.map(f=>'F'+f).join(', ')}`
@@ -4870,7 +4920,7 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   // old code still divided appearRate by the FULL numSims (deflating every
   // optimal-rate that feeds the alignment servo and ownership cull) and
   // reported totalSims as if the run finished.
-  let simsDone = 0;
+  let simsDone = 0, genSims = 0;
   for(let s=0; s<numSims; s++){
     if(s > 0 && s % CHUNK === 0){
       await new Promise(r=>setTimeout(r,0));
@@ -4900,7 +4950,11 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
       if(fighterAllScores[p.id] !== undefined) fighterAllScores[p.id].push(sc);
     });
 
-    // Step 3: pick optimal lineup from visible players only
+    // Step 3: pick optimal lineup from visible players only.
+    // EV mode: even sims only (scores above were recorded for ALL sims — the
+    // odd half stays pristine for out-of-sample EV pricing).
+    if(evMode && (s % 2 === 1)) continue;
+    genSims++;
     const optimal = pickOptimalLineup(simScore, visiblePool, salaryCap, groups, noOppose, minSal);
     if(!optimal) continue;
 
@@ -4914,6 +4968,40 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
       e.scores.push(total);
     } else {
       lineupFreq.set(key, {lineup:optimal, count:1, totalScore:total, scores:[total], key});
+    }
+  }
+
+  // ── Pivot passes (EV mode) ────────────────────────────────────────────────
+  // A fighter optimal in most sims (chalk pillar) collapses the candidate pool
+  // to his lineups only — when exposure caps or duplication pricing push back,
+  // there's nothing to fill the freed slots. For each fighter in >35% of
+  // optimals, generate the per-sim best lineup that EXCLUDES him, so pillar-
+  // free alternatives exist and the EV engine judges them on equal footing.
+  // Self-limiting: on a balanced card nobody crosses 35% and no passes run.
+  if(evMode && !window._genCancelled){
+    let tot=0; const app={};
+    lineupFreq.forEach(e=>{ tot+=e.count; e.lineup.forEach(p=>{ app[p.id]=(app[p.id]||0)+e.count; }); });
+    const chalk = visiblePool.filter(p=>(app[p.id]||0)/Math.max(1,tot) > 0.35)
+      .sort((a,b)=>(app[b.id]||0)-(app[a.id]||0)).slice(0,3);
+    if(chalk.length && typeof log==='function')
+      log(`Pivot generation: ${chalk.map(p=>`${p.name.split(' ').slice(-1)[0]} (${Math.round(100*(app[p.id]||0)/tot)}% of optimals)`).join(', ')} — building pillar-free alternatives.`);
+    for(const cp of chalk){
+      for(let s=0; s<simsDone; s+=2){
+        if(s>0 && s%200===0){ await new Promise(r=>setTimeout(r,0)); if(window._genCancelled) break; }
+        const simScore={};
+        visiblePool.forEach(p=>{ simScore[p.id] = (fighterAllScores[p.id]||[])[s]||0; });
+        simScore[cp.id] = -1e9;
+        const opt = pickOptimalLineup(simScore, visiblePool, salaryCap, groups, noOppose, minSal);
+        if(!opt || opt.some(p=>p.id===cp.id)) continue;
+        const key = opt.map(p=>p.id).sort().join('|');
+        const total = opt.reduce((s2,p)=>s2+(simScore[p.id]||0),0);
+        if(lineupFreq.has(key)){
+          const e=lineupFreq.get(key); e.count++; e.totalScore+=total; e.scores.push(total);
+        } else {
+          lineupFreq.set(key, {lineup:opt, count:1, totalScore:total, scores:[total], key, _pivot:true});
+        }
+      }
+      if(window._genCancelled) break;
     }
   }
 
@@ -4960,12 +5048,15 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   }).sort((a,b) => b.composite - a.composite || b.count - a.count);
 
   const appearRate = {};
-  visiblePool.forEach(p=>{ appearRate[p.id] = (optAppear[p.id]||0) / Math.max(1, simsDone); });
+  // In EV mode only even sims produced optimals — divide by the sims that
+  // actually voted, or every rate is silently halved.
+  const rateDenom = evMode ? Math.max(1, genSims) : Math.max(1, simsDone);
+  visiblePool.forEach(p=>{ appearRate[p.id] = (optAppear[p.id]||0) / rateDenom; });
   // simScoresById: every visible fighter's per-sim score array (index = sim).
   // Exposed so the selection layer can price a candidate lineup's JOINT
   // distribution (its total across the same sims) instead of summing marginals.
   return {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate,
-          totalSims: simsDone, simScoresById: fighterAllScores};
+          totalSims: simsDone, genSims: evMode ? genSims : simsDone, simScoresById: fighterAllScores};
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -6080,8 +6171,12 @@ async function runUFCContestEV(ctx){
       .sort((a,b)=>b.e-a.e).slice(0,6)
       .map(r=>`${r.p.name.split(' ').slice(-1)[0]} ${Math.round(100*r.e/target)}% (cut ${r.p._simCut==null?'n/a':r.p._simCut+'%'})`).join(', ');
     log(`Pre-cap exposures: ${_diag} — cap triggers for cut<99% at ≥50% use.`);
+    // Trigger threshold: NASCAR fires at ≥35% use (a punt at 44% of the slate
+    // with a 30% usable-score rate is already over-extended; the PGA 50% bar
+    // was tuned for genuine portfolio pillars, not salary-relief fills).
+    const pillarBar = (slate && slate.sport==='nascar') ? 0.35 : 0.5;
     const pillars = pool.filter(p => p._simCut!=null && p._simCut<99 &&
-      (sel.expCount[p.id]||0) >= 0.5*target);
+      (sel.expCount[p.id]||0) >= pillarBar*target);
     if(pillars.length){
       const meanIdxAll = pool.map((p,i)=>{ const a=scoreArr[i]; let s2=0; for(const si of simIdx) s2+=(a[si]||0); return s2/Math.max(1,simIdx.length); });
       let sx=0,sy=0,sxx=0,sxy=0; const nP=pool.length;
@@ -6110,9 +6205,10 @@ async function runUFCContestEV(ctx){
         const r=evalPortfolio(s2,scoreArr,fieldSorted), w=evalPortfolio(s2,scoreArrW,fieldSortedW);
         const win={sel:s2, evR:r.ev, evW:w.ev, deadR:r.dead, deadW:w.dead};
         sel=win.sel;
+        const cutWord = (slate && slate.sport==='nascar') ? 'usable-score (30+) rate' : 'make-cut';
         const pdesc=pillars.filter(p=>(un.sel.expCount[p.id]||0)!==(win.sel.expCount[p.id]||0))
-          .map(p=>`${p.name} ${Math.round(100*(un.sel.expCount[p.id]||0)/target)}%→${Math.round(100*(win.sel.expCount[p.id]||0)/target)}% (his make-cut: ${p._simCut}%)`).join(', ');
-        log(`Auto-exposure (make-cut rule): ${pdesc} — capped at his weekend odds. Price if the model is RIGHT: $${Math.round(un.evR-win.evR)}/slate; if WRONG about him: ${win.evW>=un.evW?'saves $'+Math.round(win.evW-un.evW):'costs $'+Math.round(un.evW-win.evW)}; dead-slates ${(100*un.deadR).toFixed(0)}%→${(100*win.deadR).toFixed(0)}% (right) ${(100*un.deadW).toFixed(0)}%→${(100*win.deadW).toFixed(0)}% (wrong).`);
+          .map(p=>`${p.name} ${Math.round(100*(un.sel.expCount[p.id]||0)/target)}%→${Math.round(100*(win.sel.expCount[p.id]||0)/target)}% (his ${cutWord}: ${p._simCut}%)`).join(', ');
+        log(`Auto-exposure (${cutWord} rule): ${pdesc} — capped at his floor odds. Price if the model is RIGHT: $${Math.round(un.evR-win.evR)}/slate; if WRONG about him: ${win.evW>=un.evW?'saves $'+Math.round(win.evW-un.evW):'costs $'+Math.round(un.evW-win.evW)}; dead-slates ${(100*un.deadR).toFixed(0)}%→${(100*win.deadR).toFixed(0)}% (right) ${(100*un.deadW).toFixed(0)}%→${(100*win.deadW).toFixed(0)}% (wrong).`);
       }
     }
   }
@@ -6984,8 +7080,9 @@ async function runUFCSimGen(){
 
   if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return; }
 
-  const {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, totalSims, simScoresById} = await runUFCSimsNew(
-    fullPool, pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal
+  const _evOn = !!(slate._ufcEv && slate._ufcEv.on);
+  const {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, totalSims, genSims, simScoresById} = await runUFCSimsNew(
+    fullPool, pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal, _evOn
   );
 
   // Cancelled mid-run: abort instead of building lineups from a partial sample.
@@ -7031,8 +7128,16 @@ async function runUFCSimGen(){
   log(`${ranked.length} unique optimal lineups found across ${totalSims.toLocaleString()} sims.`);
 
   // ── Contest-EV mode: replaces the entire heuristic selection stack ──
-  if(slate._ufcEv && slate._ufcEv.on && ranked.length){
-    const out = await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims, target, maxExpPct, overrides});
+  // Full parity with the PGA path (these four shipped there first and UFC
+  // never got them): oosParity=1 prices candidates on the held-out odd sims
+  // (kills in-sample optimism), sharpShare models 15% of the field as
+  // optimizer-like entries (honest duplication + top-of-curve), dominance
+  // repair upgrades single-sim fluke slots, and maxSal lets the repair
+  // respect the real cap.
+  if(_evOn && ranked.length){
+    const out = await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims,
+      genSims: genSims || totalSims, target, maxExpPct, overrides,
+      oosParity:1, sharpShare:0.15, se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:true, maxSal});
     if(out === null && window._genCancelled) log('Cancelled.');
     document.getElementById('genBtn').disabled = false;
     cancelBtn?.remove();
@@ -8478,10 +8583,20 @@ async function runNascarSimGen(){
   // weighted score that actually drives bucketing, the floor, and selection) —
   // matching the PGA path and making the displayed score track exposure. The
   // true median stays available in the sim-distribution hover tooltip via _simDist.
-  driverResults.forEach(r=>{
+  driverResults.forEach((r,i)=>{
     r.player._simP50       = r.composite!=null ? Math.round(r.composite*10)/10 : null;
     r.player._simComposite = r.composite;
     r.player._simDist      = r.dist || null;
+    // NASCAR punt-ruin guard: _simCut = % of sims this driver posts a USABLE
+    // score (30+ DK pts — finished on the lead-lap-ish and didn't kill the
+    // lineup). Feeds the same auto-exposure machinery as PGA's make-cut rule:
+    // a punt's exposure is capped at his own usable-score rate, so the greedy
+    // can't jam a $4,500 back-marker into half the slate on salary relief
+    // alone. Self-scaling — studs clear 30 in ~85%+ of sims and are untouched;
+    // the rule only ever fires on drivers whose floor is genuinely rotten.
+    const arr = simScoreArrays[i] || [];
+    let usable = 0; for(const v of arr) if(v >= 30) usable++;
+    r.player._simCut = arr.length ? Math.round(100 * usable / arr.length) : null;
   });
   if(typeof renderPool==='function') renderPool();
 
@@ -8521,10 +8636,20 @@ async function runNascarSimGen(){
     // optimal. No salary or ownership axis — the sim's own outcome decides
     // what the alternative build looks like. Selection stays pure
     // EV/coverage — if these don't earn their coverage, the greedy skips them.
-    const CHAOS_MIN_INC = 13;
+    // Track-aware demolition threshold. The old flat 13 could NEVER fire on
+    // short tracks (incident dist maxes at 10) or road courses (max 9) — so
+    // chaos-leverage candidates simply didn't exist at exactly the tracks
+    // where cautions breed cautions. Each threshold sits at roughly the top
+    // ~20-25% of that track's own incident distribution.
+    const CHAOS_MIN_INC = ({road:6, short:8, intermediate:10, superspeedway:13})[trackType] || 10;
     let chaosCands = 0, chaosSims = 0;
 
-    for(let s=0; s<simsDone2; s++){
+    // TRAIN/TEST SPLIT (same as UFC/PGA): candidates from EVEN sims only; EV
+    // priced on the held-out odd sims via oosParity below. Without it, punt
+    // fills were priced on the exact spike sims that made them optimal —
+    // in-sample optimism that jammed the same two cheap trucks into half the
+    // portfolio.
+    for(let s=0; s<simsDone2; s+=2){
       for(let i=0;i<nP;i++) order[i]=i;
       order.sort((a,b)=>(evScores[b][s]||0)-(evScores[a][s]||0));
       for(let i=0;i<nP;i++){ sortScore[i]=evScores[order[i]][s]||0; sortSal[i]=salArr[order[i]]; preS[i+1]=preS[i]+sortScore[i]; }
@@ -8586,11 +8711,15 @@ async function runNascarSimGen(){
       }
     }
     const rankedNas = [...rankedMap.values()].sort((a,b)=>b.count-a.count);
-    log(`${rankedNas.length.toLocaleString()} unique ex-post optimal lineups across ${simsDone2.toLocaleString()} race sims.`);
+    log(`${rankedNas.length.toLocaleString()} unique ex-post optimal lineups from ${Math.ceil(simsDone2/2).toLocaleString()} generation sims (EV priced on the held-out half).`);
     if(chaosSims) log(`Chaos candidates: ${chaosCands.toLocaleString()} disjoint runner-up builds from ${chaosSims.toLocaleString()} high-attrition sims (${CHAOS_MIN_INC}+ cars out).`);
     const simScoresByIdNas = {};
     evPool.forEach((p,i)=>{ simScoresByIdNas[p.id]=evScores[i]; });
-    const out = await runUFCContestEV({slate, pool: evPool, ranked: rankedNas, simScoresById: simScoresByIdNas, totalSims: simsDone2, target, maxExpPct, overrides});
+    // Full EV-engine parity with the UFC/PGA paths: out-of-sample pricing,
+    // sharp field share, dominance repair, real salary cap.
+    const out = await runUFCContestEV({slate, pool: evPool, ranked: rankedNas, simScoresById: simScoresByIdNas,
+      totalSims: simsDone2, genSims: Math.ceil(simsDone2/2), target, maxExpPct, overrides,
+      oosParity:1, sharpShare:0.15, se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:true, maxSal});
     if(out===null && window._genCancelled) log('Cancelled.');
     done(); return;
   }
@@ -11847,7 +11976,12 @@ function createSlate(){
     if(tt){
       slate._nascarTrackType=tt;
       slate._nascarLaps={road:100,intermediate:300,short:500,superspeedway:188}[tt];
-      showToast(`Track type auto-selected: ${tt} (from "${parsedCSV.headers.find(h=>new RegExp(tt==='superspeedway'?'super\\s*speedway':tt==='road'?'road\\s*course':tt==='short'?'short\\s*track':'intermediate','i').test(h))}")`,'ok');
+      // Lap count is a TYPE DEFAULT, not the race's real length — and dominator
+      // points (laps led ×0.25 + fastest laps ×0.45) scale LINEARLY with it.
+      // Short tracks especially vary wildly (Bristol 500, Martinsville 400,
+      // North Wilkesboro trucks 250, IRP 200): simming a 250-lap race at the
+      // 500-lap default DOUBLES every dominator projection. Say so loudly.
+      showToast(`Track type: ${tt} — laps defaulted to ${slate._nascarLaps}. VERIFY the real race length in Simulate settings (dominator points scale with it).`,'ok');
     }
   }
   imputeMissingRatings(slate);
