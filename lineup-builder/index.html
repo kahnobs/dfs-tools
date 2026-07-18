@@ -7749,8 +7749,56 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
     if(p._nPTop10 != null && p._nPTop5  != null && p._nPTop10 < p._nPTop5)  p._nPTop10 = p._nPTop5;
   });
 
+  // ── Rating sample-size shrinkage ──────────────────────────────────────────
+  // A fastlap rating built on 2 races carries the same face value as one built
+  // on 40 — and inside the floored-odds punt tier, where every market number is
+  // an indistinguishable zero, the rating is effectively 100% of the ordering.
+  // That let a thin-sample 66.9 (Luke Baldwin, ~2 races) outrank the whole punt
+  // tier while a no-history ringer the market priced identically sat 5 points
+  // lower. When the sheet carries "Rating N" (console v2.6 writes it), shrink
+  // each rating toward the REAL-rating field median by n/(n+K), K=6: 2 races
+  // keeps ~25% of its deviation, 12 races ~67%, 40 races ~87%. Imputed ratings
+  // (salary-band averages) are already shrunk by construction — left alone.
+  // No "Rating N" column → no change (legacy slates behave exactly as before).
+  {
+    // The prior must be SALARY-CONDITIONAL, not the field median: shrinking a
+    // $4,800 punt's 3-race rating toward the global median (dragged to ~80 by
+    // the studs) would RAISE every thin-sample junk rating — backwards. DK's
+    // price is itself a market read of equipment; "no data at this salary"
+    // should collapse toward what similarly-priced trucks actually rate.
+    // Prior = mean real rating of ±$750 salary peers (≥3 of them), else a
+    // salary→rating regression over the real-rated field.
+    const realArr=pool.filter(p=>p.rating!=null&&!p._ratingImputed&&parseFloat(p.rating)>0);
+    const K=6;
+    let shrunk=0;
+    if(realArr.length>=8){
+      // salary→rating linear fit (regression fallback for thin salary bands)
+      let sx=0,sy=0,sxx=0,sxy=0; const nR=realArr.length;
+      realArr.forEach(q=>{ const x=q.salary||0, y=parseFloat(q.rating); sx+=x; sy+=y; sxx+=x*x; sxy+=x*y; });
+      const beta=(nR*sxy-sx*sy)/Math.max(1e-9,(nR*sxx-sx*sx)), alpha=(sy-beta*sx)/nR;
+      const priorFor=p=>{
+        const peers=realArr.filter(q=>q!==p&&Math.abs((q.salary||0)-(p.salary||0))<=750);
+        if(peers.length>=3) return peers.reduce((s,q)=>s+parseFloat(q.rating),0)/peers.length;
+        return alpha+beta*(p.salary||0);
+      };
+      pool.forEach(p=>{
+        p._effRating=parseFloat(p.rating)||0;
+        if(p.ratingN!=null&&p.rating!=null&&!p._ratingImputed){
+          const n=Math.max(0,p.ratingN);
+          const prior=priorFor(p);
+          const eff=prior+(parseFloat(p.rating)-prior)*(n/(n+K));
+          if(Math.abs(eff-p._effRating)>0.05) shrunk++;
+          p._effRating=eff;
+        }
+      });
+    } else {
+      pool.forEach(p=>{ p._effRating=parseFloat(p.rating)||0; });
+    }
+    if(shrunk&&typeof log==='function') log(`Rating shrinkage: ${shrunk} thin-sample rating${shrunk!==1?'s':''} pulled toward their salary-tier prior (n/(n+${K}) credibility on "Rating N").`);
+  }
+
   // ── Skill score: 65% odds-based (weighted by available tiers), 35% rating ─
-  const ratings    = pool.map(p=>parseFloat(p.rating)||0);
+  const ratings    = pool.map(p=>p._effRating||0);
   const maxRating  = Math.max(...ratings);
   const minRating  = Math.min(...ratings.filter(r=>r>0));
   const ratingRange= maxRating - minRating || 1;
@@ -7768,7 +7816,7 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
       (p._nPTop5  || 0) * wTop5 +
       (p._nPTop10 || 0) * wTop10
     ) / totalW;
-    const rtg        = parseFloat(p.rating)||0;
+    const rtg        = p._effRating||0;
     // Drivers with no rating get 0 (worst), not 0.5 (middle).
     // Defaulting to 0.5 was incorrectly ranking no-rating backmarkers above
     // drivers with legitimately bad odds.
@@ -7819,7 +7867,7 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
       return m;
     };
     const oddsPct=pctRank(pool.map((p,i)=>({i, v:(p._nSkillScore>0&&p._nOddsScore>0)?p._nOddsScore:null})));
-    const ratePct=pctRank(pool.map((p,i)=>{const r=parseFloat(p.rating); return {i, v:r>0?r:null};}));
+    const ratePct=pctRank(pool.map((p,i)=>{const r=p._effRating; return {i, v:r>0?r:null};}));
     const pracVals=pool.map((p,i)=>{const v=parseFloat(p.practice); return {i, v:!isNaN(v)?v:null};});
     const pracN=pracVals.filter(x=>x.v!=null).length;
     const pracPct=pracN>=6?pctRank(pracVals):new Map(); // needs real coverage to rank against
@@ -11472,6 +11520,16 @@ async function refreshFromSheet(){
         p.ss_ou=get('SS O/U')||null;
         p.td_ou=get('TD O/U')||null;
       }
+      // NASCAR: refresh the practice composite + rating sample size too — the
+      // refresh path previously never re-read Practice Score, so a console
+      // re-run (e.g. the pit-lap fix correcting a corrupted 10-lap value)
+      // silently never reached the builder without recreating the slate.
+      if(slate.sport==='nascar'){
+        const pi=headers.findIndex(h=>/^practice([\s_]?score)?$/i.test((h||'').trim()));
+        if(pi>=0){ const v=parseFloat(row[pi]); p.practice=!isNaN(v)?v:null; }
+        const ni=headers.findIndex(h=>/^rating\s*(n|races|count)$/i.test((h||'').trim()));
+        if(ni>=0){ const v=parseInt(row[ni]); p.ratingN=!isNaN(v)?v:null; }
+      }
       if(slate.sport==='pga') applyPgaStats(p, row, headers);
     });
 
@@ -11502,6 +11560,12 @@ async function refreshFromSheet(){
         ['1','2','3','4','5','6'].forEach(k=>{ p['td_'+k]=getN2(`TD_${k}plus`); });
         p.ss_ou=get2('SS O/U')||null; p.td_ou=get2('TD O/U')||null;
         p.fightNum = parseInt(p.start)||null;
+      }
+      if(slate.sport==='nascar'){
+        const pi=headers.findIndex(h=>/^practice([\s_]?score)?$/i.test((h||'').trim()));
+        if(pi>=0){ const v=parseFloat(row[pi]); if(!isNaN(v)) p.practice=v; }
+        const ni=headers.findIndex(h=>/^rating\s*(n|races|count)$/i.test((h||'').trim()));
+        if(ni>=0){ const v=parseInt(row[ni]); if(!isNaN(v)) p.ratingN=v; }
       }
       if(slate.sport==='pga') applyPgaStats(p, row, headers);
       slate.players.push(p);
@@ -11938,6 +12002,10 @@ function createSlate(){
     if(sport==='nascar'){
       const pi2=parsedCSV.headers.findIndex(h=>/^practice([\s_]?score)?$/i.test((h||'').trim()));
       if(pi2>=0){ const v=parseFloat(row[pi2]); if(!isNaN(v)) p.practice=v; }
+      // Rating sample size (console's "Rating N" column) — how many fastlap
+      // races back this driver's rating. Feeds the sim's thin-sample shrink.
+      const ni2=parsedCSV.headers.findIndex(h=>/^rating\s*(n|races|count)$/i.test((h||'').trim()));
+      if(ni2>=0){ const v=parseInt(row[ni2]); if(!isNaN(v)) p.ratingN=v; }
     }
 
     players.push(p);
