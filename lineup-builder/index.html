@@ -5254,6 +5254,17 @@ function updateContestEvSummary(){
       +`<span style="color:var(--text);">${F.toLocaleString()}</span> field · `
       +`1st ${money(first)} · pays thru <span style="color:var(--text);">${lastPaid.toLocaleString()}</span> `
       +`(${(100*lastPaid/F).toFixed(1)}%) · pool ${money(pool)}`;
+    // Overlay sanity check: a real contest's pool can't exceed the entry fees
+    // it collects (DK takes rake, never adds money). Pool >> field×fee almost
+    // always means the FIELD SIZE was set to the number of places PAID instead
+    // of total entries — which silently triples every EV% and pays 100% of the
+    // "field". Flag it in red before it poisons a build.
+    const handle = F*fee;
+    if(pool > handle*1.02){
+      html+=`<br><span style="color:#f87171;font-weight:600;">⚠ pool is ${(pool/handle).toFixed(1)}× the entry fees (${money(handle)}) — field size looks like PLACES PAID, not total entries. Set field to the contest's real entry count or every EV% will be inflated ~${(100*(pool/handle-1)).toFixed(0)}pts.</span>`;
+    } else if(lastPaid>=F){
+      html+=`<br><span style="color:#eab308;">⚠ 100% of the field cashes — real GPPs pay ~25%. Double-check field size vs places paid.</span>`;
+    }
   }
   const dr=contestDrift(ev);
   if(dr && dr.drift){
@@ -5586,6 +5597,19 @@ async function runUFCContestEV(ctx){
   const payout = buildPayoutFn({fieldSize:F, fee, preset:cfg.preset||'gpp', custom:cfg.custom});
   const tick = ()=>new Promise(r=>setTimeout(r,0));
   log(`Contest EV: ${payout.desc}. Leverage slider ignored — uniqueness is priced by the curve.`);
+  // Same overlay guard as the contest summary line: pool > entries×fee means
+  // the field size is almost certainly the places-paid count, not total
+  // entries — every EV% that follows would be inflated by the phantom overlay.
+  {
+    let _pool=0,_lp=0;
+    for(let r=1;r<=F;r++){ const a=payout.at(r); if(a>0){_pool+=a;_lp=r;} else if(_lp>0&&r-_lp>5000) break; }
+    const _handle=F*fee;
+    if(_pool > _handle*1.02){
+      log(`⚠ CONTEST CONFIG: payout pool $${Math.round(_pool).toLocaleString()} exceeds entry fees $${Math.round(_handle).toLocaleString()} (${(_pool/_handle).toFixed(1)}×). Field size looks like PLACES PAID, not total entries — EV% below is inflated by that phantom overlay. Fix field size and re-run.`);
+    } else if(_lp>=F){
+      log(`⚠ CONTEST CONFIG: 100% of the field cashes — real GPPs pay ~25%. Double-check field size vs places paid.`);
+    }
+  }
 
   // Sampled sims (stride) — EV needs breadth, not every sim
   const SIMS = Math.min(1500, totalSims);
@@ -5628,12 +5652,18 @@ async function runUFCContestEV(ctx){
   const gaussEV = ()=>{ const u=Math.max(1e-9,Math.random()), v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); };
   const baseOwn = pool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
   const ownBudget = baseOwn.reduce((a,b)=>a+b,0);
-  const scenarios = [baseOwn];
-  for(let k=1;k<K;k++){
-    let o = baseOwn.map(v=>v*Math.exp(sigma*gaussEV() - sigma*sigma/2));
-    const s2 = o.reduce((a,b)=>a+b,0)||1;
-    scenarios.push(o.map(v=>Math.max(0.1, v*ownBudget/s2)));
-  }
+  // Scenario/field construction is a FUNCTION (not straight-line code) so the
+  // F1 best-of-N selection restarts below can draw fresh, independent samples.
+  const makeScenarios = () => {
+    const out = [baseOwn];
+    for(let k=1;k<K;k++){
+      let o = baseOwn.map(v=>v*Math.exp(sigma*gaussEV() - sigma*sigma/2));
+      const s2 = o.reduce((a,b)=>a+b,0)||1;
+      out.push(o.map(v=>Math.max(0.1, v*ownBudget/s2)));
+    }
+    return out;
+  };
+  let scenarios = makeScenarios();
   log(`Ownership uncertainty: ${K} scenarios at a standard ±${Math.round(sigma*100)}% (budget-preserving); sims split across them.`);
 
   // ── Sharp share ───────────────────────────────────────────────────────────
@@ -5657,38 +5687,45 @@ async function runUFCContestEV(ctx){
   }
 
   const NF = 2000;
-  const fields=[], fieldKeyCounts=[];
-  let dev0=0, dev0Name='';
-  for(let k=0;k<K;k++){
-    const {field, maxDev, maxName} = sampleUfcField(pool, NF, scenarios[k]);
-    if(!field.length){ log('⚠ Field sampler produced no lineups — check Own% column.'); return null; }
-    if(sharpPool){
-      const nSharp=Math.floor(field.length*sharpShare);
-      for(let j=0;j<nSharp;j++){
-        let r=Math.random()*sharpPool.totW, pick=sharpPool.asIdx[0];
-        for(const x of sharpPool.asIdx){ r-=x.w; if(r<=0){ pick=x; break; } }
-        field[(Math.random()*field.length)|0]=pick.idxs.slice();
+  const sampleFields = async (scen) => {
+    const flds=[], keyCounts=[];
+    let d0=0, d0Name='';
+    for(let k=0;k<K;k++){
+      const {field, maxDev, maxName} = sampleUfcField(pool, NF, scen[k]);
+      if(!field.length){ log('⚠ Field sampler produced no lineups — check Own% column.'); return null; }
+      if(sharpPool){
+        const nSharp=Math.floor(field.length*sharpShare);
+        for(let j=0;j<nSharp;j++){
+          let r=Math.random()*sharpPool.totW, pick=sharpPool.asIdx[0];
+          for(const x of sharpPool.asIdx){ r-=x.w; if(r<=0){ pick=x; break; } }
+          field[(Math.random()*field.length)|0]=pick.idxs.slice();
+        }
       }
+      flds.push(field);
+      const m=new Map();
+      field.forEach(l=>{ const kk=l.slice().sort((a,b)=>a-b).join('|'); m.set(kk,(m.get(kk)||0)+1); });
+      keyCounts.push(m);
+      if(k===0){ d0=maxDev; d0Name=maxName; }
+      await tick(); if(window._genCancelled) return null;
     }
-    fields.push(field);
-    const m=new Map();
-    field.forEach(l=>{ const kk=l.slice().sort((a,b)=>a-b).join('|'); m.set(kk,(m.get(kk)||0)+1); });
-    fieldKeyCounts.push(m);
-    if(k===0){ dev0=maxDev; dev0Name=maxName; }
-    await tick(); if(window._genCancelled) return null;
-  }
-  log(`Field: ${K}×${NF.toLocaleString()} lineups sampled (as-projected scenario worst marginal miss ${dev0.toFixed(1)}pts on ${dev0Name}).`);
+    return {fields:flds, fieldKeyCounts:keyCounts, dev0:d0, dev0Name:d0Name};
+  };
+  const smp0 = await sampleFields(scenarios);
+  if(smp0===null) return null;
+  let fields=smp0.fields, fieldKeyCounts=smp0.fieldKeyCounts;
+  log(`Field: ${K}×${NF.toLocaleString()} lineups sampled (as-projected scenario worst marginal miss ${smp0.dev0.toFixed(1)}pts on ${smp0.dev0Name}).`);
 
   // 2) Field score distribution per sampled sim (sorted for rank lookup).
   // Sim s is evaluated against scenario (s mod K)'s field.
   const scoreArr = pool.map(p=>simScoresById[p.id]||[]);
   // Field scorer, reusable so auto-exposure can re-score the same sampled field
   // under a "model wrong about the pillar" world.
-  const buildFieldSorted = (arrs) => {
+  const buildFieldSorted = (arrs, flds) => {
+    const useFlds = flds || fields;
     const out=[];
     for(let s=0; s<simIdx.length; s++){
       const si = simIdx[s];
-      const field = fields[s%K];
+      const field = useFlds[s%K];
       const arr = new Float64Array(field.length);
       for(let f=0; f<field.length; f++){
         const l=field[f]; let t=0;
@@ -5700,7 +5737,7 @@ async function runUFCContestEV(ctx){
     }
     return out;
   };
-  const fieldSorted = buildFieldSorted(scoreArr);
+  let fieldSorted = buildFieldSorted(scoreArr);
   await tick(); if(window._genCancelled) return null;
 
   // 3) EV per candidate (all unique ex-post optimals).
@@ -5765,6 +5802,15 @@ async function runUFCContestEV(ctx){
       let idxs=e.lineup.map(p=>idxById.get(p.id)).filter(x=>x!=null);
       if(idxs.length!==6){ repaired.push(e); continue; }
       if(e._pivot){ repaired.push(e); continue; } // deliberate pillar-free pivot — never "repair" the pillar back in
+      // Chaos candidates are deliberate claims on demolition worlds — disjoint
+      // from that sim's optimal BY CONSTRUCTION. "Repairing" their midfielders
+      // into the chalk studs destroys exactly the diversity they exist to
+      // provide (measured on the Cup NW slate: repair collapsed 2,400
+      // candidates to ~760 uniques with ZERO Bell/Blaney-free Larson builds
+      // left, making caps infeasible and Min pins / the F2 floor unable to
+      // insert cap-clean lineups). Same doctrine as pivots: if they don't earn
+      // their coverage at the EV stage, the greedy skips them.
+      if(e._chaos){ repaired.push(e); continue; }
       let touched=false;
       for(let iter=0; iter<4; iter++){
         const inSet=new Set(idxs);
@@ -5876,44 +5922,54 @@ async function runUFCContestEV(ctx){
     const mean=tot/n;
     return (sigma>0) ? (1-ROBUST_RHO)*mean + ROBUST_RHO*minB : mean;
   };
-  for(let c=0; c<ranked.length; c++){
-    const e = ranked[c];
-    const idxs = e.lineup.map(p=>idxById.get(p.id)).filter(i=>i!=null);
-    const key = idxs.slice().sort((a,b)=>a-b).join('|');
-    // Dups are per ownership scenario: both the analytic product and the
-    // empirical field count move with the scenario's Own%.
-    e._dupsK = [];
+  // Candidate pricing as a FUNCTION of the currently active field context, so
+  // the F1 selection restarts can re-price against each fresh field sample.
+  const dupsUnder = (idxs, key, scen, keyCounts, flds) => {
+    const out=[];
     for(let k=0;k<K;k++){
-      const ownProdK = idxs.reduce((s2,i)=>s2*Math.max(0.0005, scenarios[k][i]/100),1);
-      const empK = (fieldKeyCounts[k].get(key)||0) * (F/fields[k].length);
-      e._dupsK.push(Math.max(F*ownProdK*DUP_K, empK));
+      const ownProdK = idxs.reduce((s2,i)=>s2*Math.max(0.0005, scen[k][i]/100),1);
+      const empK = (keyCounts[k].get(key)||0) * (F/flds[k].length);
+      out.push(Math.max(F*ownProdK*DUP_K, empK));
     }
-    const bSum=new Float64Array(K), bCnt=new Float64Array(K);
-    for(let s=0; s<fieldSorted.length; s++){
-      const si=simIdx[s]; let t=0;
-      for(const i of idxs) t += (scoreArr[i][si]||0);
-      const arr=fieldSorted[s];
-      const dups=e._dupsK[s%K];
-      // beating = strictly greater; tied = equal scores. The old lookup
-      // counted ties as BEATEN — placing the candidate at the top of its own
-      // score cluster in exactly the sims where chalk builds bunch together
-      // (the stud wins and every similar field lineup lands within a point).
-      // Expected rank within a tie cluster is its midpoint.
-      let lo=0, hi=arr.length;
-      while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid]<=t) lo=mid+1; else hi=mid; }
-      let lo2=0, hi2=lo;
-      while(lo2<hi2){ const mid=(lo2+hi2)>>1; if(arr[mid]<t) lo2=mid+1; else hi2=mid; }
-      const beating = arr.length-lo;
-      const tied    = lo-lo2;
-      bSum[s%K] += expPayout(beating, tied, arr.length, dups, 0); bCnt[s%K]++;
+    return out;
+  };
+  const priceCandidates = async (quiet) => {
+    for(let c=0; c<ranked.length; c++){
+      const e = ranked[c];
+      const idxs = e.lineup.map(p=>idxById.get(p.id)).filter(i=>i!=null);
+      const key = idxs.slice().sort((a,b)=>a-b).join('|');
+      // Dups are per ownership scenario: both the analytic product and the
+      // empirical field count move with the scenario's Own%.
+      e._dupsK = dupsUnder(idxs, key, scenarios, fieldKeyCounts, fields);
+      const bSum=new Float64Array(K), bCnt=new Float64Array(K);
+      for(let s=0; s<fieldSorted.length; s++){
+        const si=simIdx[s]; let t=0;
+        for(const i of idxs) t += (scoreArr[i][si]||0);
+        const arr=fieldSorted[s];
+        const dups=e._dupsK[s%K];
+        // beating = strictly greater; tied = equal scores. The old lookup
+        // counted ties as BEATEN — placing the candidate at the top of its own
+        // score cluster in exactly the sims where chalk builds bunch together
+        // (the stud wins and every similar field lineup lands within a point).
+        // Expected rank within a tie cluster is its midpoint.
+        let lo=0, hi=arr.length;
+        while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid]<=t) lo=mid+1; else hi=mid; }
+        let lo2=0, hi2=lo;
+        while(lo2<hi2){ const mid=(lo2+hi2)>>1; if(arr[mid]<t) lo2=mid+1; else hi2=mid; }
+        const beating = arr.length-lo;
+        const tied    = lo-lo2;
+        bSum[s%K] += expPayout(beating, tied, arr.length, dups, 0); bCnt[s%K]++;
+      }
+      e._ev = robustAgg(bSum, bCnt) - fee;
+      if(c>0 && c%400===0){
+        if(!quiet) log(`EV: ${c.toLocaleString()}/${ranked.length.toLocaleString()} candidates priced...`);
+        await tick(); if(window._genCancelled) return null;
+      }
     }
-    e._ev = robustAgg(bSum, bCnt) - fee;
-    if(c>0 && c%400===0){
-      log(`EV: ${c.toLocaleString()}/${ranked.length.toLocaleString()} candidates priced...`);
-      await tick(); if(window._genCancelled) return null;
-    }
-  }
-  const evList = ranked.slice().sort((a,b)=>b._ev-a._ev);
+    return ranked.slice().sort((a,b)=>b._ev-a._ev);
+  };
+  let evList = await priceCandidates(false);
+  if(evList===null) return null;
 
   // 4) Portfolio: marginal COVERAGE+EV greedy (lazy re-evaluation) under caps.
   // Objective per sim: [head credit = max(0, candidate's head payout − best
@@ -6112,7 +6168,7 @@ async function runUFCContestEV(ctx){
     }
     if(chosen.length < target){
       const shortBy = target - chosen.length;
-      if(pillarCap) log(`Fill: caps left ${shortBy} slot(s) unfillable from ${extra.length} candidates — RELAXING caps to complete the slate (this is where a capped golfer creeps back up; means too few cap-respecting lineups exist).`);
+      log(`⚠ Fill: caps left ${shortBy} slot(s) unfillable from ${extra.length} candidates — RELAXING caps to complete the slate (this is where a capped player creeps back up; means too few cap-respecting lineups exist).`);
       for(const e of extra){
         if(chosen.length>=target) break;
         if(have.has(key(e))) continue;
@@ -6127,10 +6183,10 @@ async function runUFCContestEV(ctx){
   // Honest whole-portfolio evaluation under a given world's scores: every
   // entry ranked in the sampled field (tie- and dup-adjusted, own better
   // entries counted ahead), summed to portfolio gross per sim.
-  const evalPortfolio = (sel, arrs, fsrt) => {
+  const evalPortfolio = (sel, arrs, fsrt, dupsFn) => {
     const stake = fee*sel.chosen.length;
     let netSum=0, dead=0;
-    const ents = sel.chosen.map(e=>({ idxs:e.lineup.map(p=>idxById.get(p.id)).filter(i=>i!=null), dups:e._dupsK }));
+    const ents = sel.chosen.map(e=>({ idxs:e.lineup.map(p=>idxById.get(p.id)).filter(i=>i!=null), dups: dupsFn ? dupsFn(e) : e._dupsK }));
     for(let s=0; s<fsrt.length; s++){
       const si=simIdx[s];
       const tots = ents.map(en=>{ let t=0; for(const i of en.idxs) t+=(arrs[i][si]||0); return {t, dups:en.dups?en.dups[s%K]:0}; })
@@ -6173,7 +6229,71 @@ async function runUFCContestEV(ctx){
   // as-projected world AND a "model wrong about the pillar" world (his edge
   // above salary expectation stripped from his made-cut sims, field re-scored
   // identically) — and reported in one log line.
-  let sel = await runGreedy(null);
+  // ═══ F1: SELECTION STABILITY — best-of-3 greedy restarts ═════════════════
+  // The greedy selects against a RANDOMLY SAMPLED field (K ownership
+  // scenarios × NF lineups) on a near-flat EV surface, so tie-breaks land
+  // differently every run and can bury a premier leverage stud: three
+  // identical-config Cup builds measured Hamlin at 8% / 58% / 50% exposure
+  // (portfolio EV $34/$76/$68) — and the same instability showed as Usman
+  // 30%↔54% across UFC runs. Fix: run the whole selection stage 3×, each
+  // restart against its own independently sampled field (fresh ownership
+  // scenarios, fresh field lineups, candidates re-priced), then keep the
+  // portfolio with the highest evaluated equity as judged on ONE COMMON,
+  // independently sampled evaluation field. Common random numbers: the eval
+  // field's own sampling noise hits all three portfolios identically, so the
+  // comparison isolates portfolio quality. The winning restart's field
+  // context stays active for everything downstream (auto-exposure, chalk
+  // floor, min enforcement, reporting) so all later EV math is coherent.
+  const RESTARTS = 3;
+  const entryDups = (e, scen, keyCounts, flds) => {
+    const idxs = e.lineup.map(p=>idxById.get(p.id)).filter(i=>i!=null);
+    const key = idxs.slice().sort((a,b)=>a-b).join('|');
+    return dupsUnder(idxs, key, scen, keyCounts, flds);
+  };
+  const makeCtx = async () => {
+    const scen = makeScenarios();
+    const smp = await sampleFields(scen);
+    if(smp===null) return null;
+    return { scenarios:scen, fields:smp.fields, fieldKeyCounts:smp.fieldKeyCounts,
+             fieldSorted: buildFieldSorted(scoreArr, smp.fields) };
+  };
+  const activateCtx = (ctx) => { scenarios=ctx.scenarios; fields=ctx.fields;
+    fieldKeyCounts=ctx.fieldKeyCounts; fieldSorted=ctx.fieldSorted; };
+  let sel = null;
+  {
+    const evalCtx = await makeCtx();
+    if(evalCtx===null) return null;
+    let curCtx = { scenarios, fields, fieldKeyCounts, fieldSorted }; // restart 1 = the already-built-and-priced context
+    let selCtx = null, bestEv = -Infinity, kept = 0;
+    const evs = [];
+    for(let r=0; r<RESTARTS; r++){
+      if(r>0){
+        const c = await makeCtx();
+        if(c===null) return null;
+        activateCtx(c); curCtx = c;
+        const el2 = await priceCandidates(true);
+        if(el2===null) return null;
+        evList = el2;
+      }
+      const s = await runGreedy(null);
+      if(s===null) return null;
+      if(window._genCancelled) return null;
+      const q = evalPortfolio(s, scoreArr, evalCtx.fieldSorted,
+        e => entryDups(e, evalCtx.scenarios, evalCtx.fieldKeyCounts, evalCtx.fields));
+      evs.push(q.ev);
+      if(q.ev > bestEv){ bestEv = q.ev; sel = s; selCtx = curCtx; kept = r; }
+      await tick(); if(window._genCancelled) return null;
+    }
+    // Reactivate the winner's field context (and its candidate pricing) if a
+    // later restart's context is currently live.
+    if(selCtx && selCtx.fieldSorted !== fieldSorted){
+      activateCtx(selCtx);
+      const el2 = await priceCandidates(true);
+      if(el2===null) return null;
+      evList = el2;
+    }
+    log(`Selection stability (F1): best-of-${RESTARTS} greedy restarts vs independent field samples — portfolio EV ${evs.map(v=>(v>=0?'+':'−')+'$'+Math.abs(Math.round(v))).join(' / ')} on the common eval field; kept restart #${kept+1}.`);
+  }
   if(sel===null) return null;
   if(window._genCancelled) return null;
   {
@@ -6236,6 +6356,7 @@ async function runUFCContestEV(ctx){
   const meanById = {};
   pool.forEach((p,i)=>{ const a=scoreArr[i]; let s2=0; for(const si of simIdx) s2+=(a[si]||0); meanById[p.id]=s2/Math.max(1,simIdx.length); });
   const decorate = e => { const l=[...e.lineup];
+    l._entry = e;    // back-pointer for whole-portfolio EV evaluation (F2 chalk floor)
     l._ev = e._ev;
     // EV as % of the entry fee — "+33%" differentiates far better than "$1.00"
     l._evPct = (e._ev/Math.max(0.01,fee))*100;
@@ -6244,12 +6365,81 @@ async function runUFCContestEV(ctx){
     l._simWinRate= ((e.count/Math.max(1,genSims))*100).toFixed(1);
     return l; };
   let finalLineups = chosen.map(decorate);
+  const minCands = rest.map(decorate);
+  const sfScore = l => (l._ev!=null ? l._ev : 0);
+  const capFn = id => { const pct = overrides[id]!=null ? overrides[id] : maxExpPct;
+    return pct>=100 ? null : (pct<=0 ? 0 : Math.max(1,Math.ceil(target*pct/100))); };
   if(Object.keys(minOverrides).some(id=>minOverrides[id]>0)){
-    const cands = rest.map(decorate);
-    const sf = l => (l._ev!=null ? l._ev : 0);
-    const capFn = id => { const pct = overrides[id]!=null ? overrides[id] : maxExpPct;
-      return pct>=100 ? null : (pct<=0 ? 0 : Math.max(1,Math.ceil(target*pct/100))); };
-    finalLineups = enforceMinExposure(finalLineups, cands, minOverrides, sf, log, capFn);
+    finalLineups = enforceMinExposure(finalLineups, minCands, minOverrides, sfScore, log, capFn);
+  }
+
+  // ═══ F2: CHALK-FADE SOFT FLOOR (NASCAR) ══════════════════════════════════
+  // Extreme chalk fades are EV-neutral but risk-heavy: the engine held Larson
+  // (62.4% field own, 8.1% fair win, 4th-best composite) at 2% exposure, yet
+  // FORCING him to 20% measured +$83/slate — within noise, i.e. free. The
+  // marginal EV surface between 2% and 20% is flat, while the difference in
+  // race-outcome robustness is enormous: at 2%, a Larson win (~8% of worlds,
+  // with 62% of the field holding him) near-zeroes the portfolio. Rule: any
+  // driver with fair win prob ≥5% gets exposure ≥ ⅓ of his projected field
+  // ownership — enforced through the cap-respecting min machinery (F3), and
+  // ONLY kept if the whole-portfolio EV doesn't measurably object (checked
+  // before/after on the same field — paired comparison, so noise is tiny).
+  // If the EV cost is real, the floor is dropped and a loud log tells you to
+  // consider a manual pin instead. User Min%/Max% overrides always outrank
+  // this: the floor never lowers a user min and never breaches a max cap.
+  // Skipped for single-entry and micro-slates (<10 lineups): exposure is
+  // near-binary there, so a "⅓-of-ownership floor" degenerates into swapping
+  // THE lineup around to stuff floor drivers in — measured doing exactly that
+  // in SE testing (it replaced the optimized single build with a two-floor
+  // compromise lineup). With so few entries, diversification floors have no
+  // meaning; the punt-ruin guard and EV objective carry the risk management.
+  if(slate && slate.sport==='nascar' && finalLineups.length >= 10 && !ctx.se){
+    const NFL = finalLineups.length;
+    const cnt = {}; finalLineups.forEach(l=>l.forEach(p=>{ cnt[p.id]=(cnt[p.id]||0)+1; }));
+    const floors = {}, floorInfo = [];
+    pool.forEach((p,i)=>{
+      const fairWin = (p._nPWin!=null) ? p._nPWin*100 : null;   // de-vigged market win %
+      if(fairWin==null || fairWin < 5) return;
+      const own = baseOwn[i];                                   // projected field own %
+      const floorPct = own/3;
+      const curPct = 100*(cnt[p.id]||0)/NFL;
+      const userMin = minOverrides[p.id]||0;
+      // Needs a real raise (>2pts over both current exposure and any user min)
+      if(floorPct > Math.max(curPct, userMin) + 2){
+        floors[p.id] = Math.round(floorPct);
+        floorInfo.push({p, cur:curPct, fairWin, own});
+      }
+    });
+    if(floorInfo.length){
+      const evalSet = ls => evalPortfolio({chosen: ls.map(l=>l._entry).filter(Boolean)}, scoreArr, fieldSorted);
+      const before = evalSet(finalLineups);
+      // hardCaps: the floor is a SOFT rule — it may stop short of ⅓-ownership
+      // when every remaining candidate lineup would push another driver past
+      // his Max% cap, and it NEVER breaches a cap (a muted-logger trial must
+      // not be able to breach silently — that exact combination pushed
+      // Bell/Blaney 60%→68% in testing before this guard).
+      const trial  = enforceMinExposure(finalLineups.map(l=>l), minCands, floors, sfScore, ()=>{}, capFn, {hardCaps:true});
+      const after  = evalSet(trial);
+      const dEv    = after.ev - before.ev;
+      const stake  = fee*NFL;
+      const SF_THRESH = Math.max(fee, 0.02*stake);   // "measurably objects" = costs >2% of stake (min one entry fee)
+      if(dEv >= -SF_THRESH){
+        finalLineups = trial;
+        const cnt2 = {}; trial.forEach(l=>l.forEach(p=>{ cnt2[p.id]=(cnt2[p.id]||0)+1; }));
+        let anyShort = false;
+        const desc = floorInfo.map(fi=>{
+          const got = Math.round(100*(cnt2[fi.p.id]||0)/Math.max(1,trial.length));
+          const short = got + 2 < (floors[fi.p.id]||0);
+          if(short) anyShort = true;
+          return `${fi.p.name} ${Math.round(fi.cur)}%→${got}%${short?` of ${floors[fi.p.id]}% target — UNREACHABLE cap-clean`:''} (fair win ${fi.fairWin.toFixed(1)}%, field ${fi.own.toFixed(0)}%)`;
+        }).join(', ');
+        log(`Chalk floor (F2): fair-win ≥5% drivers floored at ⅓ field ownership — ${desc}. EV Δ ${dEv>=0?'+':'−'}$${Math.abs(Math.round(dEv))}/slate (within noise ⇒ the robustness is free: a chalk winner no longer zeroes the slate).`);
+        if(anyShort) log(`⚠ Chalk floor (F2): floor(s) above could not be fully reached without pushing a capped driver over his Max% — every remaining candidate lineup carries a capped stud. A manual Min% pin will force it (breaching caps loudly); raising other caps or adding candidates also works.`);
+      } else {
+        const desc = floorInfo.map(fi=>`${fi.p.name} held at ${Math.round(fi.cur)}% vs ${fi.own.toFixed(0)}% field (fair win ${fi.fairWin.toFixed(1)}%)`).join(', ');
+        log(`⚠ Chalk floor (F2) DECLINED: ${desc} — forcing the ⅓-ownership floor costs $${Math.abs(Math.round(dEv))}/slate (> $${Math.round(SF_THRESH)} noise threshold), exposures left as selected. If you disagree with the fade, pin a manual Min%.`);
+      }
+    }
   }
 
   // Portfolio report straight from the per-sim portfolio distribution — the
@@ -7631,10 +7821,17 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
   const llDecayCenter = NASCAR_LL_DECAY_CENTER[trackType] || 0.75;
   const llDecayRange  = NASCAR_LL_DECAY_RANGE[trackType]  || 0.30;
 
-  // Green flag laps available for LL and FL credit
+  // Green flag laps — used for FASTEST-LAP credit only (a caution lap has no
+  // meaningful fastest driver).
   const greenLaps = Math.round(totalLaps * greenMult);
   // FL pool = all green flag laps (every green lap has one fastest driver)
   const FL_POOL   = greenLaps;
+  // LL pool = ALL laps (audit F4). DK credits laps led on EVERY lap including
+  // cautions — someone is always the leader — so allocating LL over green
+  // laps only shaved ~3% off every dominator projection (measured: mean
+  // simulated laps led 436.7 of 450 at a 450-lap short track). FL stays on
+  // green laps by design.
+  const LL_POOL   = totalLaps;
 
   // ── Pre-parse driver data ─────────────────────────────────────────────────
   pool.forEach(p=>{
@@ -8308,7 +8505,7 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
       });
       const totalLapW = lapWeights.reduce((s,w)=>s+w,0);
       lapLeaders.forEach((d,i)=>{
-        d.lapsLed = Math.round((lapWeights[i]/totalLapW)*greenLaps);
+        d.lapsLed = Math.round((lapWeights[i]/totalLapW)*LL_POOL);   // F4: full-lap pool (cautions count for LL)
       });
     }
     // Zero out everyone not in the combined lap leaders pool
@@ -8316,12 +8513,12 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
     survivorDrawnFinal.forEach(d=>{ if(!lapLeaderSet.has(d.p.id)) d.lapsLed=0; });
 
     // ── 8. Credit crashed leaders with pre-crash laps (conserving) ──────────
-    // Step 7 already allocated all greenLaps among survivors — including the
+    // Step 7 already allocated the full LL_POOL among survivors — including the
     // early laps a crashed dominator actually led before exiting. A strong car
     // that crashes at, say, 60% distance led a share of those first 60% of laps
     // (DK awards laps-led points even on a DNF). We credit the crashed driver
     // those pre-crash laps and RECLAIM exactly that many from the survivor pool,
-    // so the field total stays at greenLaps (no phantom laps) and crashed
+    // so the field total stays at LL_POOL (no phantom laps) and crashed
     // dominators aren't under-credited. exit = fraction of race completed before
     // the crash, so pre-crash share ∝ exit.
     if(survivorDrawnFinal.length > 0){
@@ -8329,7 +8526,7 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
       incidentDrivers.forEach(d=>{
         const incWinW = Math.sqrt(d.p._nPWin||0.001);
         if(incWinW/allWinW < 0.03) return; // true backmarkers led ~nothing
-        const preCrashLaps = Math.round((incWinW/allWinW) * greenLaps * (d.exit||0));
+        const preCrashLaps = Math.round((incWinW/allWinW) * LL_POOL * (d.exit||0));
         if(preCrashLaps <= 0) return;
         // Reclaim from current survivor leaders, proportional to their share.
         const donors = survivorDrawnFinal.filter(r=>r.lapsLed>0);
@@ -8346,7 +8543,7 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
       });
       survivorDrawnFinal.forEach(d=>{
         // Supers: no single car can realistically lead 40%+ of a drafting race
-        d.lapsLed = Math.min(d.lapsLed, Math.round(greenLaps*(isSuper ? 0.40 : 0.95)));
+        d.lapsLed = Math.min(d.lapsLed, Math.round(LL_POOL*(isSuper ? 0.40 : 0.95)));
       });
     }
 
@@ -8785,7 +8982,7 @@ async function runNascarSimGen(){
             const key2 = ids2.slice().sort((a,b)=>a-b).join('|');
             const e2 = rankedMap.get(key2);
             if(e2){ e2.count++; e2.totalScore+=t2; }
-            else { rankedMap.set(key2, {lineup: ids2.map(i=>evPool[i]), count:1, totalScore:t2}); chaosCands++; }
+            else { rankedMap.set(key2, {lineup: ids2.map(i=>evPool[i]), count:1, totalScore:t2, _chaos:true}); chaosCands++; }
           }
         }
       }
@@ -9285,7 +9482,11 @@ async function runNascarSimGen(){
 // dropping another player below an already-met min and (b) pushing a player
 // past their max cap (when maxCapFn is supplied), so enforcing one player's
 // floor doesn't silently break someone else's floor or ceiling.
-function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, logFn, maxCapFn){
+function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, logFn, maxCapFn, opts){
+  // opts.hardCaps: NEVER breach a max cap — leave the min short instead. Used
+  // by the F2 chalk floor (a soft rule must not override a user's Max%); user
+  // Min% keeps the default breach-as-last-resort-with-loud-log behavior.
+  const hardCaps = !!(opts && opts.hardCaps);
   const playersWithMin = Object.keys(minOverrides).filter(id => minOverrides[id] > 0);
   if(!playersWithMin.length) return finalLineups;
 
@@ -9316,24 +9517,33 @@ function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, 
 
   if(!needs.length) return result;
 
+  // F3: snapshot pre-existing over-cap exposure so the loud breach log below
+  // only fires for breaches THIS pass causes (the greedy's last-resort fill
+  // can already have relaxed caps in a too-thin pool — that's logged there).
+  const capOf = id => maxCapFn ? maxCapFn(id) : null;
+  const preOver = {};
+  Object.keys(counts).forEach(id => { const c = capOf(id); if(c != null && counts[id] > c) preOver[id] = counts[id]; });
+
   needs.forEach(({ id, minCount }) => {
     let stillNeeded = minCount - (counts[id]||0);
     if(stillNeeded <= 0) return;
 
-    // Candidate lineups containing this player, not already in the set.
-    // Cap-clean lineups first, then by score.
+    // Candidate lineups containing this player, not already in the set,
+    // best score first. Cap safety is decided LIVE at insertion time below —
+    // a sort-time cap flag goes stale the moment the first swap moves counts.
     const usedKeys = new Set(result.map(l => l.map(p=>p.id).sort().join(',')));
     const withPlayer = candidatePool
       .filter(l => {
         const key = l.map(p=>p.id).sort().join(',');
         return l.some(p => p.id === id) && !usedKeys.has(key);
       })
-      .map(l => ({ l, score: scoreFn(l), cap: addExceedsCap(l) ? 1 : 0 }))
-      .sort((a, b) => (a.cap - b.cap) || (b.score - a.score));
+      .map(l => ({ l, score: scoreFn(l) }))
+      .sort((a, b) => b.score - a.score);
 
-    let replaced = 0;
+    let replaced = 0, breachInserts = 0;
     for(let n = 0; n < stillNeeded && withPlayer.length > 0; n++){
-      const replacement = withPlayer.shift();
+      // Removal victim FIRST — its removal frees exposure, so the incoming
+      // lineup's cap check runs against the true post-removal counts.
       // Worst lineup lacking this player whose removal won't break another met
       // min; fall back to plain worst only if every option would break one.
       let worstIdx = -1, worstScore = Infinity;
@@ -9345,18 +9555,45 @@ function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, 
         if(!removalBreaksMin(l, id) && sc < safeScore){ safeScore = sc; safeIdx = li; }
       });
       const pick = safeIdx >= 0 ? safeIdx : worstIdx;
-      if(pick >= 0){
-        bump(result[pick], -1);
-        result[pick] = replacement.l;
-        bump(replacement.l, 1);
-        replaced++;
+      if(pick < 0) break;
+      bump(result[pick], -1);
+      // F3: HARD-RESPECT MAX CAPS. The old pass sorted cap-clean candidates
+      // first but (a) evaluated the cap against stale counts and (b) silently
+      // fell through to cap-violating lineups — that's exactly how a Larson
+      // Min pushed Bell from 60% to 66%, past his 60% cap. Now the best
+      // cap-clean candidate is taken (re-checked live per insertion); a
+      // cap-breaking lineup is used ONLY when no cap-clean candidate remains
+      // (the min is mathematically unreachable otherwise), and every breach
+      // is named loudly in the audit log below.
+      let ci = withPlayer.findIndex(c => !addExceedsCap(c.l));
+      let usedBreach = false;
+      if(ci < 0){
+        if(hardCaps){ bump(result[pick], 1); break; }   // soft floor: restore the victim, stop here — never breach
+        ci = 0; usedBreach = true;
       }
+      const replacement = withPlayer.splice(ci, 1)[0];
+      result[pick] = replacement.l;
+      bump(replacement.l, 1);
+      replaced++; if(usedBreach) breachInserts++;
     }
 
     if(replaced > 0 && logFn){
-      logFn(`Min exposure: inserted ${replaced} lineup${replaced>1?'s':''} for player ${id} to reach ${minCount}/${result.length} (${minOverrides[id]}%)`);
+      logFn(`Min exposure: inserted ${replaced} lineup${replaced>1?'s':''} for player ${id} to reach ${minCount}/${result.length} (${minOverrides[id]}%)${breachInserts ? ` — ⚠ ${breachInserts} had NO cap-clean candidate available` : ''}`);
     }
   });
+
+  // F3 audit: name every player this pass pushed past their max cap.
+  if(maxCapFn && logFn){
+    const nameOf = {};
+    result.forEach(l => l.forEach(p => { nameOf[p.id] = p.name || p.id; }));
+    const N2 = Math.max(1, result.length);
+    Object.keys(counts).forEach(cid => {
+      const c = capOf(cid);
+      if(c != null && (counts[cid]||0) > c && (counts[cid]||0) > (preOver[cid]||c)){
+        logFn(`⚠ CAP BREACH (F3): min-exposure enforcement pushed ${nameOf[cid]||cid} to ${counts[cid]}/${N2} lineups (${Math.round(100*counts[cid]/N2)}%), past the ${Math.round(100*c/N2)}% max cap — no cap-clean lineups containing the min'd player remained. Add candidates, raise this cap, or lower the min.`);
+      }
+    });
+  }
 
   return result;
 }
