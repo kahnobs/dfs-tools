@@ -1090,7 +1090,7 @@ html { overscroll-behavior-y: contain; }
 
           <div class="autogen-section" id="pgaSection" style="display:none;">
             <div class="autogen-section-title">PGA Simulation</div>
-            <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">Simulates full tournaments: finishes calibrated to the de-vigged odds ladder, AM/PM wave correlation, the cut after R2, and DK hole-by-hole scoring shaped per golfer and anchored to your projections. Requires odds mapped; runs in Contest EV mode.</div>
+            <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">Simulates full tournaments: finishes calibrated to the de-vigged odds ladder, AM/PM wave correlation, the cut after R2, and DK hole-by-hole scoring shaped per golfer and anchored to your projections. Requires odds mapped. Contest EV Mode on = lineups priced vs your contest's payout curve and a modeled field (needs Own%); off = Sim Score mode, lineups ranked by their joint score on held-out sims.</div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
               <span class="setting-label">Simulations</span>
             </div>
@@ -3516,7 +3516,9 @@ function renderGroupRulesSummary(){
   if(waveSection){
     // Hidden in sim mode: the simulation prices the draw itself (wave shocks
     // + the Tee Wave volatility/lean controls in the PGA Simulation panel).
-    const simOn = slate.sport==='pga' && slate._ufcEv && slate._ufcEv.on;
+    // Gated on the MODE TAB, not just the Contest EV toggle — Simulate with
+    // EV off also never reads these quotas, so showing them was a lie.
+    const simOn = slate.sport==='pga' && (_genMode==='simulate' || (slate._ufcEv && slate._ufcEv.on));
     const showWave = slate.sport==='pga' && slate.columnMapping?.start!=null && !simOn;
     waveSection.style.display = showWave ? 'block' : 'none';
   }
@@ -3524,16 +3526,21 @@ function renderGroupRulesSummary(){
   // Always hide archetype section for non-PGA slates — must happen before the
   // early return below so an empty-groups UFC slate doesn't leave it visible
   // from a prior PGA render.
-  // ...and hide it in PGA sim (Contest EV) mode: the simulation's skill-axis
-  // correlation surfaces archetype-tilted builds naturally, so manual
-  // allocation would double-steer.
-  const pgaSimOn = slate.sport === 'pga' && slate._ufcEv && slate._ufcEv.on;
+  // ...and hide it in PGA sim mode (Contest EV on OR the Simulate tab active):
+  // the simulation's skill-axis correlation surfaces archetype-tilted builds
+  // naturally, so manual allocation would double-steer.
+  const pgaSimOn = slate.sport === 'pga' && (_genMode==='simulate' || (slate._ufcEv && slate._ufcEv.on));
   const arcSec = document.getElementById('archetypeSection');
   if(arcSec) arcSec.style.display = (slate.sport === 'pga' && !pgaSimOn) ? '' : 'none';
 
   const el=document.getElementById('groupRulesSummary');
   if(!groups.length){el.textContent='No groups defined yet.';return;}
-  el.innerHTML=groups.map(g=>{
+  // Honesty note: the PGA sim engine builds from per-sim optimal lineups and
+  // never applies group min/max rules — say so instead of implying they bind.
+  const _pgaSimNote = pgaSimOn
+    ? '<div style="font-size:10px;color:var(--muted);font-style:italic;margin-bottom:6px;">Simulate mode: group rules are not applied — the sim builds from per-sim optimal lineups. Switch to Optimize to enforce them.</div>'
+    : '';
+  el.innerHTML=_pgaSimNote+groups.map(g=>{
     const lines=[];
     const min=g.ruleMin||0, max=g.ruleMax||0;
     if(min>0&&max>0&&min===max) lines.push(`Use exactly ${min} from "${g.name}"`);
@@ -7040,6 +7047,91 @@ function pgaOptimalForSim(pool, scores, salArr, cheapPre, maxSal){
   return bestPick?bestPick.map(i=>order[i]):null;
 }
 
+// ── Sim Score selection (PGA, Contest EV off) ───────────────────────────────
+// Same sims, same ex-post-optimal candidate pool as Contest EV mode — only the
+// SELECTOR differs. Each candidate is priced on the held-out ODD sims by its
+// JOINT lineup-total distribution (0.6×P80 + 0.4×mean — the same ceiling-
+// weighted composite the pool column uses, but computed on lineup TOTALS so
+// six best-cases that never co-occur don't stack, per the UFC joint-ceiling
+// lesson). Selection is greedy by that score with:
+//   • the make-cut exposure principle: a golfer's share of the output can't
+//     exceed his simulated make-cut rate (floored at 5%), nor the user's
+//     Max% cap / per-player overrides;
+//   • a near-duplicate constraint (≤3 shared golfers of 6 with any chosen
+//     lineup), progressively relaxed to ≤4 / ≤5 only if the pool runs dry.
+// No ownership, no payout curve — this is "best portfolio by the sim's own
+// scoring", for cash-ish contexts or weeks without an Own% projection.
+async function runPgaSimScoreSelect(ctx){
+  const {slate, pool, ranked, simScoresById, simsDone, target, maxExpPct, overrides} = ctx;
+  if(!ranked.length){ alert('No valid lineups generated. Try relaxing salary rules or unhiding players.'); return null; }
+  // Held-out odd sims, sampled to ≤800 for pricing breadth without the wait
+  const avail=[]; for(let t=1;t<simsDone;t+=2) avail.push(t);
+  if(!avail.length) avail.push(0);
+  const nS=Math.min(800, avail.length);
+  const stride=avail.length/nS;
+  const simIdx=[]; for(let k=0;k<nS;k++) simIdx.push(avail[Math.floor(k*stride)]);
+  log(`Sim Score: pricing ${ranked.length.toLocaleString()} candidates on ${simIdx.length.toLocaleString()} held-out sims…`);
+  await new Promise(r=>setTimeout(r,0));
+  const totals=new Float64Array(simIdx.length);
+  const cands=[];
+  for(let ci=0;ci<ranked.length;ci++){
+    const e=ranked[ci];
+    totals.fill(0);
+    for(const p of e.lineup){
+      const s=simScoresById[p.id];
+      for(let k=0;k<simIdx.length;k++) totals[k]+=s[simIdx[k]];
+    }
+    const arr=Array.from(totals).sort((a,b)=>a-b);
+    const q=f=>arr[Math.min(arr.length-1,Math.floor(arr.length*f))];
+    const mean=arr.reduce((a,b)=>a+b,0)/(arr.length||1);
+    cands.push({lineup:e.lineup, score:0.6*q(0.8)+0.4*mean});
+    if(ci>0&&ci%800===0){ await new Promise(r=>setTimeout(r,0)); if(window._genCancelled) return null; }
+  }
+  cands.sort((a,b)=>b.score-a.score);
+  // Exposure caps: min(user Max% / override, simulated make-cut rate)
+  const capMap={};
+  pool.forEach(p=>{
+    const userPct=overrides[p.id]!=null?overrides[p.id]:maxExpPct;
+    const cutPct=p._simCut!=null?Math.max(5,p._simCut):100;
+    capMap[p.id]=Math.max(1, Math.ceil(target*Math.min(userPct,cutPct)/100));
+  });
+  const expCount={}; const chosen=[]; const chosenSets=[]; const used=new Set();
+  const RELAX=[3,4,5];
+  for(let ri=0;ri<RELAX.length;ri++){
+    const maxShared=RELAX[ri];
+    for(let i=0;i<cands.length && chosen.length<target;i++){
+      if(used.has(i)) continue;
+      const c=cands[i];
+      if(c.lineup.some(p=>(expCount[p.id]||0)>=capMap[p.id])) continue;
+      let dup=false;
+      for(const s of chosenSets){
+        let sh=0; for(const p of c.lineup) if(s.has(p.id)) sh++;
+        if(sh>maxShared){ dup=true; break; }
+      }
+      if(dup) continue;
+      used.add(i); chosen.push(c.lineup.slice());
+      chosenSets.push(new Set(c.lineup.map(p=>p.id)));
+      c.lineup.forEach(p=>expCount[p.id]=(expCount[p.id]||0)+1);
+    }
+    if(chosen.length>=target) break;
+    if(ri<RELAX.length-1) log(`  uniqueness relaxed to ≤${RELAX[ri+1]} shared golfers (${chosen.length}/${target} so far)…`);
+  }
+  if(!chosen.length){ alert('Sim Score selection found no lineups under the exposure caps — raise Max% and re-run.'); return null; }
+  if(chosen.length<target) log(`⚠ Only ${chosen.length}/${target} lineups clear the exposure caps + uniqueness — raise Max% or sims for more.`);
+  // Exposure + cut-cap readout, same spirit as the EV path's diagnostics
+  {
+    const top=pool.map(p=>({p, e:expCount[p.id]||0})).filter(x=>x.e>0).sort((a,b)=>b.e-a.e).slice(0,6);
+    log('Top exposure: '+top.map(x=>`${x.p.name.split(' ').slice(-1)[0]} ${Math.round(100*x.e/chosen.length)}% (cut ${x.p._simCut==null?'n/a':x.p._simCut+'%'})`).join(', '));
+    const sals=chosen.map(l=>l.reduce((s,p)=>s+(p.salary||0),0));
+    log(`Done! ${chosen.length} lineups by Sim Score. Salary $${Math.min(...sals).toLocaleString()}–$${Math.max(...sals).toLocaleString()}.`);
+  }
+  const minOv=slate.playerMinOverrides||{};
+  if(Object.keys(minOv).some(id=>minOv[id]>0)) log('Note: Min% overrides are not enforced in Sim Score mode (use Contest EV or Optimize for forced exposure).');
+  addToHistory(slate.id, `${chosen.length} lineups (sim score) @ ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`, chosen);
+  openPreviewModal(chosen, 'proj');
+  return chosen;
+}
+
 async function runPgaSimGen(){
   const slate=activeSlate(); if(!slate) return;
   const target=parseInt(document.getElementById('genCount').value)||20;
@@ -7076,14 +7168,16 @@ async function runPgaSimGen(){
     alert('PGA Simulation needs the sportsbook odds ladder mapped (Win/Top 5/10/20 + ideally Top 30/40) — pull odds into the slate first.');
     done(); return;
   }
-  if(!(slate._ufcEv&&slate._ufcEv.on)){
-    alert('PGA Simulation runs in Contest EV mode — turn on "Contest EV Mode" in the PGA Simulation panel (pick your contest), then generate again.');
+  // Contest EV is optional: ON prices lineups against your contest's payout
+  // curve + a modeled ownership field (needs Own% mapped); OFF falls back to
+  // Sim Score mode — same simulations, same candidates, but selection is by
+  // each lineup's JOINT score distribution on held-out sims (no field model).
+  const _evOn = !!(slate._ufcEv && slate._ufcEv.on);
+  if(_evOn && !pool.some(p=>(parseFloat(p.own)||0)>0)){
+    alert('Contest EV needs an Own% column mapped to model the field. (Or turn Contest EV Mode off to select by raw sim score instead.)');
     done(); return;
   }
-  if(!pool.some(p=>(parseFloat(p.own)||0)>0)){
-    alert('Contest EV needs an Own% column mapped to model the field.');
-    done(); return;
-  }
+  if(!_evOn) log('Contest EV Mode off — Sim Score mode: lineups ranked by held-out sim totals (0.6×P80 + 0.4×mean), no payout/field modeling.');
 
   { const f=slate._pgaFactors||{};
     const parts=[['drv','Driving'],['acc','Accuracy'],['app','Approach'],['arg','Short'],['putt','Putting']]
@@ -7193,9 +7287,15 @@ async function runPgaSimGen(){
   // is higher. Propose one-swap upgrades that spend the leftover, then let
   // the SAME contest-EV pricing judge originals and neighbors on equal
   // footing. Nothing is forced: if the cheap build carries more EV, it wins.
-  const _se = !!(slate._ufcEv && slate._ufcEv.se);
-  const out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, oosParity:1, sharpShare:0.15, se:_se, dominanceRepair:true, maxSal});
-  if(out===null&&window._genCancelled) log('Cancelled.');
+  let out;
+  if(_evOn){
+    const _se = !!(slate._ufcEv && slate._ufcEv.se);
+    out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, oosParity:1, sharpShare:0.15, se:_se, dominanceRepair:true, maxSal});
+    if(out===null&&window._genCancelled) log('Cancelled.');
+  } else {
+    out=await runPgaSimScoreSelect({slate, pool, ranked, simScoresById, simsDone, target, maxExpPct, overrides});
+    if(out===null){ if(window._genCancelled) log('Cancelled.'); done(); return; }
+  }
 
   // ── Theme readout: which skill set / wave each lineup is built around ──
   // NOTE: runUFCContestEV renders the preview modal BEFORE returning, so after
