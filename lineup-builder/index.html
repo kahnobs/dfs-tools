@@ -170,8 +170,12 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .saved-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;}
 .saved-num{font-family:'Bebas Neue',sans-serif;font-size:12px;color:var(--accent2);}
 .saved-sal{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);}
-.saved-names{font-size:10px;color:var(--text);line-height:1.5;margin-bottom:3px;}
-.saved-stats{display:flex;flex-wrap:wrap;align-items:center;gap:4px;row-gap:3px;}
+/* Reserve 2 lines for names + 2 rows for stats so every saved card is the SAME
+   height regardless of name length or whether it carries Sim/EV stats. Short
+   content just leaves reserved whitespace; nothing is clipped (all 6 golfers
+   always show). 2 lines @ 15px = 30px covers the widest observed 6-name row. */
+.saved-names{font-size:10px;color:var(--text);line-height:1.5;margin-bottom:3px;min-height:30px;}
+.saved-stats{display:flex;flex-wrap:wrap;align-items:center;align-content:flex-start;gap:4px;row-gap:3px;min-height:31px;}
 .saved-stat{font-family:'DM Mono',monospace;font-size:10px;color:var(--accent);}
 .saved-stat-lbl{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.4px;margin-right:1px;}
 .saved-stat-sep{color:var(--border);}
