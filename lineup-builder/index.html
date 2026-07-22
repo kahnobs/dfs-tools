@@ -1090,7 +1090,7 @@ html { overscroll-behavior-y: contain; }
 
           <div class="autogen-section" id="pgaSection" style="display:none;">
             <div class="autogen-section-title">PGA Simulation</div>
-            <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">Simulates full tournaments: finishes calibrated to the de-vigged odds ladder, AM/PM wave correlation, the cut after R2, and DK hole-by-hole scoring shaped per golfer and anchored to your projections. Requires odds mapped. Contest EV Mode on = lineups priced vs your contest's payout curve and a modeled field (needs Own%); off = Sim Score mode, lineups ranked by their joint score on held-out sims.</div>
+            <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">Simulates full tournaments: finishes calibrated to the de-vigged odds ladder, AM/PM wave correlation, the cut after R2, and DK hole-by-hole scoring shaped per golfer and anchored to the course scoring environment (Par + Field vs par). Requires odds mapped. Contest EV Mode on = lineups priced vs your contest's payout curve and a modeled field (needs Own%); off = Sim Score mode, lineups ranked by their joint score on held-out sims.</div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
               <span class="setting-label">Simulations</span>
             </div>
@@ -1111,6 +1111,11 @@ html { overscroll-behavior-y: contain; }
                 style="width:44px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:5px;font-size:11px;font-family:'DM Mono',monospace;"
                 title="Course par — sets the DK 'all 4 rounds under 70' bonus threshold (on a par-70 track, under 70 = under par)"
                 oninput="const _s=activeSlate();if(_s){_s._pgaPar=parseInt(this.value)||71;save();}">
+              <span class="setting-label" style="flex:none;margin-left:8px;">Field vs par</span>
+              <input type="number" id="pgaFieldParInput" min="-3" max="3" step="0.1" value="-0.3"
+                style="width:52px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:5px;font-size:11px;font-family:'DM Mono',monospace;"
+                title="Expected FIELD scoring average vs par, per round — anchors the sim's DK hole scoring to course difficulty (birdie/bogey rates). Auto-filled from course data (⟳ button) when available; editing sets a manual override. Birdie-fests (3M, Sony, Palm Springs) ≈ −1.0; typical tour stop ≈ −0.3; hard majors / US Open ≈ +1 to +2."
+                oninput="const _s=activeSlate();if(_s){const _v=parseFloat(this.value);if(isNaN(_v)){delete _s._pgaFieldVsPar;delete _s._pgaFieldVsParSrc;}else{_s._pgaFieldVsPar=Math.max(-3,Math.min(3,_v));_s._pgaFieldVsParSrc='manual';}save();}">
             </div>
             <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
@@ -5361,7 +5366,25 @@ async function fetchPgaFactors(s, name){
   if(j.ok===false||j.error) throw new Error(j.error||'course lookup failed');
   const prof=recipeToPgaFactors(j);
   s._pgaFactors=Object.assign({},s._pgaFactors,prof,{src:'auto',course:j.course_name||''});
-  save(); renderPgaFactorSliders();
+  // ── Course scoring environment (webhook v15+) ──────────────────────────────
+  // field_vs_par anchors the sim's DK stroke level; par sets the under-70
+  // bonus threshold; birdie rate refines hole scoring; win_scores feed the
+  // implied-winning-score sanity check. A manual "Field vs par" edit always
+  // wins (src flag); older webhook responses simply lack these fields → no-op.
+  const cs=j.course_scoring;
+  if(cs){
+    if(cs.par>=68&&cs.par<=74&&s._pgaPar==null) s._pgaPar=cs.par;
+    if(cs.field_vs_par!=null&&isFinite(+cs.field_vs_par)&&s._pgaFieldVsParSrc!=='manual'){
+      s._pgaFieldVsPar=Math.max(-3,Math.min(3,Math.round(+cs.field_vs_par*10)/10));
+      s._pgaFieldVsParSrc='auto';
+    }
+    s._pgaCourseBirdies=cs.birdies_per_round!=null&&isFinite(+cs.birdies_per_round)?+cs.birdies_per_round:null;
+  }
+  if(Array.isArray(j.win_scores)&&j.win_scores.length){
+    const nums=j.win_scores.map(w=>+((w&&w.score)!=null?w.score:NaN)).filter(v=>isFinite(v)&&v>=-35&&v<=12);
+    s._pgaWinHist=nums.length?nums.slice(0,10):null;
+  }
+  save(); renderPgaFactorSliders(); syncPgaCutUI();
   return {j, prof};
 }
 async function autoFillPgaFactors(){
@@ -5379,7 +5402,10 @@ async function autoFillPgaFactors(){
       res=await fetchPgaFactors(s, name);
     }
     const desc=PGA_FACTOR_AXES.map(([k,l])=>`${l.split(' ')[0]} ${res.prof[k]}`).join(' · ');
-    showToast(`✓ ${res.j.course_name}: ${desc}`,'ok');
+    const cs=res.j.course_scoring;
+    const extra=(cs&&cs.field_vs_par!=null?` · field ${cs.field_vs_par>0?'+':''}${cs.field_vs_par}/rd`:'')
+      +(Array.isArray(res.j.win_scores)&&res.j.win_scores.length?` · win hist avg ${(res.j.win_scores.reduce((a,w)=>a+(+w.score||0),0)/res.j.win_scores.length).toFixed(0)}`:'');
+    showToast(`✓ ${res.j.course_name}: ${desc}${extra}`,'ok');
   }catch(e){
     showToast('Course profile fetch failed — '+(e.message||e)+'. Sliders unchanged.','err');
   }
@@ -6495,8 +6521,11 @@ async function runUFCContestEV(ctx){
 // the cut after R2 (top 65 + ties semantics), and DK Classic scoring built
 // per round: birdies/eagles/bogeys implied by round quality and shaped by
 // golfer style, plus streak/bogey-free/under-70 bonuses and placement points.
-// Simulated MEANS are anchored to the projection column — the sim's job is
-// variance, cut risk and correlation, not re-inventing the projections.
+// The ABSOLUTE stroke level is anchored per-course: latent scores are re-
+// centered to the field mean and offset by the slate's "Field vs par" input
+// (course difficulty), so birdie rates match the actual scoring environment.
+// (mu's raw level is arbitrary — calibration matches finish RANKS, which are
+// shift-invariant — so without this anchor the DK point scale floats.)
 const PGA_SIG_ROUND = 2.7;   // per-round score SD vs field (strokes)
 const PGA_SIG_WAVE  = 0.55;  // shared AM/PM wave shock SD (strokes)
 // ── Auto cut-line inference ────────────────────────────────────────────────
@@ -6536,6 +6565,8 @@ function syncPgaCutUI(){
   if(el) el.value = manual ? s._pgaCut : inf.n;
   const parEl=document.getElementById('pgaParInput');
   if(parEl) parEl.value = s._pgaPar || 71;
+  const fpEl=document.getElementById('pgaFieldParInput');
+  if(fpEl) fpEl.value = s._pgaFieldVsPar!=null ? s._pgaFieldVsPar : -0.3;
   if(lbl){
     lbl.textContent = manual
       ? `manual · click to auto (${inf.label} → ${inf.n})`
@@ -6939,6 +6970,32 @@ async function runPgaSims(pool, numSims, log){
   // ⇔ xp ≤ 69.4 − par. Old hardcoded −2.0 assumed ~par 71.4 everywhere.
   const PGA_PAR=(activeSlate()&&activeSlate()._pgaPar)||71;
   const U70_THRESH=69.4-PGA_PAR;
+  // ── Stroke-level anchor: field mean + course difficulty ──────────────────
+  // mu's absolute level is ARBITRARY (odds-logit init; calibration matches
+  // finish ranks, which don't move when a constant is added to everyone), so
+  // x must be re-centered before it can be read as strokes-vs-par. Anchor:
+  //   xp = (x − mean(mu)) + FIELD_VS_PAR
+  // where FIELD_VS_PAR is the slate's "Field vs par" input — the expected
+  // field scoring average vs par per round (birdie-fest ≈ −1.0, typical stop
+  // ≈ −0.3, US-Open-hard ≈ +1.5). The old hardcoded xp = x + 0.2 read the
+  // raw logit level (field mean ≈ +2.5!) as strokes, scoring every course
+  // like a brutal major — birdie rates, under-70 and bogey-free bonuses all
+  // came in far too low (a −20-winner course simmed like a −11 one).
+  const muBar=(()=>{let s=0;for(let i=0;i<N;i++)s+=mu[i];return s/N;})();
+  const FIELD_VS_PAR=(()=>{const s=activeSlate();
+    const v=s&&s._pgaFieldVsPar; return v!=null&&!isNaN(+v)?Math.max(-3,Math.min(3,+v)):-0.3;})();
+  const FVP_SRC=(activeSlate()&&activeSlate()._pgaFieldVsParSrc)||'default';
+  if(log) log(`Stroke level anchored: field mean re-centered (µ̄=${muBar.toFixed(2)}), field plays ${FIELD_VS_PAR>0?'+':''}${FIELD_VS_PAR.toFixed(1)} vs par/round (${FVP_SRC==='auto'?'auto from course data':FVP_SRC}).`);
+  // Course birdie-rate anchor (optional, from course data): shift the birdie
+  // intercept so the FIELD-average golfer's birdies/round matches the course's
+  // measured birdie-or-better rate (which includes eagles → subtract the
+  // ~0.055 eagle share). Catches courses whose difficulty profile is unusual —
+  // e.g. windy tracks with BOTH high birdie and high bogey rates — that a
+  // strokes-only anchor can't distinguish. Clamped ±1 birdie/round.
+  const B_ANCHOR=(()=>{const s=activeSlate(); const cb=s&&s._pgaCourseBirdies;
+    if(cb==null||!isFinite(+cb)) return 0;
+    return Math.max(-1,Math.min(1,(+cb-0.055)-(3.55-0.48*FIELD_VS_PAR)));})();
+  if(B_ANCHOR!==0&&log) log(`Birdie rate anchored to course data: ${B_ANCHOR>0?'+':''}${B_ANCHOR.toFixed(2)}/round vs the difficulty-implied baseline.`);
   const bobP =pctOf(pool.map(p=>parseFloat(p.bob)));
   const bavP =pctOf(pool.map(p=>parseFloat(p.bogey_avoid)));
   const p5P  =pctOf(pool.map(p=>parseFloat(p.sg_par_5)));
@@ -6947,8 +7004,8 @@ async function runPgaSims(pool, numSims, log){
   const eagleP  =pool.map((p,i)=>Math.max(0.015,0.055+(p5P[i]-0.5)*0.05));
 
   function holePts(x,i){
-    const xp=x+0.2;                       // field plays ~+0.2 vs par
-    const bMean=Math.min(9,Math.max(0.5,3.55+styleB[i]-0.48*xp));
+    const xp=(x-muBar)+FIELD_VS_PAR;      // strokes vs par, course-anchored
+    const bMean=Math.min(9,Math.max(0.5,3.55+B_ANCHOR+styleB[i]-0.48*xp));
     let b=Math.max(0,Math.round(bMean+gauss()*Math.sqrt(bMean*0.55)));
     let e=Math.random()<Math.max(0.01,eagleP[i]-0.01*xp)?1:0;
     let S=Math.round(xp+b+2*e);
@@ -6991,22 +7048,24 @@ async function runPgaSims(pool, numSims, log){
   // shape). The projection column is a separate, partly-redundant quality view
   // that only distorts the sim when it disagrees (it buried Tom Kim: elite
   // rating + good odds, outlier-low projection). It's removed from the sim
-  // entirely — the absolute DK level it used to "correct" is irrelevant to
-  // selection anyway (EV compares your lineups to a field scored by the SAME
-  // sim, so any level offset cancels). Projection remains available to the
-  // lineup-selection layer if we ever want it there.
+  // entirely. NOTE: the projection was also the only thing anchoring the
+  // ABSOLUTE DK point level — a level offset does cancel for EV selection,
+  // but it broke exported sim distributions and the nonlinear bonuses
+  // (under-70 / bogey-free / streaks). That anchor is now provided properly
+  // by the field-mean re-centering + "Field vs par" course input above.
   log('Projection excluded from sim — golfer strength is odds + model only.');
 
   // ── Final run ──
   const simScores=pool.map(()=>new Float64Array(numSims));
   const winCnt=new Float64Array(N), cutRate=new Float64Array(N);
   const t5=new Float64Array(N), t10=new Float64Array(N), t20=new Float64Array(N);
+  const winStrokes=[];   // winner's 72-hole total vs par, for the history check
   let simsDone=0;
   for(let s=0;s<numSims;s++){
     const o=dkOnce(null);
     for(let i=0;i<N;i++){
       simScores[i][s]=o[i];
-      if(rank[i]===1) winCnt[i]++;
+      if(rank[i]===1){ winCnt[i]++; winStrokes.push(tot[i]-4*muBar+4*FIELD_VS_PAR); }
       if(rank[i]<=5) t5[i]++;
       if(rank[i]<=10) t10[i]++;
       if(rank[i]<=20) t20[i]++;
@@ -7015,6 +7074,24 @@ async function runPgaSims(pool, numSims, log){
     simsDone=s+1;
     if(s%200===0){ if(log&&s>0) log(`  ${s.toLocaleString()}/${numSims.toLocaleString()} tournaments…`);
       await tick(); if(window._genCancelled) break; }
+  }
+  // ── Winning-score sanity check vs course history ───────────────────────────
+  // The sim's implied median winning score (strokes vs par) should sit near
+  // the course's past winning scores (webhook v15 win_scores). A gap of 4+
+  // strokes means the Field vs par anchor is off for this venue — a direct,
+  // human-readable check that the DK point scale is calibrated to the course.
+  if(log&&winStrokes.length){
+    winStrokes.sort((a,b)=>a-b);
+    const medW=winStrokes[winStrokes.length>>1];
+    const wh=(activeSlate()&&activeSlate()._pgaWinHist)||null;
+    const fmt=v=>(v>0?'+':'')+v.toFixed(1);
+    if(wh&&wh.length){
+      const hAvg=wh.reduce((a,b)=>a+b,0)/wh.length;
+      const gap=Math.abs(medW-hAvg);
+      log(`Implied winning score: median ${fmt(medW)} — course history avg ${fmt(hAvg)} over ${wh.length} events ${gap<4?'✓':'⚠ (4+ stroke gap: adjust Field vs par)'}`);
+    } else {
+      log(`Implied winning score: median ${fmt(medW)} (no course win history loaded — pull course data to enable the check).`);
+    }
   }
   return { simScores, simsDone, winCnt, cutRate, t5, t10, t20, mu,
            factors:{ axes:FAXES, sig:fsig, load:fload } };
