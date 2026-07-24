@@ -5787,6 +5787,28 @@ async function runUFCContestEV(ctx){
   // floor for candidates too unique to appear in the sample. Take the max.
   const idxById = new Map(pool.map((p,i)=>[p.id,i]));
 
+  // ── No-oppose screen (UFC) ────────────────────────────────────────────────
+  // Belt-and-suspenders: no candidate carrying an opposing pair may reach EV
+  // pricing when the rule is on, regardless of which stage produced it. Any
+  // drop here means an upstream stage leaked — the log names the pair so the
+  // leak is visible instead of silently selected.
+  if(slate.sport==='ufc' && (document.getElementById('genUfcNoOppose')?.checked||false)){
+    const _scrFx = p => { const f=p.fightNum||parseInt(p.start)||0; return f>0 && ufcExcludedFights.has(f); };
+    const _scrOpp = (p,q) => !_scrFx(p) &&
+      ((p.opp && (p.opp===q.name||p.opp===q.id)) || (q.opp && (q.opp===p.name||q.opp===p.id)));
+    const findPair = lu => {
+      for(let a=0;a<lu.length;a++) for(let b=a+1;b<lu.length;b++)
+        if(_scrOpp(lu[a],lu[b])) return `${lu[a].name} vs ${lu[b].name}`;
+      return null;
+    };
+    let dropped=0, ex='';
+    for(let i=ranked.length-1;i>=0;i--){
+      const pr=findPair(ranked[i].lineup);
+      if(pr){ dropped++; if(!ex) ex=pr; ranked.splice(i,1); }
+    }
+    if(dropped) log(`⚠ No-oppose screen: dropped ${dropped} candidate(s) containing opposing fighters (e.g. ${ex}) — an upstream stage leaked past the rule.`);
+  }
+
   // ── Dominance repair ──────────────────────────────────────────────────────
   // A lineup that leaves real salary on a weak player is making a false claim:
   // that no affordable, unused, clearly-better golfer exists. Per-sim optimals
@@ -5832,6 +5854,17 @@ async function runUFCContestEV(ctx){
       return r;
     };
     const byMeanDesc=[...Array(pool.length).keys()].sort((a,b)=>meanIdx[b]-meanIdx[a]);
+    // No-oppose guard (UFC only). Repair swaps in the best-mean affordable
+    // player with NO opposition check — candidates arrive oppose-clean from
+    // pickOptimalLineup, then repair jams a cheap high-mean fighter into
+    // lineups already holding his OPPONENT (the two sides of a cheap value
+    // fight are exactly the top of byMeanDesc), silently re-stacking fights
+    // the generator was told to split. Honor the same rule + per-fight
+    // exclusion toggles the generator used.
+    const _repNoOpp = slate.sport==='ufc' && (document.getElementById('genUfcNoOppose')?.checked||false);
+    const _repFightExcl = p => { const f=p.fightNum||parseInt(p.start)||0; return f>0 && ufcExcludedFights.has(f); };
+    const _repOpposes = (p,q) => !_repFightExcl(p) &&
+      ((p.opp && (p.opp===q.name||p.opp===q.id)) || (q.opp && (q.opp===p.name||q.opp===p.id)));
     const seen=new Map();
     let swaps=0, dominated=0;
     const repaired=[];
@@ -5861,6 +5894,7 @@ async function runUFCContestEV(ctx){
             if(meanIdx[q]-meanIdx[pI]<=bestGain) break; // sorted desc → no better remains
             if(inSet.has(q)) continue;
             if(salIdx[q]>budget) continue;
+            if(_repNoOpp && idxs.some(i=>i!==pI && _repOpposes(pool[q], pool[i]))) continue; // never swap in a teammate's opponent
             if(!beatsEnough(q,pI)) continue; // mean gap alone ≠ dominance — must beat him sim by sim
             bestGain=meanIdx[q]-meanIdx[pI]; bestSlot=pI; bestUp=q; break;
           }
