@@ -3,423 +3,3322 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DFS Tools</title>
-<meta name="description" content="Free, browser-based DFS tools for DraftKings contests. No login required. Your data never leaves your device.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<title>DEBO Cup — Weekly Update Tool</title>
 <style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #ffffff; --bg2: #f7f6f2; --bg3: #f0ede6;
+    --border: rgba(0,0,0,0.12); --border2: rgba(0,0,0,0.22);
+    --text: #1a1a18; --text2: #6b6a64; --text3: #9e9d97;
+    --green: #2d6a4f; --red: #9b2226; --gold: #b5860d;
+    --gold-bg: #fff3cd; --silver-bg: #f0ede6; --bronze-bg: #f5cba7;
+    --radius: 8px; --radius-lg: 12px;
+  }
+  body { font-family: 'Georgia','Times New Roman',serif; background: var(--bg2); color: var(--text); min-height: 100vh; padding: 2rem 1rem; }
+  .container { max-width: 980px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 2px solid var(--text); }
+  header h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; text-transform: uppercase; }
+  header p { font-size: 13px; color: var(--text2); margin-top: 4px; font-style: italic; }
 
-:root {
-  --bg: #0a0b0d;
-  --surface: #111316;
-  --surface2: #191c21;
-  --border: rgba(255,255,255,0.06);
-  --border2: rgba(255,255,255,0.1);
-  --text: #eeecea;
-  --muted: #666d78;
-  --accent: #c8f05a;
-  --accent-dim: rgba(200,240,90,0.08);
-  --font: 'Syne', sans-serif;
-  --mono: 'DM Mono', monospace;
-}
+  .status-bar { font-family: 'Helvetica Neue',Arial,sans-serif; font-size: 12px; padding: 8px 12px; border-radius: var(--radius); margin-bottom: 1.25rem; border: 0.5px solid var(--border); background: var(--bg); color: var(--text2); display: flex; align-items: center; gap: 8px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--text3); }
+  .status-dot.ok { background: #2d6a4f; }
+  .status-dot.err { background: #9b2226; }
+  .status-dot.loading { background: #b5860d; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
-body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font);
-  min-height: 100vh;
-  overflow-x: hidden;
-}
+  .card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem; margin-bottom: 1.25rem; }
+  .section-label { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text2); margin-bottom: 10px; font-family: 'Helvetica Neue',Arial,sans-serif; }
+  .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .field-group { display: flex; flex-direction: column; gap: 5px; }
+  .field-group label { font-size: 12px; color: var(--text2); font-family: 'Helvetica Neue',Arial,sans-serif; }
+  input[type="text"], input[type="date"], input[type="number"], select { font-family: 'Helvetica Neue',Arial,sans-serif; font-size: 13px; padding: 7px 10px; border: 0.5px solid var(--border2); border-radius: var(--radius); background: var(--bg); color: var(--text); width: 100%; outline: none; }
+  input:focus, select:focus { border-color: var(--text); }
 
-/* Grid background */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(200,240,90,0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(200,240,90,0.03) 1px, transparent 1px);
-  background-size: 60px 60px;
-  pointer-events: none;
-  z-index: 0;
-}
+  /* Drop zone */
+  .drop-zone { border: 1.5px dashed var(--border2); border-radius: var(--radius-lg); padding: 2rem; text-align: center; cursor: pointer; transition: border-color 0.15s, background 0.15s; font-family: 'Helvetica Neue',Arial,sans-serif; }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: var(--text); background: var(--bg2); }
+  .drop-zone .dz-icon { font-size: 28px; margin-bottom: 8px; }
+  .drop-zone .dz-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .drop-zone .dz-sub { font-size: 12px; color: var(--text2); }
+  .drop-zone input[type="file"] { display: none; }
 
-.container {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 0 24px;
-  position: relative;
-  z-index: 1;
-}
+  /* Import preview table */
+  .import-table { width: 100%; border-collapse: collapse; font-family: 'Helvetica Neue',Arial,sans-serif; font-size: 13px; }
+  .import-table th { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text2); text-align: left; padding: 6px 8px; border-bottom: 0.5px solid var(--border); }
+  .import-table td { padding: 6px 8px; border-bottom: 0.5px solid var(--border); color: var(--text); vertical-align: middle; }
+  .import-table tr:last-child td { border-bottom: none; }
+  .match-ok { color: var(--green); font-weight: 600; }
+  .match-warn { color: var(--gold); font-weight: 600; }
+  .match-none { color: var(--red); font-weight: 600; }
+  .rank-badge { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; font-size: 11px; font-weight: 700; background: var(--bg2); color: var(--text2); }
+  .rank-1 { background: var(--gold-bg); color: var(--gold); }
+  .rank-2 { background: var(--silver-bg); color: #444; }
+  .rank-3 { background: var(--bronze-bg); color: #7a4a1e; }
 
-/* Nav */
-nav {
-  padding: 24px 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--border);
-}
+  /* Manual override select in table */
+  .import-table select { font-size: 12px; padding: 4px 6px; height: 28px; }
 
-.nav-logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  text-decoration: none;
-}
+  /* Unmatched warning */
+  .unmatched-box { background: #fff8e1; border: 0.5px solid #f9c74f; border-radius: var(--radius); padding: 10px 14px; font-family: 'Helvetica Neue',Arial,sans-serif; font-size: 12px; color: #7a5c00; margin-top: 10px; }
 
-.logo-mark {
-  width: 34px;
-  height: 34px;
-  background: var(--accent);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--mono);
-  font-weight: 500;
-  font-size: 13px;
-  color: #0a0b0d;
-  flex-shrink: 0;
-}
+  .results-header { display: grid; grid-template-columns: 2fr 75px 90px 60px 60px 28px; gap: 6px; padding: 0 2px 6px; border-bottom: 0.5px solid var(--border); margin-bottom: 8px; }
+  .results-header span { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text2); font-family: 'Helvetica Neue',Arial,sans-serif; }
+  .result-row { display: grid; grid-template-columns: 2fr 75px 90px 60px 60px 28px; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .dc-out, .pr-out { font-size: 13px; font-weight: 600; text-align: center; font-family: 'Helvetica Neue',Arial,sans-serif; color: var(--text2); }
+  .remove-btn { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 16px; padding: 0; line-height: 1; }
+  .remove-btn:hover { color: var(--red); }
+  .add-btn { font-family: 'Helvetica Neue',Arial,sans-serif; font-size: 12px; padding: 5px 14px; border: 0.5px solid var(--border2); border-radius: var(--radius); background: var(--bg2); color: var(--text2); cursor: pointer; margin-top: 8px; }
+  .add-btn:hover { background: var(--bg3); color: var(--text); }
 
-.nav-wordmark {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text);
-  letter-spacing: -0.02em;
-}
+  .calc-btn { width: 100%; padding: 12px; font-family: 'Helvetica Neue',Arial,sans-serif; font-size: 14px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; border: 2px solid var(--text); border-radius: var(--radius); background: var(--text); color: var(--bg); cursor: pointer; margin-bottom: 1.5rem; }
+  .calc-btn:hover { background: #333; }
+  .calc-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.nav-badge {
-  font-size: 10px;
-  font-family: var(--mono);
-  color: var(--muted);
-  border: 1px solid var(--border2);
-  border-radius: 4px;
-  padding: 3px 8px;
-}
+  .top-tabs { display: flex; border-bottom: 0.5px solid var(--border); margin-bottom: 1.5rem; }
+  .top-tab { font-family: 'Helvetica Neue',Arial,sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; padding: 8px 18px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--text2); cursor: pointer; margin-bottom: -1px; }
+  .top-tab.active { color: var(--text); border-bottom-color: var(--text); }
 
-/* Hero */
-.hero {
-  padding: 96px 0 80px;
-  text-align: center;
-}
+  .inner-tabs { display: flex; gap: 4px; margin-bottom: 1rem; flex-wrap: wrap; }
+  .inner-tab { font-family: 'Helvetica Neue',Arial,sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; padding: 6px 14px; border: 0.5px solid var(--border2); border-radius: var(--radius); background: var(--bg); color: var(--text2); cursor: pointer; }
+  .inner-tab.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 
-.hero-eyebrow {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--accent);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  margin-bottom: 24px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
+  .standings-table { width: 100%; border-collapse: collapse; font-family: 'Helvetica Neue',Arial,sans-serif; }
+  .standings-table th { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text2); text-align: left; padding: 6px 8px; border-bottom: 0.5px solid var(--border); }
+  .standings-table td { padding: 7px 8px; font-size: 13px; border-bottom: 0.5px solid var(--border); color: var(--text); }
+  .standings-table tr:last-child td { border-bottom: none; }
+  .delta-up { color: var(--green); font-size: 11px; }
+  .delta-dn { color: var(--red); font-size: 11px; }
 
-.hero-eyebrow::before, .hero-eyebrow::after {
-  content: '';
-  width: 24px;
-  height: 1px;
-  background: var(--accent);
-  opacity: 0.5;
-}
+  .output-box { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 1rem; font-size: 12.5px; line-height: 1.75; white-space: pre-wrap; font-family: 'Courier New',monospace; color: var(--text); margin-bottom: 8px; min-height: 80px; }
+  .copy-btn { font-family: 'Helvetica Neue',Arial,sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; padding: 5px 16px; border: 0.5px solid var(--border2); border-radius: var(--radius); background: var(--bg); color: var(--text2); cursor: pointer; margin-bottom: 1.25rem; }
+  .copy-btn:hover { background: var(--bg2); color: var(--text); }
+  .refresh-btn { font-family: 'Helvetica Neue',Arial,sans-serif; font-size: 12px; padding: 4px 12px; border: 0.5px solid var(--border2); border-radius: var(--radius); background: var(--bg); color: var(--text2); cursor: pointer; margin-left: auto; flex-shrink: 0; }
+  .generating { opacity: 0.6; pointer-events: none; }
 
-.hero h1 {
-  font-size: clamp(42px, 7vw, 72px);
-  font-weight: 800;
-  line-height: 1.05;
-  letter-spacing: -0.03em;
-  margin-bottom: 20px;
-  color: var(--text);
-}
+  .push-btn { width: 100%; padding: 12px; font-family: 'Helvetica Neue',Arial,sans-serif; font-size: 14px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; border: 2px solid #2d6a4f; border-radius: var(--radius); background: #2d6a4f; color: #fff; cursor: pointer; margin-bottom: 1rem; }
+  .push-btn:hover { background: #235540; }
+  .push-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .auth-bar { font-family: 'Helvetica Neue',Arial,sans-serif; font-size: 12px; padding: 8px 12px; border-radius: var(--radius); margin-bottom: 1rem; border: 0.5px solid var(--border); background: var(--bg); color: var(--text2); display: flex; align-items: center; gap: 8px; }
+  .auth-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--text3); }
+  .auth-dot.signed-in { background: #2d6a4f; }
+  .auth-btn { font-family: 'Helvetica Neue',Arial,sans-serif; font-size: 12px; font-weight: 600; padding: 4px 14px; border: 0.5px solid var(--border2); border-radius: var(--radius); background: var(--bg2); color: var(--text); cursor: pointer; margin-left: auto; }
+  .auth-btn:hover { background: var(--bg3); }
+  .recent-table { width: 100%; border-collapse: collapse; font-family: 'Helvetica Neue',Arial,sans-serif; font-size: 12px; }
+  .recent-table th { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text2); text-align: left; padding: 5px 8px; border-bottom: 0.5px solid var(--border); }
+  .recent-table td { padding: 5px 8px; border-bottom: 0.5px solid var(--border); color: var(--text); }
+  .recent-table tr:last-child td { border-bottom: none; }
+  .pill { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 7px; border-radius: 20px; text-transform: uppercase; font-family: 'Helvetica Neue',Arial,sans-serif; }
+  .pill-major { background: var(--gold-bg); color: var(--gold); }
+  .pill-sig { background: #e8f4fd; color: #185fa5; }
+  .pill-reg { background: var(--bg2); color: var(--text2); }
 
-.hero h1 em {
-  font-style: normal;
-  color: var(--accent);
-}
+  @media (max-width: 540px) {
+    .meta-grid { grid-template-columns: 1fr; }
+    .results-header, .result-row { grid-template-columns: 1.5fr 60px 75px 50px 50px 24px; }
+  }
 
-.hero p {
-  font-size: 17px;
-  color: var(--muted);
-  max-width: 480px;
-  margin: 0 auto 40px;
-  line-height: 1.65;
-  font-weight: 400;
-}
+  /* ── Form Dashboard ─────────────────────────────────────── */
+  .form-controls { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:16px; }
+  .form-pill { font-family:'Helvetica Neue',Arial,sans-serif; font-size:11px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; padding:4px 12px; border:0.5px solid var(--border2); border-radius:20px; background:var(--bg); color:var(--text2); cursor:pointer; transition:all 0.12s; }
+  .form-pill:hover { border-color:var(--text); color:var(--text); }
+  .form-pill.active { background:var(--text); color:var(--bg); border-color:var(--text); }
+  .form-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; }
+  .form-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:12px 14px 10px; transition:border-color 0.15s; }
+  .form-card:hover { border-color:var(--border2); }
+  .form-card-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:5px; }
+  .form-player-name { font-family:'Helvetica Neue',Arial,sans-serif; font-size:14px; font-weight:700; color:var(--text); }
+  .form-player-sub { font-family:'Helvetica Neue',Arial,sans-serif; font-size:10px; color:var(--text3); margin-top:2px; letter-spacing:0.01em; }
+  .form-status { font-family:'Helvetica Neue',Arial,sans-serif; font-size:11px; font-weight:700; letter-spacing:0.03em; }
+  .form-chart-box { position:relative; width:100%; height:88px; margin:8px 0 6px; }
+  .form-pips-row { display:flex; align-items:center; justify-content:space-between; }
+  .form-pips-label { font-family:'Helvetica Neue',Arial,sans-serif; font-size:10px; color:var(--text3); }
+  .form-pips { display:flex; gap:3px; }
+  .form-pip { width:18px; height:18px; border-radius:3px; display:flex; align-items:center; justify-content:center; font-family:'Helvetica Neue',Arial,sans-serif; font-size:9px; font-weight:700; }
+  .form-pip-null { background:var(--bg2); color:var(--text3); }
+  .form-empty { font-family:'Helvetica Neue',Arial,sans-serif; font-size:13px; color:var(--text2); padding:2rem; text-align:center; }
+  .form-legend-row { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:14px; font-family:'Helvetica Neue',Arial,sans-serif; font-size:11px; color:var(--text2); align-items:center; }
+  .form-legend-item { display:flex; align-items:center; gap:5px; }
+  .form-legend-swatch { width:24px; height:3px; border-radius:2px; }
+  .trend-pill { font-family: 'Helvetica Neue',Arial,sans-serif; font-size:12px; font-weight:600; padding:4px 10px; border:0.5px solid var(--border2); border-radius:20px; background:var(--bg); color:var(--text2); cursor:pointer; transition:all 0.12s; }
+  .trend-pill:hover { border-color:var(--text); color:var(--text); }
+  .trend-pill.active { background:var(--text); color:var(--bg); border-color:var(--text); }
 
-.hero-pills {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
+  .usage-sort-btn { font-family: 'Helvetica Neue',Arial,sans-serif; font-size:11px; font-weight:600; padding:3px 10px; border:0.5px solid var(--border2); border-radius:20px; background:var(--bg); color:var(--text2); cursor:pointer; transition:all 0.12s; letter-spacing:0.04em; text-transform:uppercase; }
+  .usage-sort-btn:hover { border-color:var(--text); color:var(--text); }
+  .usage-sort-btn.active { background:var(--text); color:var(--bg); border-color:var(--text); }
+  .usage-row { display:grid; grid-template-columns:32px 1fr 90px 160px; gap:10px; align-items:center; padding:7px 10px; border-radius:6px; background:var(--bg); border:0.5px solid transparent; cursor:pointer; transition:border-color 0.12s; margin-bottom:2px; }
+  .usage-row:hover { border-color:var(--border); }
+  .usage-row.top1 { border-color:#b5860d !important; }
+  .usage-row.top2 { border-color:#888 !important; }
+  .usage-row.top3 { border-color:#cd7f32 !important; }
+  .usage-row.expanded { border-color:var(--text) !important; border-radius:6px 6px 0 0; }
+  .usage-expand { display:none; background:var(--bg2); border:0.5px solid var(--text); border-top:none; border-radius:0 0 6px 6px; padding:8px 10px 10px 42px; margin-bottom:4px; font-family:'Helvetica Neue',Arial,sans-serif; font-size:11px; color:var(--text2); line-height:2; }
+  .usage-expand.open { display:block; }
+  .usage-rank { font-size:13px; font-weight:700; color:var(--text2); text-align:center; font-family:'Helvetica Neue',Arial,sans-serif; }
+  .usage-row.top1 .usage-rank { color:#b5860d; }
+  .usage-row.top2 .usage-rank { color:#666; }
+  .usage-row.top3 .usage-rank { color:#cd7f32; }
+  .usage-golfer-name { font-size:13px; font-weight:500; color:var(--text); }
+  .usage-pips { display:flex; gap:3px; flex-wrap:wrap; margin-top:3px; }
+  .usage-pip { display:inline-flex; align-items:center; font-family:'Helvetica Neue',Arial,sans-serif; font-size:9px; border-radius:3px; overflow:hidden; border:0.5px solid var(--border); }
+  .usage-pip-name { padding:1px 5px; background:var(--bg2); color:var(--text2); }
+  .usage-pip-count { padding:1px 5px; background:var(--border); color:var(--text); font-weight:600; }
+  .usage-pip.multi .usage-pip-name { background:#eaf5ee; color:#2d6a4f; border-right:0.5px solid var(--border); }
+  .usage-pip.multi .usage-pip-count { background:#eaf5ee; color:#2d6a4f; }
+  .usage-stat { font-family:'Helvetica Neue',Arial,sans-serif; font-size:12px; color:var(--text); text-align:right; line-height:1.5; }
+  .usage-stat span { display:block; font-size:9px; color:var(--text2); }
+  .usage-bar-wrap { height:4px; background:var(--border); border-radius:2px; overflow:hidden; }
+  .usage-bar { height:100%; border-radius:2px; background:var(--text2); transition:width 0.4s; }
+  .usage-row.top1 .usage-bar { background:#b5860d; }
+  .p-usage-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:7px; margin-top:4px; }
+  .p-usage-card { background:var(--bg); border:0.5px solid var(--border); border-radius:6px; padding:10px 12px; }
+  .p-usage-card.multi { border-left:2px solid #2d6a4f; }
+  .p-usage-golfer { font-size:13px; font-weight:500; color:var(--text); margin-bottom:4px; }
+  .p-usage-count { display:flex; align-items:baseline; gap:5px; margin-bottom:5px; }
+  .p-usage-num { font-size:20px; font-weight:700; color:var(--text2); font-family:'Helvetica Neue',Arial,sans-serif; }
+  .p-usage-card.multi .p-usage-num { color:#2d6a4f; }
+  .p-usage-label { font-size:10px; color:var(--text2); text-transform:uppercase; letter-spacing:0.06em; font-family:'Helvetica Neue',Arial,sans-serif; }
+  .p-usage-events { font-size:10px; color:var(--text2); font-family:'Helvetica Neue',Arial,sans-serif; line-height:1.5; }
+  .p-usage-tab { padding:5px 12px; background:var(--bg); border:0.5px solid var(--border2); color:var(--text2); font-family:'Helvetica Neue',Arial,sans-serif; font-size:12px; font-weight:600; cursor:pointer; border-radius:3px; transition:all 0.12s; letter-spacing:0.04em; text-transform:uppercase; }
+  .p-usage-tab:hover { border-color:var(--text); color:var(--text); }
+  .p-usage-tab.active { background:var(--text); color:var(--bg); border-color:var(--text); }
 
-.pill {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted);
-  border: 1px solid var(--border2);
-  border-radius: 100px;
-  padding: 5px 14px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.pill-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  flex-shrink: 0;
-}
-
-/* Tools grid */
-.section-label {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--muted);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  margin-bottom: 20px;
-}
-
-.tools-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
-  margin-bottom: 80px;
-}
-
-.tool-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 28px;
-  text-decoration: none;
-  display: block;
-  transition: border-color 0.15s, transform 0.15s, background 0.15s;
-  position: relative;
-  overflow: hidden;
-  animation: fadeUp 0.5s ease both;
-}
-
-.tool-card:hover {
-  border-color: var(--accent);
-  background: var(--accent-dim);
-  transform: translateY(-2px);
-}
-
-.tool-card::after {
-  content: '→';
-  position: absolute;
-  top: 28px;
-  right: 28px;
-  font-size: 18px;
-  color: var(--muted);
-  transition: color 0.15s, transform 0.15s;
-}
-
-.tool-card:hover::after {
-  color: var(--accent);
-  transform: translate(3px, -3px);
-}
-
-.tool-sports {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 16px;
-}
-
-.sport-tag {
-  font-family: var(--mono);
-  font-size: 10px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  background: rgba(255,255,255,0.05);
-  color: var(--muted);
-  border: 1px solid var(--border);
-}
-
-.sport-tag.active {
-  background: rgba(200,240,90,0.1);
-  color: var(--accent);
-  border-color: rgba(200,240,90,0.2);
-}
-
-.tool-name {
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--text);
-  margin-bottom: 8px;
-  padding-right: 32px;
-}
-
-.tool-desc {
-  font-size: 13px;
-  color: var(--muted);
-  line-height: 1.6;
-  font-family: var(--mono);
-  font-weight: 400;
-}
-
-.tool-features {
-  margin-top: 18px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.feature-tag {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--muted);
-  background: var(--surface2);
-  border-radius: 4px;
-  padding: 3px 8px;
-}
-
-/* Coming soon card */
-.tool-card.coming-soon {
-  opacity: 0.5;
-  cursor: default;
-  pointer-events: none;
-}
-
-.tool-card.coming-soon::after {
-  content: 'soon';
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--muted);
-  top: 30px;
-  right: 28px;
-}
-
-/* Footer */
-footer {
-  border-top: 1px solid var(--border);
-  padding: 32px 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-footer p {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.footer-privacy {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.footer-privacy::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  flex-shrink: 0;
-}
-
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(16px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.tool-card:nth-child(1) { animation-delay: 0.05s; }
-.tool-card:nth-child(2) { animation-delay: 0.1s; }
-.tool-card:nth-child(3) { animation-delay: 0.15s; }
-.tool-card:nth-child(4) { animation-delay: 0.2s; }
-
-@media (max-width: 600px) {
-  .hero { padding: 64px 0 56px; }
-  nav { padding: 16px 0; }
-  .tools-grid { grid-template-columns: 1fr; }
-  footer { flex-direction: column; align-items: flex-start; }
-}
 </style>
 </head>
 <body>
-
 <div class="container">
-  <nav>
-    <a href="/" class="nav-logo">
-      <div class="logo-mark">DFS</div>
-      <span class="nav-wordmark">DFS Tools</span>
-    </a>
-    <div style="display:flex;align-items:center;gap:8px;">
-      <a href="./contest-analyzer/" style="font-family:var(--mono);font-size:10px;color:var(--muted);text-decoration:none;padding:4px 10px;border-radius:5px;border:1px solid var(--border);transition:all .15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">Contest Analyzer</a>
-      <a href="./lineup-builder/" style="font-family:var(--mono);font-size:10px;color:var(--muted);text-decoration:none;padding:4px 10px;border-radius:5px;border:1px solid var(--border);transition:all .15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">Lineup Builder</a>
-      <span class="nav-badge">free &amp; open source</span>
+
+  <header>
+    <h1>DEBO Cup</h1>
+    <p>Weekly update &amp; content generator</p>
+  </header>
+
+  <div class="status-bar">
+    <div class="status-dot loading" id="status-dot"></div>
+    <span id="status-text">Loading live data from Google Sheets...</span>
+    <button class="refresh-btn" onclick="loadAll()">Refresh</button>
+  </div>
+
+  <div class="top-tabs">
+    <button class="top-tab active" onclick="showTopTab('enter',this)">Enter results</button>
+    <button class="top-tab" onclick="showTopTab('preview',this)">Week preview</button>
+    <button class="top-tab" onclick="showTopTab('ownership',this)">Ownership</button>
+    <button class="top-tab" onclick="showTopTab('cutsweat',this)">Cut sweat</button>
+    <button class="top-tab" onclick="showTopTab('history',this)">Recent results</button>
+    <button class="top-tab" onclick="showTopTab('live-standings',this)">Current standings</button>
+    <button class="top-tab" onclick="showTopTab('trend',this)">Standings trend</button>
+    <button class="top-tab" onclick="showTopTab('usage',this)">Golfer usage</button>
+    <button class="top-tab" onclick="showTopTab('form',this)">Form dashboard</button>
+  </div>
+
+  <!-- ENTER RESULTS TAB -->
+  <div id="top-enter">
+
+    <div class="card">
+      <div class="section-label">Event details</div>
+      <div class="field-group" style="margin-bottom:12px;">
+        <label>Select from schedule (auto-fills details)</label>
+        <select id="evt-schedule-select" onchange="onEnterEventSelect()" style="width:100%;">
+          <option value="">-- select event or fill in manually --</option>
+        </select>
+      </div>
+      <div class="meta-grid">
+        <div class="field-group"><label>Tournament name</label><input type="text" id="evt-name" placeholder="e.g. Texas Children's Houston Open"></div>
+        <div class="field-group"><label>Event date</label><input type="date" id="evt-date"></div>
+        <div class="field-group"><label>Event type</label>
+          <select id="evt-type"><option value="Regular">Regular</option><option value="Signature">Signature</option><option value="Major">Major</option></select>
+        </div>
+        <div class="field-group"><label>Week # of season</label><input type="number" id="evt-week" placeholder="e.g. 11" min="1" max="33"></div>
+        <div class="field-group" style="grid-column:1/-1;"><label>PGA Tour winner (optional — for recap)</label><input type="text" id="pga-winner" placeholder="e.g. Matt Fitzpatrick"></div>
+      </div>
     </div>
-  </nav>
 
-  <section class="hero">
-    <div class="hero-eyebrow">DraftKings Analytics</div>
-    <h1>Tools built for<br><em>serious DFS players</em></h1>
-    <p>Free, browser-based tools to analyze your DraftKings contests. No account needed. Your data never leaves your device.</p>
-    <div class="hero-pills">
-      <div class="pill"><span class="pill-dot"></span> 100% client-side</div>
-      <div class="pill"><span class="pill-dot"></span> No login required</div>
-      <div class="pill"><span class="pill-dot"></span> Golf · NASCAR · UFC</div>
+    <!-- CSV IMPORT -->
+    <div class="card">
+      <div class="section-label">Import from DraftKings CSV</div>
+      <div class="drop-zone" id="drop-zone" onclick="document.getElementById('csv-file').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+        <input type="file" id="csv-file" accept=".csv" onchange="handleFile(this.files[0])">
+        <div class="dz-icon">&#8659;</div>
+        <div class="dz-title">Drop DraftKings contest CSV here</div>
+        <div class="dz-sub">or click to browse — download from your DK contest results page</div>
+      </div>
+      <div id="import-preview" style="display:none; margin-top:1rem;">
+        <div id="import-table-wrap"></div>
+        <div id="unmatched-warn" style="display:none;"></div>
+        <button class="add-btn" style="margin-top:12px;" onclick="confirmImport()">Confirm import &amp; populate results</button>
+      </div>
     </div>
-  </section>
 
-  <div class="section-label">Available tools</div>
-  <div class="tools-grid">
+    <!-- MANUAL RESULTS (populated by import or manual entry) -->
+    <div class="card">
+      <div class="section-label">Results — finish order + DK fantasy points</div>
+      <div class="results-header">
+        <span>Player</span><span>Finish</span><span>DK pts</span><span>DC pts</span><span>Prize</span><span></span>
+      </div>
+      <div id="rows-container"></div>
+      <button class="add-btn" onclick="addRow()">+ Add player</button>
+    </div>
 
-    <a href="./contest-analyzer/" class="tool-card">
-      <div class="tool-sports">
-        <span class="sport-tag active">Golf</span>
-        <span class="sport-tag active">NASCAR</span>
-        <span class="sport-tag active">UFC</span>
-      </div>
-      <div class="tool-name">Contest Analyzer</div>
-      <div class="tool-desc">Upload any DK contest CSV and analyze your portfolio against the full field.</div>
-      <div class="tool-features">
-        <span class="feature-tag">Lineup duplicates</span>
-        <span class="feature-tag">Ownership</span>
-        <span class="feature-tag">Leverage</span>
-        <span class="feature-tag">Combo search</span>
-        <span class="feature-tag">Head to head</span>
-      </div>
-    </a>
+    <button class="calc-btn" id="calc-btn" onclick="calculate()" disabled>Calculate &amp; generate content</button>
 
-    <a href="./lineup-builder/" class="tool-card">
-      <div class="tool-sports">
-        <span class="sport-tag active">Golf</span>
-        <span class="sport-tag active">NASCAR</span>
-        <span class="sport-tag active">UFC</span>
+    <div id="output-area" style="display:none;">
+
+      <div class="auth-bar">
+        <div class="auth-dot" id="auth-dot"></div>
+        <span id="auth-text">Not signed in to Google</span>
+        <button class="auth-btn" id="auth-btn" onclick="handleAuthClick()">Sign in with Google</button>
       </div>
-      <div class="tool-name">Lineup Builder</div>
-      <div class="tool-desc">Build and manage DK lineups across multiple slates with a full player pool and export tools.</div>
-      <div class="tool-features">
-        <span class="feature-tag">Multi-slate</span>
-        <span class="feature-tag">Player pool</span>
-        <span class="feature-tag">Ownership %</span>
-        <span class="feature-tag">Export</span>
+      <button class="push-btn" id="push-btn" onclick="pushToSheets()" disabled>Push to Google Sheets</button>
+
+      <div class="inner-tabs">
+        <button class="inner-tab active" onclick="showInnerTab('standings',this)">Updated standings</button>
+        <button class="inner-tab" onclick="showInnerTab('sheet',this)">Sheet data</button>
+        <button class="inner-tab" onclick="showInnerTab('recap',this)">Recap post</button>
+        <button class="inner-tab" onclick="showInnerTab('xthread',this)">X thread</button>
       </div>
-    </a>
+      <div id="itab-standings"><div class="card" style="padding:0.75rem;"><table class="standings-table" id="standings-tbl"></table></div></div>
+      <div id="itab-sheet" style="display:none;">
+        <div class="section-label">RESULTS tab — paste these rows</div>
+        <div class="output-box" id="sheet-results"></div>
+        <button class="copy-btn" onclick="copyEl('sheet-results',this)">Copy</button>
+        <div class="section-label">EVENT SUMMARIES tab — one new row</div>
+        <div class="output-box" id="sheet-summary"></div>
+        <button class="copy-btn" onclick="copyEl('sheet-summary',this)">Copy</button>
+      </div>
+      <div id="itab-recap" style="display:none;">
+        <p style="font-size:12px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;margin-bottom:12px;">Auto-generated from your results. Edit the one-liner before posting.</p>
+        <div class="field-group" style="margin-bottom:12px;">
+          <label>One-liner (optional — edit before posting)</label>
+          <input type="text" id="recap-oneliner" placeholder="e.g. Brad claims his first career DEBO Cup victory." oninput="updateRecapTemplate()">
+        </div>
+        <div class="section-label">X post — Monday morning recap</div>
+        <div class="output-box" id="recap-text">Calculate results first to generate the recap.</div>
+        <button class="copy-btn" onclick="copyEl('recap-text',this)">Copy</button>
+      </div>
+      <div id="itab-xthread" style="display:none;">
+        <div class="section-label">X thread — ready to post</div>
+        <div class="output-box" id="xthread-text"></div>
+        <button class="copy-btn" onclick="copyEl('xthread-text',this)">Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WEEK PREVIEW TAB -->
+  <div id="top-preview" style="display:none;">
+
+    <div class="card">
+      <div class="section-label">Upcoming event</div>
+      <p style="font-size:12px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;margin-bottom:12px;">Select the event from your schedule — all details load automatically.</p>
+      <div class="field-group" style="margin-bottom:12px;">
+        <label>Select event</label>
+        <select id="preview-event-select" onchange="onPreviewEventSelect()" style="width:100%;">
+          <option value="">-- loading schedule --</option>
+        </select>
+      </div>
+      <div id="preview-event-details" style="display:none;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+          <div class="field-group"><label>Tournament</label><input type="text" id="prev-tournament" readonly style="background:var(--bg2);"></div>
+          <div class="field-group"><label>Course</label><input type="text" id="prev-course" readonly style="background:var(--bg2);"></div>
+          <div class="field-group"><label>Location</label><input type="text" id="prev-location" readonly style="background:var(--bg2);"></div>
+          <div class="field-group"><label>Week #</label><input type="text" id="prev-week"></div>
+          <div class="field-group"><label>Defending PGA champion</label><input type="text" id="prev-pga-champ" readonly style="background:var(--bg2);"></div>
+          <div class="field-group"><label>Defending DEBO champion</label><input type="text" id="prev-debo-champ" readonly style="background:var(--bg2);"></div>
+        </div>
+        <div class="field-group" style="margin-bottom:12px;">
+          <label>Lineup lock time (e.g. 7:35 AM EST)</label>
+          <input type="text" id="prev-lock-time" placeholder="e.g. 7:35 AM EST">
+        </div>
+        <div class="field-group" style="margin-bottom:12px;">
+          <label>Past DEBO Cup winners at this event</label>
+          <div class="output-box" id="prev-past-winners" style="min-height:40px;font-size:13px;"></div>
+        </div>
+        <button class="calc-btn" onclick="generatePreviewPost()">Generate preview post</button>
+        <div id="preview-output" style="display:none;">
+          <div class="section-label">X post — Wednesday preview</div>
+          <div class="output-box" id="preview-post-text"></div>
+          <button class="copy-btn" onclick="copyEl('preview-post-text',this)">Copy</button>
+          <p style="font-size:11px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;margin-top:4px;">Attach your pre-made preview card graphic when posting to X.</p>
+        </div>
+      </div>
+    </div>
 
   </div>
 
-  <footer>
-    <p>Built for DraftKings GPP players &mdash; kahnobs.github.io/dfs-tools</p>
-    <div class="footer-privacy">All analysis runs locally in your browser. No data is ever uploaded or stored.</div>
-  </footer>
-</div>
+  <!-- OWNERSHIP TAB -->
+  <div id="top-ownership" style="display:none;">
 
+    <div class="card">
+      <div class="section-label">Ownership snapshot</div>
+      <p style="font-size:12px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;margin-bottom:12px;">Import your DK CSV first, then fill in the event details below to generate the ownership post and image.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+        <div class="field-group"><label>Tournament name</label><input type="text" id="own-tournament" placeholder="e.g. Valero Texas Open"></div>
+        <div class="field-group"><label>Week #</label><input type="text" id="own-week" placeholder="e.g. Week 12"></div>
+      </div>
+      <button class="calc-btn" onclick="generateOwnership()">Generate ownership post</button>
+    </div>
+
+    <div id="ownership-output" style="display:none;">
+      <div class="card">
+        <div class="section-label">Post text</div>
+        <div class="output-box" id="ownership-post"></div>
+        <button class="copy-btn" onclick="copyEl('ownership-post',this)">Copy</button>
+      </div>
+      <div class="card">
+        <div class="section-label">Ownership image — attach to your X post</div>
+        <p style="font-size:12px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;margin-bottom:12px;">Right-click to save, or use the download button below.</p>
+        <canvas id="ownership-canvas" style="max-width:100%;border-radius:var(--radius);border:0.5px solid var(--border);"></canvas>
+        <br><br>
+        <button class="copy-btn" onclick="downloadOwnershipImage()">Download image</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- CUT SWEAT TAB -->
+  <div id="top-cutsweat" style="display:none;">
+
+    <div class="card">
+      <div class="section-label">Step 1 — Golfer list for DataGolf</div>
+      <p style="font-size:12px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;margin-bottom:10px;">Paste this into DataGolf's live tracker. Import your DK CSV first to populate this list.</p>
+      <div class="output-box" id="golfer-csv-list" style="min-height:48px;">Import a DK CSV first to generate the golfer list.</div>
+      <button class="copy-btn" onclick="copyEl('golfer-csv-list',this)">Copy golfer list</button>
+    </div>
+
+    <div class="card">
+      <div class="section-label">Step 2a — Upload cut line probabilities screenshot</div>
+      <p style="font-size:12px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;margin-bottom:10px;">Screenshot the cut line probabilities section from DataGolf. Claude will extract the cut line odds automatically.</p>
+      <div class="drop-zone" id="dg-cutline-zone" onclick="document.getElementById('dg-cutline-img').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDGCutlineDrop(event)" style="padding:1.25rem;">
+        <input type="file" id="dg-cutline-img" accept="image/*" onchange="handleDGCutlineFile(this.files[0])">
+        <div class="dz-icon">&#9986;</div>
+        <div class="dz-title" id="dg-cutline-title">Drop cut line screenshot here</div>
+        <div class="dz-sub">or click to browse</div>
+      </div>
+      <div id="dg-cutline-status" style="display:none;margin-top:10px;font-size:12px;font-family:'Helvetica Neue',Arial,sans-serif;color:var(--text2);"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-label">Step 2b — Upload golfer scores screenshot</div>
+      <p style="font-size:12px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;margin-bottom:10px;">Screenshot the golfer list from DataGolf. Claude will extract scores and make cut % for each golfer.</p>
+      <div class="drop-zone" id="dg-drop-zone" onclick="document.getElementById('dg-screenshot').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDGDrop(event)" style="padding:1.25rem;">
+        <input type="file" id="dg-screenshot" accept="image/*" onchange="handleDGFile(this.files[0])">
+        <div class="dz-icon">&#128247;</div>
+        <div class="dz-title" id="dg-drop-title">Drop golfer scores screenshot here</div>
+        <div class="dz-sub">or click to browse</div>
+      </div>
+      <div id="dg-parse-status" style="display:none;margin-top:10px;font-size:12px;font-family:'Helvetica Neue',Arial,sans-serif;color:var(--text2);"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-label">Step 3 — Projected cut line</div>
+      <p style="font-size:12px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;margin-bottom:10px;">Auto-filled from screenshot if Claude can read them, or enter manually.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:8px;">
+        <div class="field-group"><label>Tournament (round)</label><input type="text" id="cut-tournament" placeholder="e.g. Houston Open (R2)"></div>
+        <div></div><div></div>
+        <div class="field-group"><label>Cut line score 1</label><input type="text" id="cut-s1" placeholder="e.g. -1"></div>
+        <div class="field-group"><label>Make cut % 1</label><input type="text" id="cut-p1" placeholder="e.g. 94.2%"></div>
+        <div></div>
+        <div class="field-group"><label>Cut line score 2</label><input type="text" id="cut-s2" placeholder="e.g. E"></div>
+        <div class="field-group"><label>Make cut % 2</label><input type="text" id="cut-p2" placeholder="e.g. 42.8%"></div>
+        <div></div>
+        <div class="field-group"><label>Cut line score 3</label><input type="text" id="cut-s3" placeholder="e.g. +1"></div>
+        <div class="field-group"><label>Make cut % 3</label><input type="text" id="cut-p3" placeholder="e.g. 10.7%"></div>
+        <div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-label">Step 4 — Golfer cut status</div>
+      <p style="font-size:12px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;margin-bottom:10px;">Enter each golfer's current score to-par. Ownership is calculated automatically from imported lineups.</p>
+      <div id="cut-sweat-table-wrap">
+        <table style="width:100%;border-collapse:collapse;font-family:'Helvetica Neue',Arial,sans-serif;font-size:13px;" id="cut-sweat-tbl">
+          <thead><tr>
+            <th style="text-align:left;padding:5px 8px;border-bottom:0.5px solid var(--border);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text2);">Golfer</th>
+            <th style="text-align:center;padding:5px 8px;border-bottom:0.5px solid var(--border);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text2);">Score</th>
+            <th style="text-align:center;padding:5px 8px;border-bottom:0.5px solid var(--border);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text2);">Make Cut %</th>
+            <th style="text-align:center;padding:5px 8px;border-bottom:0.5px solid var(--border);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text2);">Ownership</th>
+            <th style="text-align:center;padding:5px 8px;border-bottom:0.5px solid var(--border);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text2);">Owners</th>
+            <th style="text-align:center;padding:5px 8px;border-bottom:0.5px solid var(--border);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text2);">Bold?</th>
+          </tr></thead>
+          <tbody id="cut-sweat-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <button class="calc-btn" onclick="generateCutSweat()">Generate cut sweat post</button>
+
+    <div id="cut-sweat-output" style="display:none;">
+      <div class="card">
+        <div class="section-label">Post 1 — cut line odds (attach table image)</div>
+        <div class="output-box" id="cut-sweat-post"></div>
+        <button class="copy-btn" onclick="copyEl('cut-sweat-post',this)">Copy</button>
+      </div>
+      <div class="card">
+        <div class="section-label">Post 2 — emoji exposure breakdown (reply to post 1)</div>
+        <div class="output-box" id="cut-sweat-post2"></div>
+        <button class="copy-btn" onclick="copyEl('cut-sweat-post2',this)">Copy</button>
+      </div>
+      <div class="card">
+        <div class="section-label">Table image — attach this to your X post</div>
+        <p style="font-size:12px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;margin-bottom:12px;">Right-click to save, or use the download button below.</p>
+        <canvas id="cut-sweat-canvas" style="max-width:100%;border-radius:var(--radius);border:0.5px solid var(--border);"></canvas>
+        <br><br>
+        <button class="copy-btn" onclick="downloadCutSweatImage()">Download image</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- HISTORY TAB -->
+  <div id="top-history" style="display:none;">
+    <div class="card" style="padding:0.75rem;">
+      <div class="section-label" style="margin-bottom:12px;">2026 season results — live from Google Sheets</div>
+      <div id="history-content"><span style="font-size:13px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;">Loading...</span></div>
+    </div>
+  </div>
+
+  <!-- LIVE STANDINGS TAB -->
+  <div id="top-live-standings" style="display:none;">
+    <div class="card" style="padding:0.75rem;">
+      <div class="section-label" style="margin-bottom:12px;">Current season standings — live from Google Sheets</div>
+      <table class="standings-table" id="live-standings-tbl"></table>
+    </div>
+  </div>
+
+  <!-- STANDINGS TREND TAB -->
+  <div id="top-trend" style="display:none;">
+    <div class="card" style="padding:1rem;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+        <div class="section-label" style="margin-bottom:0;">Standings movement — each player</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <label style="font-size:12px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;">Show last</label>
+          <div style="display:flex;align-items:center;gap:4px;">
+            <button class="trend-pill active" onclick="setTrendWindow(0,this)">All</button>
+            <button class="trend-pill" onclick="setTrendWindow(4,this)">4</button>
+            <button class="trend-pill" onclick="setTrendWindow(6,this)">6</button>
+            <button class="trend-pill" onclick="setTrendWindow(8,this)">8</button>
+            <button class="trend-pill" onclick="setTrendWindow(10,this)">10</button>
+            <input id="trend-weeks-custom" type="number" min="1" max="33" placeholder="#" oninput="setTrendCustom(this)" style="width:42px;font-size:12px;padding:3px 6px;border:0.5px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);text-align:center;">
+          </div>
+        </div>
+      </div>
+      <div id="trend-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;"></div>
+      <p style="font-size:11px;color:var(--text3);font-family:'Helvetica Neue',Arial,sans-serif;margin-top:12px;text-align:center;letter-spacing:0.02em;">Players' season-long standing after each event</p>
+      <p id="trend-empty" style="font-size:13px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;display:none;margin-top:1rem;">No results data available — check that the sheet is publicly readable.</p>
+    </div>
+  </div>
+
+  <!-- FORM DASHBOARD TAB -->
+  <div id="top-form" style="display:none;">
+    <div class="card" style="padding:1rem 1.25rem;">
+
+      <!-- Header row -->
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:4px;">
+        <div>
+          <div class="section-label" style="margin-bottom:3px;">Player form dashboard — 2026 season</div>
+          <p style="font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:var(--text3);line-height:1.5;">Hot / Cold based on last 5 events vs. season average. Dashed line = season baseline.</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+          <label style="font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:var(--text2);">Recent window:</label>
+          <select id="form-window-select" onchange="renderFormDashboard()" style="font-size:12px;padding:4px 8px;width:auto;border:0.5px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);">
+            <option value="3">Last 3</option>
+            <option value="5" selected>Last 5</option>
+            <option value="8">Last 8</option>
+            <option value="0">All season</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div class="form-legend-row" style="margin-top:10px;">
+        <div class="form-legend-item"><div class="form-legend-swatch" style="background:#2d6a4f;"></div><span>Season avg baseline</span></div>
+        <div class="form-legend-item"><div style="width:10px;height:10px;border-radius:50%;background:#b5860d;"></div><span>Major / Signature event</span></div>
+        <div class="form-legend-item"><div class="form-pip" style="background:#d4edda;color:#2d6a4f;width:16px;height:16px;">1</div><span style="margin-left:2px;">Top 3 finish</span></div>
+        <div class="form-legend-item"><div class="form-pip" style="background:#fff3cd;color:#856404;width:16px;height:16px;">5</div><span style="margin-left:2px;">Mid finish</span></div>
+        <div class="form-legend-item"><div class="form-pip" style="background:#f8d7da;color:#842029;width:16px;height:16px;">9</div><span style="margin-left:2px;">Bottom finish</span></div>
+      </div>
+
+      <!-- Sort controls -->
+      <div class="form-controls">
+        <span style="font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">Sort:</span>
+        <button class="form-pill active" id="fpill-hot" onclick="setFormSort('hot',this)">🔥 Hottest → Coldest</button>
+        <button class="form-pill" id="fpill-form" onclick="setFormSort('form',this)">Recent avg</button>
+        <button class="form-pill" id="fpill-season" onclick="setFormSort('season',this)">Season avg</button>
+        <button class="form-pill" id="fpill-name" onclick="setFormSort('name',this)">Name</button>
+      </div>
+
+      <!-- Cards grid -->
+      <div class="form-grid" id="form-grid">
+        <p class="form-empty">Loading results data…</p>
+      </div>
+      <p id="form-empty-msg" style="display:none;" class="form-empty">No results data available — check that the sheet is publicly readable.</p>
+
+    </div>
+  </div>
+
+  <!-- GOLFER USAGE TAB -->
+  <div id="top-usage" style="display:none;">
+    <div class="card" style="padding:1rem;">
+
+      <!-- Section switcher -->
+      <div class="inner-tabs" id="usage-inner-tabs">
+        <button class="inner-tab active" onclick="showUsageView('league',this)">League leaderboard</button>
+        <button class="inner-tab" onclick="showUsageView('player',this)">Player breakdown</button>
+        <button class="inner-tab" onclick="showUsageView('cards',this)">Player cards</button>
+      </div>
+
+      <!-- LEAGUE VIEW -->
+      <div id="usage-league">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+          <div style="font-family:'Helvetica Neue',Arial,sans-serif;font-size:12px;color:var(--text2);" id="usage-league-sub"></div>
+
+        </div>
+        <div id="usage-league-rows"></div>
+        <button class="add-btn" id="usage-show-more" onclick="toggleUsageShowAll()" style="margin-top:8px;display:none;">Show all</button>
+      </div>
+
+      <!-- PLAYER VIEW -->
+      <div id="usage-player" style="display:none;">
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;" id="usage-player-tabs"></div>
+        <div id="usage-player-detail"><p style="font-size:13px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;">Select a player above</p></div>
+      </div>
+
+      <!-- PLAYER CARDS VIEW -->
+      <div id="usage-cards" style="display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+          <div style="font-family:'Helvetica Neue',Arial,sans-serif;font-size:12px;color:var(--text2);">Top picks per player — sorted by current standings</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <label style="font-family:'Helvetica Neue',Arial,sans-serif;font-size:12px;color:var(--text2);">Show top</label>
+            <select id="cards-top-n" onchange="renderUsageCards()" style="font-size:12px;padding:4px 8px;width:auto;border:0.5px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);">
+              <option value="3">3 golfers</option>
+              <option value="4">4 golfers</option>
+              <option value="5" selected>5 golfers</option>
+            </select>
+            <button onclick="downloadUsageCards()" style="font-family:'Helvetica Neue',Arial,sans-serif;font-size:12px;font-weight:600;padding:5px 14px;border:0.5px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text2);cursor:pointer;">Download image ↓</button>
+          </div>
+        </div>
+        <canvas id="usage-cards-canvas" style="display:block;max-width:100%;border-radius:var(--radius-lg);"></canvas>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+<script>
+const REAL_SHEET_ID = '10Oa-LOeo7lyR5fkruCUun4A9Ofr_w2NLn0xfZEn_T0g';
+const CSV_SCHEDULE = `https://docs.google.com/spreadsheets/d/${REAL_SHEET_ID}/gviz/tq?tqx=out:csv&gid=66689929`;
+const CSV_PLAYERS  = `https://docs.google.com/spreadsheets/d/${REAL_SHEET_ID}/gviz/tq?tqx=out:csv&gid=437546101`;
+const GID_PLAYERS  = '437546101';
+const CSV_STANDINGS = `https://docs.google.com/spreadsheets/d/${REAL_SHEET_ID}/gviz/tq?tqx=out:csv&gid=494949199`;
+const CSV_RESULTS   = `https://docs.google.com/spreadsheets/d/${REAL_SHEET_ID}/gviz/tq?tqx=out:csv&gid=0`;
+const CSV_TIES      = `https://docs.google.com/spreadsheets/d/${REAL_SHEET_ID}/gviz/tq?tqx=out:csv&gid=1984755411`;
+
+const DC_PTS = {1:25,2:15,3:10,4:7,5:5,6:4,7:3,8:2,9:1,10:1};
+
+// Tied finishes split the points of the positions they occupy,
+// e.g. two tied for 3rd split 3rd+4th: (10+7)/2 = 8.5 each.
+function tieSplitDcPts(finish, count) {
+  let sum = 0;
+  for (let i = 0; i < count; i++) sum += DC_PTS[finish + i] || 0;
+  return sum / count;
+}
+const PRIZE  = {1:10,2:5,3:3,4:2};
+
+// DK username → DEBO Cup player name mapping
+// Update this map as new players join or usernames change
+// DK username map — built dynamically from PLAYERS sheet (column A=DK_Username, column B=Player)
+// Fallback hardcoded map used if sheet can't be reached
+const DK_USERNAME_MAP_FALLBACK = {
+  'mknob87': 'MK', 'WoodrowP': 'Woody', 'atan76': 'Anth', 'DrLoomis72': 'Loomis',
+  'bhscott96': 'Brad', 'decamp26': 'DeCampli', 'zach_mathias': 'Zach', 'croth20': 'Colin',
+  'Swicky92': 'Kyle', 'stepdaddystew69': 'Stew', 'natewiley35': 'Wiley',
+  'b10boariu': 'Broc', 'bluke2424': 'B Luke',
+};
+let DK_USERNAME_MAP = {...DK_USERNAME_MAP_FALLBACK};
+
+let CURRENT_STANDINGS = {};
+let PLAYERS = [];
+let ALL_RESULTS = [];
+let ALL_TIES = [];
+let pendingImport = [];
+
+function setStatus(state, msg) {
+  document.getElementById('status-dot').className = 'status-dot ' + state;
+  document.getElementById('status-text').textContent = msg;
+}
+
+// ── DraftKings special-character name repair ───────────────────────────────
+// DK's CSV export now downgrades accented names to plain ASCII and drops a '?'
+// where the lost letter was (e.g. "Rasmus Højgaard" -> "Rasmus H?jgaard",
+// "Fabián Gómez" -> "Fabi?n G?mez"). The '?' marks the EXACT position of the
+// missing character, so we treat it as a single-character wildcard and match
+// against this list of correctly-spelled names. To fix a newly-affected
+// player, just add their proper spelling below — matching is accent-insensitive
+// so you never have to worry about how DK mangled it.
+const SPECIAL_NAME_FIXES = [
+  "Rasmus Højgaard", "Nicolai Højgaard", "Ludvig Åberg", "Thorbjørn Olesen",
+  "Joaquín Niemann", "Sebastián Muñoz", "Emiliano Grillo", "Fabián Gómez",
+  "Christiaan Bezuidenhout", "Víctor Pérez", "Adrián Otaegui", "Jorge Campillo",
+  "Alejandro Cañizares", "Matthieu Pavon", "Rafael Cabrera Bello", "Nacho Elvira",
+  "Renato Paratore", "Julien Guerrier", "Clément Sordet", "Romain Langasque",
+  "Sami Välimäki", "Matías Domínguez",
+];
+
+// Strip accents/diacritics to plain lowercase ASCII (for comparison only).
+// NFD decomposition handles most accents (\u00e9 -> e + combining mark), but several
+// Nordic/Slavic letters are single code points that DON'T decompose \u2014 notably
+// \u00f8 (H\u00f8jgaard), \u00e6, \u0153, \u0142, \u0111, \u00fe, \u00df. Those slip through NFD and cause the accented
+// spelling ("H\u00f8jgaard") to fail to match the plain-ASCII spelling ("Hojgaard")
+// that DataGolf shows in its screenshots. Fold them explicitly.
+function _stripAccents(s) {
+  return (s || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // strip combining diacritics
+    .replace(/[\u00f8\u00d8]/g, 'o')
+    .replace(/[\u00e6\u00c6]/g, 'ae')
+    .replace(/[\u0153\u0152]/g, 'oe')
+    .replace(/[\u0142\u0141]/g, 'l')
+    .replace(/[\u0111\u0110\u00f0\u00d0]/g, 'd')
+    .replace(/[\u00fe\u00de]/g, 'th')
+    .replace(/\u00df/g, 'ss')
+    .replace(/[\u0131\u0130]/g, 'i')
+    .toLowerCase().trim();
+}
+
+// If `name` contains one or more '?', try to recover the real spelling by
+// wildcard-matching it against SPECIAL_NAME_FIXES. Returns the clean name only
+// when exactly one candidate fits; otherwise returns the name unchanged so we
+// never guess wrong.
+function repairDkName(name) {
+  if (!name || name.indexOf('?') === -1) return name;
+  const target = _stripAccents(name); // '?' is not a diacritic, so it survives
+  const pattern = '^' + target.split('').map(ch =>
+    ch === '?' ? '.' : ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  ).join('') + '$';
+  let re;
+  try { re = new RegExp(pattern); } catch (e) { return name; }
+  const hits = SPECIAL_NAME_FIXES.filter(c => re.test(_stripAccents(c)));
+  return hits.length === 1 ? hits[0] : name;
+}
+
+function parseCSVText(text) {
+  const lines = text.trim().split('\n');
+  const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g,'').trim());
+  return lines.slice(1).map(line => {
+    const vals = []; let cur = '', inQ = false;
+    for (const ch of line) {
+      if (ch === '"') inQ = !inQ;
+      else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = ''; }
+      else cur += ch;
+    }
+    vals.push(cur.trim());
+    const obj = {};
+    headers.forEach((h,i) => obj[h] = (vals[i]||'').replace(/^"|"$/g,'').trim());
+    return obj;
+  });
+}
+
+async function fetchCSV(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    if (!text.includes(',')) throw new Error('Unexpected response');
+    return text;
+  } catch(e) {
+    clearTimeout(timer);
+    throw e;
+  }
+}
+
+async function loadAll() {
+  setStatus('loading', 'Loading live data from Google Sheets...');
+  // Always load fallback first so UI is immediately interactive
+  useFallback();
+  document.getElementById('calc-btn').disabled = false;
+  let standingsOk = false, resultsOk = false;
+
+  try {
+    const text = await fetchCSV(CSV_STANDINGS);
+    const rows = parseCSVText(text);
+    CURRENT_STANDINGS = {}; PLAYERS = [];
+    // Reset username map and rebuild from sheet
+    DK_USERNAME_MAP = {};
+    rows.forEach(r => {
+      const p = r['Player'] || r['player'];
+      if (!p) return;
+      CURRENT_STANDINGS[p] = {
+        pts:    parseFloat(r['DC_Points']||r['DC Points']||0)||0,
+        prize:  parseFloat((r['Prize_$_Earned']||r['Prize $ Earned']||'0').toString().replace(/[$,]/g,''))||0,
+        wins:   parseInt(r['Wins']||0)||0,
+        top3:   parseInt(r['Top_3s']||r['Top 3s']||0)||0,
+        events: parseInt(r['Events_Played']||r['Events Played']||0)||0,
+      };
+      PLAYERS.push(p);
+      // Build DK username map from DK_Username column
+      const dk = r['DK_Username'] || r['DK Username'] || '';
+      if (dk) DK_USERNAME_MAP[dk] = p;
+    });
+    if (!PLAYERS.length) throw new Error('No players');
+    // If no usernames loaded from sheet, fall back to hardcoded
+    if (Object.keys(DK_USERNAME_MAP).length === 0) DK_USERNAME_MAP = {...DK_USERNAME_MAP_FALLBACK};
+    rebuildSelects();
+    renderLiveStandings();
+    standingsOk = true;
+  } catch(e) { useFallback(); }
+
+  try {
+    const [resultsText, tiesText] = await Promise.all([
+      fetchCSV(CSV_RESULTS),
+      fetchCSV(CSV_TIES).catch(() => null)
+    ]);
+    ALL_RESULTS = parseCSVText(resultsText);
+    ALL_TIES = tiesText ? parseCSVText(tiesText) : [];
+    renderHistory();
+    resultsOk = true;
+  } catch(e) {
+    document.getElementById('history-content').innerHTML =
+      `<p style="font-size:13px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;">Results feed unavailable.</p>`;
+  }
+
+  if (standingsOk && resultsOk)
+    setStatus('ok', `Live data loaded — ${PLAYERS.length} players · ${new Date().toLocaleTimeString()}`);
+  else if (standingsOk)
+    setStatus('ok', `Standings loaded (results unavailable) · ${new Date().toLocaleTimeString()}`);
+  else
+    setStatus('err', 'Could not reach Google Sheets — using fallback standings. Check sheet is public.');
+
+  document.getElementById('calc-btn').disabled = false;
+  setTimeout(loadSchedule, 100);
+}
+
+function useFallback() {
+  CURRENT_STANDINGS = {
+    'Anth':     {pts:116,  prize:41, wins:3, top3:6,  events:10},
+    'MK':       {pts:96,   prize:29, wins:1, top3:4,  events:10},
+    'DeCampli': {pts:91,   prize:26, wins:1, top3:3,  events:9},
+    'Wiley':    {pts:73,   prize:21, wins:1, top3:4,  events:10},
+    'Kyle':     {pts:62.5, prize:15, wins:1, top3:2,  events:10},
+    'Woody':    {pts:61.5, prize:17, wins:1, top3:2,  events:10},
+    'Zach':     {pts:55,   prize:15, wins:1, top3:2,  events:9},
+    'Brad':     {pts:53,   prize:12, wins:0, top3:2,  events:10},
+    'Broc':     {pts:51,   prize:11, wins:0, top3:3,  events:10},
+    'Stew':     {pts:35,   prize:10, wins:1, top3:1,  events:9},
+    'Colin':    {pts:34,   prize:3,  wins:0, top3:1,  events:9},
+    'B Luke':   {pts:0,    prize:0,  wins:0, top3:0,  events:0},
+  };
+  PLAYERS = Object.keys(CURRENT_STANDINGS);
+  rebuildSelects();
+  renderLiveStandings();
+  document.getElementById('calc-btn').disabled = false;
+}
+
+// ── DraftKings CSV Import ──────────────────────────────────────────────────
+
+function handleDragOver(e) { e.preventDefault(); document.getElementById('drop-zone').classList.add('drag-over'); }
+function handleDragLeave(e) { document.getElementById('drop-zone').classList.remove('drag-over'); }
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) handleFile(file);
+}
+
+function handleFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => parseDKCSV(e.target.result);
+  reader.readAsText(file);
+}
+
+function parseDKCSV(text) {
+  const rows = parseCSVText(text);
+  // Only keep rows with a valid Rank (actual contest entries)
+  const entries = rows.filter(r => r['Rank'] && !isNaN(parseFloat(r['Rank'])));
+
+  pendingImport = entries.map(r => {
+    const dk = (r['EntryName'] || '').trim();
+    const rank = parseFloat(r['Rank']);
+    const points = parseFloat(r['Points'] || r['FPTS'] || 0);
+    const matched = DK_USERNAME_MAP[dk] || null;
+    // Parse lineup: "G Brooks Koepka G Corey Conners ..." → "Brooks Koepka, Corey Conners, ..."
+    const lineupRaw = (r['Lineup'] || '').trim();
+    const lineup = lineupRaw
+      ? lineupRaw.split(/\s+G\s+/).map(s => repairDkName(s.replace(/^G\s+/, '').trim())).filter(Boolean).join(', ')
+      : '';
+    return { dk, rank, points, matched, lineup };
+  });
+
+  renderImportPreview();
+}
+
+function renderImportPreview() {
+  const unmatched = pendingImport.filter(r => !r.matched);
+  const html = `
+    <table class="import-table">
+      <thead><tr>
+        <th>#</th>
+        <th>DK username</th>
+        <th style="text-align:right">DK pts</th>
+        <th>DEBO player</th>
+        <th>Lineup</th>
+      </tr></thead>
+      <tbody>
+        ${pendingImport.map((r,i) => `
+          <tr>
+            <td><span class="rank-badge ${r.rank<=3?'rank-'+r.rank:''}">${r.rank}</span></td>
+            <td style="font-family:'Courier New',monospace;font-size:12px;">${r.dk}</td>
+            <td style="text-align:right;font-weight:600;">${r.points}</td>
+            <td>
+              ${r.matched
+                ? `<span class="match-ok">${r.matched}</span>`
+                : `<select onchange="pendingImport[${i}].matched=this.value" style="width:100%">
+                    <option value="">-- assign player --</option>
+                    ${PLAYERS.map(p=>`<option value="${p}">${p}</option>`).join('')}
+                   </select>`
+              }
+            </td>
+            <td style="font-size:11px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;">${r.lineup||'—'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>`;
+
+  document.getElementById('import-table-wrap').innerHTML = html;
+  document.getElementById('import-preview').style.display = 'block';
+
+  if (unmatched.length) {
+    document.getElementById('unmatched-warn').style.display = 'block';
+    document.getElementById('unmatched-warn').innerHTML =
+      `<strong>${unmatched.length} unmatched username${unmatched.length>1?'s':''}:</strong> ${unmatched.map(r=>r.dk).join(', ')} — assign them above, then confirm import. You can also add them permanently to the username map in the tool settings.`;
+  } else {
+    document.getElementById('unmatched-warn').style.display = 'none';
+  }
+}
+
+function confirmImport() {
+  // Clear existing rows
+  document.getElementById('rows-container').innerHTML = '';
+
+  // Sort by rank and populate
+  const sorted = [...pendingImport].sort((a,b) => a.rank - b.rank);
+  sorted.forEach(r => {
+    if (r.matched) addRow(r.matched, r.rank, r.points, r.lineup||'');
+  });
+
+  // Scroll to results section
+  document.getElementById('rows-container').scrollIntoView({ behavior: 'smooth' });
+}
+
+// ── Manual row management ──────────────────────────────────────────────────
+
+function addRow(player='', finish='', dk='', lineup='') {
+  const div = document.createElement('div');
+  div.className = 'result-row';
+  div.innerHTML = `
+    <select class="p-sel"><option value="">-- player --</option>${PLAYERS.map(p=>`<option value="${p}"${p===player?' selected':''}>${p}</option>`).join('')}</select>
+    <input type="number" class="fin-inp" min="1" max="200" placeholder="1–100" value="${finish}">
+    <input type="number" class="dk-inp" placeholder="pts" value="${dk}" step="0.5">
+    <input type="hidden" class="lineup-inp" value="${lineup.replace(/"/g,'&quot;')}">
+    <span class="dc-out">—</span><span class="pr-out">—</span>
+    <button class="remove-btn" onclick="this.closest('.result-row').remove();recalcAllRows()">×</button>
+  `;
+  div.querySelector('.fin-inp').addEventListener('input', recalcAllRows);
+  document.getElementById('rows-container').appendChild(div);
+  if (finish) recalcAllRows();
+}
+
+// Recalculates every row's DC pts so tied finishes split points correctly
+function recalcAllRows() {
+  const rowEls = Array.from(document.querySelectorAll('#rows-container .result-row'));
+  const counts = {};
+  rowEls.forEach(el => {
+    const fin = parseInt(el.querySelector('.fin-inp').value);
+    if (!isNaN(fin)) counts[fin] = (counts[fin] || 0) + 1;
+  });
+  rowEls.forEach(el => {
+    const fin = parseInt(el.querySelector('.fin-inp').value);
+    const dcEl = el.querySelector('.dc-out');
+    const prEl = el.querySelector('.pr-out');
+    if (!isNaN(fin)) {
+      const pts = tieSplitDcPts(fin, counts[fin] || 1);
+      dcEl.textContent = Number.isInteger(pts) ? pts : pts.toFixed(1);
+      const isMajor = document.getElementById('evt-type').value === 'Major';
+      const prizeAmt = (PRIZE[fin] || 0) + (fin === 1 && isMajor ? 20 : 0);
+      prEl.textContent = prizeAmt > 0 ? '$'+prizeAmt : '—';
+      dcEl.style.color = fin <= 3 ? '#2d6a4f' : '#6b6a64';
+      dcEl.style.fontWeight = fin <= 3 ? '700' : '600';
+    } else { dcEl.textContent = '—'; prEl.textContent = '—'; }
+  });
+}
+
+// Back-compat alias (recalculates all rows, since a tie affects other rows too)
+function calcRow() { recalcAllRows(); }
+
+function getRows() {
+  const rows = Array.from(document.querySelectorAll('#rows-container .result-row')).map(row => ({
+    player: row.querySelector('.p-sel').value,
+    finish: parseInt(row.querySelector('.fin-inp').value),
+    dk:     parseFloat(row.querySelector('.dk-inp').value) || 0,
+    lineup: row.querySelector('.lineup-inp')?.value || '',
+    dcPts:  0, // set below (tie-aware)
+    prize:  (PRIZE[parseInt(row.querySelector('.fin-inp').value)] || 0) + (parseInt(row.querySelector('.fin-inp').value) === 1 && document.getElementById('evt-type').value === 'Major' ? 20 : 0),
+  })).filter(r => r.player && !isNaN(r.finish));
+  const counts = {};
+  rows.forEach(r => counts[r.finish] = (counts[r.finish] || 0) + 1);
+  rows.forEach(r => { r.dcPts = tieSplitDcPts(r.finish, counts[r.finish]); });
+  return rows;
+}
+
+// ── Calculate & generate ───────────────────────────────────────────────────
+
+function calculate() {
+  const rows = getRows();
+  if (!rows.length) { alert('Enter at least one result first.'); return; }
+  const evtName = document.getElementById('evt-name').value || 'Tournament';
+  const evtDate = document.getElementById('evt-date').value || '';
+  const evtType = document.getElementById('evt-type').value;
+  const evtWeek = document.getElementById('evt-week').value || '?';
+
+  rows.sort((a,b) => a.finish - b.finish);
+  const winner = rows.find(r => r.finish === 1);
+  const top3 = rows.filter(r => r.finish <= 3);
+
+  const newS = {};
+  for (const [p,s] of Object.entries(CURRENT_STANDINGS)) newS[p] = {...s};
+  for (const r of rows) {
+    if (!newS[r.player]) newS[r.player] = {pts:0,prize:0,wins:0,top3:0,events:0};
+    newS[r.player].pts += r.dcPts; newS[r.player].prize += r.prize; newS[r.player].events += 1;
+    if (r.finish === 1) newS[r.player].wins += 1;
+    if (r.finish <= 3) newS[r.player].top3 += 1;
+  }
+
+  const oldRanks = Object.entries(CURRENT_STANDINGS).sort((a,b)=>b[1].pts-a[1].pts).map(e=>e[0]);
+  const sorted = Object.entries(newS).sort((a,b)=>b[1].pts-a[1].pts);
+  const newRanks = sorted.map(e=>e[0]);
+
+  const SEASON_BONUS = [350, 150, 60];
+  document.getElementById('standings-tbl').innerHTML =
+    `<thead><tr><th></th><th>Player</th><th style="text-align:right">DC pts</th><th style="text-align:right">Record</th><th style="text-align:right">Season $</th><th style="text-align:right">End of season bonus</th></tr></thead><tbody>` +
+    sorted.map(([p,s],i) => {
+      const delta = (oldRanks.indexOf(p)+1)-(i+1);
+      const dHtml = delta>0?` <span class="delta-up">▲${delta}</span>`:delta<0?` <span class="delta-dn">▼${Math.abs(delta)}</span>`:'';
+      const badge = i<3?['rank-1','rank-2','rank-3'][i]:'';
+      const bonus = SEASON_BONUS[i] || 0;
+      const bonusLabel = i===0 ? '<span style="color:#b5860d;font-weight:600;">$350 champion</span>' : i===1 ? '<span style="color:#6b6a64;">$150 runner-up</span>' : i===2 ? '<span style="color:#7a4a1e;">$60 third place</span>' : '<span style="color:var(--color-text-tertiary,#9e9d97);">—</span>';
+      return `<tr><td><span class="rank-badge ${badge}">${i+1}</span></td><td style="font-weight:600">${p}${dHtml}</td><td style="text-align:right;font-weight:600">${s.pts}</td><td style="text-align:right;color:var(--text2)">${s.wins}W / ${s.top3} T3</td><td style="text-align:right;color:var(--text2)">$${s.prize}</td><td style="text-align:right;">${bonusLabel}</td></tr>`;
+    }).join('') + `</tbody>`;
+
+  const dateStr = evtDate || 'TBD';
+  const slug = evtName.toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'');
+  const seasonId = `2026 Regular__${dateStr.replace(/-/g,'')}__${slug}`;
+  const podium = top3.map(r=>`${r.finish}${['st','nd','rd'][r.finish-1]}: ${r.player} (${r.dk} DK pts)`).join(' | ');
+  const leader = sorted[0];
+  const gap = sorted.length > 1 ? sorted[0][1].pts - sorted[1][1].pts : 0;
+  const leaderTotal = leader[1].prize + 350;
+  const movers = rows.filter(r => (oldRanks.indexOf(r.player)-newRanks.indexOf(r.player)) >= 2);
+
+  document.getElementById('sheet-results').textContent =
+    rows.map(r=>`${seasonId}\t${dateStr}\t2026 Regular\t${evtName}\t${r.player}\t${r.finish}\t${r.dk}\t${evtType==='Major'?'TRUE':'FALSE'}\t${evtType}\t${r.prize}\t${r.lineup}`).join('\n');
+  document.getElementById('sheet-summary').textContent =
+    `${seasonId}\t${dateStr}\t2026 Regular\t${evtName}\t${evtType==='Major'}\t${winner?.player||''}\t${winner?.dk||''}\t${rows.length}\t${evtType}`;
+  buildRecapTemplate(evtName, evtWeek, winner, document.getElementById('pga-winner').value || '');
+  document.getElementById('xthread-text').textContent =
+`Week ${evtWeek} results are in. ${evtName} is done. [1/4]
+
+---
+
+${winner?`WINNER: ${winner.player} fires ${winner.dk} DK points to claim Week ${evtWeek}${evtType==='Major'?' and the $30 Major bonus':''}.${top3.slice(1).length?` ${top3.slice(1).map(r=>`${r.player} (${['','2nd','3rd'][r.finish]})`).join(', ')} round out the top 3.`:''}`:''} 
+
+---
+
+STANDINGS — Top 5 after Wk ${evtWeek}:
+${sorted.slice(0,5).map(([p,s],i)=>`${i+1}. ${p} — ${s.pts} pts`).join('\n')}
+
+---
+
+${leader[0]} leads the DEBO Cup by ${gap} points with ${33-parseInt(evtWeek)} weeks left. Follow along at debocup.com #DEBOCup`;
+
+
+
+  document.getElementById('output-area').style.display = 'block';
+  document.getElementById('output-area').scrollIntoView({behavior:'smooth'});
+}
+
+// ── Standings & history views ──────────────────────────────────────────────
+
+function renderLiveStandings() {
+  const sorted = Object.entries(CURRENT_STANDINGS).sort((a,b) => b[1].pts - a[1].pts);
+  const LIVE_BONUS = [350, 150, 60];
+  document.getElementById('live-standings-tbl').innerHTML =
+    `<thead><tr><th></th><th>Player</th><th style="text-align:right">DC pts</th><th style="text-align:right">Record</th><th style="text-align:right">Season $</th><th style="text-align:right">End of season bonus</th></tr></thead><tbody>` +
+    sorted.map(([p,s],i) => {
+      const badge = i<3?['rank-1','rank-2','rank-3'][i]:'';
+      const bonusLabel = i===0 ? '<span style="color:#b5860d;font-weight:600;">$350 champion</span>' : i===1 ? '<span style="color:#6b6a64;">$150 runner-up</span>' : i===2 ? '<span style="color:#7a4a1e;">$60 third place</span>' : '—';
+      return `<tr><td><span class="rank-badge ${badge}">${i+1}</span></td><td style="font-weight:600">${p}</td><td style="text-align:right;font-weight:600">${s.pts}</td><td style="text-align:right;color:var(--text2)">${s.wins}W / ${s.top3} T3</td><td style="text-align:right;color:var(--text2)">$${s.prize}</td><td style="text-align:right;">${bonusLabel}</td></tr>`;
+    }).join('') + `</tbody>`;
+}
+
+function renderHistory() {
+  const season2026 = ALL_RESULTS.filter(r => (r['Season']||'').includes('2026'));
+  const byEvent = {};
+  season2026.forEach(r => {
+    const evt = r['Event']||r['event'];
+    if (!evt) return;
+    if (!byEvent[evt]) byEvent[evt] = { date: r['Date']||'', type: r['Event Type']||'Regular', rows: [] };
+    byEvent[evt].rows.push(r);
+  });
+  const eventList = Object.entries(byEvent).sort((a,b) => new Date(b[1].date) - new Date(a[1].date));
+  if (!eventList.length) {
+    document.getElementById('history-content').innerHTML =
+      `<p style="font-size:13px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;">No 2026 results found.</p>`;
+    return;
+  }
+  document.getElementById('history-content').innerHTML = eventList.map(([evt,data],idx) => {
+    const sorted = [...data.rows].sort((a,b)=>parseInt(a['Finish']||99)-parseInt(b['Finish']||99));
+    const pillClass = data.type==='Major'?'pill-major':data.type==='Signature'?'pill-sig':'pill-reg';
+    const rows = sorted.slice(0,5).map(r=>
+      `<tr><td style="color:var(--text2);width:28px">${r['Finish']}</td><td style="font-weight:${parseInt(r['Finish'])<=3?'600':'400'}">${r['Player']||''}</td><td style="text-align:right;color:var(--text2)">${r['Fantasy_Points']||'—'}</td></tr>`
+    ).join('');
+    return `${idx>0?'<hr style="border:none;border-top:0.5px solid var(--border);margin-bottom:1.25rem;">':''}
+    <div style="margin-bottom:1.25rem;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+        <span style="font-size:13px;font-weight:600;font-family:'Helvetica Neue',Arial,sans-serif;">${evt}</span>
+        <span class="pill ${pillClass}">${data.type}</span>
+        <span style="font-size:11px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;margin-left:auto;">${data.date}</span>
+      </div>
+      <table class="recent-table"><thead><tr><th>#</th><th>Player</th><th style="text-align:right">DK pts</th></tr></thead><tbody>${rows}</tbody></table>
+    </div>`;
+  }).join('');
+}
+
+function rebuildSelects() {
+  document.querySelectorAll('.p-sel').forEach(sel => {
+    const cur = sel.value;
+    sel.innerHTML = `<option value="">-- player --</option>` +
+      PLAYERS.map(p=>`<option value="${p}"${p===cur?' selected':''}>${p}</option>`).join('');
+  });
+}
+
+// showTopTab redefined in Cut Sweat section
+
+function showInnerTab(name, btn) {
+  ['standings','sheet','recap','xthread'].forEach(t=>document.getElementById('itab-'+t).style.display=t===name?'':'none');
+  document.querySelectorAll('.inner-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function copyEl(id, btn) {
+  navigator.clipboard.writeText(document.getElementById(id).textContent).then(() => {
+    const orig = btn.textContent; btn.textContent = 'Copied!';
+    setTimeout(()=>btn.textContent=orig, 1500);
+  });
+}
+
+
+// ── Week Preview ──────────────────────────────────────────────────────────
+
+let SCHEDULE_DATA = [];
+
+async function loadSchedule() {
+  try {
+    const text = await fetchCSV(CSV_SCHEDULE);
+    const rows = parseCSVText(text);
+    SCHEDULE_DATA = rows.filter(r => r['Tournament'] || r['Start Date']);
+    populateScheduleDropdown();
+  } catch(e) {
+    console.log('Schedule load failed:', e.message);
+  }
+}
+
+function populateScheduleDropdown() {
+  // Populate Week Preview dropdown
+  const sel = document.getElementById('preview-event-select');
+  if (sel) {
+    sel.innerHTML = '<option value="">-- select event --</option>';
+    SCHEDULE_DATA.forEach((row, i) => {
+      const name = row['Tournament'] || '';
+      const date = row['Start Date'] || '';
+      if (!name) return;
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = name + (date ? ' (' + date.substring(0,10) + ')' : '');
+      sel.appendChild(opt);
+    });
+  }
+
+  // Populate Enter Results dropdown
+  const sel2 = document.getElementById('evt-schedule-select');
+  if (sel2) {
+    sel2.innerHTML = '<option value="">-- select event or fill in manually --</option>';
+    SCHEDULE_DATA.forEach((row, i) => {
+      const name = row['Tournament'] || '';
+      const date = row['Start Date'] || '';
+      if (!name) return;
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = name + (date ? ' (' + date.substring(0,10) + ')' : '');
+      sel2.appendChild(opt);
+    });
+  }
+}
+
+function onEnterEventSelect() {
+  const sel = document.getElementById('evt-schedule-select');
+  const idx = parseInt(sel.value);
+  if (isNaN(idx)) return;
+  const row = SCHEDULE_DATA[idx];
+  if (!row) return;
+
+  const tournament = row['Tournament'] || '';
+  const weekNum = row['Week #'] || row['Week#'] || row['Week'] || '';
+  const weekLabel = weekNum ? 'Week ' + weekNum : '';
+  const evtType = row['Event Type'] || 'Regular';
+
+  // Parse date M/D/YYYY -> YYYY-MM-DD
+  const rawDate = row['Start Date'] || '';
+  let isoDate = '';
+  if (rawDate) {
+    const mdy = rawDate.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (mdy) {
+      isoDate = mdy[3] + '-' + mdy[1].padStart(2,'0') + '-' + mdy[2].padStart(2,'0');
+    } else {
+      isoDate = rawDate.substring(0,10);
+    }
+  }
+
+  // ── Enter Results tab ──
+  document.getElementById('evt-name').value = tournament;
+  if (isoDate) document.getElementById('evt-date').value = isoDate;
+  const typeEl = document.getElementById('evt-type');
+  for (const opt of typeEl.options) { if (opt.value === evtType) { typeEl.value = evtType; break; } }
+  if (weekNum) document.getElementById('evt-week').value = weekNum;
+
+  // ── Week Preview tab ──
+  const prevSel = document.getElementById('preview-event-select');
+  if (prevSel) {
+    for (const opt of prevSel.options) {
+      if (parseInt(opt.value) === idx) { prevSel.value = idx; break; }
+    }
+    onPreviewEventSelect();
+  }
+
+  // ── Ownership tab ──
+  const ownTournament = document.getElementById('own-tournament');
+  const ownWeek = document.getElementById('own-week');
+  if (ownTournament) ownTournament.value = tournament;
+  if (ownWeek) ownWeek.value = weekLabel;
+
+  // ── Cut Sweat tab ──
+  const cutTournament = document.getElementById('cut-tournament');
+  if (cutTournament) cutTournament.value = tournament + (weekLabel ? ' (' + weekLabel + ')' : '');
+}
+
+function onPreviewEventSelect() {
+  const sel = document.getElementById('preview-event-select');
+  const idx = parseInt(sel.value);
+  if (isNaN(idx)) return;
+  const row = SCHEDULE_DATA[idx];
+  if (!row) return;
+
+  document.getElementById('prev-tournament').value = row['Tournament'] || '';
+  document.getElementById('prev-course').value = row['Course'] || '';
+  document.getElementById('prev-location').value = row['Location'] || '';
+  document.getElementById('prev-pga-champ').value = row['Defending PGA Champion'] || '';
+  document.getElementById('prev-debo-champ').value = row['Defending DEBO Champion'] || '';
+
+  // Read week number from schedule sheet (column A = Week #)
+  const weekNum = row['Week #'] || row['Week#'] || row['Week'] || '';
+  document.getElementById('prev-week').value = weekNum ? 'Week ' + weekNum : '';
+
+  // Look up past winners
+  const pastWinners = findPastWinners(row['Tournament'] || '');
+  document.getElementById('prev-past-winners').textContent =
+    pastWinners.length ? pastWinners.map(w => w.player + ' (' + w.season + ')').join(' • ') : 'No history found';
+
+  document.getElementById('preview-event-details').style.display = 'block';
+  document.getElementById('preview-output').style.display = 'none';
+}
+
+// Normalize an event/tournament name for matching purposes.
+// Periods are stripped OUTRIGHT (not turned into spaces) so abbreviations
+// like "U.S." collapse to "US" instead of splitting into the single letters
+// "u" and "s" — that split was why "U.S. Open" never matched the "US Open"
+// rows in the results history (both keyword and substring matching failed).
+function normalizeEventName(s) {
+  return (s || '')
+    .toLowerCase()
+    .replace(/\./g, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Resolve any event/tournament name to a stable canonical key, so the SCHEDULE's
+// spelling and the RESULTS-history spelling of the same event land on the same
+// key even when they differ (e.g. schedule "The Open" vs results "Open", or
+// schedule "FedEx St. Jude Championship" vs results "St Jude Championship").
+//
+// Majors and notoriously ambiguous events are matched explicitly first. This is
+// what fixes The Open: the results sheet stores it as the bare word "Open", which
+// must map to the same key as schedule "The Open"/"The Open Championship"/"British
+// Open" WITHOUT ever colliding with "US Open", "Scottish Open", "Canadian Open",
+// etc. Everything else falls back to a sponsor-agnostic significant-token key.
+const EVENT_CONNECTOR_WORDS = new Set(['the','of','at','in','a','an','and','by','pres','presented','de']);
+const EVENT_ULTRA_GENERIC = new Set(['championship','open','classic','invitational','tour']);
+function canonicalEventKey(rawName) {
+  const n = normalizeEventName(rawName);
+  if (!n) return '';
+  // The Open Championship (a.k.a. British Open) — stored various ways incl. bare "Open".
+  if (n === 'open'
+      || /(^|\s)british open(\s|$)/.test(n)
+      || /(^|\s)the open(\s|$)/.test(n)
+      || /(^|\s)open championship(\s|$)/.test(n)
+      || /(^|\s)\d+(st|nd|rd|th) open(\s|$)/.test(n))
+    return 'major:the-open';
+  if (/(^|\s)(u s open|us open|united states open)(\s|$)/.test(n)) return 'major:us-open';
+  if (/(^|\s)pga championship(\s|$)/.test(n)) return 'major:pga-championship';
+  if (/(^|\s)masters(\s|$)/.test(n)) return 'major:masters';
+  // General events: signature from significant tokens (drops connector words only).
+  const tokens = n.split(' ').filter(w => w && !EVENT_CONNECTOR_WORDS.has(w));
+  return 'sig:' + tokens.sort().join(' ');
+}
+// True when two significant-token keys refer to the same event, tolerating
+// sponsor prefixes (e.g. {st,jude,championship} ⊆ {fedex,st,jude,championship}).
+// Requires the overlap to include at least one distinguishing (non-generic) token
+// so two unrelated "… Championship"/"… Open" names can't match on the suffix alone.
+function eventTokenKeysMatch(keyA, keyB) {
+  const a = new Set(keyA.slice(4).split(' ').filter(Boolean));
+  const b = new Set(keyB.slice(4).split(' ').filter(Boolean));
+  if (!a.size || !b.size) return false;
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  for (const t of small) if (!large.has(t)) return false;
+  for (const t of small) if (!EVENT_ULTRA_GENERIC.has(t)) return true;
+  return false;
+}
+// True when a schedule tournament name and a results-history event name are the
+// same event. Exact canonical-key equality first; sponsor-tolerant token match next.
+function eventsAreSame(scheduleName, resultEventName) {
+  const tk = canonicalEventKey(scheduleName);
+  const ek = canonicalEventKey(resultEventName);
+  if (!tk || !ek) return false;
+  if (tk === ek) return true;
+  if (tk.startsWith('sig:') && ek.startsWith('sig:')) return eventTokenKeysMatch(tk, ek);
+  return false;
+}
+
+function findPastWinners(tournamentName) {
+  if (!ALL_RESULTS.length) return [];
+  if (!canonicalEventKey(tournamentName)) return [];
+
+  // Find event winners from RESULTS tab — finish 1, grouped by season
+  const winners = [];
+  const seenSeasons = new Set();
+
+  // Sort results by date descending — normalize M/D/YYYY and YYYY-MM-DD formats
+  const parseDate = s => {
+    if (!s) return 0;
+    // Handle M/D/YYYY format
+    const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (mdy) return new Date(mdy[3], mdy[1]-1, mdy[2]).getTime();
+    return new Date(s).getTime() || 0;
+  };
+  const sorted = [...ALL_RESULTS].sort((a,b) => parseDate(b['Date']) - parseDate(a['Date']));
+
+  for (const r of sorted) {
+    // Support multiple possible finish column names
+    const finishVal = r['Finish'] ?? r['Place'] ?? r['finish'] ?? r['place'] ?? '';
+    if (parseInt(finishVal) !== 1) continue;
+    if (!eventsAreSame(tournamentName, r['Event'] || '')) continue;
+
+    const season = r['Season'] || r['Date']?.substring(0,4) || '';
+    const yearMatch = season.match(/\d{4}/);
+    const year = yearMatch ? yearMatch[0] : season;
+
+    if (!seenSeasons.has(year)) {
+      seenSeasons.add(year);
+      winners.push({ player: r['Player'] || '', season: year });
+      if (winners.length >= 3) break;
+    }
+  }
+
+  return winners;
+}
+
+function generatePreviewPost() {
+  const tournament = document.getElementById('prev-tournament').value;
+  const course = document.getElementById('prev-course').value;
+  const location = document.getElementById('prev-location').value;
+  const week = document.getElementById('prev-week').value;
+  const pgaChamp = document.getElementById('prev-pga-champ').value;
+  const deboChamp = document.getElementById('prev-debo-champ').value;
+  const lockTime = document.getElementById('prev-lock-time').value;
+  const pastWinnersText = document.getElementById('prev-past-winners').textContent;
+
+  if (!lockTime) { alert('Please enter the lineup lock time.'); return; }
+
+  const lockStr = lockTime.toLowerCase().includes('tomorrow') ? lockTime : 'tomorrow at ' + lockTime;
+  const courseShort = course.split(' ')[0] || tournament.split(' ')[0];
+  const deboLine = deboChamp ? ('Defending DEBO champion: ' + deboChamp + '. Can they repeat?') : '';
+  const postParts = [week + ' — ' + tournament + '. ⛳', 'Lineups lock ' + lockStr + '.', 'DEBO Cup Winners at ' + courseShort + ':', pastWinnersText, deboLine, 'debocup.com'].filter(Boolean);
+  const post = postParts.join('\n\n');
+
+  document.getElementById('preview-post-text').textContent = post;
+  document.getElementById('preview-output').style.display = 'block';
+  document.getElementById('preview-output').scrollIntoView({behavior:'smooth'});
+}
+
+loadAll();
+
+
+// ── Ownership ─────────────────────────────────────────────────────────────
+
+function syncOwnershipFromPreview() {
+  // Pull tournament and week from preview tab if already selected
+  const tournament = document.getElementById('prev-tournament')?.value || '';
+  const week = document.getElementById('prev-week')?.value || '';
+  if (tournament) document.getElementById('own-tournament').value = tournament;
+  if (week) document.getElementById('own-week').value = week;
+}
+
+function generateOwnership() {
+  const tournament = document.getElementById('own-tournament').value || 'Tournament';
+  const week = document.getElementById('own-week').value || '';
+
+  // Build golfer ownership from imported lineups
+  const rows = document.querySelectorAll('#rows-container .result-row');
+  const totalPlayers = rows.length;
+  if (!totalPlayers) { alert('Import a DK CSV first.'); return; }
+
+  const golferMap = {};
+  rows.forEach(row => {
+    const player = row.querySelector('.p-sel').value;
+    const lineup = row.querySelector('.lineup-inp')?.value || '';
+    if (!lineup || !player) return;
+    lineup.split(',').map(g => g.trim()).filter(Boolean).forEach(golfer => {
+      if (!golferMap[golfer]) golferMap[golfer] = [];
+      golferMap[golfer].push(player);
+    });
+  });
+
+  // Sort by ownership descending
+  const sorted = Object.entries(golferMap).sort((a,b) => b[1].length - a[1].length);
+
+  // Text post
+  const header = 'DEBO CUP OWNERSHIP' + (week ? '\n\n' + week + ' — ' + tournament : '\n\n' + tournament);
+  document.getElementById('ownership-post').textContent = header + '\n\ndebocup.com';
+
+  // Render canvas
+  renderOwnershipCanvas(sorted, tournament, week, totalPlayers);
+
+  document.getElementById('ownership-output').style.display = 'block';
+  document.getElementById('ownership-output').scrollIntoView({behavior:'smooth'});
+}
+
+function renderOwnershipCanvas(sorted, tournament, week, totalPlayers) {
+  const canvas = document.getElementById('ownership-canvas');
+  const dpr = window.devicePixelRatio || 1;
+  // Auto-size canvas width based on longest owners string
+  const tempCanvas = document.createElement('canvas');
+  const tempCtx = tempCanvas.getContext('2d');
+  tempCtx.font = '12px Arial, sans-serif';
+  const maxOwners = sorted.reduce((max, [,owners]) => {
+    const w = tempCtx.measureText(owners.join(', ')).width;
+    return w > max ? w : max;
+  }, 0);
+  const maxGolfer = sorted.reduce((max, [golfer]) => {
+    const w = tempCtx.measureText(golfer).width;
+    return w > max ? w : max;
+  }, 0);
+
+  const COL_GOLFER = Math.max(160, Math.ceil(maxGolfer) + 20);
+  const COL_OWN = 70;
+  const COL_OWNERS = Math.max(200, Math.ceil(maxOwners) + 20);
+  const title = week ? week + ' — ' + tournament : tournament;
+  tempCtx.font = 'bold 20px Arial, sans-serif';
+  const titleW = Math.ceil(tempCtx.measureText(title).width) + 48;
+  const W = Math.max(COL_GOLFER + COL_OWN + COL_OWNERS + 16, titleW);
+
+  const ROW_H = 30;
+  const HEADER_H = 44;
+  const TITLE_H = 56;
+  const PADDING = 16;
+  const H = TITLE_H + HEADER_H + sorted.length * ROW_H + PADDING;
+
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  // Background
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, W, H);
+
+  // Title
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 20px Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(title, W/2, 32);
+
+  // Column layout: Golfer | Own% | Owners
+  const COL  = [0, COL_GOLFER, COL_GOLFER + COL_OWN];
+  const colW = [COL_GOLFER, COL_OWN, COL_OWNERS];
+
+  // Header
+  const hy = TITLE_H;
+  ctx.fillStyle = '#2a2a2a';
+  ctx.fillRect(0, hy, W, HEADER_H);
+  ctx.fillStyle = '#aaaaaa';
+  ctx.font = 'bold 13px Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Golfer',     COL[0] + colW[0]/2, hy + 27);
+  ctx.fillText('Own%',       COL[1] + colW[1]/2, hy + 27);
+  ctx.fillText('Owners',     COL[2] + colW[2]/2, hy + 27);
+
+  // Chalk threshold: ownership % of the 4th-highest golfer (bold everyone tied at or above it)
+  const canvasChalkCount = sorted.length >= 4 ? sorted[3][1].length : (sorted.length ? sorted[sorted.length-1][1].length : 0);
+  const canvasChalkPct = totalPlayers > 0 ? canvasChalkCount / totalPlayers : 0;
+
+  // Rows
+  sorted.forEach(([golfer, owners], i) => {
+    const y = TITLE_H + HEADER_H + i * ROW_H;
+    ctx.fillStyle = i % 2 === 0 ? '#222222' : '#1e1e1e';
+    ctx.fillRect(0, y, W, ROW_H);
+
+    const pct = ((owners.length / totalPlayers) * 100).toFixed(2) + '%';
+    const isTop = totalPlayers > 0 && (owners.length / totalPlayers) >= canvasChalkPct;
+
+    // Golfer name
+    ctx.fillStyle = '#ffffff';
+    ctx.font = (isTop ? 'bold' : 'normal') + ' 13px Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(golfer, COL[0] + 8, y + 20);
+
+    // Own%
+    ctx.fillStyle = isTop ? '#ffffff' : '#cccccc';
+    ctx.font = (isTop ? 'bold' : 'normal') + ' 13px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(pct, COL[1] + colW[1]/2, y + 20);
+
+    // Owners
+    ctx.fillStyle = isTop ? '#ffffff' : '#aaaaaa';
+    ctx.font = (isTop ? 'bold' : 'normal') + ' 12px Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(owners.join(', '), COL[2] + 8, y + 20);
+
+    // Divider
+    ctx.strokeStyle = '#333333';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(0, y + ROW_H);
+    ctx.lineTo(W, y + ROW_H);
+    ctx.stroke();
+  });
+
+  // Column dividers
+  ctx.strokeStyle = '#333333';
+  ctx.lineWidth = 0.5;
+  [COL[1], COL[2]].forEach(x => {
+    ctx.beginPath();
+    ctx.moveTo(x, TITLE_H);
+    ctx.lineTo(x, H);
+    ctx.stroke();
+  });
+}
+
+function downloadOwnershipImage() {
+  const canvas = document.getElementById('ownership-canvas');
+  const link = document.createElement('a');
+  link.download = 'debo-cup-ownership.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+
+function handleDGCutlineDrop(e) {
+  e.preventDefault();
+  document.getElementById('dg-cutline-zone').classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) handleDGCutlineFile(file);
+}
+
+function handleDGCutlineFile(file) {
+  if (!file) return;
+  const apiKey = localStorage.getItem('claude_api_key');
+  if (!apiKey) { alert('Please enter your Claude API key in the Recap Post tab first.'); return; }
+  const status = document.getElementById('dg-cutline-status');
+  status.style.display = 'block';
+  status.textContent = 'Reading cut line screenshot...';
+  document.getElementById('dg-cutline-title').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const base64 = e.target.result.split(',')[1];
+    const mediaType = file.type || 'image/png';
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 500,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+              { type: 'text', text: `This is a DataGolf cut line probabilities screenshot. Extract the cut line data and return JSON only.
+
+The screenshot may show large numbers like "-3 16.7%" or "-2 40.0%" representing score and make-cut probability.
+Return: {"cut_lines": [{"score": "-3", "pct": "16.7%"}, {"score": "-2", "pct": "40.0%"}, ...]}
+Include up to 3 cut line entries. Return only valid JSON, nothing else.` }
+            ]
+          }]
+        })
+      });
+      if (!response.ok) { const err = await response.json(); throw new Error(err.error?.message || 'API error'); }
+      const data = await response.json();
+      const text = data.content[0]?.text || '';
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('Could not parse response');
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.cut_lines && parsed.cut_lines.length) {
+        parsed.cut_lines.slice(0, 3).forEach((cl, i) => {
+          const n = i + 1;
+          const sEl = document.getElementById('cut-s' + n);
+          const pEl = document.getElementById('cut-p' + n);
+          if (sEl) sEl.value = cl.score?.toString().trim() || '';
+          if (pEl) pEl.value = cl.pct?.toString().trim() || '';
+        });
+        status.textContent = `Cut line parsed — ${parsed.cut_lines.length} entries found.`;
+        status.style.color = '#2d6a4f';
+      } else {
+        status.textContent = 'No cut line data found — enter manually.';
+        status.style.color = '#9b2226';
+      }
+    } catch(e) {
+      status.textContent = 'Could not parse: ' + e.message;
+      status.style.color = '#9b2226';
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── DataGolf Screenshot Parser ────────────────────────────────────────────
+
+function handleDGDrop(e) {
+  e.preventDefault();
+  document.getElementById('dg-drop-zone').classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) handleDGFile(file);
+}
+
+function handleDGFile(file) {
+  if (!file) return;
+  const apiKey = localStorage.getItem('claude_api_key');
+  if (!apiKey) {
+    alert('Please enter your Claude API key in the Recap Post tab first.');
+    return;
+  }
+  const status = document.getElementById('dg-parse-status');
+  status.style.display = 'block';
+  status.textContent = 'Reading screenshot with Claude...';
+  document.getElementById('dg-drop-title').textContent = file.name;
+
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const base64 = e.target.result.split(',')[1];
+    const mediaType = file.type || 'image/png';
+    await parseDGScreenshot(base64, mediaType, apiKey, status);
+  };
+  reader.readAsDataURL(file);
+}
+
+async function parseDGScreenshot(base64, mediaType, apiKey, statusEl) {
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2000,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: mediaType, data: base64 }
+            },
+            {
+              type: 'text',
+              text: `This is a DataGolf cut line tracker screenshot. Extract the following data and return it as JSON only, no explanation:
+
+1. "cut_lines": array of objects with "score" (e.g. "-1", "E", "+1") and "pct" (e.g. "85.6%") — the projected cut line odds shown at the top or as a summary
+2. "golfers": array of objects with:
+   - "name": full golfer name as shown (First Last format, e.g. "Davis Thompson")
+   - "score": their current score to par as a string (e.g. "-5", "E", "+2", "WD")
+   - "make_cut_pct": their make cut probability as shown (e.g. "98.6%")
+
+For golfer names: the table shows LASTNAME Firstname — convert to Firstname Lastname format.
+Return only valid JSON, nothing else.`
+            }
+          ]
+        }]
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error?.message || 'API error');
+    }
+
+    const data = await response.json();
+    const text = data.content[0]?.text || '';
+    
+    // Parse JSON from response
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('Could not parse response');
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    // Apply scores to the cut sweat table rows
+    if (parsed.golfers && parsed.golfers.length) {
+      const tableRows = document.querySelectorAll('#cut-sweat-tbody tr');
+      let matched = 0;
+      tableRows.forEach(row => {
+        const golferName = row.querySelector('td:first-child')?.textContent.trim();
+        // Try to match by last name or full name.
+        // Reuse the shared folder so non-decomposing letters (\u00f8, \u00e6, \u0142, \u2026) are
+        // normalized the same way here as during DK CSV import \u2014 otherwise
+        // "H\u00f8jgaard" (table) never matches "Hojgaard" (DataGolf screenshot).
+        const norm = _stripAccents;
+        // '?'-tolerant comparisons: if a DK name still carries a '?' where an
+        // accented letter was lost, treat '?' on either side as a wildcard that
+        // matches any single character. (Names are usually already repaired at
+        // import; this is the backstop for players not in SPECIAL_NAME_FIXES.)
+        const weq = (a, b) => {
+          if (a.length !== b.length) return false;
+          for (let i = 0; i < a.length; i++) {
+            if (a[i] !== b[i] && a[i] !== '?' && b[i] !== '?') return false;
+          }
+          return true;
+        };
+        const wchar = (a, b) => a === b || a === '?' || b === '?';
+        const winc = (hay, needle) => {
+          if (!needle.length || needle.length > hay.length) return false;
+          for (let i = 0; i <= hay.length - needle.length; i++) {
+            let ok = true;
+            for (let j = 0; j < needle.length; j++) {
+              if (!wchar(hay[i + j], needle[j])) { ok = false; break; }
+            }
+            if (ok) return true;
+          }
+          return false;
+        };
+        const dgGolfer = (() => {
+          const rowName = norm(golferName || '');
+          if (!rowName) return null;
+          const rowParts = rowName.split(' ');
+          const rowFirst = rowParts[0] || '';
+          const rowLast = rowParts[rowParts.length - 1] || '';
+
+          // Score each candidate — higher = better match
+          let best = null, bestScore = 0;
+          for (const g of parsed.golfers) {
+            const dgName = norm(g.name || '');
+            if (!dgName) continue;
+            const dgParts = dgName.split(' ');
+            const dgFirst = dgParts[0] || '';
+            const dgLast = dgParts[dgParts.length - 1] || '';
+            let score = 0;
+
+            // Exact full name match — highest priority
+            if (weq(dgName, rowName)) { score = 100; }
+            // Last name exact + first name exact
+            else if (weq(dgLast, rowLast) && weq(dgFirst, rowFirst)) { score = 90; }
+            // Last name exact + first name starts with same letter
+            else if (weq(dgLast, rowLast) && wchar(dgFirst[0], rowFirst[0])) { score = 70; }
+            // Last name exact only (risky for common names)
+            else if (weq(dgLast, rowLast) && rowLast.length > 3) { score = 40; }
+            // First 5 chars of last name (Echavarria variants)
+            else if (dgLast.length > 4 && rowLast.length > 4 && weq(dgLast.substring(0,5), rowLast.substring(0,5))) { score = 35; }
+            // Contains match
+            else if (winc(dgName, rowLast) || winc(rowName, dgLast)) { score = 30; }
+
+            if (score > bestScore) { bestScore = score; best = g; }
+          }
+          return bestScore > 0 ? best : null;
+        })();
+        if (dgGolfer) {
+          const scoreInp = row.querySelector('.score-inp');
+          const makecutInp = row.querySelector('.makecut-inp');
+          if (scoreInp) scoreInp.value = dgGolfer.score || '';
+          if (makecutInp) makecutInp.value = dgGolfer.make_cut_pct || '';
+          if (scoreInp || makecutInp) matched++;
+        }
+      });
+      statusEl.textContent = `Screenshot parsed — ${matched} of ${tableRows.length} golfers matched. Review scores below and adjust any mismatches.`;
+      sortCutSweatTable();
+      statusEl.style.color = matched > 0 ? '#2d6a4f' : '#9b2226';
+    } else {
+      statusEl.textContent = 'No golfer data found in screenshot. Enter scores manually.';
+      statusEl.style.color = '#9b2226';
+    }
+
+  } catch(e) {
+    statusEl.textContent = 'Could not parse screenshot: ' + e.message + '. Enter scores manually below.';
+    statusEl.style.color = '#9b2226';
+  }
+}
+
+// ── Cut Sweat ─────────────────────────────────────────────────────────────
+
+let cutSweatGolfers = {}; // golfer name -> {owners: [], ownerPct: 0}
+
+function buildCutSweatFromLineups() {
+  // Parse all lineups from result rows
+  const rows = document.querySelectorAll('#rows-container .result-row');
+  const totalPlayers = rows.length;
+  if (!totalPlayers) return;
+
+  const golferMap = {};
+  rows.forEach(row => {
+    const player = row.querySelector('.p-sel').value;
+    const lineup = row.querySelector('.lineup-inp')?.value || '';
+    if (!lineup || !player) return;
+    lineup.split(',').map(g => g.trim()).filter(Boolean).forEach(golfer => {
+      if (!golferMap[golfer]) golferMap[golfer] = [];
+      golferMap[golfer].push(player);
+    });
+  });
+
+  cutSweatGolfers = golferMap;
+
+  // Populate golfer CSV list
+  const golferList = Object.keys(golferMap).sort().join(',');
+  document.getElementById('golfer-csv-list').textContent = golferList || 'No lineups found — import DK CSV first.';
+
+  // Build cut sweat table
+  const tbody = document.getElementById('cut-sweat-tbody');
+  tbody.innerHTML = '';
+  const sorted = Object.entries(golferMap).sort((a,b) => b[1].length - a[1].length);
+  // Chalk threshold: ownership % of the 4th-highest golfer (bold everyone at or above it)
+  const chalkThreshCount = sorted.length >= 4 ? sorted[3][1].length : (sorted.length ? sorted[sorted.length-1][1].length : 0);
+  const chalkThreshPct = totalPlayers > 0 ? chalkThreshCount / totalPlayers : 0;
+
+  sorted.forEach(([golfer, owners]) => {
+    const pct = ((owners.length / totalPlayers) * 100).toFixed(2);
+    const isBold = totalPlayers > 0 && (owners.length / totalPlayers) >= chalkThreshPct;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding:5px 8px;border-bottom:0.5px solid var(--border);font-weight:${isBold?'600':'400'}">${golfer}</td>
+      <td style="padding:5px 8px;border-bottom:0.5px solid var(--border);text-align:center;">
+        <input type="text" class="score-inp" placeholder="-3" style="width:60px;text-align:center;font-size:12px;padding:3px 6px;">
+      </td>
+      <td style="padding:5px 8px;border-bottom:0.5px solid var(--border);text-align:center;">
+        <input type="text" class="makecut-inp" placeholder="98.6%" style="width:72px;text-align:center;font-size:12px;padding:3px 6px;" onblur="formatMakeCutPct(this);sortCutSweatTable()">
+      </td>
+      <td style="padding:5px 8px;border-bottom:0.5px solid var(--border);text-align:center;color:var(--text2);">${pct}%</td>
+      <td style="padding:5px 8px;border-bottom:0.5px solid var(--border);text-align:center;color:var(--text2);font-size:12px;">${owners.join(', ')}</td>
+      <td style="padding:5px 8px;border-bottom:0.5px solid var(--border);text-align:center;">
+        <input type="checkbox" class="bold-chk" ${isBold?'checked':''} style="width:16px;height:16px;cursor:pointer;">
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// Auto-build when switching to Cut Sweat tab
+const origShowTopTab = showTopTab;
+function showTopTab(name, btn) {
+  ['enter','preview','ownership','cutsweat','history','live-standings','trend','usage','form'].forEach(t=>document.getElementById('top-'+t).style.display=t===name?'':'none');
+  document.querySelectorAll('.top-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  if (name === 'cutsweat') buildCutSweatFromLineups();
+  if (name === 'ownership') syncOwnershipFromPreview();
+  if (name === 'trend') { populateTrendPlayerSelect(); renderTrend(); }
+  if (name === 'usage') renderUsage();
+  if (name === 'form') renderFormDashboard();
+}
+
+function parseScore(s) {
+  if (!s || s.trim() === '') return 999;
+  const clean = s.trim().toUpperCase();
+  if (clean === 'E' || clean === '0') return 0;
+  if (clean === 'WD' || clean === 'DQ' || clean === 'CUT') return 999;
+  return parseInt(clean.replace('+','')) || 0;
+}
+
+function formatMakeCutPct(input) {
+  let val = input.value.trim().replace('%','');
+  if (val && !isNaN(parseFloat(val))) {
+    input.value = parseFloat(val).toFixed(1) + '%';
+  }
+}
+
+function sortCutSweatTable() {
+  const tbody = document.getElementById('cut-sweat-tbody');
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  rows.sort((a, b) => {
+    const aScore = a.querySelector('.score-inp')?.value.toUpperCase() === 'WD' ? -1 : parseFloat((a.querySelector('.makecut-inp')?.value||'').replace('%','')) || 0;
+    const bScore = b.querySelector('.score-inp')?.value.toUpperCase() === 'WD' ? -1 : parseFloat((b.querySelector('.makecut-inp')?.value||'').replace('%','')) || 0;
+    return bScore - aScore;
+  });
+  rows.forEach(r => tbody.appendChild(r));
+}
+
+function getStatus(makeCutPct, score) {
+  // Handle WD explicitly
+  if ((score||'').toString().toUpperCase() === 'WD') {
+    return { label: 'DEAD (WD)', color: '#e03131', dot: '#e03131', sortVal: -1 };
+  }
+  const n = parseFloat((makeCutPct||'').replace('%',''));
+  if (isNaN(n)) return { label: '—', color: '#888888', dot: '#888888', sortVal: -2 };
+  if (n >= 90) return { label: 'SAFE (' + makeCutPct + ')', color: '#27ae60', dot: '#27ae60', sortVal: n };
+  if (n >= 70) return { label: 'LOOKING GOOD (' + makeCutPct + ')', color: '#82c91e', dot: '#82c91e', sortVal: n };
+  if (n >= 30) return { label: 'SWEATING (' + makeCutPct + ')', color: '#f59f00', dot: '#f59f00', sortVal: n };
+  if (n >= 10) return { label: 'IN TROUBLE (' + makeCutPct + ')', color: '#e8590c', dot: '#e8590c', sortVal: n };
+  return { label: 'DEAD (' + makeCutPct + ')', color: '#e03131', dot: '#e03131', sortVal: n };
+}
+
+function generateCutSweat() {
+  const tournament = document.getElementById('cut-tournament').value || 'Tournament';
+  const cutS1 = document.getElementById('cut-s1').value || '';
+  const cutP1 = document.getElementById('cut-p1').value || '';
+  const cutS2 = document.getElementById('cut-s2').value || '';
+  const cutP2 = document.getElementById('cut-p2').value || '';
+  const cutS3 = document.getElementById('cut-s3').value || '';
+  const cutP3 = document.getElementById('cut-p3').value || '';
+
+  const rows = Array.from(document.querySelectorAll('#cut-sweat-tbody tr'));
+
+  const golfers = rows.map(row => {
+    const cells = row.querySelectorAll('td');
+    const name = cells[0]?.textContent.trim();
+    const score = cells[1]?.querySelector('.score-inp')?.value.trim() || '';
+    const makeCut = cells[2]?.querySelector('.makecut-inp')?.value.trim() || '';
+    const ownerPct = cells[3]?.textContent.trim();
+    const owners = cells[4]?.textContent.trim();
+    const bold = cells[5]?.querySelector('.bold-chk')?.checked || false;
+    const isWD = score.toUpperCase() === 'WD';
+    return { name, score, makeCut, ownerPct, owners, bold, isWD,
+             makeCutNum: isWD ? -1 : (parseFloat((makeCut||'').replace('%','')) || 0) };
+  }).filter(g => g.name);
+
+  // Sort by make cut % descending, WDs go to bottom
+  golfers.sort((a,b) => {
+    const aWD = (a.score||'').toUpperCase() === 'WD';
+    const bWD = (b.score||'').toUpperCase() === 'WD';
+    if (aWD && !bWD) return 1;
+    if (!aWD && bWD) return -1;
+    return b.makeCutNum - a.makeCutNum;
+  });
+
+  // Build cut line odds for text post
+  const cutLines = [];
+  if (cutS1 && cutP1) cutLines.push('• ' + cutS1 + ' → ' + cutP1);
+  if (cutS2 && cutP2) cutLines.push('• ' + cutS2 + ' → ' + cutP2);
+  if (cutS3 && cutP3) cutLines.push('• ' + cutS3 + ' → ' + cutP3);
+
+  const cutLinesStr = cutLines.join('\n');
+  const post = '🚨 CUT SWEAT 🚨\n\nProjected Cut Line (via DataGolf):\n\n' + cutLinesStr + '\n\ndebocup.com';
+
+  // ── Emoji breakdown post ─────────────────────────────────────────────
+  const emojiMap = pct => {
+    if (pct === -1) return '💀'; // WD
+    if (pct >= 90) return '🟢';
+    if (pct >= 70) return '🟡';
+    if (pct >= 30) return '🟠';
+    if (pct >= 10) return '🔴';
+    return '💀';
+  };
+
+  // Build per-owner breakdown
+  // Collect all owners from the golfer list
+  const ownerSet = {};
+  golfers.forEach(g => {
+    if (!g.owners) return;
+    g.owners.split(',').map(o => o.trim()).filter(Boolean).forEach(owner => {
+      if (!ownerSet[owner]) ownerSet[owner] = [];
+      ownerSet[owner].push({ name: g.name, makeCutNum: g.makeCutNum, isWD: g.isWD });
+    });
+  });
+
+  // Sort owners by average make cut % descending (best exposure first)
+  const emojiLines = Object.entries(ownerSet)
+    .map(([owner, ownerGolfers]) => {
+      const sorted = [...ownerGolfers].sort((a,b) => b.makeCutNum - a.makeCutNum);
+      const avg = sorted.reduce((sum, g) => sum + (g.isWD ? 0 : g.makeCutNum), 0) / (sorted.length || 1);
+      const emojis = sorted.map(g => emojiMap(g.isWD ? -1 : g.makeCutNum)).join('');
+      return { line: owner + ': ' + emojis, avg };
+    })
+    .sort((a,b) => b.avg - a.avg)
+    .map(o => o.line);
+
+  const post2 = '🏌️ DEBO CUP EXPOSURE\n\n' + emojiLines.join('\n');
+
+  document.getElementById('cut-sweat-post').textContent = post;
+  document.getElementById('cut-sweat-post2').textContent = post2;
+  document.getElementById('cut-sweat-output').style.display = 'block';
+
+  // Generate canvas image
+  renderCutSweatCanvas(golfers, tournament);
+  document.getElementById('cut-sweat-output').scrollIntoView({behavior:'smooth'});
+}
+
+function renderCutSweatCanvas(golfers, tournament) {
+  const canvas = document.getElementById('cut-sweat-canvas');
+  const dpr = window.devicePixelRatio || 1;
+  const W = 920;
+  const ROW_H = 30;
+  const HEADER_H = 44;
+  const TITLE_H = 48;
+  const PADDING = 16;
+  const H = TITLE_H + HEADER_H + golfers.length * ROW_H + PADDING;
+
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 20px Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(tournament, W/2, 30);
+
+  const COL  = [0, 200, 420, 500];
+  const colW = [200, 220, 80, 420];
+
+  const hy = TITLE_H;
+  ctx.fillStyle = '#2a2a2a';
+  ctx.fillRect(0, hy, W, HEADER_H);
+  ctx.fillStyle = '#aaaaaa';
+  ctx.font = 'bold 13px Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Golfer',  COL[0] + colW[0]/2, hy + 27);
+  ctx.fillText('Status',  COL[1] + colW[1]/2, hy + 27);
+  ctx.fillText('Own%',    COL[2] + colW[2]/2, hy + 27);
+  ctx.fillText('Owners',  COL[3] + (W - COL[3])/2, hy + 27);
+
+  golfers.forEach((g, i) => {
+    const y = TITLE_H + HEADER_H + i * ROW_H;
+    ctx.fillStyle = i % 2 === 0 ? '#222222' : '#1e1e1e';
+    ctx.fillRect(0, y, W, ROW_H);
+
+    const status = getStatus(g.makeCut, g.score);
+    const nameText = g.score ? g.name + ' (' + g.score + ')' : g.name;
+    const weight = g.bold ? 'bold' : 'normal';
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = weight + ' 13px Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(nameText, COL[0] + 8, y + 19);
+
+    ctx.fillStyle = status.dot;
+    ctx.beginPath();
+    ctx.arc(COL[1] + 12, y + 14, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = status.color;
+    ctx.font = weight + ' 12px Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(status.label, COL[1] + 22, y + 19);
+
+    ctx.fillStyle = g.bold ? '#ffffff' : '#cccccc';
+    ctx.font = weight + ' 13px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(g.ownerPct, COL[2] + colW[2]/2, y + 19);
+
+    ctx.fillStyle = g.bold ? '#ffffff' : '#aaaaaa';
+    ctx.font = weight + ' 12px Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(g.owners || '', COL[3] + 8, y + 19);
+
+    ctx.strokeStyle = '#333333';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(0, y + ROW_H);
+    ctx.lineTo(W, y + ROW_H);
+    ctx.stroke();
+  });
+
+  ctx.strokeStyle = '#333333';
+  ctx.lineWidth = 0.5;
+  [COL[1], COL[2], COL[3]].forEach(x => {
+    ctx.beginPath();
+    ctx.moveTo(x, TITLE_H);
+    ctx.lineTo(x, H);
+    ctx.stroke();
+  });
+}
+function downloadCutSweatImage() {
+  const canvas = document.getElementById('cut-sweat-canvas');
+  const link = document.createElement('a');
+  link.download = 'debo-cup-cut-sweat.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+// ── Recap template ─────────────────────────────────────────────
+
+let recapEvtName = '', recapEvtWeek = '', recapWinner = null, recapPgaWinner = '';
+
+function buildRecapTemplate(evtName, evtWeek, winner, pgaWinner) {
+  recapEvtName = evtName; recapEvtWeek = evtWeek;
+  recapWinner = winner; recapPgaWinner = pgaWinner;
+  updateRecapTemplate();
+}
+
+function updateRecapTemplate() {
+  const oneliner = (document.getElementById('recap-oneliner')?.value || '').trim();
+  const winnerName = recapWinner?.player || '';
+  const defaultLine = winnerName ? winnerName + ' takes Week ' + recapEvtWeek + '.' : '';
+  const line = oneliner || defaultLine;
+  const parts = [
+    recapEvtName + ' 🏆',
+    '',
+    recapPgaWinner ? 'PGA TOUR Winner: ' + recapPgaWinner : null,
+    'DEBO Cup Winner: ' + winnerName,
+    '',
+    line,
+    '',
+    'Standings updated 👇',
+    'debocup.com'
+  ].filter(p => p !== null);
+  document.getElementById('recap-text').textContent = parts.join('\n');
+}
+
+
+// ── Google OAuth + Sheets API ─────────────────────────────────────────────
+
+const CLIENT_ID = '253075292004-ga8anbqsnq774uju3m5k0rjabo4rq4pj.apps.googleusercontent.com';
+const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
+const SHEET_ID_WRITE = '10Oa-LOeo7lyR5fkruCUun4A9Ofr_w2NLn0xfZEn_T0g';
+
+let tokenClient;
+let accessToken = null;
+let pendingRows = null;
+
+function initGoogleAuth() {
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: (resp) => {
+      if (resp.error) { setAuthStatus(false, 'Sign-in failed: ' + resp.error); return; }
+      accessToken = resp.access_token;
+      setAuthStatus(true, 'Signed in — ready to push');
+      document.getElementById('push-btn').disabled = false;
+      if (pendingRows) { doWrite(pendingRows); pendingRows = null; }
+    },
+  });
+}
+
+function handleAuthClick() {
+  if (accessToken) {
+    accessToken = null;
+    setAuthStatus(false, 'Signed out');
+    document.getElementById('push-btn').disabled = true;
+    document.getElementById('auth-btn').textContent = 'Sign in with Google';
+  } else {
+    tokenClient.requestAccessToken({ prompt: 'consent' });
+  }
+}
+
+function setAuthStatus(signedIn, msg) {
+  document.getElementById('auth-dot').className = 'auth-dot' + (signedIn ? ' signed-in' : '');
+  document.getElementById('auth-text').textContent = msg;
+  document.getElementById('auth-btn').textContent = signedIn ? 'Sign out' : 'Sign in with Google';
+}
+
+async function pushToSheets() {
+  const rows = getRows();
+  if (!rows.length) { alert('No results to push.'); return; }
+
+  const evtName = document.getElementById('evt-name').value || 'Tournament';
+  const evtDate = document.getElementById('evt-date').value || '';
+  const evtType = document.getElementById('evt-type').value;
+  const dateStr = evtDate || 'TBD';
+  const slug = evtName.toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'');
+  const seasonId = `2026 Regular__${dateStr.replace(/-/g,'')}__${slug}`;
+  const winner = [...rows].sort((a,b)=>a.finish-b.finish)[0];
+
+  const resultRows = rows.map(r => [
+    seasonId, dateStr, '2026 Regular', evtName,
+    r.player, r.finish, r.dk, evtType === 'Major' ? 'TRUE' : 'FALSE', evtType, r.prize, r.lineup
+  ]);
+
+  // ── Detect ties and calculate DC adjustments ──────────────────────────
+  const DC_PTS_MAP = {1:25,2:15,3:10,4:7,5:5,6:4,7:3,8:2,9:1,10:1};
+  const tieRows = [];
+
+  // Group players by finish position
+  const byFinish = {};
+  rows.forEach(r => {
+    if (!byFinish[r.finish]) byFinish[r.finish] = [];
+    byFinish[r.finish].push(r.player);
+  });
+
+  // Find ties (2+ players at same position) — n-way ties split n positions' points
+  Object.entries(byFinish).forEach(([finish, players]) => {
+    if (players.length < 2) return;
+    const pos = parseInt(finish);
+    const n = players.length;
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += DC_PTS_MAP[pos + i] || 0;
+    const avg = sum / n;
+    const adj = parseFloat((avg - (DC_PTS_MAP[pos] || 0)).toFixed(2));
+    if (adj === 0) return; // no adjustment needed (positions worth the same)
+    players.forEach(player => {
+      tieRows.push(['2026 Regular', evtName, player, adj]);
+    });
+  });
+
+  const summaryRow = [
+    seasonId, dateStr, '2026 Regular', evtName,
+    evtType === 'Major' ? 'TRUE' : 'FALSE',
+    winner?.player || '', winner?.dk || '', rows.length, evtType
+  ];
+
+  if (!accessToken) {
+    pendingRows = { resultRows, summaryRow, tieRows };
+    tokenClient.requestAccessToken({ prompt: '' });
+    return;
+  }
+
+  doWrite({ resultRows, summaryRow, tieRows });
+}
+
+async function doWrite({ resultRows, summaryRow, tieRows = [] }) {
+  const btn = document.getElementById('push-btn');
+  btn.disabled = true;
+  btn.textContent = 'Pushing to Sheets...';
+
+  const sheetId = '10Oa-LOeo7lyR5fkruCUun4A9Ofr_w2NLn0xfZEn_T0g';
+
+  const apiAppend = async (sheetName, values) => {
+    const res = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(sheetName)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values })
+      }
+    );
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(sheetName + ' write failed: ' + (err.error?.message || res.status));
+    }
+    return res.json();
+  };
+
+  try {
+    btn.textContent = 'Writing results...';
+    await apiAppend('RESULTS', resultRows);
+
+    btn.textContent = 'Writing event summary...';
+    await apiAppend('EVENT SUMMARIES', [summaryRow]);
+
+    if (tieRows.length > 0) {
+      btn.textContent = 'Writing tie adjustments...';
+      await apiAppend('TIES', tieRows);
+    }
+
+    btn.textContent = 'Pushed successfully!';
+    btn.style.background = '#1a4a32';
+    const tieMsg = tieRows.length > 0 ? ` + ${tieRows.length} tie adjustment(s)` : '';
+    setAuthStatus(true, `Pushed ${resultRows.length} rows to RESULTS + 1 row to EVENT SUMMARIES${tieMsg}. Standings and career stats update automatically.`);
+    setTimeout(() => {
+      btn.textContent = 'Push to Google Sheets';
+      btn.style.background = '';
+      btn.disabled = false;
+    }, 4000);
+
+  } catch(e) {
+    btn.textContent = 'Push to Google Sheets';
+    btn.disabled = false;
+    setAuthStatus(true, 'Push failed: ' + e.message);
+    alert('Push failed: ' + e.message);
+  }
+}
+
+// Load Google Identity Services
+window.addEventListener('load', () => {
+  const script = document.createElement('script');
+  script.src = 'https://accounts.google.com/gsi/client';
+  script.onload = initGoogleAuth;
+  document.head.appendChild(script);
+});
+
+
+
+// ── Standings Trend (small multiples) ────────────────────────────────────
+
+const TREND_COLORS = [
+  '#b5860d','#2d6a4f','#9b2226','#1a6091','#6a0572',
+  '#c05c00','#1b4332','#4a1942','#0d3b6e','#5c3317',
+  '#2c6e49','#7c3d12'
+];
+
+function populateTrendPlayerSelect() {
+  // no-op — small multiples don't use a player select
+}
+
+function abbrevEvt(evt) {
+  return evt
+    .replace('Farmers Insurance Open','Farmers').replace('Genesis Invitational','Genesis')
+    .replace('American Express','AmEx').replace('Masters Tournament','Masters')
+    .replace('PGA National','PGA Natl').replace('Houston Open','Houston')
+    .replace('Texas Open','Texas').replace('Sony Open','Sony')
+    .replace('Phoenix Open','Phoenix').replace('Pebble Beach','Pebble')
+    .replace('Valspar Championship','Valspar').replace(' Championship','')
+    .replace(' Invitational','').replace(' Open','');
+}
+
+function renderTrend() {
+  const grid = document.getElementById('trend-grid');
+  const emptyMsg = document.getElementById('trend-empty');
+  if (!grid) return;
+
+  const season = ALL_RESULTS.filter(r => (r['Season']||'').includes('2026') && r['Player'] && r['Event']);
+  if (!season.length) {
+    emptyMsg.style.display = '';
+    grid.style.display = 'none';
+    return;
+  }
+  emptyMsg.style.display = 'none';
+  grid.style.display = 'grid';
+
+  const parseDate = s => {
+    if (!s) return 0;
+    const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (mdy) return new Date(mdy[3], mdy[1]-1, mdy[2]).getTime();
+    return new Date(s).getTime() || 0;
+  };
+
+  // Build ordered event list
+  const eventMap = {};
+  season.forEach(r => {
+    const evt = r['Event'] || '';
+    if (evt && !eventMap[evt]) eventMap[evt] = r['Date'] || '';
+  });
+  const allEvents = Object.entries(eventMap).sort((a,b) => parseDate(a[1]) - parseDate(b[1])).map(e=>e[0]);
+
+  // Apply window filter
+  const wkFilter = window._trendWeeks || 0;
+  const displayEvents = wkFilter > 0 && allEvents.length > wkFilter ? allEvents.slice(-wkFilter) : [...allEvents];
+
+  // Get all players (sort by current rank)
+  const players = [...new Set(season.map(r=>r['Player']).filter(Boolean))];
+
+  // Cumulative pts per player per event (full season)
+  const playerCumPts = {};
+  players.forEach(p => {
+    let cum = 0;
+    playerCumPts[p] = {};
+    allEvents.forEach(evt => {
+      const row = season.find(r => r['Player'] === p && r['Event'] === evt);
+      const fin = row ? parseInt(row['Finish']) : NaN;
+      cum += (!isNaN(fin) && fin > 0) ? (DC_PTS[fin] || 0) : 0;
+      playerCumPts[p][evt] = cum;
+    });
+  });
+
+  // Apply tie adjustments from TIES tab
+  // TIES columns (positional): Season, Event, Player, Adjustment
+  // parseCSVText returns objects — use Object.values() to access by position
+  ALL_TIES.forEach(t => {
+    const vals = Object.values(t);
+    const p   = vals[2];
+    const evt = vals[1];
+    const adj = parseFloat(vals[3]) || 0;
+    if (p && evt && adj && playerCumPts[p]) {
+      // Add adjustment to this event and all subsequent events (cumulative)
+      let applying = false;
+      allEvents.forEach(e => {
+        if (e === evt) applying = true;
+        if (applying && playerCumPts[p][e] !== undefined) {
+          playerCumPts[p][e] += adj;
+        }
+      });
+    }
+  });
+
+  // Rank at each event (full season)
+  const ranksByEvent = {};
+  allEvents.forEach((evt, evtIdx) => {
+    const evtsUpTo = allEvents.slice(0, evtIdx + 1);
+    const active = players.filter(p => evtsUpTo.some(e => season.find(r => r['Player']===p && r['Event']===e)));
+    const sorted = [...active].sort((a,b) => (playerCumPts[b][evt]||0) - (playerCumPts[a][evt]||0));
+    ranksByEvent[evt] = {};
+    sorted.forEach((p,i) => ranksByEvent[evt][p] = i+1);
+  });
+
+  const totalPlayers = players.length;
+
+  // Sort players by current rank
+  const lastEvt = allEvents[allEvents.length - 1];
+  const sortedPlayers = [...players].sort((a,b) => (ranksByEvent[lastEvt]?.[a]||99) - (ranksByEvent[lastEvt]?.[b]||99));
+
+  // Draw each mini-chart
+  grid.innerHTML = '';
+  const dpr = window.devicePixelRatio || 1;
+
+  sortedPlayers.forEach((p, pi) => {
+    const color = TREND_COLORS[sortedPlayers.indexOf(p) % TREND_COLORS.length];
+    const currentRank = ranksByEvent[lastEvt]?.[p] || '—';
+    const _rawPts = playerCumPts[p][lastEvt] || 0;
+    const currentPts = Number.isInteger(_rawPts) ? _rawPts : Math.round(_rawPts * 10) / 10;
+
+    // Get rank series for display window
+    const rankSeries = displayEvents.map(evt => ranksByEvent[evt]?.[p] || null);
+    const validRanks = rankSeries.filter(r => r !== null);
+    const firstRank = validRanks[0] || null;
+    const lastRank = validRanks[validRanks.length - 1] || null;
+    const trend = firstRank && lastRank ? firstRank - lastRank : 0; // positive = moved up
+
+    // Card wrapper
+    const card = document.createElement('div');
+    card.style.cssText = 'background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:10px 12px;';
+
+    // Header: player name + current rank badge
+    const rankBadgeClass = currentRank === 1 ? 'rank-1' : currentRank === 2 ? 'rank-2' : currentRank === 3 ? 'rank-3' : '';
+    const trendStr = trend > 0 ? `<span style="color:#2d6a4f;font-size:10px;font-weight:600;">▲${trend}</span>` :
+                     trend < 0 ? `<span style="color:#9b2226;font-size:10px;font-weight:600;">▼${Math.abs(trend)}</span>` :
+                     wkFilter > 0 ? `<span style="color:#9e9d97;font-size:10px;">—</span>` : '';
+
+    card.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:7px;">
+          <span class="rank-badge ${rankBadgeClass}" style="width:20px;height:20px;font-size:10px;">${currentRank}</span>
+          <span style="font-size:13px;font-weight:700;font-family:'Helvetica Neue',Arial,sans-serif;color:var(--text);">${p}</span>
+          ${trendStr}
+        </div>
+        <span style="font-size:11px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;">${currentPts} DC pts</span>
+      </div>
+      <canvas id="mini-${pi}" style="display:block;width:100%;height:72px;"></canvas>
+    `;
+    grid.appendChild(card);
+
+    // Draw mini canvas after appending to DOM
+    requestAnimationFrame(() => {
+      const canvas = document.getElementById('mini-' + pi);
+      if (!canvas) return;
+      const W = canvas.offsetWidth || 176;
+      const H = 84;
+      canvas.width = W * dpr;
+      canvas.height = H * dpr;
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+
+      const PAD = { t: 6, b: 18, l: 8, r: 8 };
+      const cW = W - PAD.l - PAD.r;
+      const cH = H - PAD.t - PAD.b;
+
+      // Background
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, W, H);
+
+      const n = displayEvents.length;
+      if (n < 1) return;
+
+      const xStep = n > 1 ? cW / (n - 1) : cW / 2;
+
+      // Light horizontal guide lines for rank 1 and last rank
+      [1, totalPlayers].forEach(r => {
+        const y = PAD.t + ((r - 1) / (totalPlayers - 1 || 1)) * cH;
+        ctx.strokeStyle = '#f0ede6';
+        ctx.lineWidth = 0.5;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(PAD.l, y);
+        ctx.lineTo(W - PAD.r, y);
+        ctx.stroke();
+      });
+
+      // Plot the line
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+
+      let started = false;
+      ctx.beginPath();
+      rankSeries.forEach((rank, i) => {
+        if (rank === null) return;
+        const x = PAD.l + i * xStep;
+        const y = PAD.t + ((rank - 1) / (totalPlayers - 1 || 1)) * cH;
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      // Dots + rank number labels on line
+      const validIndices = rankSeries.map((r,i) => r !== null ? i : -1).filter(i => i >= 0);
+      const firstValidIdx = validIndices[0] ?? -1;
+      const lastValidIdx  = validIndices[validIndices.length - 1] ?? -1;
+
+      rankSeries.forEach((rank, i) => {
+        if (rank === null) return;
+        const x = PAD.l + i * xStep;
+        const y = PAD.t + ((rank - 1) / (totalPlayers - 1 || 1)) * cH;
+
+        // Dot
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Only label at rank changes, first, and last dot
+        const prevRank   = rankSeries.slice(0, i).filter(r => r !== null).at(-1) ?? null;
+        const nextRank   = rankSeries.slice(i + 1).find(r => r !== null) ?? null;
+        const isFirst    = i === firstValidIdx;
+        const isLast     = i === lastValidIdx;
+        const changed    = prevRank !== null && rank !== prevRank;
+        const willChange = nextRank !== null && rank !== nextRank;
+        const showLabel  = isFirst || isLast || changed || willChange;
+
+        if (showLabel) {
+          ctx.fillStyle = color;
+          ctx.font = 'bold 9px Helvetica Neue, Arial, sans-serif';
+          ctx.textAlign = 'center';
+          const labelY = y > PAD.t + cH * 0.5 ? y - 6 : y + 13;
+          ctx.fillText(rank, x, labelY);
+        }
+      });
+
+      // X axis week number labels
+      const startWeek = allEvents.length - displayEvents.length + 1;
+      ctx.fillStyle = '#9e9d97';
+      ctx.font = '9px Helvetica Neue, Arial, sans-serif';
+      const lastIdx = displayEvents.length - 1;
+      displayEvents.forEach((evt, i) => {
+        const x = PAD.l + i * xStep;
+        const wkNum = startWeek + i;
+        const isFirst = i === 0;
+        const isLast = i === lastIdx;
+        const showMiddle = displayEvents.length <= 8 ? true : (i % 2 === 0);
+        if (!isFirst && !isLast && !showMiddle) return;
+        // Suppress the second-to-last label if it would crowd the always-shown last label
+        if (!isLast && displayEvents.length > 8 && i === lastIdx - 1) return;
+        ctx.textAlign = isLast ? 'right' : isFirst ? 'left' : 'center';
+        ctx.fillText(wkNum, x, H - 4);
+      });
+    });
+  });
+}
+
+
+
+window._trendWeeks = 0;
+function setTrendWindow(n, btn) {
+  window._trendWeeks = n;
+  document.getElementById('trend-weeks-custom').value = '';
+  document.querySelectorAll('.trend-pill').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderTrend();
+}
+function setTrendCustom(input) {
+  const n = parseInt(input.value);
+  window._trendWeeks = (!isNaN(n) && n > 0) ? n : 0;
+  document.querySelectorAll('.trend-pill').forEach(b => b.classList.remove('active'));
+  renderTrend();
+}
+
+// ── Golfer Usage ──────────────────────────────────────────────────────────
+
+let _usageSortMode = 'uses';
+let _usageShowAll  = false;
+let _usageActivePlayer = null;
+const USAGE_INITIAL = 30;
+
+function buildUsageData() {
+  const season = ALL_RESULTS.filter(r => (r['Season']||'').includes('2026') && r['Player'] && r['Lineup']);
+  const leagueData  = {}; // golfer -> { count, owners: {player: [events]} }
+  const playerData  = {}; // player -> { golfer: [events] }
+
+  season.forEach(r => {
+    const player = r['Player'];
+    const event  = r['Event'] || '';
+    const lineup = (r['Lineup'] || '').toString();
+    if (!lineup || lineup === 'nan') return;
+    const golfers = lineup.split(',').map(g => g.trim()).filter(Boolean);
+    if (!playerData[player]) playerData[player] = {};
+    golfers.forEach(g => {
+      if (!playerData[player][g]) playerData[player][g] = [];
+      if (!playerData[player][g].includes(event)) playerData[player][g].push(event);
+      if (!leagueData[g]) leagueData[g] = { count: 0, owners: {} };
+      if (!leagueData[g].owners[player]) { leagueData[g].owners[player] = []; leagueData[g].count++; }
+      if (!leagueData[g].owners[player].includes(event)) leagueData[g].owners[player].push(event);
+    });
+  });
+  return { leagueData, playerData };
+}
+
+function showUsageView(view, btn) {
+  document.getElementById('usage-league').style.display = view === 'league' ? '' : 'none';
+  document.getElementById('usage-player').style.display = view === 'player' ? '' : 'none';
+  document.getElementById('usage-cards').style.display = view === 'cards' ? '' : 'none';
+  document.querySelectorAll('#usage-inner-tabs .inner-tab').forEach(b => b.classList.toggle('active', b === btn));
+  if (view === 'cards') renderUsageCards();
+}
+
+function setUsageSort(mode, btn) {
+  _usageSortMode = mode;
+  document.querySelectorAll('.usage-sort-btn').forEach(b => b.classList.toggle('active', b === btn));
+  renderUsageLeague();
+}
+
+function toggleUsageShowAll() {
+  _usageShowAll = !_usageShowAll;
+  renderUsageLeague();
+}
+
+function renderUsage() {
+  const { leagueData, playerData } = buildUsageData();
+  window._usageLeagueData = leagueData;
+  window._usagePlayerData = playerData;
+
+  // Build player tabs
+  const nav = document.getElementById('usage-player-tabs');
+  nav.innerHTML = '';
+  const allPlayers = Object.keys(playerData).sort((a,b) => {
+    // Sort by current standings order
+    const standings = Object.entries(window.CURRENT_STANDINGS||{}).sort((x,y)=>y[1].pts-x[1].pts).map(e=>e[0]);
+    const ai = standings.indexOf(a), bi = standings.indexOf(b);
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  });
+  allPlayers.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'p-usage-tab' + (p === _usageActivePlayer ? ' active' : '');
+    btn.textContent = p;
+    btn.onclick = () => { _usageActivePlayer = p; renderUsagePlayer(p, btn); };
+    nav.appendChild(btn);
+  });
+
+  renderUsageLeague();
+}
+
+function getSortedLeague() {
+  const entries = Object.entries(window._usageLeagueData || {});
+  if (_usageSortMode === 'owners') {
+    entries.sort((a,b) => b[1].count - a[1].count || Object.values(b[1].owners).reduce((s,e)=>s+e.length,0) - Object.values(a[1].owners).reduce((s,e)=>s+e.length,0));
+  } else if (_usageSortMode === 'uses') {
+    entries.sort((a,b) => {
+      const ua = Object.values(a[1].owners).reduce((s,e)=>s+e.length,0);
+      const ub = Object.values(b[1].owners).reduce((s,e)=>s+e.length,0);
+      return ub - ua || b[1].count - a[1].count;
+    });
+  } else {
+    entries.sort((a,b) => a[0].localeCompare(b[0]));
+  }
+  return entries;
+}
+
+function renderUsageLeague() {
+  const sorted = getSortedLeague();
+  const allPlayers = Object.keys(window.CURRENT_STANDINGS || {});
+  const totalPlayers = allPlayers.length || 12;
+  const maxVal = sorted[0] ? (_usageSortMode === 'uses'
+    ? Object.values(sorted[0][1].owners).reduce((s,e)=>s+e.length,0)
+    : sorted[0][1].count) : 1;
+
+  document.getElementById('usage-league-sub').textContent =
+    `${sorted.length} unique golfers used · ${Object.keys(buildUsageData().playerData).length} players`;
+
+  const toShow = _usageShowAll ? sorted : sorted.slice(0, USAGE_INITIAL);
+  const container = document.getElementById('usage-league-rows');
+  container.innerHTML = '';
+
+  toShow.forEach(([golfer, data], i) => {
+    const rank = i + 1;
+    const owners = Object.entries(data.owners).sort((a,b) => b[1].length - a[1].length);
+    const totalUses = owners.reduce((s,[,e]) => s+e.length, 0);
+    const barVal = _usageSortMode === 'uses' ? totalUses / maxVal : data.count / maxVal;
+    const rankClass = rank===1?' top1':rank===2?' top2':rank===3?' top3':'';
+
+    const pips = owners.map(([owner, evts]) => {
+      const multi = evts.length > 1;
+      return `<span class="usage-pip${multi?' multi':''}"><span class="usage-pip-name">${owner}</span><span class="usage-pip-count">×${evts.length}</span></span>`;
+    }).join('');
+
+    const row = document.createElement('div');
+    row.className = 'usage-row' + rankClass;
+    row.innerHTML = `
+      <div class="usage-rank">${rank}</div>
+      <div>
+        <div class="usage-golfer-name">${golfer}</div>
+        <div class="usage-pips">${pips}</div>
+      </div>
+      <div class="usage-stat">${data.count}/${totalPlayers} <span>owners</span>${totalUses} <span>total uses</span></div>
+      <div class="usage-bar-wrap"><div class="usage-bar" style="width:${(barVal*100).toFixed(1)}%"></div></div>
+    `;
+    row.onclick = () => toggleUsageExpand(row, golfer, data, i);
+    container.appendChild(row);
+
+    const exp = document.createElement('div');
+    exp.className = 'usage-expand';
+    exp.id = 'uexp-' + i;
+    container.appendChild(exp);
+  });
+
+  const btn = document.getElementById('usage-show-more');
+  btn.style.display = '';
+  btn.textContent = _usageShowAll ? 'Show less ↑' : `Show all ${sorted.length} golfers ↓`;
+  if (!_usageShowAll && sorted.length <= USAGE_INITIAL) btn.style.display = 'none';
+}
+
+function toggleUsageExpand(row, golfer, data, idx) {
+  const exp = document.getElementById('uexp-' + idx);
+  const isOpen = exp.classList.contains('open');
+  document.querySelectorAll('.usage-expand.open').forEach(e => e.classList.remove('open'));
+  document.querySelectorAll('.usage-row.expanded').forEach(r => r.classList.remove('expanded'));
+  if (!isOpen) {
+    row.classList.add('expanded');
+    exp.classList.add('open');
+    const owners = Object.entries(data.owners).sort((a,b) => b[1].length - a[1].length);
+    exp.innerHTML = owners.map(([owner, evts]) =>
+      `<span style="display:inline-block;margin-right:18px;"><strong style="color:var(--text)">${owner}</strong> (×${evts.length}): <span style="color:var(--text2)">${evts.join(', ')}</span></span>`
+    ).join('');
+  }
+}
+
+function renderUsagePlayer(name, activeBtn) {
+  document.querySelectorAll('.p-usage-tab').forEach(b => b.classList.toggle('active', b === activeBtn));
+  const data = (window._usagePlayerData || {})[name];
+  const detail = document.getElementById('usage-player-detail');
+  if (!data) { detail.innerHTML = '<p style="font-size:13px;color:var(--text2);">No data</p>'; return; }
+
+  const golfers = Object.entries(data).sort((a,b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  const totalUses = golfers.reduce((s,[,e]) => s+e.length, 0);
+  const repeats = golfers.filter(([,e]) => e.length > 1).length;
+  const events = [...new Set(golfers.flatMap(([,e]) => e))];
+
+  detail.innerHTML = `
+    <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:14px;flex-wrap:wrap;">
+      <span style="font-size:18px;font-weight:700;font-family:'Helvetica Neue',Arial,sans-serif;color:var(--text);">${name}</span>
+      <span style="font-size:12px;color:var(--text2);font-family:'Helvetica Neue',Arial,sans-serif;">
+        <strong style="color:var(--text)">${golfers.length}</strong> unique golfers ·
+        <strong style="color:var(--text)">${totalUses}</strong> total picks ·
+        <strong style="color:var(--text)">${events.length}</strong> events ·
+        <strong style="color:var(--text)">${repeats}</strong> repeat picks
+      </span>
+      <div style="margin-left:auto;display:flex;gap:6px;">
+        <button class="p-usage-tab active" id="puf-all" onclick="filterUsagePlayer(&apos;all&apos;,&apos;${name}&apos;,this)">All (${golfers.length})</button>
+        <button class="p-usage-tab" id="puf-rep" onclick="filterUsagePlayer(&apos;repeat&apos;,&apos;${name}&apos;,this)">Repeats (${repeats})</button>
+      </div>
+    </div>
+    <div class="p-usage-grid" id="p-usage-grid"></div>
+  `;
+  buildUsagePlayerGrid(golfers, 'all');
+}
+
+function filterUsagePlayer(mode, name, btn) {
+  document.querySelectorAll('#puf-all,#puf-rep').forEach(b => b.classList.toggle('active', b === btn));
+  const data = (window._usagePlayerData || {})[name];
+  if (!data) return;
+  const golfers = Object.entries(data).sort((a,b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  const toShow = mode === 'repeat' ? golfers.filter(([,e]) => e.length > 1) : golfers;
+  buildUsagePlayerGrid(toShow, mode);
+}
+
+function buildUsagePlayerGrid(golfers, mode) {
+  const grid = document.getElementById('p-usage-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  if (!golfers.length) {
+    grid.innerHTML = '<p style="font-size:13px;color:var(--text2);">No repeat picks yet</p>';
+    return;
+  }
+  golfers.forEach(([golfer, events]) => {
+    const uses = events.length;
+    const card = document.createElement('div');
+    card.className = 'p-usage-card' + (uses > 1 ? ' multi' : '');
+    card.innerHTML = `
+      <div class="p-usage-golfer">${golfer}</div>
+      <div class="p-usage-count">
+        <div class="p-usage-num">${uses}</div>
+        <div class="p-usage-label">use${uses !== 1 ? 's' : ''}</div>
+      </div>
+      <div class="p-usage-events">${events.join(', ')}</div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+
+// ── Usage Player Cards ────────────────────────────────────────────────────
+
+function renderUsageCards() {
+  const canvas = document.getElementById('usage-cards-canvas');
+  if (!canvas) return;
+  const playerData = window._usagePlayerData || {};
+  if (!Object.keys(playerData).length) { renderUsage(); }
+
+  const topN = parseInt(document.getElementById('cards-top-n').value) || 5;
+  const standings = Object.entries(CURRENT_STANDINGS).sort((a,b) => b[1].pts - a[1].pts).map(e => e[0]);
+  const players = standings.filter(p => playerData[p]).concat(
+    Object.keys(playerData).filter(p => !standings.includes(p))
+  ).sort((a, b) => Object.keys(playerData[b] || {}).length - Object.keys(playerData[a] || {}).length);
+
+  const dpr = window.devicePixelRatio || 1;
+  const COLS = 4;
+  const ROWS = Math.ceil(players.length / COLS);
+
+  const CARD_W    = 256;
+  const CARD_PAD  = 14;
+  const NAME_H    = 44;
+  const ROW_H     = 32;
+  const CARD_H    = NAME_H + topN * ROW_H + 10;
+  const GAP       = 10;
+  const OUTER_PAD = 22;
+  const BANNER_H  = 60;
+  const FOOTER_H  = 32;
+  const W = COLS * CARD_W + (COLS - 1) * GAP + OUTER_PAD * 2;
+  const H = BANNER_H + ROWS * CARD_H + (ROWS - 1) * GAP + OUTER_PAD * 2 + FOOTER_H;
+
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  // Background
+  ctx.fillStyle = '#0c0c10';
+  ctx.fillRect(0, 0, W, H);
+
+  // Dot grid texture
+  ctx.fillStyle = 'rgba(255,255,255,0.022)';
+  for (let gx = OUTER_PAD; gx < W - OUTER_PAD; gx += 18) {
+    for (let gy = BANNER_H; gy < H - FOOTER_H; gy += 18) {
+      ctx.beginPath();
+      ctx.arc(gx, gy, 0.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Gold top bar
+  const goldGrad = ctx.createLinearGradient(0, 0, W, 0);
+  goldGrad.addColorStop(0,   '#c8942a');
+  goldGrad.addColorStop(0.5, '#f0c050');
+  goldGrad.addColorStop(1,   '#c8942a');
+  ctx.fillStyle = goldGrad;
+  ctx.fillRect(0, 0, W, 3);
+
+  // Banner
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 24px Arial, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('MOST USED GOLFERS', OUTER_PAD, 38);
+
+  const totalEvents  = [...new Set(Object.values(playerData).flatMap(d => Object.values(d).flat()))].length;
+  const totalGolfers = Object.keys(playerData).reduce((s,p) => s + Object.keys(playerData[p]).length, 0);
+  // Brighter subtitle so it's actually readable
+  ctx.fillStyle = '#6a6a88';
+  ctx.font = '11px Arial, sans-serif';
+  ctx.fillText(totalGolfers + ' golfers  ·  ' + totalEvents + ' events  ·  sorted by roster depth', OUTER_PAD, 54);
+
+  // ── Cards ────────────────────────────────────────────────────────────────
+  players.forEach((player, pi) => {
+    const col = pi % COLS;
+    const row = Math.floor(pi / COLS);
+    const cx  = OUTER_PAD + col * (CARD_W + GAP);
+    const cy  = BANNER_H + OUTER_PAD + row * (CARD_H + GAP);
+
+    const golfers       = Object.entries(playerData[player] || {})
+                           .sort((a,b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+    const standingsRank = standings.indexOf(player);
+    const pColor        = TREND_COLORS[standingsRank % TREND_COLORS.length];
+    const uniqueCount   = golfers.length;
+    const top           = golfers.slice(0, topN);
+    const localMax      = top[0] ? top[0][1].length : 1;
+
+    // Card bg
+    ctx.fillStyle = '#13131a';
+    ctx.beginPath();
+    ctx.roundRect(cx, cy, CARD_W, CARD_H, 6);
+    ctx.fill();
+
+    // Left accent stripe
+    ctx.fillStyle = pColor;
+    ctx.beginPath();
+    ctx.roundRect(cx, cy, 3, CARD_H, [6, 0, 0, 6]);
+    ctx.fill();
+
+    // ── Card header ──────────────────────────────────────────────────────
+    // Player name — big and bold
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 16px Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(player, cx + CARD_PAD, cy + 21);
+
+    // Unique count — smaller, fixed readable gray so dark player colors stay legible
+    const nameW = ctx.measureText(player).width;
+    ctx.fillStyle = '#7a7a96';
+    ctx.font = '400 10px Arial, sans-serif';
+    ctx.fillText('· ' + uniqueCount + ' unique', cx + CARD_PAD + nameW + 4, cy + 21);
+
+    // Rank — barely visible, bottom right
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.font = '400 10px Arial, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('#' + (standingsRank + 1), cx + CARD_W - CARD_PAD, cy + 21);
+
+    // Separator
+    ctx.strokeStyle = pColor;
+    ctx.globalAlpha = 0.15;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx + 3, cy + NAME_H);
+    ctx.lineTo(cx + CARD_W, cy + NAME_H);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // ── Golfer rows ──────────────────────────────────────────────────────
+    top.forEach(([golfer, events], gi) => {
+      const uses    = events.length;
+      const gy      = cy + NAME_H + gi * ROW_H;
+      const isHot   = uses >= 7;
+      const isMulti = uses >= 2;
+
+      // Name
+      const nameColor = isHot ? '#f5c842' : isMulti ? '#d0d0e0' : '#686880';
+      ctx.fillStyle = nameColor;
+      ctx.font = isHot   ? 'bold 12px Arial, sans-serif'
+               : isMulti ? '500 12px Arial, sans-serif'
+               :           '400 11px Arial, sans-serif';
+      ctx.textAlign = 'left';
+      let name = golfer;
+      while (ctx.measureText(name).width > CARD_W - 50 && name.length > 5) {
+        name = name.slice(0, -2) + '…';
+      }
+      ctx.fillText(name, cx + CARD_PAD, gy + 16);
+
+      // Usage bar — sits directly under name text like an underline
+      // Measure count badge width so bar never overlaps it
+      ctx.font = 'bold 11px Arial, sans-serif';
+      const countW  = ctx.measureText('×' + uses).width + 6;
+      const barX    = cx + CARD_PAD;
+      const barMaxW = CARD_W - CARD_PAD * 2 - countW - 8;
+      const barFill = Math.round(barMaxW * (uses / localMax));
+      const barY    = gy + 20; // snug under the baseline
+
+      // Track
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, barMaxW, 3, 1.5);
+      ctx.fill();
+      // Fill
+      ctx.fillStyle = isHot ? '#c8942a' : pColor;
+      ctx.globalAlpha = isHot ? 0.9 : isMulti ? 0.6 : 0.3;
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, barFill, 3, 1.5);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Count — right aligned, with proper padding
+      // Use brighter color floor so ×2 is never invisible
+      const countAlpha = isHot ? 1 : isMulti ? 0.85 : 0.45;
+      ctx.fillStyle = isHot ? '#c8942a' : pColor;
+      ctx.globalAlpha = countAlpha;
+      ctx.font = 'bold 11px Arial, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('×' + uses, cx + CARD_W - CARD_PAD, gy + 16);
+      ctx.globalAlpha = 1;
+    });
+  });
+
+  // ── Footer ───────────────────────────────────────────────────────────────
+  const fy = H - FOOTER_H + 8;
+  ctx.fillStyle = 'rgba(200,148,42,0.25)';
+  ctx.fillRect(OUTER_PAD, H - FOOTER_H, W - OUTER_PAD * 2, 1);
+
+  const legend = [
+    { color: '#c8942a', label: '×7+ loyalty' },
+    { color: '#8888aa', label: '×2+ repeat'  },
+    { color: '#686880', label: '×1 once'     },
+  ];
+  let lx = OUTER_PAD;
+  ctx.font = '10px Arial, sans-serif';
+  legend.forEach(({ color, label }) => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(lx + 4, fy + 4, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#5a5a72';
+    ctx.textAlign = 'left';
+    ctx.fillText(label, lx + 13, fy + 8);
+    lx += ctx.measureText(label).width + 26;
+  });
+
+  ctx.fillStyle = '#5a5a72';
+  ctx.font = 'bold 10px Arial, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('debocup.com', W - OUTER_PAD, fy + 8);
+}
+function downloadUsageCards() {
+  const canvas = document.getElementById('usage-cards-canvas');
+  if (!canvas) return;
+  const link = document.createElement('a');
+  link.download = 'debo-cup-player-usage.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+// ── Form Dashboard ────────────────────────────────────────────────────────
+
+let _formSort = 'hot';
+const FORM_PLAYER_COLORS = {
+  'Anth':'#1a6091','B Luke':'#c05c00','Brad':'#2c6e49','Broc':'#6a0572',
+  'Colin':'#9b2226','DeCampli':'#1b6355','Kyle':'#b5860d','MK':'#5c5c5c',
+  'Stew':'#1a6091','Wiley':'#7c3d12','Woody':'#2d6a4f','Zach':'#8b4513',
+  'Loomis':'#4a1942','Lloyd':'#0d3b6e'
+};
+
+function _formParseDate(s) {
+  if (!s) return 0;
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return new Date(m[3], m[1]-1, m[2]).getTime();
+  return new Date(s).getTime() || 0;
+}
+
+function getFormData() {
+  const season = ALL_RESULTS.filter(r => (r['Season']||'').includes('2026') && r['Player'] && r['Event']);
+  if (!season.length) return null;
+
+  // Build ordered event list with type info
+  const eventMap = {};
+  season.forEach(r => {
+    const evt = r['Event']||'';
+    if (evt && !eventMap[evt]) {
+      eventMap[evt] = { date: r['Date']||'', type: (r['Event Type']||r['Event_Type']||'Regular'), isMajor: (r['Is_Major']||r['IsMajor']||'').toString().toLowerCase() === 'true' };
+    }
+  });
+  const allEvents = Object.entries(eventMap)
+    .sort((a,b) => _formParseDate(a[1].date) - _formParseDate(b[1].date))
+    .map(([name, info]) => ({ name, ...info }));
+
+  // Build per-player finish arrays aligned to allEvents
+  const players = [...new Set(season.map(r=>r['Player']).filter(Boolean))];
+  const playerData = {};
+  players.forEach(p => {
+    const finishes = allEvents.map(evt => {
+      const row = season.find(r => r['Player']===p && r['Event']===evt.name);
+      if (!row) return null;
+      const f = parseInt(row['Finish']);
+      return isNaN(f) || f <= 0 ? null : f;
+    });
+    const played = finishes.filter(v => v !== null);
+    playerData[p] = { finishes, played };
+  });
+  return { allEvents, playerData, players };
+}
+
+function formSeasonAvg(played) {
+  return played.length ? played.reduce((a,b)=>a+b,0)/played.length : null;
+}
+
+function formRecentAvg(played, window) {
+  const w = window === 0 ? played.length : window;
+  const slice = played.slice(-w);
+  return slice.length ? slice.reduce((a,b)=>a+b,0)/slice.length : null;
+}
+
+function formHeatDelta(played, window) {
+  const sa = formSeasonAvg(played);
+  const ra = formRecentAvg(played, window);
+  if (sa === null || ra === null) return 0;
+  return sa - ra; // positive = hot
+}
+
+function formTrend(delta) {
+  if (delta > 1)  return { label:'↑ Hot',    color:'var(--green)' };
+  if (delta < -1) return { label:'↓ Cold',   color:'var(--red)' };
+  return               { label:'→ Steady', color:'var(--gold)' };
+}
+
+function formPipStyle(v, nPlayers) {
+  if (v === null) return null;
+  const pct = (v - 1) / (nPlayers - 1 || 1);
+  if (pct < 0.33) return 'background:#d4edda;color:#2d6a4f;';
+  if (pct < 0.66) return 'background:#fff3cd;color:#856404;';
+  return 'background:#f8d7da;color:#842029;';
+}
+
+function setFormSort(mode, btn) {
+  _formSort = mode;
+  document.querySelectorAll('.form-pill').forEach(b => { b.classList.remove('active'); b.style.background=''; b.style.color=''; b.style.borderColor=''; });
+  btn.classList.add('active');
+  renderFormDashboard();
+}
+
+function renderFormDashboard() {
+  const grid = document.getElementById('form-grid');
+  const emptyMsg = document.getElementById('form-empty-msg');
+  if (!grid) return;
+
+  const data = getFormData();
+  if (!data || !data.players.length) {
+    grid.innerHTML = '';
+    emptyMsg.style.display = '';
+    return;
+  }
+  emptyMsg.style.display = 'none';
+
+  const { allEvents, playerData, players } = data;
+  const recentWindow = parseInt(document.getElementById('form-window-select').value) || 5;
+  const nPlayers = players.length;
+
+  // Sort players
+  function sortVal(p) {
+    const pd = playerData[p];
+    if (_formSort === 'hot')    return -formHeatDelta(pd.played, recentWindow);
+    if (_formSort === 'form')   return formRecentAvg(pd.played, recentWindow) ?? 999;
+    if (_formSort === 'season') return formSeasonAvg(pd.played) ?? 999;
+    return p.toLowerCase();
+  }
+  const sorted = [...players].sort((a,b) => {
+    const va = sortVal(a), vb = sortVal(b);
+    return typeof va === 'string' ? va.localeCompare(vb) : va - vb;
+  });
+
+  grid.innerHTML = '';
+  const dpr = window.devicePixelRatio || 1;
+
+  sorted.forEach((p, idx) => {
+    const pd = playerData[p];
+    const { finishes, played } = pd;
+    const seasonAvg  = formSeasonAvg(played);
+    const recentAvg  = formRecentAvg(played, recentWindow);
+    const delta      = formHeatDelta(played, recentWindow);
+    const trend      = formTrend(delta);
+    const deltaStr   = seasonAvg !== null && recentAvg !== null ? (delta >= 0 ? '+' : '') + delta.toFixed(1) : '—';
+    const color      = FORM_PLAYER_COLORS[p] || TREND_COLORS[idx % TREND_COLORS.length];
+
+    // Last N played pips
+    const lastNPlayed = played.slice(-Math.max(recentWindow, 5));
+
+    // Wins & top 3s
+    const wins  = played.filter(v => v === 1).length;
+    const top3s = played.filter(v => v <= 3).length;
+
+    // Card
+    const card = document.createElement('div');
+    card.className = 'form-card';
+
+    // Pip HTML
+    const pipHtml = lastNPlayed.map(v => {
+      const s = formPipStyle(v, nPlayers);
+      return `<div class="form-pip" style="${s}">${v}</div>`;
+    }).join('');
+
+    card.innerHTML = `
+      <div class="form-card-header">
+        <div>
+          <div class="form-player-name">${p}</div>
+          <div class="form-player-sub">
+            Season avg: ${seasonAvg !== null ? seasonAvg.toFixed(1) : '—'} &nbsp;·&nbsp;
+            Recent avg: ${recentAvg !== null ? recentAvg.toFixed(1) : '—'} &nbsp;·&nbsp;
+            Δ <span style="font-weight:700;color:${trend.color};">${deltaStr}</span>
+          </div>
+          <div class="form-player-sub" style="margin-top:1px;">
+            ${wins} win${wins!==1?'s':''} &nbsp;·&nbsp; ${top3s} top-3${top3s!==1?'s':''}  &nbsp;·&nbsp; ${played.length} events
+          </div>
+        </div>
+        <div class="form-status" style="color:${trend.color};">${trend.label}</div>
+      </div>
+      <div class="form-chart-box">
+        <canvas id="fchart-${idx}" style="display:block;width:100%;height:88px;"></canvas>
+      </div>
+      <div class="form-pips-row">
+        <span class="form-pips-label">Last ${lastNPlayed.length} played:</span>
+        <div class="form-pips">${pipHtml}</div>
+      </div>`;
+
+    grid.appendChild(card);
+
+    // Draw the mini chart on canvas using native 2D API (matches existing tool style)
+    requestAnimationFrame(() => {
+      const canvas = document.getElementById('fchart-' + idx);
+      if (!canvas) return;
+      const W = canvas.offsetWidth || 252;
+      const H = 88;
+      canvas.width  = W * dpr;
+      canvas.height = H * dpr;
+      canvas.style.width  = W + 'px';
+      canvas.style.height = H + 'px';
+
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+
+      const PAD = { t:8, b:16, l:24, r:8 };
+      const cW = W - PAD.l - PAD.r;
+      const cH = H - PAD.t - PAD.b;
+
+      // Background
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#ffffff';
+      ctx.fillRect(0, 0, W, H);
+
+      const n = allEvents.length;
+      if (n < 1) return;
+      const xStep = n > 1 ? cW / (n - 1) : cW;
+
+      // Y scale: 1 (best) at top, nPlayers at bottom
+      const yFor = v => PAD.t + ((v - 1) / (nPlayers - 1 || 1)) * cH;
+
+      // Faint horizontal guides at 1st, mid, last
+      [1, Math.ceil(nPlayers/2), nPlayers].forEach(r => {
+        ctx.strokeStyle = '#e8e6e0';
+        ctx.lineWidth = 0.5;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(PAD.l, yFor(r));
+        ctx.lineTo(W - PAD.r, yFor(r));
+        ctx.stroke();
+      });
+
+      // Y axis labels (1st / last)
+      ctx.fillStyle = '#b0aea8';
+      ctx.font = '8px Helvetica Neue, Arial, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('1st', PAD.l - 3, yFor(1) + 3);
+      ctx.fillText(nPlayers + (nPlayers===12?'th':nPlayers===11?'th':nPlayers===10?'th':'th'), PAD.l - 3, yFor(nPlayers) + 3);
+
+      // Season baseline (dashed green)
+      if (seasonAvg !== null) {
+        const baseY = yFor(seasonAvg);
+        ctx.strokeStyle = '#2d6a4f';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(PAD.l, baseY);
+        ctx.lineTo(W - PAD.r, baseY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+      }
+
+      // Filled area under the line
+      const points = finishes.map((v, i) => v !== null ? { x: PAD.l + i * xStep, y: yFor(v) } : null);
+      const validPts = points.filter(Boolean);
+      if (validPts.length > 1) {
+        ctx.beginPath();
+        let first = true;
+        points.forEach((pt, i) => {
+          if (!pt) return;
+          if (first) { ctx.moveTo(pt.x, pt.y); first = false; }
+          else ctx.lineTo(pt.x, pt.y);
+        });
+        // Close fill path to baseline
+        const lastPt = validPts[validPts.length - 1];
+        const firstPt = validPts[0];
+        ctx.lineTo(lastPt.x, H - PAD.b);
+        ctx.lineTo(firstPt.x, H - PAD.b);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.08;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      // Main line (smooth — Catmull-Rom spline)
+      if (validPts.length > 1) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        // simple polyline through valid points (gaps skipped)
+        let started = false;
+        points.forEach(pt => {
+          if (!pt) { started = false; return; }
+          if (!started) { ctx.moveTo(pt.x, pt.y); started = true; }
+          else ctx.lineTo(pt.x, pt.y);
+        });
+        ctx.stroke();
+      }
+
+      // Dots — normal events small, major/signature highlighted
+      finishes.forEach((v, i) => {
+        if (v === null) return;
+        const x = PAD.l + i * xStep;
+        const y = yFor(v);
+        const evtInfo = allEvents[i];
+        const isSpecial = evtInfo && (evtInfo.isMajor || evtInfo.type === 'Major' || evtInfo.type === 'Signature');
+
+        if (isSpecial) {
+          // Gold ring dot for majors/sigs
+          ctx.beginPath();
+          ctx.arc(x, y, 5, 0, Math.PI * 2);
+          ctx.fillStyle = '#fff8e1';
+          ctx.fill();
+          ctx.strokeStyle = '#b5860d';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = '#b5860d';
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.fill();
+        }
+      });
+
+      // X-axis event tick marks — short lines at each event, label first/last
+      ctx.fillStyle = '#b0aea8';
+      ctx.font = '8px Helvetica Neue, Arial, sans-serif';
+      allEvents.forEach((evt, i) => {
+        const x = PAD.l + i * xStep;
+        ctx.strokeStyle = '#e0ddd6';
+        ctx.lineWidth = 0.5;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(x, H - PAD.b);
+        ctx.lineTo(x, H - PAD.b + 3);
+        ctx.stroke();
+        // Label first and last only
+        if (i === 0) {
+          ctx.textAlign = 'left';
+          ctx.fillText(abbrevEvt(evt.name), x, H - 2);
+        } else if (i === n - 1) {
+          ctx.textAlign = 'right';
+          ctx.fillText(abbrevEvt(evt.name), x, H - 2);
+        }
+      });
+    });
+  });
+}
+
+</script>
 </body>
 </html>
