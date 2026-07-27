@@ -3779,17 +3779,26 @@ function ensureOddsScores(pool, slate){
   // small regression. Legacy raw-share composite in that case — identical to
   // prior behavior.
   const deepPosted = mapped.some(k=>ODDS_WEIGHTS[k]==null && withOdds.some(p=>nascarMlToProb(p[k])!=null));
+  // Without deep rungs the COMPOSITE stays legacy (sim-tested: a 4-rung curve
+  // fit regressed the odds score) — but the SIM still needs survival curves to
+  // sample finishes from. So: compute the legacy composite here, then keep
+  // going and fit curves from the posted rungs anyway. Early-week slates
+  // (books post T30/40 Tue/Wed) can now simulate; the fit's slope shrinks
+  // toward the field mean, which is exactly the guard rail for a short ln(k)
+  // span. _oddsScore selection happens at the bottom: fitted place-points when
+  // deep rungs exist, legacy composite otherwise — optimizer behavior with
+  // shallow odds is byte-identical to before.
+  let legacyScore=null;
   if(!deepPosted){
     const markets=mapped.filter(k=>ODDS_WEIGHTS[k]>0);
     if(!markets.length){ pool.forEach(p=>{p._oddsScore=0; p._eqFit=null; p._curve=null;}); return false; }
     const fieldSum={};
     markets.forEach(k=> fieldSum[k]=Math.max(0.01, pool.reduce((s,p)=>s+(nascarMlToProb(p[k])||0),0)) );
     const wTot=markets.reduce((s,k)=>s+ODDS_WEIGHTS[k],0)||1;
+    legacyScore=new Map();
     pool.forEach(p=>{
-      p._eqFit=null; p._curve=null;
-      p._oddsScore=markets.reduce((s,k)=> s + (ODDS_WEIGHTS[k]/wTot)*((nascarMlToProb(p[k])||0)/fieldSum[k]), 0);
+      legacyScore.set(p, markets.reduce((s,k)=> s + (ODDS_WEIGHTS[k]/wTot)*((nascarMlToProb(p[k])||0)/fieldSum[k]), 0));
     });
-    return true;
   }
 
   // Per-tier coverage. A tier is "covered" when ~the whole field is posted, so
@@ -3897,7 +3906,9 @@ function ensureOddsScores(pool, slate){
     const e=fitted.get(p);
     p._eqFit=e?e.vals:null; // fitted win/t5/t10/t20 probs — inspectable in console
     p._curve=e?{a:e.f.a,b:e.f.b}:null; // raw survival-curve params — the PGA sim samples from these
-    p._oddsScore=e?expectedPlacePts(e.f):0;
+    p._oddsScore=deepPosted
+      ? (e?expectedPlacePts(e.f):0)
+      : (legacyScore.get(p)||0); // shallow odds: legacy composite, curves sim-only
   });
   return true;
 }
