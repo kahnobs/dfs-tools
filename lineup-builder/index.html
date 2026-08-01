@@ -25,6 +25,9 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min
 .sport-nascar{background:rgba(232,66,26,.2);color:var(--accent2);}
 .sport-pga{background:rgba(34,197,94,.2);color:var(--green);}
 .sport-ufc{background:rgba(59,130,246,.2);color:var(--blue);}
+.sport-nfl{background:rgba(168,85,247,.2);color:#a855f7;}
+.slot-pos-tag{font-family:'DM Mono',monospace;font-size:9px;font-weight:700;color:var(--muted);width:32px;display:inline-block;}
+.pos-badge{font-family:'DM Mono',monospace;font-size:10px;font-weight:700;padding:1px 4px;border-radius:3px;background:rgba(168,85,247,.15);color:#c084fc;}
 .del-tab{color:var(--muted);font-size:12px;opacity:0;transition:opacity .1s;}
 .slate-tab:hover .del-tab{opacity:1;}
 .del-tab:hover{color:var(--red)!important;}
@@ -1092,6 +1095,49 @@ html { overscroll-behavior-y: contain; }
             </div>
           </div>
 
+          <div class="autogen-section" id="nflSection" style="display:none;">
+            <div class="autogen-section-title">NFL Simulation</div>
+            <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">Simulates each game outside-in: the consensus total and spread set the game's score, that score sets each team's yardage and pass/run script, and every player's prop line rides those team factors. Stack and bring-back correlation come out of that structure — a QB and his WR share the same team draw. Needs Team + Position; O/U, Spread and TmTot (from the odds puller) make the game environments real.</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+              <span class="setting-label">Simulations</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <input type="range" min="500" max="10000" step="500" value="2000" id="nflSimCountSlider"
+                style="width:100%;accent-color:#a855f7;"
+                oninput="document.getElementById('nflSimCountLabel').textContent=this.value;const _s=activeSlate();if(_s){_s._simCount=parseInt(this.value);save();}">
+              <span id="nflSimCountLabel" style="font-family:'DM Mono',monospace;font-size:11px;color:#a855f7;font-weight:600;min-width:38px;">2000</span>
+            </div>
+
+            <div class="autogen-section-title" style="margin-top:10px;">Stacking</div>
+            <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">Correlation is already in the sim — these rules force it into the lineups you actually submit. "QB + N" requires N pass catchers (WR/TE) from the QB's own team; "bring-back" requires a skill player from the opposing team, the play that wins shootouts.</div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">
+              <span class="setting-label" style="flex:none;">QB +</span>
+              <select id="nflStackN" class="form-input" style="width:110px;padding:3px 6px;font-size:11px;"
+                onchange="const _s=activeSlate();if(_s){_s._nflStackN=parseInt(this.value);save();}">
+                <option value="0">off</option>
+                <option value="1">1 pass catcher</option>
+                <option value="2">2 pass catchers</option>
+                <option value="3">3 pass catchers</option>
+              </select>
+              <span class="setting-label" style="flex:none;margin-left:6px;">Bring-back</span>
+              <select id="nflBringBack" class="form-input" style="width:74px;padding:3px 6px;font-size:11px;"
+                onchange="const _s=activeSlate();if(_s){_s._nflBringBack=parseInt(this.value);save();}">
+                <option value="0">off</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+              </select>
+            </div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);cursor:pointer;">
+              <input type="checkbox" id="nflNoRbVsDst" style="accent-color:#a855f7;"
+                onchange="const _s=activeSlate();if(_s){_s._nflNoRbVsDst=this.checked;save();}">
+              <span>No RB against my own DST <span style="opacity:.65;">(a DST scores by stopping the run — rostering both fights itself)</span></span>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);cursor:pointer;margin-top:3px;">
+              <input type="checkbox" id="nflStackRbCounts" style="accent-color:#a855f7;"
+                onchange="const _s=activeSlate();if(_s){_s._nflStackRbCounts=this.checked;save();}">
+              <span>Count a same-team RB toward the stack <span style="opacity:.65;">(off = WR/TE only, the real pass-game correlation)</span></span>
+            </label>
+          </div>
           <div class="autogen-section" id="pgaSection" style="display:none;">
             <div class="autogen-section-title">PGA Simulation</div>
             <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">Simulates full tournaments: finishes calibrated to the de-vigged odds ladder, AM/PM wave correlation, the cut after R2, and DK hole-by-hole scoring shaped per golfer and anchored to the course scoring environment (Par + Field vs par). Requires odds mapped. Contest EV Mode on = lineups priced vs your contest's payout curve and a modeled field (needs Own%); off = Sim Score mode, lineups ranked by their joint score on held-out sims.</div>
@@ -1374,10 +1420,12 @@ html { overscroll-behavior-y: contain; }
         </div>
         <div class="form-group">
           <div class="form-label">Sport</div>
-          <select class="form-input" id="slateSport">
+          <select class="form-input" id="slateSport"
+            onchange="if(typeof parsedCSV!=='undefined'&&parsedCSV&&parsedCSV.headers&&parsedCSV.headers.length){autoMapColumns(this.value);}">
             <option value="nascar">NASCAR (Drivers)</option>
             <option value="pga">PGA (Golfers)</option>
             <option value="ufc">UFC (Fighters)</option>
+            <option value="nfl">NFL (Classic)</option>
           </select>
         </div>
       </div>
@@ -1506,7 +1554,106 @@ const SPORT_CFG = {
   nascar:{label:'Drivers',pos:'D',pillClass:'sport-nascar'},
   pga:   {label:'Golfers', pos:'G',pillClass:'sport-pga'},
   ufc:   {label:'Fighters',pos:'F',pillClass:'sport-ufc'},
+  // NFL Classic: positional 9-slot roster. `slots` drives the manual builder,
+  // export header, and the sim optimizer; `flex` lists FLEX-eligible positions.
+  nfl:   {label:'Players',pos:'FLEX',pillClass:'sport-nfl',
+          slots:['QB','RB','RB','WR','WR','WR','TE','FLEX','DST'],
+          flex:['RB','WR','TE'], size:9},
 };
+// Roster size for the active sport (6-man positionless everywhere except NFL).
+const rosterSize = (slate) => (SPORT_CFG[slate?.sport]?.size) || MAX;
+const isNfl = (slate) => slate?.sport === 'nfl';
+
+// ===== NFL CORE A ===== (extracted verbatim for node tests — see test-nfl-sim.js)
+// ── NFL positional feasibility ────────────────────────────────────────────────
+// A partial set of players is feasible iff position counts can still be
+// completed to QB,2RB,3WR,TE,FLEX(RB/WR/TE),DST. Closed-form: QB≤1, DST≤1,
+// RB≤3, WR≤4, TE≤2, RB+WR+TE≤7, total≤9.
+function nflPosOf(p){
+  const raw = String(p?.position||'').toUpperCase().replace(/[^A-Z]/g,'');
+  if(/^(DST|DEF|D)$/.test(raw)) return 'DST';
+  if(/^(QB|RB|WR|TE)$/.test(raw)) return raw;
+  return null;
+}
+function nflCounts(slate, ids){
+  const c = {QB:0,RB:0,WR:0,TE:0,DST:0,UNK:0};
+  for(const id of ids||[]){
+    const pos = nflPosOf(playerById(slate,id));
+    c[pos||'UNK']++;
+  }
+  return c;
+}
+function nflFeasible(c){
+  if(c.UNK>0) return false;
+  const flexPool = c.RB+c.WR+c.TE;
+  if(c.QB>1 || c.DST>1 || c.RB>3 || c.WR>4 || c.TE>2) return false;
+  if(flexPool>7 || (c.QB+c.DST+flexPool)>9) return false;
+  // Only ONE flex slot exists, so at most one position may exceed its base
+  // requirement (2 RB / 3 WR / 1 TE). 3 RB + 4 WR fits every per-position cap
+  // yet needs two flex spots — infeasible.
+  const excess = Math.max(0,c.RB-2) + Math.max(0,c.WR-3) + Math.max(0,c.TE-1);
+  return excess<=1;
+}
+function nflComplete(c){
+  return c.UNK===0 && c.QB===1 && c.DST===1 && c.RB>=2 && c.WR>=3 && c.TE>=1 &&
+         (c.RB+c.WR+c.TE)===7;
+}
+// Assign a COMPLETE 9-id set to named slots for display/export. Base slots
+// first (RB1/RB2, WR1-3, TE), the leftover skill player lands in FLEX.
+function nflAssignSlots(slate, ids){
+  const groups = {QB:[],RB:[],WR:[],TE:[],DST:[]};
+  for(const id of ids||[]){
+    const pos = nflPosOf(playerById(slate,id));
+    if(pos) groups[pos].push(id); else (groups._bad=groups._bad||[]).push(id);
+  }
+  const bySal = a => a.sort((x,y)=>(playerById(slate,y)?.salary||0)-(playerById(slate,x)?.salary||0));
+  Object.values(groups).forEach(g=>Array.isArray(g)&&bySal(g));
+  const out = {QB:groups.QB[0]||null, RB:groups.RB[0]||null, RB2:groups.RB[1]||null,
+    WR:groups.WR[0]||null, WR2:groups.WR[1]||null, WR3:groups.WR[2]||null,
+    TE:groups.TE[0]||null, DST:groups.DST[0]||null,
+    FLEX:groups.RB[2]||groups.WR[3]||groups.TE[1]||null};
+  return [out.QB,out.RB,out.RB2,out.WR,out.WR2,out.WR3,out.TE,out.FLEX,out.DST];
+}
+
+// ── NFL odds/prop cell parsers + stat ingestion ──────────────────────────────
+// Consensus O/U cells look like "249.5 (-112)" (line + de-vigged over price).
+function parseOuCell(s){
+  const m = String(s||'').match(/^([\d.]+)\s*\(([+-]?\d+|EVEN)\)$/i);
+  if(!m) return null;
+  const line = parseFloat(m[1]);
+  const ml = /even/i.test(m[2]) ? 100 : parseInt(m[2],10);
+  const prob = ml<0 ? (-ml)/((-ml)+100) : 100/(ml+100);
+  return Number.isFinite(line) ? {line, overProb: Number.isFinite(prob)?prob:0.5} : null;
+}
+function amProb(s){
+  const ml = parseInt(String(s||'').replace('−','-'),10);
+  if(!Number.isFinite(ml)||ml===0) return null;
+  return ml<0 ? (-ml)/((-ml)+100) : 100/(ml+100);
+}
+// Header-name reads for the odds puller's NFL columns (+ DK CSV fallbacks).
+function applyNflStats(p, row, headers){
+  const idx = (rx)=>headers.findIndex(h=>rx.test((h||'').trim()));
+  const get = (rx)=>{ const i=idx(rx); return i>=0?(row[i]||'').trim():null; };
+  const num = (rx)=>{ const v=get(rx); const n=parseFloat(v); return Number.isFinite(n)?n:null; };
+  p.pass_yds_ou = get(/^pass\s*yds?\s*o\/u$/i) || null;
+  p.pass_td_ou  = get(/^pass\s*tds?\s*o\/u$/i) || null;
+  p.rush_yds_ou = get(/^rush\s*yds?\s*o\/u$/i) || null;
+  p.rec_yds_ou  = get(/^rec\s*yds?\s*o\/u$/i)  || null;
+  p.rec_ou      = get(/^rec\s*o\/u$/i)         || null;
+  p.rush_rec_ou = get(/^rush\s*\+\s*rec\s*o\/u$/i) || null;
+  p.atd         = get(/^atd$/i) || get(/^anytime\s*td$/i) || null;
+  p.game_ou     = num(/^o\/u$/i);
+  p.spread      = num(/^spread$/i);
+  p.tm_tot      = num(/^tm\s*tot(al)?$/i);
+  p.opp_tot     = num(/^opp\s*tot(al)?$/i);
+  // Position fallback: DK salary CSVs carry "Position"; the mapper handles it,
+  // but header-scan too so sheet imports without an explicit mapping work.
+  if(!p.position){
+    const v = get(/^(pos|position|roster\s*position)$/i);
+    if(v) p.position = v.toUpperCase();
+  }
+}
+// ===== /NFL CORE A =====
 
 const REQUIRED_ROLES = [
   {value:'name',   label:'Name'},
@@ -1517,6 +1664,7 @@ const OPTIONAL_ROLES = [
   {value:'proj',       label:'Projection'},
   {value:'own',        label:'Ownership %'},
   {value:'rating',     label:'Rating'},
+  {value:'position',   label:'Position (NFL)'},
   {value:'start',      label:'Fight # / Seed / Tee Time / Grid'},
   {value:'team',       label:'Team'},
   {value:'opp',        label:'Opponent'},
@@ -1606,7 +1754,22 @@ function blendPgaModel(row, idx){
 
 // Two-pass auto-mapper: priority columns (Average Proj/Own) are claimed first,
 // then normal AUTO_MAP fills in anything not yet assigned.
-function applyAutoMap(headers, mapping) {
+// `sport` MUST be passed by every caller. It used to fall back to reading the
+// New Slate modal's <select>, which is wrong for Update Pool (that acts on the
+// ACTIVE slate) and stale after an NFL import — a NASCAR sheet's "Pos" column
+// would then get claimed as `position` and its grid column silently dropped.
+function applyAutoMap(headers, mapping, sport) {
+  sport = sport || '';
+  // Pass 0 (NFL only): claim the Position column BEFORE the normal pass —
+  // AUTO_MAP.start also matches "pos"/"position" (grid position for NASCAR),
+  // and would silently swallow NFL's roster-position column otherwise.
+  // "Roster Position" is claimed for any sport (unambiguous).
+  headers.forEach((h, i) => {
+    const t = h.trim();
+    if(mapping.position != null) return;
+    if(/^roster[\s_]?position$/i.test(t)) mapping.position = i;
+    else if(sport === 'nfl' && /^(pos|position)$/i.test(t)) mapping.position = i;
+  });
   // Pass 1: priority matches
   headers.forEach((h, i) => {
     for(const [role, rx] of Object.entries(PRIORITY_MAP)){
@@ -1616,7 +1779,12 @@ function applyAutoMap(headers, mapping) {
   // Pass 2: normal matches (skip roles already claimed by priority pass)
   headers.forEach((h, i) => {
     for(const [role, rx] of Object.entries(AUTO_MAP)){
-      if(rx.test(h.trim()) && mapping[role] == null){ mapping[role] = i; break; }
+      if(role === 'position') continue;                       // handled in pass 0
+      if(rx.test(h.trim()) && mapping[role] == null){
+        // Don't let 'start' re-claim the column pass 0 gave to position
+        if(role === 'start' && mapping.position === i) continue;
+        mapping[role] = i; break;
+      }
     }
   });
 }
@@ -1955,10 +2123,19 @@ const playerById = (slate,id) => (slate.players||[]).find(p=>p.id===id);
 function leftColLabel(slate){
   if(slate.sport==='pga') return 'Tee';
   if(slate.sport==='ufc') return 'Fight';
+  if(slate.sport==='nfl') return 'Pos';
   return 'Grid';
 }
 
 function leftColValue(slate, p, i){
+  if(slate.sport==='nfl'){
+    const pos = nflPosOf(p) || '?';
+    const team = (p.team||'').toUpperCase();
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1;">
+      <span class="pos-badge">${pos}</span>
+      ${team?`<span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">${team}</span>`:''}
+    </div>`;
+  }
   if(slate.sport==='ufc'){
     const fight = p.fightNum || '—';
     const opp = p.opp || p.team || '';
@@ -2124,6 +2301,19 @@ function slateFieldsBase(slate){
     f.push({key:'_simP50', label:'Sim', cls:'col-r'});
     f.push({key:'simValue', label:'SVal', cls:'col-r', computed:true});
   }
+  // NFL: game environment is the primary read — team total first, then the
+  // sim columns once a simulation has been run.
+  if(slate.sport==='nfl'){
+    const ps=(slate.players||[]);
+    if(ps.some(p=>p.tm_tot!=null))  f.push({key:'tm_tot',  label:'TmTot', cls:'col-r'});
+    if(ps.some(p=>p.game_ou!=null)) f.push({key:'game_ou', label:'O/U',   cls:'col-r'});
+    if(ps.some(p=>p.spread!=null))  f.push({key:'spread',  label:'Sprd',  cls:'col-r'});
+    if(ps.some(p=>p._simP50!=null)){
+      f.push({key:'_simP50', label:'Sim', cls:'col-r'});
+      f.push({key:'simValue', label:'SVal', cls:'col-r', computed:true});
+      f.push({key:'_simBoom', label:'Boom', cls:'col-r'});
+    }
+  }
   if(cm.cut!=null)    f.push({key:'cut',   label:'Cut',   cls:'col-r'});
   f.push({key:'minExp', label:'Min%', cls:'col-c', inline:true});
   f.push({key:'maxExp', label:'Max%', cls:'col-c', inline:true});
@@ -2161,7 +2351,7 @@ function gridTemplate(fields){
   const slate=activeSlate();
   if(isMobileView()){
     // PGA tee col is just "AM"/"PM" on mobile — much narrower
-    const leftWidth=slate?.sport==='pga'?'30px':slate?.sport==='ufc'?'52px':'28px';
+    const leftWidth=slate?.sport==='pga'?'30px':slate?.sport==='ufc'?'52px':slate?.sport==='nfl'?'40px':'28px';
     const{primary,secondary}=getMobileStatFields(fields);
     const parts=[leftWidth,'minmax(90px,1fr)','56px'];
     if(primary)parts.push('40px');
@@ -2169,7 +2359,7 @@ function gridTemplate(fields){
     parts.push('28px','22px');
     return parts.join(' ');
   }
-  const leftWidth = slate?.sport==='pga' ? '62px' : slate?.sport==='ufc' ? '76px' : '38px';
+  const leftWidth = slate?.sport==='pga' ? '62px' : slate?.sport==='ufc' ? '76px' : slate?.sport==='nfl' ? '48px' : '38px';
   const cols=[leftWidth,'minmax(140px,1fr)','72px'];
   fields.forEach(f=>{
     if(f.key==='proj')  cols.push('56px');
@@ -2178,6 +2368,8 @@ function gridTemplate(fields){
     else if(f.key==='_simP50') cols.push('48px');
     else if(f.key==='ml'||f.key==='itd'||f.key==='win'||f.key==='top3'||f.key==='top5'||f.key==='top10'||f.key==='top20'||f.key==='top30'||f.key==='top40'||f.key==='cut') cols.push('48px');
     else if(f.key==='minExp'||f.key==='maxExp') cols.push('50px');
+    else if(f.key==='_simBoom') cols.push('44px');
+    else if(f.key==='tm_tot'||f.key==='game_ou'||f.key==='spread') cols.push('42px');
     else cols.push(f.key==='team'?'56px':'44px');
   });
   cols.push('26px','22px','18px');
@@ -2503,7 +2695,7 @@ function renderPool(){
   const mobile = isMobileView();
   const {primary: mStat1, secondary: mStat2} = mobile ? getMobileStatFields(fields) : {primary:null,secondary:null};
   hdr.innerHTML=(isGroupEdit?`<span class="col-c">✓</span>`:'')
-    +`<span class="col-c" onclick="setSort('start')" title="${leftColLabel(activeSlate())}" style="cursor:pointer;padding-right:6px;">${leftColLabel(slate)}</span><span>Name</span>`
+    +`<span class="col-c" onclick="setSort('${slate.sport==='nfl'?'position':'start'}')" title="${leftColLabel(activeSlate())}" style="cursor:pointer;padding-right:6px;">${leftColLabel(slate)}</span><span>Name</span>`
     +`<span class="col-r" onclick="setSort('salary')">Sal</span>`
     +(mobile
       ? (mStat1?`<span class="${mStat1.cls} pool-col-hdr" onclick="setSort('${mStat1.key}')" style="font-size:9px;">${mStat1.label}</span>`:'')
@@ -2537,9 +2729,21 @@ function renderPool(){
       if(mx>mn) _svalRange={min:mn,max:mx};
     }
   }
+  // NFL: "full" is per-position — a 4th WR is unusable even with slots open.
+  // Count the current roster ONCE here rather than per row: nflCounts does a
+  // linear playerById lookup per id, and renderPool runs on every keystroke.
+  const _nflCur = isNfl(slate) ? nflCounts(slate, current) : null;
+  const _nflFullFor = (p) => {
+    const pos = nflPosOf(p);
+    if(!pos) return true;                       // no position → can't be slotted
+    const c = {..._nflCur}; c[pos]++;
+    return !nflFeasible(c);
+  };
   list.innerHTML=players.map((p,i)=>{
     const isSelected=current.includes(p.id),isHidden=hidden.includes(p.id);
-    const isFull=current.length>=MAX&&!isSelected;
+    const isFull=!isSelected&&(isNfl(slate)
+      ? _nflFullFor(p)
+      : current.length>=rosterSize(slate));
     const cantAfford=!isSelected&&p.salary>rem;
     const dimmed=(isFull||cantAfford)&&!isSelected&&!isHidden;
     const exp=ec[p.id]||0;
@@ -2698,15 +2902,27 @@ function handleBtnClick(el){ togglePlayer(el.dataset.pid); }
 function handleHideClick(el,e){ toggleHide(el.dataset.pid,e); }
 function handleGroupRowClick(el){ toggleGroupPlayer(el.dataset.pid); }
 
+// Can this player still be added? For NFL that's a POSITIONAL question (a 4th
+// WR has no home even when only 8 of 9 slots are filled); every other sport
+// just counts to MAX.
+function canAddPlayer(slate, id){
+  const cur=slate.currentLineup||[];
+  if(cur.includes(id)) return false;
+  const p=playerById(slate,id);
+  const used=cur.reduce((s,i)=>s+(playerById(slate,i)?.salary||0),0);
+  if(used+(p?.salary||0)>SALARY_CAP) return false;
+  if(isNfl(slate)){
+    if(!nflPosOf(p)) return false;                  // unknown position — can't slot it
+    return nflFeasible(nflCounts(slate,[...cur,id]));
+  }
+  return cur.length<MAX;
+}
 function togglePlayer(id){
   const slate=activeSlate();if(!slate)return;
   slate.currentLineup=slate.currentLineup||[];
   if(slate.currentLineup.includes(id)){slate.currentLineup=slate.currentLineup.filter(x=>x!==id);}
   else{
-    if(slate.currentLineup.length>=MAX)return;
-    const p=playerById(slate,id);
-    const used=slate.currentLineup.reduce((s,i)=>s+(playerById(slate,i)?.salary||0),0);
-    if(used+(p?.salary||0)>SALARY_CAP)return;
+    if(!canAddPlayer(slate,id))return;
     slate.currentLineup.push(id);
   }
   save();renderAll();
@@ -2717,11 +2933,40 @@ function renderLineup(){
   const current=slate.currentLineup||[];
   const cfg=SPORT_CFG[slate.sport]||SPORT_CFG.nascar;
   const slots=document.getElementById('lineupSlots');
+  const size=rosterSize(slate);
   const rows=[];
-  for(let i=0;i<MAX;i++){
-    const id=current[i];
-    if(id){const p=playerById(slate,id);rows.push(`<div class="slot filled"><div class="slot-num">${i+1}</div><div class="slot-name">${p?.name||id}</div><div class="slot-sal">${fmt(p?.salary||0)}</div><button class="remove-btn" style="margin-left:4px" onclick="togglePlayer('${id}')">−</button></div>`);}
-    else rows.push(`<div class="slot"><div class="slot-num">${i+1}</div><div class="slot-empty">${cfg.label.slice(0,-1)} slot</div></div>`);
+  if(isNfl(slate)){
+    // Named slots. A complete 9 gets a true slot assignment; a partial roster
+    // shows players under their base position with leftovers in FLEX.
+    const names=cfg.slots;                          // QB,RB,RB,WR,WR,WR,TE,FLEX,DST
+    const counts=nflCounts(slate,current);
+    const filled=nflComplete(counts)?nflAssignSlots(slate,current):(()=>{
+      const g={QB:[],RB:[],WR:[],TE:[],DST:[]};
+      current.forEach(id=>{const pos=nflPosOf(playerById(slate,id));if(pos)g[pos].push(id);});
+      const take=(k)=>g[k].shift()||null;
+      const base=[take('QB'),take('RB'),take('RB'),take('WR'),take('WR'),take('WR'),take('TE')];
+      const flex=g.RB[0]||g.WR[0]||g.TE[0]||null;
+      if(flex){['RB','WR','TE'].forEach(k=>{const i=g[k].indexOf(flex);if(i>=0)g[k].splice(i,1);});}
+      return [...base,flex,take('DST')];
+    })();
+    filled.forEach((id,i)=>{
+      const tag=`<div class="slot-num"><span class="slot-pos-tag">${names[i]}</span></div>`;
+      if(id){const p=playerById(slate,id);rows.push(`<div class="slot filled">${tag}<div class="slot-name">${p?.name||id}</div><div class="slot-sal">${fmt(p?.salary||0)}</div><button class="remove-btn" style="margin-left:4px" onclick="togglePlayer('${id}')">−</button></div>`);}
+      else rows.push(`<div class="slot">${tag}<div class="slot-empty">${names[i]} slot</div></div>`);
+    });
+    // Any player who couldn't be slotted (over-limit at a position) still shows
+    // so it can be removed — otherwise it'd be invisible but blocking.
+    const shown=new Set(filled.filter(Boolean));
+    current.filter(id=>!shown.has(id)).forEach(id=>{
+      const p=playerById(slate,id);
+      rows.push(`<div class="slot filled" style="border-color:var(--accent2)"><div class="slot-num"><span class="slot-pos-tag" style="color:var(--accent2)">EXTRA</span></div><div class="slot-name">${p?.name||id}</div><div class="slot-sal">${fmt(p?.salary||0)}</div><button class="remove-btn" style="margin-left:4px" onclick="togglePlayer('${id}')">−</button></div>`);
+    });
+  } else {
+    for(let i=0;i<size;i++){
+      const id=current[i];
+      if(id){const p=playerById(slate,id);rows.push(`<div class="slot filled"><div class="slot-num">${i+1}</div><div class="slot-name">${p?.name||id}</div><div class="slot-sal">${fmt(p?.salary||0)}</div><button class="remove-btn" style="margin-left:4px" onclick="togglePlayer('${id}')">−</button></div>`);}
+      else rows.push(`<div class="slot"><div class="slot-num">${i+1}</div><div class="slot-empty">${cfg.label.slice(0,-1)} slot</div></div>`);
+    }
   }
   slots.innerHTML=rows.join('');
   const sel=current.map(id=>playerById(slate,id)).filter(Boolean);
@@ -2732,20 +2977,23 @@ function renderLineup(){
   if(hasRtg)pills.push(`<div class="total-pill${has?' lit':''}"><div class="total-label">Total Rtg</div><div class="total-value${has?' lit':''}">${has?sel.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0).toFixed(1):'—'}</div></div>`);
   document.getElementById('lineupTotals').innerHTML=pills.join('');
   const used=sel.reduce((s,p)=>s+(p.salary||0),0);
-  const remSal=SALARY_CAP-used,slotsLeft=MAX-sel.length,pct=Math.min((used/SALARY_CAP)*100,100);
+  const remSal=SALARY_CAP-used,slotsLeft=size-sel.length,pct=Math.min((used/SALARY_CAP)*100,100);
   document.getElementById('salUsed').textContent=fmt(used)+' used';
   const remEl=document.getElementById('salRem');remEl.textContent=remSal>=0?fmt(remSal)+' remaining':fmt(Math.abs(remSal))+' OVER';remEl.className='sal-rem'+(remSal<0?' over':'');
   const avgEl=document.getElementById('salAvg');
-  if(slotsLeft>0&&slotsLeft<MAX){avgEl.style.display='block';avgEl.innerHTML=`<span>${fmt(Math.floor(remSal/slotsLeft))}</span> avg / slot (${slotsLeft} left)`;}else avgEl.style.display='none';
+  if(slotsLeft>0&&slotsLeft<size){avgEl.style.display='block';avgEl.innerHTML=`<span>${fmt(Math.floor(remSal/slotsLeft))}</span> avg / slot (${slotsLeft} left)`;}else avgEl.style.display='none';
   const bar=document.getElementById('barFill');bar.style.width=pct+'%';bar.className='bar-fill'+(pct>100?' over':pct>90?' warn':'');
-  document.getElementById('saveBtn').disabled=sel.length!==MAX||used>SALARY_CAP;
+  const rosterOk=isNfl(slate)?nflComplete(nflCounts(slate,current)):sel.length===size;
+  document.getElementById('saveBtn').disabled=!rosterOk||used>SALARY_CAP;
 }
 
 function clearLineup(){const slate=activeSlate();if(!slate)return;slate.currentLineup=[];save();renderAll();hideToast();}
 
 function saveLineup(){
   const slate=activeSlate();if(!slate)return;
-  const current=slate.currentLineup||[];if(current.length!==MAX)return;
+  const current=slate.currentLineup||[];
+  if(isNfl(slate)){ if(!nflComplete(nflCounts(slate,current))) return; }
+  else if(current.length!==rosterSize(slate)) return;
   const key=lineupKey(current);
   slate.savedLineups=slate.savedLineups||[];
   const dupIdx=slate.savedLineups.findIndex(l=>lineupKey(l)===key);
@@ -2925,7 +3173,11 @@ function exportCSV(){
   const slate=activeSlate();if(!slate)return;
   const cfg=SPORT_CFG[slate.sport]||SPORT_CFG.nascar;
   const pos=cfg.pos;
-  const csv=[[pos,pos,pos,pos,pos,pos].join(','),...(slate.savedLineups||[]).map(l=>l.join(','))].join('\n');
+  // NFL: DK's upload template is positional — header is the slot list and each
+  // row must be in slot order (QB,RB,RB,WR,WR,WR,TE,FLEX,DST).
+  const header=(cfg.slots||Array(rosterSize(slate)).fill(pos)).join(',');
+  const rowIds=l=>isNfl(slate)?nflAssignSlots(slate,l):l;
+  const csv=[header,...(slate.savedLineups||[]).map(l=>rowIds(l).join(','))].join('\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download=slate.name.replace(/\s+/g,'_').toLowerCase()+'_lineups.csv';a.click();
 }
 
@@ -2947,12 +3199,14 @@ function exportSimCSV(){
   // finish rates + the usable-score rate (P(30+ DK pts) — the punt-ruin
   // guard's input) but no top-20 market; UFC scoring has no finish positions
   // at all, so it exports the distribution only.
-  const sport=slate.sport, nas=sport==='nascar', ufc=sport==='ufc';
+  const sport=slate.sport, nas=sport==='nascar', ufc=sport==='ufc', nfl=sport==='nfl';
   const tailH = nas ? ['SimWin%','SimTop5%','SimTop10%','Usable30+%']
               : ufc ? []
+              : nfl ? ['Pos','Team','Usable1.5x%','Boom3x%']
               :       ['SimWin%','SimTop5%','SimTop10%','SimTop20%','MadeCut%'];
   const tailV = p => nas ? [p._simWin,p._simT5,p._simT10,p._simCut]
                    : ufc ? []
+                   : nfl ? [nflPosOf(p)||'', p.team||'', p._simCut, p._simBoom]
                    :       [p._simWin,p._simT5,p._simT10,p._simT20,p._simCut];
   const header=['Name','Salary',nas?'Rating':'ModelScore','SimScore','Mean','Floor(P10)','P25','Median','P75','Ceiling(P90)',...tailH];
   const lines=[header.join(',')];
@@ -2966,7 +3220,7 @@ function exportSimCSV(){
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download=(slate.name||'slate').replace(/\s+/g,'_').toLowerCase()+'_sim_distributions.csv';
   a.click();
-  showToast(`Exported ${rows.length} ${nas?'drivers':ufc?'fighters':'golfers'}' sim distributions.`,'ok');
+  showToast(`Exported ${rows.length} ${nas?'drivers':ufc?'fighters':nfl?'players':'golfers'}' sim distributions.`,'ok');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3421,7 +3675,7 @@ function renderGroupRulesSummary(){
   if(ufcSection) ufcSection.style.display = slate.sport==='ufc' ? 'block' : 'none';
   // Show/hide Simulate tab — only UFC and NASCAR have simulation support
   const simTab = document.getElementById('modeTabSimulate');
-  const hasSimulation = slate.sport==='ufc' || slate.sport==='nascar' || slate.sport==='pga';
+  const hasSimulation = slate.sport==='ufc' || slate.sport==='nascar' || slate.sport==='pga' || slate.sport==='nfl';
   if(simTab) simTab.style.display = hasSimulation ? '' : 'none';
   // Default mode per slate: simulate wherever simulation exists (incl. PGA —
   // the sim engine is the golf builder's primary mode). A manual override the
@@ -3496,6 +3750,26 @@ function renderGroupRulesSummary(){
     const ufcLevLb = document.getElementById('ufcLeverageLabel');
     if(ufcLevSl){ const lv = (slate._ufcLeverage!=null ? slate._ufcLeverage : 30); ufcLevSl.value = lv; if(ufcLevLb) ufcLevLb.textContent = lv; }
     restoreContestEvUI(slate);
+  }
+
+  const nflSection = document.getElementById('nflSection');
+  if(nflSection) nflSection.style.display = slate.sport==='nfl' ? 'block' : 'none';
+  if(slate.sport==='nfl'){
+    const nSlider = document.getElementById('nflSimCountSlider');
+    const nLabel  = document.getElementById('nflSimCountLabel');
+    if(nSlider){
+      const nCount = slate._simCount || parseInt(nSlider.value) || 2000;
+      nSlider.value = nCount;
+      if(nLabel) nLabel.textContent = nCount;
+    }
+    const sN = document.getElementById('nflStackN');
+    if(sN) sN.value = String(slate._nflStackN|0);
+    const bB = document.getElementById('nflBringBack');
+    if(bB) bB.value = String(slate._nflBringBack|0);
+    const nRb = document.getElementById('nflNoRbVsDst');
+    if(nRb) nRb.checked = !!slate._nflNoRbVsDst;
+    const rbC = document.getElementById('nflStackRbCounts');
+    if(rbC) rbC.checked = !!slate._nflStackRbCounts;
   }
 
   const pgaSection = document.getElementById('pgaSection');
@@ -4511,7 +4785,21 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
 
   let ss = 0;
   if(ssCDF){
-    ss = Math.max(0, Math.round(ssCDF(null) * durScale));
+    // Sample CONDITIONAL on the duration cap, don't sample blind and clamp.
+    //
+    // This was the core correlation bug. ssCDF(null) drew from the whole-fight
+    // ladder with no knowledge of how long the fight lasted, so a fighter drew
+    // the SAME volume distribution whether he finished in round 1 or went the
+    // distance — measured at 61 strikes in every outcome for a 69.5-line
+    // fighter, i.e. 24 significant strikes per MINUTE in a 2.5-minute R1
+    // finish. Clamping afterwards didn't fix it: it piled all the excess mass
+    // onto a spike exactly at the cap.
+    //
+    // The draw is multiplied by durScale after sampling, so the cap has to be
+    // divided by it to express the limit in ladder units. The sampler already
+    // honours a maxVal argument — it simply was never passed one.
+    const drawCap = durScale > 0 ? ssCap / durScale : ssCap;
+    ss = Math.max(0, Math.round(ssCDF(drawCap) * durScale));
     ss = Math.min(ss, Math.round(ssCap));
   } else {
     // League-pace prior fallback. Missing SS markets used to inherit 55% of
@@ -4527,7 +4815,9 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
 
   let td = 0;
   if(tdCDF){
-    td = Math.max(0, Math.round(tdCDF(null) * durScale));
+    // Same conditional-sampling fix as significant strikes above.
+    const drawCapTD = durScale > 0 ? tdCap / durScale : tdCap;
+    td = Math.max(0, Math.round(tdCDF(drawCapTD) * durScale));
     td = Math.min(td, Math.floor(tdCap));
   } else {
     // League-pace prior fallback (~0.08 landed TD/min ≈ 1.2 per 15 minutes).
@@ -5145,6 +5435,20 @@ const BUILTIN_CONTESTS=[
   // ONE lineup by default. Payout sums to $25,000 across 563 paid spots.
   {id:'builtin_pga_albatross_se', sport:'pga', name:'PGA $25K Albatross · $12 × 2,450 [SINGLE ENTRY]', fee:12, fieldSize:2450, preset:'custom', se:true,
    custom:'1: 2500\n2: 1250\n3: 750\n4: 600\n5: 500\n6: 400\n7-8: 300\n9-10: 250\n11-12: 200\n13-15: 150\n16-19: 100\n20-25: 75\n26-35: 60\n36-55: 50\n56-95: 40\n96-165: 35\n166-285: 30\n286-563: 25'},
+  // NFL built-ins. Field sizes/fees follow DK's recurring Sunday main-slate
+  // shapes; the flagship Milly Maker is the one that actually shapes strategy
+  // (top-heavy => uniqueness is worth far more than a flat double-up).
+  // Verify the exact tiers against the contest page before trusting an EV% —
+  // DK re-shapes these between seasons.
+  {id:'builtin_nfl_milly3', sport:'nfl', name:'NFL $3.5M Milly Maker · $20 × 205,000', fee:20, fieldSize:205000, preset:'custom',
+   custom:'1: 1000000\n2: 200000\n3: 100000\n4: 75000\n5: 50000\n6: 30000\n7: 25000\n8: 20000\n9: 15000\n10: 12000\n11-15: 10000\n16-20: 7500\n21-25: 5000\n26-30: 4000\n31-40: 3000\n41-50: 2500\n51-65: 2000\n66-80: 1500\n81-100: 1250\n101-135: 1000\n136-180: 750\n181-250: 600\n251-350: 500\n351-500: 400\n501-750: 300\n751-1150: 250\n1151-1800: 200\n1801-2900: 150\n2901-4700: 125\n4701-7800: 100\n7801-13000: 80\n13001-22000: 65\n22001-35000: 55\n35001-49200: 50'},
+  {id:'builtin_nfl_mini50', sport:'nfl', name:'NFL $50K Mini-Max · $0.50 × 117,600', fee:0.5, fieldSize:117600, preset:'custom',
+   custom:'1: 5000\n2: 2500\n3: 1500\n4: 1000\n5: 750\n6: 500\n7-8: 400\n9-10: 300\n11-14: 200\n15-19: 150\n20-25: 100\n26-35: 75\n36-45: 60\n46-55: 50\n56-70: 40\n71-90: 30\n91-120: 25\n121-160: 20\n161-210: 15\n211-345: 10\n346-615: 8\n616-1175: 6\n1176-2545: 5\n2546-5185: 4\n5186-10500: 3\n10501-24700: 2\n24701-29400: 1.50'},
+  {id:'builtin_nfl_flea5', sport:'nfl', name:'NFL $150K Flea Flicker · $5 × 35,700', fee:5, fieldSize:35700, preset:'custom',
+   custom:'1: 20000\n2: 10000\n3: 6000\n4: 4000\n5: 3000\n6: 2500\n7: 2000\n8: 1500\n9: 1250\n10: 1000\n11-15: 750\n16-20: 600\n21-25: 500\n26-30: 400\n31-40: 300\n41-50: 250\n51-65: 200\n66-85: 150\n86-110: 125\n111-145: 100\n146-200: 80\n201-280: 70\n281-400: 60\n401-600: 50\n601-950: 40\n951-1550: 30\n1551-2600: 25\n2601-4400: 20\n4401-8925: 15'},
+  // SINGLE ENTRY — field duplicates far less and skews sharper per entry.
+  {id:'builtin_nfl_se20', sport:'nfl', name:'NFL $100K Play-Action · $20 × 5,900 [SINGLE ENTRY]', fee:20, fieldSize:5900, preset:'custom', se:true,
+   custom:'1: 10000\n2: 5000\n3: 3000\n4: 2000\n5: 1500\n6: 1250\n7: 1000\n8: 900\n9: 800\n10: 700\n11-15: 500\n16-20: 400\n21-25: 300\n26-35: 250\n36-50: 200\n51-75: 150\n76-110: 125\n111-160: 100\n161-240: 80\n241-380: 65\n381-620: 55\n621-1180: 45'},
 ];
 function loadContestPresets(){ try{ return JSON.parse(localStorage.getItem('dfs_contest_presets')||'[]'); }catch(e){ return []; } }
 function storeContestPresets(a){ try{ localStorage.setItem('dfs_contest_presets', JSON.stringify(a)); }catch(e){} }
@@ -5457,6 +5761,9 @@ function restoreContestEvUI(slate){
     } else if(slate.sport==='pga'){
       const ph=document.getElementById('pgaEvHome');
       if(ph && ph.nextElementSibling!==blk) ph.after(blk);
+    } else if(slate.sport==='nfl'){
+      const ns=document.getElementById('nflSection');
+      if(ns && blk.parentElement!==ns) ns.appendChild(blk);
     } else {
       const home=document.getElementById('ufcEvHome');
       if(home && home.nextElementSibling!==blk) home.after(blk);
@@ -5567,19 +5874,137 @@ function buildPayoutFn(cfg){
     desc: `GPP (DK UFC main shape): $${Math.round(tiers[0].amt).toLocaleString()} to 1st, paying through ${lastPaid.toLocaleString()} of ${F.toLocaleString()} — exact at $3/47.5k, scaled otherwise` };
 }
 
-// Ownership-calibrated field sampler. Draws N 6-man lineups weighted by Own%
-// under the real constraints (cap, salary floor, no opposing fighters), then
+// ── How the NFL field actually builds ────────────────────────────────────────
+// Modeling the field as independent ownership draws is wrong for NFL: real
+// entrants stack, so stacked builds duplicate far more than a naive field
+// implies, and their EV is correspondingly overstated. These rates come from
+// FTN's study of 2024 DraftKings Milly Maker contests (Caleb Nelson), which
+// reports each pattern separately for winning and LOSING lineups — and the
+// losing cohort IS the field in a 200k-entry GPP.
+//
+//   Double stack (QB + 2 same-team pass catchers) ...... 31% of losing lineups
+//   Single stack OR no stack ........................... 54% of losing lineups
+//   => 3+ stack, as the residual ....................... 15%
+//   "Secondary stack" (2 opposing players, no QB
+//    from that game) ................................... 47% of losing lineups
+//
+// The one number the study does NOT split is single-vs-no-stack inside that
+// 54%. SINGLE_SHARE below is therefore an interpolation, not a measurement:
+// 2/3 single / 1/3 none puts the field's overall QB-stack rate at ~82%, which
+// sits sensibly under the ~89-90% rate reported for WINNING lineups (Fantasy
+// Footballers, two seasons of Milly Maker winners). Treat it as the tunable
+// assumption in this model — it is the only one.
+const NFL_FIELD_STACK = {
+  double: 0.31,          // measured  (FTN 2024, losing lineups)
+  triple: 0.15,          // residual of the two measured buckets
+  singleOrNone: 0.54,    // measured  (FTN 2024, losing lineups)
+  SINGLE_SHARE: 2/3,     // INTERPOLATED split of singleOrNone
+  bringBackRate: 0.50,   // P(bring-back | the entry stacked at all) — assumption
+};
+
+// Ownership-calibrated field sampler. Draws N lineups weighted by Own% under
+// the real constraints (cap, salary floor, no opposing fighters), then
 // iteratively re-weights so realized marginal exposures match the Own% column
 // — pure weighted draws drift under constraints; 3 calibration rounds fix it.
-function sampleUfcField(pool, N, ownArr){
+//
+// `opts.slots` switches it to POSITIONAL mode (NFL: QB/RB/RB/WR/WR/WR/TE/
+// FLEX/DST), and `opts.stackModel` additionally makes the drawn field STACK
+// at the measured rates above. Without opts the function behaves exactly as it
+// always has for the 6-man sports — same draw order, same guards, same result.
+function sampleUfcField(pool, N, ownArr, opts){
+  const slots    = opts && opts.slots ? opts.slots : null;
+  const SIZE     = slots ? slots.length : 6;
+  const posOf    = opts && opts.posOf ? opts.posOf : null;
+  const flexOk   = (opts && opts.flexOk) || ['RB','WR','TE'];
   const target   = ownArr
     ? ownArr.map(v=>Math.max(0.2, v))
     : pool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
   const salaries = pool.map(p=>p.salary||0);
-  const oppIdx   = pool.map(p=>pool.findIndex(q=>q!==p && q.name===p.opp));
-  const CAP=50000, FLOOR=47000; // field lineups overwhelmingly spend $47k+
+  // No-opposing-entrant only applies to head-to-head sports. In NFL the
+  // opposite is true — bring-backs are a correlation play — so skip it.
+  const oppIdx   = slots ? pool.map(()=>-1)
+                         : pool.map(p=>pool.findIndex(q=>q!==p && q.name===p.opp));
+  const CAP=(opts&&opts.cap)||50000, FLOOR=(opts&&opts.floor)||47000; // field lineups overwhelmingly spend $47k+
   const cheap = salaries.slice().sort((a,b)=>a-b);
   const cheapPrefix=[0]; cheap.forEach((s,i)=>cheapPrefix.push(cheapPrefix[i]+s));
+
+  // Positional mode: per-slot eligibility + a per-slot cheapest-completion
+  // lookahead (the flat cheapPrefix would let the draw paint itself into a
+  // corner where the remaining SLOTS can't be filled under the cap).
+  let posIdx=null, minRest=null, posIdxSet=null;
+  if(slots){
+    const eligFor = s => s==='FLEX' ? flexOk : [s];
+    posIdx = slots.map(s => {
+      const ok = eligFor(s);
+      return pool.map((p,i)=>ok.includes(posOf(p)) ? i : -1).filter(i=>i>=0);
+    });
+    const cheapestFor = k => {
+      let m = Infinity;
+      for(const i of posIdx[k]) if(salaries[i] < m) m = salaries[i];
+      return m===Infinity ? 0 : m;
+    };
+    minRest = new Array(SIZE+1).fill(0);
+    for(let k=SIZE-1;k>=0;k--) minRest[k] = minRest[k+1] + cheapestFor(k);
+    posIdxSet = posIdx.map(a => new Set(a));
+  }
+
+  // ── Field stacking (NFL) ──────────────────────────────────────────────────
+  // Draw a stack SHAPE per entry, seed the forced players, then let the normal
+  // ownership draw fill the rest. Marginals still get corrected by the
+  // re-weighting loop below, so forcing the joint doesn't break the Own% fit.
+  const SM = (opts && opts.stackModel) || null;
+  let qbIdx=null, byTeamCatcher=null, byTeamSkill=null, teamOfP=null, oppOfP=null;
+  if(slots && SM){
+    const TMx = p => String(p.team||'').toUpperCase().replace(/[^A-Z]/g,'');
+    const OPx = p => String(p.opp ||'').toUpperCase().replace(/[^A-Z]/g,'');
+    teamOfP = pool.map(TMx); oppOfP = pool.map(OPx);
+    qbIdx = pool.map((p,i)=>posOf(p)==='QB'?i:-1).filter(i=>i>=0);
+    byTeamCatcher = {}; byTeamSkill = {};
+    pool.forEach((p,i)=>{
+      const t = teamOfP[i], pos = posOf(p);
+      if(!t) return;
+      if(pos==='WR'||pos==='TE') (byTeamCatcher[t]=byTeamCatcher[t]||[]).push(i);
+      if(pos==='WR'||pos==='TE'||pos==='RB') (byTeamSkill[t]=byTeamSkill[t]||[]).push(i);
+    });
+  }
+  // Targets are what the FIELD should LOOK like; the forced-shape rates are
+  // only the lever. They aren't the same number, because an entry drawn as
+  // "no stack" can still land a QB + same-team catcher by chance (and often
+  // does — the real field has incidental stacks too). So we calibrate the
+  // lever against the REALIZED rate each iteration, the same way ownership is
+  // re-weighted. Forcing 31% doubles and observing 33% would leave the model
+  // mis-specified; this drives the observable onto the measurement.
+  const shapeP = SM ? {
+    single: SM.singleOrNone * (SM.SINGLE_SHARE ?? 2/3),
+    double: SM.double,
+    triple: SM.triple,
+    bb:     SM.bringBackRate ?? 0.5,
+  } : null;
+  const shapeTarget = SM ? {
+    single: SM.singleOrNone * (SM.SINGLE_SHARE ?? 2/3),
+    double: SM.double,
+    triple: SM.triple,
+  } : null;
+  const drawShape = () => {
+    const r = Math.random();
+    const s = shapeP.single, d = shapeP.double, t = shapeP.triple;
+    let n;
+    if(r < s) n = 1;
+    else if(r < s + d) n = 2;
+    else if(r < s + d + t) n = 3;
+    else n = 0;
+    return { n, bb: n>0 && Math.random() < shapeP.bb };
+  };
+  // Weighted pick from a list of pool indices (by current weights, excluding used).
+  const pickWeighted = (list, used, gamma) => {
+    let tw=0; const e=[], ew=[];
+    for(const i of list||[]){ if(used.has(i)) continue; const wi=Math.pow(w[i],gamma); e.push(i); ew.push(wi); tw+=wi; }
+    if(!e.length || tw<=0) return -1;
+    let r=Math.random()*tw;
+    for(let k=0;k<e.length;k++){ r-=ew[k]; if(r<=0) return e[k]; }
+    return e[e.length-1];
+  };
+
   let w = target.slice();
   let field = [];
   for(let iter=0; iter<3; iter++){
@@ -5597,22 +6022,68 @@ function sampleUfcField(pool, N, ownArr){
       // "stud + the obvious value block" lineups at the top of the curve.
       const gamma = 0.7 + Math.random()*0.9;
       const picks=[]; const used=new Set(); let sal=0; let dead=false;
-      for(let slot=0; slot<6 && !dead; slot++){
-        const left=5-slot;
+
+      // Decide this entry's stack shape and pre-select the forced players.
+      // They then claim the first compatible slot in the normal fill below.
+      let forced = null;
+      if(slots && SM){
+        const shape = drawShape();
+        if(shape.n > 0){
+          const qb = pickWeighted(qbIdx, used, gamma);
+          if(qb < 0) dead = true;
+          else {
+            const seen = new Set([qb]);
+            const t = teamOfP[qb], o = oppOfP[qb];
+            const mates = [];
+            for(let c=0; c<shape.n; c++){
+              const m = pickWeighted(byTeamCatcher[t], seen, gamma);
+              if(m < 0) break;                 // team has no more pass catchers
+              seen.add(m); mates.push(m);
+            }
+            const backs = [];
+            if(shape.bb && o){
+              const b = pickWeighted(byTeamSkill[o], seen, gamma);
+              if(b >= 0){ seen.add(b); backs.push(b); }
+            }
+            forced = [qb, ...mates, ...backs];
+          }
+        }
+      }
+
+      for(let slot=0; slot<SIZE && !dead; slot++){
+        const left=SIZE-1-slot;
+        // Positional mode walks only this slot's eligible players and uses the
+        // slot-aware completion cost; 6-man mode keeps the flat scan verbatim.
+        const scan = slots ? posIdx[slot] : null;
+        const headroom = slots ? minRest[slot+1] : cheapPrefix[left];
+        if(forced && forced.length && posIdxSet){
+          const ok = posIdxSet[slot];
+          const fi = forced.findIndex(i => !used.has(i) && ok.has(i) &&
+            sal + salaries[i] + headroom <= CAP);
+          if(fi >= 0){
+            const p = forced[fi];
+            picks.push(p); used.add(p); sal += salaries[p];
+            forced.splice(fi, 1);
+            continue;
+          }
+        }
         let tw=0; const elig=[]; const ew=[];
-        for(let i=0;i<pool.length;i++){
-          if(used.has(i)) continue;
-          if(oppIdx[i]>=0 && used.has(oppIdx[i])) continue;
-          if(sal+salaries[i]+cheapPrefix[left] > CAP) continue;
+        const consider = (i) => {
+          if(used.has(i)) return;
+          if(oppIdx[i]>=0 && used.has(oppIdx[i])) return;
+          if(sal+salaries[i]+headroom > CAP) return;
           const wi = Math.pow(w[i], gamma);
           elig.push(i); ew.push(wi); tw+=wi;
-        }
+        };
+        if(scan){ for(const i of scan) consider(i); }
+        else { for(let i=0;i<pool.length;i++) consider(i); }
         if(!elig.length || tw<=0){ dead=true; break; }
         let r=Math.random()*tw, pick=elig[elig.length-1];
         for(let k=0;k<elig.length;k++){ r-=ew[k]; if(r<=0){ pick=elig[k]; break; } }
         picks.push(pick); used.add(pick); sal+=salaries[pick];
       }
-      if(dead || picks.length<6) continue;
+      if(dead || picks.length<SIZE) continue;
+      if(forced && forced.length) continue;   // stack didn't fit — redraw
       if(sal<FLOOR || sal>CAP) continue;
       field.push(picks);
     }
@@ -5622,6 +6093,30 @@ function sampleUfcField(pool, N, ownArr){
     for(let i=0;i<pool.length;i++){
       const real=(cnt[i]/field.length)*100;
       w[i]=Math.max(0.02, w[i]*Math.pow((target[i]+0.5)/(real+0.5), 0.85));
+    }
+    // Re-aim the stack lever at the realized shape distribution.
+    if(SM && shapeP){
+      let s=0,d=0,t=0;
+      for(const l of field){
+        const qbI = l.find(i => posOf(pool[i])==='QB');
+        if(qbI===undefined) continue;
+        const tm = teamOfP[qbI];
+        let mates=0;
+        for(const i of l){ if(i===qbI) continue; const p=posOf(pool[i]);
+          if(teamOfP[i]===tm && (p==='WR'||p==='TE')) mates++; }
+        if(mates===1) s++; else if(mates===2) d++; else if(mates>=3) t++;
+      }
+      const N2=field.length;
+      const adj=(cur, realized, want)=>{
+        const r=Math.max(0.004, realized/N2);
+        const ratio=Math.min(3, Math.max(0.25, want/r));
+        return Math.min(0.98, Math.max(0, cur*Math.pow(ratio, 0.7)));
+      };
+      shapeP.single = adj(shapeP.single, s, shapeTarget.single);
+      shapeP.double = adj(shapeP.double, d, shapeTarget.double);
+      shapeP.triple = adj(shapeP.triple, t, shapeTarget.triple);
+      const sum = shapeP.single + shapeP.double + shapeP.triple;
+      if(sum > 0.98){ const k=0.98/sum; shapeP.single*=k; shapeP.double*=k; shapeP.triple*=k; }
     }
   }
   const cnt=new Array(pool.length).fill(0);
@@ -5640,6 +6135,19 @@ function sampleUfcField(pool, N, ownArr){
 async function runUFCContestEV(ctx){
   const {slate, pool, ranked, simScoresById, totalSims, target, maxExpPct, overrides} = ctx;
   const genSims = ctx.genSims || totalSims;  // # of generation sims (PGA uses even sims only)
+  // Roster shape. Everything below was written for 6-man positionless lineups;
+  // NFL passes its 9 named slots through and the field sampler builds legal
+  // positional rosters instead. 6-man sports leave _fieldOpts null and take
+  // the identical code path they always did.
+  const _rosterN  = (SPORT_CFG[slate.sport] && SPORT_CFG[slate.sport].size) || 6;
+  const _fieldOpts = (slate.sport === 'nfl')
+    ? { slots: SPORT_CFG.nfl.slots, flexOk: SPORT_CFG.nfl.flex, posOf: nflPosOf,
+        cap: ctx.maxSal || SALARY_CAP, floor: Math.round((ctx.maxSal || SALARY_CAP) * 0.94),
+        // Model the field as STACKED at measured Milly Maker rates — see
+        // NFL_FIELD_STACK. Without this the field looks more diverse than it
+        // is, understating duplication on stacked builds (i.e. yours).
+        stackModel: Object.assign({}, NFL_FIELD_STACK, slate._nflFieldStack||{}) }
+    : null;
   const minOverrides = slate.playerMinOverrides||{};
   const cfg  = slate._ufcEv||{};
   const F    = Math.max(target, parseInt(cfg.fieldSize)||10000);
@@ -5731,7 +6239,7 @@ async function runUFCContestEV(ctx){
     const top=ctx.ranked.slice(0, 300);
     const idxOfP=new Map(pool.map((p,i)=>[p.id,i]));
     const asIdx=top.map(e=>({idxs:e.lineup.map(p=>idxOfP.get(p.id)).filter(x=>x!=null), w:Math.max(1,e.count||1)}))
-      .filter(x=>x.idxs.length===6);
+      .filter(x=>x.idxs.length===_rosterN);
     const totW=asIdx.reduce((s,x)=>s+x.w,0);
     if(asIdx.length && totW>0){ sharpPool={asIdx, totW}; log(`Field realism: ${Math.round(sharpShare*100)}% of modeled entries play like optimizers (drawn from the candidate pool), not Own% chalk.`); }
   }
@@ -5741,8 +6249,8 @@ async function runUFCContestEV(ctx){
     const flds=[], keyCounts=[];
     let d0=0, d0Name='';
     for(let k=0;k<K;k++){
-      const {field, maxDev, maxName} = sampleUfcField(pool, NF, scen[k]);
-      if(!field.length){ log('⚠ Field sampler produced no lineups — check Own% column.'); return null; }
+      const {field, maxDev, maxName} = sampleUfcField(pool, NF, scen[k], _fieldOpts);
+      if(!field.length){ log('⚠ Field sampler produced no lineups — check Own% column' + (_fieldOpts?' and that the pool covers every position.':'.')); return null; }
       if(sharpPool){
         const nSharp=Math.floor(field.length*sharpShare);
         for(let j=0;j<nSharp;j++){
@@ -5779,7 +6287,7 @@ async function runUFCContestEV(ctx){
       const arr = new Float64Array(field.length);
       for(let f=0; f<field.length; f++){
         const l=field[f]; let t=0;
-        for(let k=0;k<6;k++) t += (arrs[l[k]][si]||0);
+        for(let k=0;k<l.length;k++) t += (arrs[l[k]][si]||0);
         arr[f]=t;
       }
       arr.sort();
@@ -5878,12 +6386,24 @@ async function runUFCContestEV(ctx){
     const _repFightExcl = p => { const f=p.fightNum||parseInt(p.start)||0; return f>0 && ufcExcludedFights.has(f); };
     const _repOpposes = (p,q) => !_repFightExcl(p) &&
       ((p.opp && (p.opp===q.name||p.opp===q.id)) || (q.opp && (q.opp===p.name||q.opp===p.id)));
+    // POSITIONAL GUARD (NFL). Repair swaps in the best-mean affordable player
+    // regardless of position — on a positionless 6-man roster that's fine, but
+    // on NFL it would happily trade the TE for a 4th WR and emit a roster DK
+    // will reject. Only allow a cross-position swap if the resulting position
+    // multiset is still a legal 9-slot lineup.
+    const _repPosMode = slate.sport==='nfl';
+    const _repRules = ctx.stackRules || null;
+    const _repCounts = (arr) => {
+      const c={QB:0,RB:0,WR:0,TE:0,DST:0,UNK:0};
+      for(const i of arr){ const k=nflPosOf(pool[i]); c[k||'UNK']++; }
+      return c;
+    };
     const seen=new Map();
     let swaps=0, dominated=0;
     const repaired=[];
     for(const e of ranked){
       let idxs=e.lineup.map(p=>idxById.get(p.id)).filter(x=>x!=null);
-      if(idxs.length!==6){ repaired.push(e); continue; }
+      if(idxs.length!==_rosterN){ repaired.push(e); continue; }
       if(e._pivot){ repaired.push(e); continue; } // deliberate pillar-free pivot — never "repair" the pillar back in
       // Chaos candidates are deliberate claims on demolition worlds — disjoint
       // from that sim's optimal BY CONSTRUCTION. "Repairing" their midfielders
@@ -5899,6 +6419,7 @@ async function runUFCContestEV(ctx){
         const inSet=new Set(idxs);
         const used=idxs.reduce((s,i)=>s+salIdx[i],0);
         const leftover=capSal-used;
+        const curC=_repPosMode?_repCounts(idxs):null;
         // find the slot with the largest available upgrade gain
         let bestGain=MARGIN, bestSlot=-1, bestUp=-1;
         for(const pI of idxs){
@@ -5908,6 +6429,18 @@ async function runUFCContestEV(ctx){
             if(inSet.has(q)) continue;
             if(salIdx[q]>budget) continue;
             if(_repNoOpp && idxs.some(i=>i!==pI && _repOpposes(pool[q], pool[i]))) continue; // never swap in a teammate's opponent
+            if(_repPosMode){
+              const outP=nflPosOf(pool[pI])||'UNK', inP=nflPosOf(pool[q])||'UNK';
+              if(outP!==inP){
+                const c={...curC}; c[outP]--; c[inP]++;
+                if(!nflComplete(c)) continue;   // would break the roster
+              }
+              // ...and never let an "upgrade" break the stack the user asked for.
+              if(_repRules && (_repRules.stackN||_repRules.bringBack||_repRules.noRbVsDst)){
+                const after=idxs.map(i=>i===pI?pool[q]:pool[i]);
+                if(!nflStackOk(after,_repRules)) continue;
+              }
+            }
             if(!beatsEnough(q,pI)) continue; // mean gap alone ≠ dominance — must beat him sim by sim
             bestGain=meanIdx[q]-meanIdx[pI]; bestSlot=pI; bestUp=q; break;
           }
@@ -6420,7 +6953,9 @@ async function runUFCContestEV(ctx){
         const r=evalPortfolio(s2,scoreArr,fieldSorted), w=evalPortfolio(s2,scoreArrW,fieldSortedW);
         const win={sel:s2, evR:r.ev, evW:w.ev, deadR:r.dead, deadW:w.dead};
         sel=win.sel;
-        const cutWord = (slate && slate.sport==='nascar') ? 'usable-score (30+) rate' : 'make-cut';
+        const cutWord = (slate && slate.sport==='nascar') ? 'usable-score (30+) rate'
+                      : (slate && slate.sport==='nfl')    ? 'usable-game (1.5× value) rate'
+                      : 'make-cut';
         const pdesc=pillars.filter(p=>(un.sel.expCount[p.id]||0)!==(win.sel.expCount[p.id]||0))
           .map(p=>`${p.name} ${Math.round(100*(un.sel.expCount[p.id]||0)/target)}%→${Math.round(100*(win.sel.expCount[p.id]||0)/target)}% (his ${cutWord}: ${p._simCut}%)`).join(', ');
         log(`Auto-exposure (${cutWord} rule): ${pdesc} — capped at his floor odds. Price if the model is RIGHT: $${Math.round(un.evR-win.evR)}/slate; if WRONG about him: ${win.evW>=un.evW?'saves $'+Math.round(win.evW-un.evW):'costs $'+Math.round(un.evW-win.evW)}; dead-slates ${(100*un.deadR).toFixed(0)}%→${(100*win.deadR).toFixed(0)}% (right) ${(100*un.deadW).toFixed(0)}%→${(100*win.deadW).toFixed(0)}% (wrong).`);
@@ -7191,6 +7726,10 @@ function pgaOptimalForSim(pool, scores, salArr, cheapPre, maxSal){
 // scoring", for cash-ish contexts or weeks without an Own% projection.
 async function runPgaSimScoreSelect(ctx){
   const {slate, pool, ranked, simScoresById, simsDone, target, maxExpPct, overrides} = ctx;
+  // Roster size drives the near-duplicate thresholds. 6-man sports keep the
+  // original [3,4,5]; NFL's 9-slot rosters get [5,6,7] from the same formula.
+  const _rs = ctx.rosterSize || 6;
+  const _unit = ctx.unitLabel || 'golfers';
   if(!ranked.length){ alert('No valid lineups generated. Try relaxing salary rules or unhiding players.'); return null; }
   // Held-out odd sims, sampled to ≤800 for pricing breadth without the wait
   const avail=[]; for(let t=1;t<simsDone;t+=2) avail.push(t);
@@ -7224,7 +7763,8 @@ async function runPgaSimScoreSelect(ctx){
     capMap[p.id]=Math.max(1, Math.ceil(target*Math.min(userPct,cutPct)/100));
   });
   const expCount={}; const chosen=[]; const chosenSets=[]; const used=new Set();
-  const RELAX=[3,4,5];
+  const _half=Math.ceil(_rs/2);
+  const RELAX=[_half,_half+1,_half+2];
   for(let ri=0;ri<RELAX.length;ri++){
     const maxShared=RELAX[ri];
     for(let i=0;i<cands.length && chosen.length<target;i++){
@@ -7242,7 +7782,7 @@ async function runPgaSimScoreSelect(ctx){
       c.lineup.forEach(p=>expCount[p.id]=(expCount[p.id]||0)+1);
     }
     if(chosen.length>=target) break;
-    if(ri<RELAX.length-1) log(`  uniqueness relaxed to ≤${RELAX[ri+1]} shared golfers (${chosen.length}/${target} so far)…`);
+    if(ri<RELAX.length-1) log(`  uniqueness relaxed to ≤${RELAX[ri+1]} shared ${_unit} (${chosen.length}/${target} so far)…`);
   }
   if(!chosen.length){ alert('Sim Score selection found no lineups under the exposure caps — raise Max% and re-run.'); return null; }
   if(chosen.length<target) log(`⚠ Only ${chosen.length}/${target} lineups clear the exposure caps + uniqueness — raise Max% or sims for more.`);
@@ -9827,6 +10367,768 @@ function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, 
 }
 
 // ═══════════════════════════════════════════════════════════
+// NFL SIM ENGINE — game environment → team allocation → players
+// ═══════════════════════════════════════════════════════════
+// NFL DFS is won by nailing GAME ENVIRONMENT: the high-total, close games
+// produce the high fantasy scores. So the sim is built outside-in, and the
+// correlation everyone hand-tunes elsewhere falls out of the structure:
+//
+//   1. GAME     Sample the game's total (T) and margin (M) from the de-vigged
+//               consensus total/spread. Nothing about players yet.
+//                 home = (T+M)/2   away = (T−M)/2
+//   2. TEAM     Each team's sampled score vs its implied total gives a scoring
+//               ratio; the deficit vs its opponent gives a SCRIPT tilt
+//               (trailing teams throw, leading teams run). One yard-factor and
+//               one script-factor per team per sim.
+//   3. PLAYER   Every player's mean is their own consensus prop line, then
+//               multiplied by their team's factors and an idiosyncratic shock.
+//
+// Because a QB and his WR share the same team factors, they co-move — that IS
+// the stack correlation. Because both teams share the game total, a bring-back
+// correlates through shootouts. No correlation matrix to maintain.
+//
+// IMPORTANT — why the environment does not re-level a priced player's mean:
+// a prop line ALREADY encodes the game environment (a WR in a 56-total game is
+// quoted more receiving yards than the same WR in a 38-total game). So the
+// environment's job here is the CONDITIONAL shape — which sims this game runs
+// hot, and who runs hot together — not a second multiplication of information
+// the market already priced in. Scaling means off the total again would
+// double-count it. Unpriced players and DSTs have no such anchor, so for them
+// the environment IS the projection.
+//
+// Players without props (backups, most DSTs' opponents) fall back to a
+// salary/projection-implied mean and still ride the same team factors, so the
+// whole pool stays simulatable.
+// ===== NFL CORE B ===== (extracted verbatim for node tests — see test-nfl-sim.js)
+
+// DK NFL Classic scoring. No kicker slot in Classic (QB/RB/RB/WR/WR/WR/TE/FLEX/DST).
+function dkNflScore(s){
+  let pts = 0;
+  pts += (s.passYds||0) * 0.04;
+  if((s.passYds||0) >= 300) pts += 3;
+  pts += (s.passTD||0) * 4;
+  pts += (s.int||0) * -1;
+  pts += (s.rushYds||0) * 0.1;
+  if((s.rushYds||0) >= 100) pts += 3;
+  pts += (s.recYds||0) * 0.1;
+  if((s.recYds||0) >= 100) pts += 3;
+  pts += (s.rec||0) * 1;                    // full PPR
+  pts += ((s.rushTD||0) + (s.recTD||0)) * 6;
+  pts += (s.fumLost||0) * -1;
+  return pts;
+}
+// DST points-allowed tiers
+function dkDstPointsAllowed(pa){
+  if(pa === 0)  return 10;
+  if(pa <= 6)   return 7;
+  if(pa <= 13)  return 4;
+  if(pa <= 20)  return 1;
+  if(pa <= 27)  return 0;
+  if(pa <= 34)  return -1;
+  return -4;
+}
+function dkDstScore(s){
+  return dkDstPointsAllowed(s.pointsAllowed||0)
+    + (s.sacks||0) * 1 + (s.ints||0) * 2 + (s.fumRec||0) * 2
+    + (s.dstTD||0) * 6 + (s.safeties||0) * 2 + (s.blocks||0) * 2;
+}
+
+// Standard normal (Box-Muller) with a cached spare.
+function nflGaussFactory(){
+  let spare = null;
+  return function(){
+    if(spare !== null){ const v = spare; spare = null; return v; }
+    let u, v, s;
+    do { u = Math.random()*2-1; v = Math.random()*2-1; s = u*u + v*v; } while(s >= 1 || s === 0);
+    const m = Math.sqrt(-2 * Math.log(s) / s);
+    spare = v * m; return u * m;
+  };
+}
+function poissonSample(lambda, rnd){
+  if(!(lambda > 0)) return 0;
+  if(lambda > 30) return Math.max(0, Math.round(lambda + Math.sqrt(lambda) * rnd()));
+  const L = Math.exp(-lambda);
+  let k = 0, p = 1;
+  do { k++; p *= Math.random(); } while(p > L);
+  return k - 1;
+}
+
+// A prop line's true mean isn't exactly the line: a de-vigged over-prob above
+// 50% says the market's mean sits above it. Shift by roughly one z-step of the
+// stat's own spread, capped so a noisy price can't run away with the mean.
+function nflMeanFromOu(ou, cv){
+  if(!ou) return null;
+  const p = Math.min(0.75, Math.max(0.25, ou.overProb ?? 0.5));
+  // invert Φ roughly (Acklam-lite is overkill here): logit approximation
+  const z = Math.log(p/(1-p)) / 1.702;
+  const shift = 1 + Math.max(-0.18, Math.min(0.18, z * (cv||0.35) * 0.55));
+  return ou.line * shift;
+}
+
+// Build the per-player sim inputs once (parsing props is expensive vs the loop).
+// Returns { teams, games, entries } where entries[i] aligns with pool[i].
+function buildNflSimInputs(pool){
+  const gamesByKey = new Map();
+  const teamInfo = new Map();
+
+  const teamOf = p => String(p.team||'').toUpperCase().replace(/[^A-Z]/g,'') || null;
+  const oppOf  = p => String(p.opp||'').toUpperCase().replace(/[^A-Z@]/g,'').replace(/^@/,'') || null;
+
+  for(const p of pool){
+    const t = teamOf(p);
+    if(!t) continue;
+    if(!teamInfo.has(t)){
+      teamInfo.set(t, {
+        team: t, opp: oppOf(p),
+        implied: Number.isFinite(p.tm_tot) ? p.tm_tot : null,
+        oppImplied: Number.isFinite(p.opp_tot) ? p.opp_tot : null,
+        total: Number.isFinite(p.game_ou) ? p.game_ou : null,
+        spread: Number.isFinite(p.spread) ? p.spread : null,
+      });
+    } else {
+      const ti = teamInfo.get(t);
+      if(ti.implied == null && Number.isFinite(p.tm_tot)) ti.implied = p.tm_tot;
+      if(ti.oppImplied == null && Number.isFinite(p.opp_tot)) ti.oppImplied = p.opp_tot;
+      if(ti.total == null && Number.isFinite(p.game_ou)) ti.total = p.game_ou;
+      if(ti.spread == null && Number.isFinite(p.spread)) ti.spread = p.spread;
+      if(!ti.opp && oppOf(p)) ti.opp = oppOf(p);
+    }
+  }
+
+  // Pair teams into games. Key is the sorted pair so both sides share one game.
+  for(const ti of teamInfo.values()){
+    const a = ti.team, b = ti.opp;
+    const key = b ? [a,b].sort().join('@') : a;
+    if(!gamesByKey.has(key)){
+      // Fall back to league-average environment when the sheet has no game env.
+      const total = ti.total ?? ((ti.implied != null && ti.oppImplied != null) ? ti.implied + ti.oppImplied : 44.5);
+      gamesByKey.set(key, { key, total, teams: {} });
+    }
+    const g = gamesByKey.get(key);
+    if(ti.total != null) g.total = ti.total;
+    g.teams[a] = ti;
+  }
+  // Each team's implied total: from the sheet, else split the total by spread.
+  for(const g of gamesByKey.values()){
+    const names = Object.keys(g.teams);
+    for(const t of names){
+      const ti = g.teams[t];
+      if(ti.implied == null){
+        const spr = Number.isFinite(ti.spread) ? ti.spread : 0;
+        ti.implied = g.total/2 - spr/2;
+      }
+      ti.implied = Math.max(9, Math.min(42, ti.implied));
+    }
+  }
+
+  // Salary-implied fallback mean DK points, by position. Rough but only used
+  // for players the market didn't price (backups, deep bench).
+  const FALLBACK_K = { QB:2.55, RB:2.35, WR:2.25, TE:2.05, DST:1.6 };
+
+  const entries = pool.map(p => {
+    const pos = nflPosOf(p);
+    const t = teamOf(p);
+    const ti = t ? teamInfo.get(t) : null;
+    const gameKey = ti ? (ti.opp ? [ti.team, ti.opp].sort().join('@') : ti.team) : null;
+
+    const e = {
+      pos, team: t, gameKey,
+      passYds: nflMeanFromOu(parseOuCell(p.pass_yds_ou), 0.28),
+      passTD:  nflMeanFromOu(parseOuCell(p.pass_td_ou), 0.55),
+      rushYds: nflMeanFromOu(parseOuCell(p.rush_yds_ou), 0.45),
+      recYds:  nflMeanFromOu(parseOuCell(p.rec_yds_ou), 0.50),
+      rec:     nflMeanFromOu(parseOuCell(p.rec_ou), 0.35),
+      rushRec: nflMeanFromOu(parseOuCell(p.rush_rec_ou), 0.42),
+      atd:     amProb(p.atd),
+      hasProps: false, fallbackMean: null,
+    };
+    // rush+rec is a combo market — use it only to fill a missing leg.
+    if(e.rushRec != null){
+      if(e.rushYds == null && e.recYds != null) e.rushYds = Math.max(0, e.rushRec - e.recYds);
+      if(e.recYds == null && e.rushYds != null) e.recYds = Math.max(0, e.rushRec - e.rushYds);
+      if(e.rushYds == null && e.recYds == null){
+        if(pos === 'RB'){ e.rushYds = e.rushRec * 0.78; e.recYds = e.rushRec * 0.22; }
+        else            { e.recYds  = e.rushRec * 0.88; e.rushYds = e.rushRec * 0.12; }
+      }
+    }
+    e.hasProps = [e.passYds,e.rushYds,e.recYds,e.rec,e.atd].some(v => v != null);
+
+    // Position priors fill the gaps the market didn't price for a priced player
+    // (e.g. a WR with rec yds but no reception line).
+    if(e.hasProps && pos !== 'DST'){
+      if(e.rec == null && e.recYds != null) e.rec = e.recYds / (pos === 'TE' ? 10.5 : pos === 'RB' ? 8.0 : 12.5);
+      if(e.recYds == null && e.rec != null) e.recYds = e.rec * (pos === 'TE' ? 10.5 : pos === 'RB' ? 8.0 : 12.5);
+      if(e.atd == null){
+        const yds = (e.rushYds||0) + (e.recYds||0);
+        e.atd = Math.max(0.02, Math.min(0.65, yds / 240));      // crude but bounded
+      }
+      if(pos === 'QB'){
+        if(e.passTD == null && e.passYds != null) e.passTD = e.passYds / 125;
+        if(e.rushYds == null) e.rushYds = 12;                   // generic QB scramble floor
+      }
+    }
+    if(!e.hasProps){
+      const proj = parseFloat(p.proj);
+      e.fallbackMean = Number.isFinite(proj) && proj > 0
+        ? proj
+        : Math.max(1.5, (p.salary||3000)/1000 * (FALLBACK_K[pos] || 2.0) - 4);
+    }
+    return e;
+  });
+
+  return { games: [...gamesByKey.values()], teamInfo, entries };
+}
+
+// One sim of every game → { [team]: {score, oppScore, implied, yardF, passF, rushF} }
+function simNflGames(games, gauss){
+  const env = {};
+  for(const g of games){
+    const names = Object.keys(g.teams);
+    // Total and margin are close to independent in NFL — sample separately.
+    const T = Math.max(13, g.total + gauss() * 10.4);
+    const a = names[0], b = names[1];
+    if(!b){
+      const ti = g.teams[a];
+      const sc = Math.max(0, ti.implied + gauss() * 7.6);
+      env[a] = mkTeamEnv(ti, sc, Math.max(0, T - sc), gauss);
+      continue;
+    }
+    const tiA = g.teams[a], tiB = g.teams[b];
+    const meanMargin = tiA.implied - tiB.implied;                 // A minus B
+    const M = meanMargin + gauss() * 13.0;
+    let scA = (T + M) / 2, scB = (T - M) / 2;
+    scA = Math.max(0, scA); scB = Math.max(0, scB);
+    env[a] = mkTeamEnv(tiA, scA, scB, gauss);
+    env[b] = mkTeamEnv(tiB, scB, scA, gauss);
+  }
+  return env;
+}
+function mkTeamEnv(ti, score, oppScore, gauss){
+  const ratio = Math.max(0.25, Math.min(2.6, score / Math.max(9, ti.implied)));
+  // Yards track points, but loosely — blunt the ratio and add its own noise.
+  const yardF = Math.max(0.45, Math.min(1.95,
+    (0.55 + 0.45 * ratio) * Math.exp(gauss() * 0.16)));
+  // Game script: trailing teams throw, leading teams run out the clock.
+  const deficit = oppScore - score;
+  const passF = Math.max(0.84, Math.min(1.28, 1 + 0.052 * (deficit / 7)));
+  const rushF = Math.max(0.76, Math.min(1.34, 1 - 0.065 * (deficit / 7)));
+  return { score, oppScore, implied: ti.implied, ratio, yardF, passF, rushF };
+}
+
+// One player-sim given their team's environment → DK points.
+function simNflPlayer(e, te, gauss){
+  if(!te) te = { ratio:1, yardF:1, passF:1, rushF:1, score:22, oppScore:22 };
+  if(e.pos === 'DST'){
+    const pa = te.oppScore;
+    // Turnovers/sacks tilt with how badly the opponent is playing: a team held
+    // under its implied total is being pressured.
+    const oppRatio = Math.max(0.35, Math.min(2.2, pa / Math.max(9, te.oppImplied || 22)));
+    const press = Math.max(0.55, Math.min(1.6, 2 - oppRatio));
+    const sacks  = poissonSample(2.35 * press, gauss);
+    const ints   = poissonSample(0.78 * press, gauss);
+    const fumRec = poissonSample(0.62 * press, gauss);
+    const dstTD  = (Math.random() < 0.055 * press * (1 + (ints + fumRec) * 0.22)) ? 1 : 0;
+    const safety = (Math.random() < 0.011) ? 1 : 0;
+    const block  = (Math.random() < 0.020) ? 1 : 0;
+    return dkDstScore({ pointsAllowed: Math.round(pa), sacks, ints, fumRec, dstTD, safeties: safety, blocks: block });
+  }
+
+  if(!e.hasProps){
+    // Unpriced: ride the team factors so they still correlate, with a fat
+    // lognormal around the salary/proj-implied mean.
+    const mult = Math.exp(gauss() * 0.62) * (0.5 + 0.5 * te.yardF);
+    return Math.max(0, e.fallbackMean * mult);
+  }
+
+  const ln = (mean, sigma) => mean > 0 ? mean * Math.exp(gauss() * sigma - sigma * sigma / 2) : 0;
+
+  const passYds = e.passYds != null ? ln(e.passYds * te.yardF * te.passF, 0.30) : 0;
+  const rushYds = e.rushYds != null ? ln(e.rushYds * te.yardF * te.rushF, 0.46) : 0;
+  const recYds  = e.recYds  != null ? ln(e.recYds  * te.yardF * te.passF, 0.52) : 0;
+  const rec     = e.rec     != null ? poissonSample(Math.max(0, e.rec * te.passF * (0.62 + 0.38 * te.yardF)), gauss) : 0;
+
+  // Touchdowns scale with the team's realized scoring, anchored on the ATD price.
+  let rushTD = 0, recTD = 0;
+  if(e.atd != null){
+    const lamBase = -Math.log(1 - Math.min(0.85, Math.max(0.01, e.atd)));
+    const lam = lamBase * Math.max(0.2, Math.min(2.8, te.ratio));
+    const tds = poissonSample(lam, gauss);
+    // rush/rec split doesn't change DK points (both 6) — keep for readability.
+    if(e.pos === 'RB'){ rushTD = tds; } else { recTD = tds; }
+  }
+  let passTD = 0, ints = 0;
+  if(e.pos === 'QB'){
+    const lamTD = Math.max(0.05, (e.passTD != null ? e.passTD : 1.5) * Math.max(0.25, Math.min(2.6, te.ratio)));
+    passTD = poissonSample(lamTD, gauss);
+    ints = poissonSample(0.72 * (2 - Math.max(0.4, Math.min(1.6, te.ratio))), gauss);
+  }
+  const fumLost = (Math.random() < 0.028) ? 1 : 0;
+
+  return dkNflScore({ passYds, passTD, int: ints, rushYds, rushTD, recYds, recTD, rec, fumLost });
+}
+
+// ── NFL stacking rules ────────────────────────────────────────────────────────
+// The sim already correlates a QB with his pass catchers; these rules decide
+// which correlated shapes actually make it into the submitted lineups.
+//   stackN     — require N same-team WR/TE (optionally RB) alongside the QB
+//   bringBack  — require N skill players from the QB's OPPONENT
+//   noRbVsDst  — forbid rostering an RB who plays against your own DST
+// `rules` is {stackN, bringBack, noRbVsDst, rbCounts}; all default to off.
+function nflTeamOf(p){ return String(p && p.team || '').toUpperCase().replace(/[^A-Z]/g,''); }
+function nflOppOf(p){ return String(p && p.opp || '').toUpperCase().replace(/[^A-Z]/g,''); }
+
+// Does a COMPLETE lineup satisfy the rules? entries are player objects.
+function nflStackOk(players, rules){
+  if(!rules) return true;
+  const stackN = rules.stackN|0, bringBack = rules.bringBack|0;
+  if(rules.noRbVsDst){
+    const dst = players.find(p=>nflPosOf(p)==='DST');
+    if(dst){
+      const dstOpp = nflOppOf(dst);
+      if(dstOpp && players.some(p=>nflPosOf(p)==='RB' && nflTeamOf(p)===dstOpp)) return false;
+    }
+  }
+  if(stackN<=0 && bringBack<=0) return true;
+  const qb = players.find(p=>nflPosOf(p)==='QB');
+  if(!qb) return false;
+  const qbTeam = nflTeamOf(qb), qbOpp = nflOppOf(qb);
+  if(stackN>0){
+    const catchers = players.filter(p=>p!==qb && nflTeamOf(p)===qbTeam &&
+      (rules.rbCounts ? ['WR','TE','RB'] : ['WR','TE']).includes(nflPosOf(p))).length;
+    if(catchers < stackN) return false;
+  }
+  if(bringBack>0){
+    if(!qbOpp) return false;
+    const back = players.filter(p=>nflTeamOf(p)===qbOpp &&
+      ['WR','TE','RB','QB'].includes(nflPosOf(p))).length;
+    if(back < bringBack) return false;
+  }
+  return true;
+}
+
+// Positional per-sim optimizer: the best legal 9-slot lineup for ONE sim's
+// scores, optionally forced into a stack shape.
+//
+// Builds against each of the THREE legal skill distributions explicitly —
+// (3RB,3WR,1TE), (2RB,4WR,1TE), (2RB,3WR,2TE) — which is what "one FLEX from
+// RB/WR/TE" actually means. Enumerating them beats greedy flex selection: it
+// can't strand itself, stacking seeds slot in cleanly, and the cheapest fill
+// per distribution gives a feasibility guarantee (if any legal roster fits the
+// cap, one of these three finds it).
+const NFL_DISTS = [ {RB:3,WR:3,TE:1}, {RB:2,WR:4,TE:1}, {RB:2,WR:3,TE:2} ];
+
+function nflOptimalForSim(cands, salaryCap, minSal, rules){
+  const byScore = { QB:[], RB:[], WR:[], TE:[], DST:[] };
+  for(const c of cands){ if(byScore[c.pos]) byScore[c.pos].push(c); }
+  for(const k in byScore) byScore[k].sort((a,b)=>b.score-a.score);
+  if(byScore.QB.length<1 || byScore.RB.length<2 || byScore.WR.length<3 ||
+     byScore.TE.length<1 || byScore.DST.length<1) return null;
+  if(byScore.RB.length + byScore.WR.length + byScore.TE.length < 7) return null;
+  const bySal = {};
+  for(const k in byScore) bySal[k] = byScore[k].slice().sort((a,b)=>a.sal-b.sal);
+
+  const R = rules || {};
+  const stackN = R.stackN|0, bringBack = R.bringBack|0;
+  const catcherPos = R.rbCounts ? ['WR','TE','RB'] : ['WR','TE'];
+  const TM = c => String(c.team||'').toUpperCase().replace(/[^A-Z]/g,'');
+  const OP = c => String(c.opp ||'').toUpperCase().replace(/[^A-Z]/g,'');
+
+  // ── Seeds: the players a stack rule forces in before optimizing the rest ──
+  // Try the top few QBs so a rule can't collapse every sim onto one stack.
+  const seeds = [];
+  if(stackN>0 || bringBack>0){
+    for(const qb of byScore.QB.slice(0, 4)){
+      const t = TM(qb), o = OP(qb);
+      const mates = byScore.QB.length && t
+        ? cands.filter(c=>c!==qb && TM(c)===t && catcherPos.includes(c.pos))
+               .sort((a,b)=>b.score-a.score).slice(0, stackN)
+        : [];
+      if(mates.length < stackN) continue;
+      const backs = bringBack>0
+        ? cands.filter(c=>o && TM(c)===o && ['WR','TE','RB'].includes(c.pos))
+               .sort((a,b)=>b.score-a.score).slice(0, bringBack)
+        : [];
+      if(backs.length < bringBack) continue;
+      seeds.push([qb, ...mates, ...backs]);
+    }
+    if(!seeds.length) return null;          // rules unsatisfiable with this pool
+  } else {
+    seeds.push([]);
+  }
+
+  // Fill one (seed, distribution) pair from `lists` (pre-sorted by the
+  // criterion you want). Returns {pick, used, sal} or null.
+  const fill = (seed, dist, lists) => {
+    const need = { QB:1, RB:dist.RB, WR:dist.WR, TE:dist.TE, DST:1 };
+    const pick = [], used = new Set();
+    let sal = 0;
+    for(const c of seed){
+      if(used.has(c.i)) return null;
+      if(!(need[c.pos] > 0)) return null;   // seed doesn't fit this distribution
+      need[c.pos]--; pick.push(c); used.add(c.i); sal += c.sal;
+    }
+    // DST last so the no-RB-vs-own-DST rule can see the rostered RBs.
+    for(const pos of ['QB','RB','WR','TE','DST']){
+      let n = need[pos];
+      if(n<=0) continue;
+      for(const c of lists[pos]){
+        if(n<=0) break;
+        if(used.has(c.i)) continue;
+        if(pos==='DST' && R.noRbVsDst){
+          const dOpp = OP(c);
+          if(dOpp && pick.some(x=>x.pos==='RB' && TM(x)===dOpp)) continue;
+        }
+        pick.push(c); used.add(c.i); sal += c.sal; n--;
+      }
+      if(n>0) return null;
+    }
+    return { pick, used, sal, seedIds:new Set(seed.map(c=>c.i)), dist };
+  };
+
+  // Same-position swaps only: distribution (and therefore legality) is
+  // preserved by construction, and seeded players are never touched.
+  const swapWithin = (st, wantCheaper) => {
+    let guard = 0;
+    while(guard++ < 60){
+      const over = st.sal > salaryCap;
+      if(wantCheaper && !over) break;
+      let best = null;
+      for(let k=0;k<st.pick.length;k++){
+        const out = st.pick[k];
+        if(st.seedIds.has(out.i)) continue;
+        for(const c of byScore[out.pos]){
+          if(st.used.has(c.i)) continue;
+          if(R.noRbVsDst){
+            // Guard BOTH directions: swapping a DST in must not collide with a
+            // rostered RB, and swapping an RB in must not collide with the
+            // rostered DST. (Only guarding the DST side let a later RB upgrade
+            // re-create the conflict — caught by the stack-rule test.)
+            if(out.pos==='DST'){
+              const dOpp = OP(c);
+              if(dOpp && st.pick.some(x=>x.pos==='RB' && TM(x)===dOpp)) continue;
+            } else if(out.pos==='RB'){
+              const dst = st.pick.find(x=>x.pos==='DST');
+              if(dst){ const dOpp = OP(dst); if(dOpp && TM(c)===dOpp) continue; }
+            }
+          }
+          if(wantCheaper){
+            if(c.sal >= out.sal) continue;
+            const eff = (out.score - c.score) / Math.max(1, out.sal - c.sal);
+            if(!best || eff < best.eff) best = { k, out, c, eff };
+          } else {
+            if(st.sal - out.sal + c.sal > salaryCap) continue;
+            const gain = c.score - out.score;
+            if(gain <= 0) continue;
+            if(!best || gain > best.gain) best = { k, out, c, gain };
+          }
+        }
+      }
+      if(!best) break;
+      st.used.delete(best.out.i); st.used.add(best.c.i);
+      st.sal += best.c.sal - best.out.sal;
+      st.pick[best.k] = best.c;
+      if(!wantCheaper && st.sal >= (minSal||0)) { /* keep upgrading while it fits */ }
+    }
+    return st;
+  };
+
+  let best = null;
+  for(const seed of seeds){
+    for(const dist of NFL_DISTS){
+      // Best-score fill, then repair down to the cap.
+      let st = fill(seed, dist, byScore);
+      if(st && st.sal > salaryCap) swapWithin(st, true);
+      // Still over? Build the CHEAPEST roster for this shape and upgrade up.
+      if(!st || st.sal > salaryCap){
+        st = fill(seed, dist, bySal);
+        if(!st || st.sal > salaryCap) continue;   // this shape can't fit the cap
+        swapWithin(st, false);
+      }
+      if(st.sal > salaryCap) continue;
+      if(minSal && st.sal < minSal) swapWithin(st, false);
+      const total = st.pick.reduce((s,c)=>s+c.score,0);
+      if(!best || total > best.total) best = { total, st };
+    }
+  }
+  if(!best) return null;
+  return best.st.pick.map(c => c.i);
+}
+// ===== /NFL CORE B =====
+
+// Layer A — the raw simulator. Mirrors runPgaSims' contract:
+//   returns { simScores: [Float64Array per player], simsDone, ... }
+async function runNflSims(pool, numSims, log){
+  const tick = () => new Promise(r => setTimeout(r, 0));
+  const gauss = nflGaussFactory();
+
+  // Wipe stale per-player sim state on the whole slate (PGA does the same).
+  const all = (activeSlate()?.players)||[];
+  all.forEach(p => { delete p._simDist; delete p._simWin; delete p._simT5;
+    delete p._simT10; delete p._simT20; delete p._simCut; delete p._simP50;
+    delete p._simBoom; });
+
+  const { games, entries } = buildNflSimInputs(pool);
+  const priced = entries.filter(e => e.hasProps).length;
+  const gamesWithEnv = games.filter(g => g.total != null).length;
+  log(`Field: ${pool.length} players — ${priced} with market props, ${pool.length-priced} salary-implied.`);
+  log(`Games: ${games.length} (${gamesWithEnv} with a consensus total).`);
+  if(!games.length){ log('⚠ No Team column — NFL sims need Team (and ideally O/U + Spread) to build game environments.'); return null; }
+  // Warn loudly when the game env is missing: correlation is the whole point.
+  if(!gamesWithEnv) log('⚠ No game totals found (O/U / TmTot columns) — using a league-average 44.5 for every game. Run the odds puller for real environments.');
+
+  // Attach opponent implied totals for the DST model.
+  const teamEnvSeed = {};
+  for(const g of games) for(const [t, ti] of Object.entries(g.teams)){
+    const other = Object.keys(g.teams).find(x => x !== t);
+    ti.oppImplied = other ? g.teams[other].implied : (g.total - ti.implied);
+    teamEnvSeed[t] = ti;
+  }
+
+  const N = pool.length;
+  const simScores = pool.map(() => new Float64Array(numSims));
+  const teamPts = {};                       // team → running sum, for the report
+  let simsDone = 0;
+
+  for(let s = 0; s < numSims; s++){
+    const env = simNflGames(games, gauss);
+    for(const t in env){ env[t].oppImplied = teamEnvSeed[t]?.oppImplied ?? 22; }
+    for(let i = 0; i < N; i++){
+      const e = entries[i];
+      const te = e.team ? env[e.team] : null;
+      simScores[i][s] = simNflPlayer(e, te, gauss);
+    }
+    if(s === 0) for(const t in env) teamPts[t] = 0;
+    for(const t in env) teamPts[t] = (teamPts[t]||0) + env[t].score;
+    simsDone = s + 1;
+    if(s % 200 === 199){
+      await tick();
+      if(window._genCancelled) break;
+    }
+  }
+
+  // Calibration report: sim means vs the market lines they were built from.
+  let devSum = 0, devN = 0, worst = null;
+  for(let i = 0; i < N; i++){
+    const e = entries[i];
+    if(!e.hasProps) continue;
+    const arr = simScores[i];
+    let m = 0; for(let s = 0; s < simsDone; s++) m += arr[s];
+    m /= Math.max(1, simsDone);
+    // Compare the two things we can check directly: implied team score vs sim.
+    const t = e.team;
+    if(t && teamPts[t] != null){
+      const simTeam = teamPts[t] / Math.max(1, simsDone);
+      const impl = teamEnvSeed[t]?.implied;
+      if(impl){
+        const d = Math.abs(simTeam - impl);
+        devSum += d; devN++;
+        if(!worst || d > worst.d) worst = { t, d, simTeam, impl };
+      }
+    }
+  }
+  if(devN) log(`Calibration: mean |sim team pts − implied| = ${(devSum/devN).toFixed(2)} pts` +
+    (worst ? `, worst ${worst.t} ${worst.simTeam.toFixed(1)} vs ${worst.impl.toFixed(1)}` : ''));
+
+  return { simScores, simsDone, entries, games, teamEnvSeed };
+}
+
+// Layer B — the driver. Mirrors runPgaSimGen: read UI → sim → decorate the
+// pool → build per-sim optimal candidates → select → preview.
+async function runNflSimGen(){
+  const slate=activeSlate(); if(!slate) return;
+  const target=parseInt(document.getElementById('genCount').value)||20;
+  const maxExpPct=parseInt(document.getElementById('genMaxExp').value)||100;
+  const maxSal=Math.min(SALARY_CAP, parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP);
+  const minSal=parseInt(document.getElementById('genMinSal').value)||0;
+  const numSims=slate._simCount||parseInt(document.getElementById('nflSimCountSlider')?.value)||2000;
+  const hidden=slate.hiddenIds||[];
+  // Like PGA: simulate the FULL slate (game environments need both teams even
+  // when half the players are hidden), but build lineups from the active pool.
+  const simPool=(slate.players||[]).filter(p=>p.salary>0);
+  const pool=simPool.filter(p=>!hidden.includes(p.id));
+  const overrides=slate.playerExpOverrides||{};
+
+  document.getElementById('genBtn').disabled=true;
+  const el=document.getElementById('genLog');
+  el.textContent='Starting NFL simulation…';
+  window._genCancelled=false;
+  let cancelBtn=document.getElementById('genCancelBtn');
+  if(!cancelBtn){
+    cancelBtn=document.createElement('button');
+    cancelBtn.id='genCancelBtn'; cancelBtn.textContent='✕ Cancel';
+    cancelBtn.style.cssText='width:100%;padding:7px;background:none;border:1px solid var(--border);color:var(--muted);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:"DM Sans",sans-serif;margin-top:6px;';
+    cancelBtn.onclick=()=>{ window._genCancelled=true; cancelBtn.remove(); };
+    el.parentNode.insertBefore(cancelBtn, el.nextSibling);
+  }
+  const done=()=>{ document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); };
+
+  // Preconditions: positions are structural (no position = no legal roster).
+  const posOk=pool.filter(p=>nflPosOf(p)).length;
+  if(posOk < 9){
+    alert('NFL sims need a Position column (QB/RB/WR/TE/DST) mapped — only '+posOk+' players have one.');
+    done(); return;
+  }
+  const need={QB:1,RB:2,WR:3,TE:1,DST:1}, have={QB:0,RB:0,WR:0,TE:0,DST:0};
+  pool.forEach(p=>{const k=nflPosOf(p); if(k) have[k]++;});
+  const short=Object.entries(need).filter(([k,n])=>have[k]<n);
+  const skill=have.RB+have.WR+have.TE;
+  if(short.length || skill<7){
+    alert('Not enough players to fill a roster: need at least '+
+      Object.entries(need).map(([k,n])=>`${n} ${k}`).join(', ')+' and 7 total RB/WR/TE'+
+      ` — pool has ${Object.entries(have).map(([k,v])=>k+':'+v).join(' ')}.`);
+    done(); return;
+  }
+  if(!pool.some(p=>p.team)){
+    alert('NFL sims need a Team column to build game environments (QB↔WR correlation comes from it).');
+    done(); return;
+  }
+
+  // Contest EV prices lineups against the payout curve + a modeled field; it
+  // needs Own% to build that field. Off => Sim Score selection (same sims,
+  // same candidates, ranked by joint held-out score, no field model).
+  const _evOn = !!(slate._ufcEv && slate._ufcEv.on);
+  if(_evOn && !pool.some(p=>(parseFloat(p.own)||0)>0)){
+    alert('Contest EV needs an Own% column mapped to model the field. (Or turn Contest EV Mode off to select by raw sim score instead.)');
+    done(); return;
+  }
+  if(!_evOn) log('Contest EV Mode off — Sim Score mode: lineups ranked by held-out sim totals (0.6×P80 + 0.4×mean), no payout/field modeling.');
+
+  log(`Running ${numSims.toLocaleString()} simulated slates (${simPool.length} players${pool.length<simPool.length?`, ${pool.length} in selection pool`:''})…`);
+  await new Promise(r=>setTimeout(r,0));
+  const res=await runNflSims(simPool, numSims, log);
+  if(!res){ log('Cancelled or insufficient data.'); done(); return; }
+  const {simScores, simsDone}=res;
+  if(window._genCancelled){ log('Cancelled.'); done(); return; }
+
+  // Decorate the pool: composite sim score + full DK-outcome distribution.
+  const NBINS=32;
+  simPool.forEach((p,i)=>{
+    const raw=simScores[i].slice(0,simsDone);
+    const arr=Array.from(raw).sort((a,b)=>a-b);
+    const n=arr.length||1;
+    const q=f=>arr[Math.min(n-1,Math.floor(n*f))];
+    const mean=arr.reduce((a,b)=>a+b,0)/n;
+    p._simP50=Math.round((0.6*q(0.8)+0.4*mean)*10)/10;
+    const domainMin=Math.floor(q(0.01)), domainMax=Math.ceil(Math.max(q(0.99), domainMin+1));
+    const span=(domainMax-domainMin)||1;
+    const bins=new Array(NBINS).fill(0);
+    for(let k=0;k<n;k++){ let bi=Math.floor((arr[k]-domainMin)/span*NBINS); if(bi<0)bi=0; if(bi>=NBINS)bi=NBINS-1; bins[bi]++; }
+    p._simDist={ p10:q(0.1),p25:q(0.25),p50:q(0.5),p75:q(0.75),p90:q(0.9),
+                 mean:Math.round(mean*10)/10, min:Math.round(arr[0]*10)/10, max:Math.round(arr[n-1]*10)/10,
+                 bins, domainMin, domainMax };
+    // "Usable game" rate — the NFL analog of PGA make-cut / NASCAR 30+: how
+    // often this player returns at least 1.5× value. Scale-free, so it caps
+    // busty studs harder than cheap dart throws (that's the point).
+    const bar=Math.max(3, (p.salary||3000)/1000 * 1.5);
+    let usable=0; for(let k=0;k<n;k++) if(arr[k]>=bar) usable++;
+    p._simCut=Math.round(100*usable/n);
+    // Boom rate (3× value) — the ceiling stat NFL GPPs actually chase.
+    const boomBar=Math.max(6, (p.salary||3000)/1000 * 3);
+    let boom=0; for(let k=0;k<n;k++) if(arr[k]>=boomBar) boom++;
+    p._simBoom=Math.round(1000*boom/n)/10;
+  });
+  window._nflSimReady=true;
+  const xb=document.getElementById('simCsvBtn'); if(xb) xb.style.display='';
+  if(typeof renderPool==='function') renderPool();
+
+  const simScoresById={};
+  simPool.forEach((p,i)=>{ simScoresById[p.id]=simScores[i]; });
+  const poolScores=pool.map(p=>simScoresById[p.id]);
+
+  // ── Stacking rules ────────────────────────────────────────────────────────
+  const stackRules = {
+    stackN:    slate._nflStackN|0,
+    bringBack: slate._nflBringBack|0,
+    noRbVsDst: !!slate._nflNoRbVsDst,
+    rbCounts:  !!slate._nflStackRbCounts,
+  };
+  {
+    const bits=[];
+    if(stackRules.stackN)    bits.push(`QB + ${stackRules.stackN} ${stackRules.rbCounts?'same-team skill player':'pass catcher'}${stackRules.stackN>1?'s':''}`);
+    if(stackRules.bringBack) bits.push(`${stackRules.bringBack} bring-back`);
+    if(stackRules.noRbVsDst) bits.push('no RB vs own DST');
+    log(bits.length ? `Stacking: ${bits.join(' · ')} — enforced in every generated lineup.`
+                    : 'Stacking: off (lineups take whatever shape the sims favor).');
+  }
+
+  // Candidates: the ex-post optimal roster of each (even) sim.
+  log('Computing per-sim optimal lineups…');
+  const cands=pool.map((p,i)=>({i, pos:nflPosOf(p), sal:p.salary||0, score:0,
+    team:p.team||'', opp:p.opp||''}));
+  const rankedMap=new Map();
+  const addCand=(idxs)=>{
+    if(!idxs) return;
+    let t=0; for(const i of idxs) t+=cands[i].score;
+    const key=idxs.slice().sort((a,b)=>a-b).join('|');
+    const e=rankedMap.get(key);
+    if(e){ e.count++; e.totalScore+=t; }
+    else rankedMap.set(key,{lineup:idxs.map(i=>pool[i]),count:1,totalScore:t});
+  };
+  let ruleMisses=0;
+  for(let s=0;s<simsDone;s+=2){
+    for(let i=0;i<cands.length;i++) cands[i].score=poolScores[i][s];
+    const lu=nflOptimalForSim(cands, maxSal, minSal, stackRules);
+    if(!lu) ruleMisses++;
+    addCand(lu);
+    if(s>0&&s%100===0){
+      if(s%500===0) log(`  optimals: ${s.toLocaleString()}/${simsDone.toLocaleString()}…`);
+      await new Promise(r=>setTimeout(r,0));
+      if(window._genCancelled){ log('Cancelled.'); done(); return; }
+    }
+  }
+  const ranked=[...rankedMap.values()].sort((a,b)=>b.count-a.count);
+  if(!ranked.length){
+    const anyRule = stackRules.stackN||stackRules.bringBack||stackRules.noRbVsDst;
+    alert(anyRule
+      ? 'No lineups satisfy the stacking rules with this pool.\n\nUsually means the pool lacks enough same-team pass catchers (or an opponent for the bring-back). Loosen the rules or unhide players.'
+      : 'No legal lineups were built — check that the pool has enough players at each position under the salary cap.');
+    done(); return;
+  }
+  if(ruleMisses) log(`  ⚠ ${ruleMisses.toLocaleString()} sim(s) had no rule-compliant roster — those sims contributed no candidate.`);
+  // Never ship a lineup that violates the rules the user set.
+  {
+    const before=ranked.length;
+    for(let i=ranked.length-1;i>=0;i--) if(!nflStackOk(ranked[i].lineup, stackRules)) ranked.splice(i,1);
+    if(ranked.length<before) log(`  (${before-ranked.length} candidate(s) dropped by the stack-rule check)`);
+    if(!ranked.length){ alert('Every candidate was rejected by the stacking rules — loosen them and re-run.'); done(); return; }
+  }
+  log(`${ranked.length.toLocaleString()} unique optimal lineups from ${Math.ceil(simsDone/2).toLocaleString()} generation sims (selection priced on the ${Math.floor(simsDone/2).toLocaleString()} held-out sims).`);
+
+  let out;
+  if(_evOn){
+    const _se = !!(slate._ufcEv && slate._ufcEv.se);
+    out = await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone,
+      genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, oosParity:1,
+      sharpShare:0.15, se:_se, dominanceRepair:true, maxSal, stackRules});
+    if(out===null && window._genCancelled) log('Cancelled.');
+  } else {
+    out = await runPgaSimScoreSelect({slate, pool, ranked, simScoresById, simsDone, target, maxExpPct, overrides,
+      rosterSize:9, unitLabel:'players'});
+    if(out===null){ if(window._genCancelled) log('Cancelled.'); done(); return; }
+  }
+
+  // Stack readout — the thing an NFL player actually wants to see.
+  if(out && out.length){
+    const stackCount={};
+    const TM=p=>String(p.team||'').toUpperCase().replace(/[^A-Z]/g,'');
+    out.forEach(l=>{
+      const qb=l.find(p=>nflPosOf(p)==='QB');
+      if(!qb) return;
+      const qbTeam=TM(qb), qbOpp=String(qb.opp||'').toUpperCase().replace(/[^A-Z]/g,'');
+      const mates=l.filter(p=>p!==qb && TM(p)===qbTeam && ['WR','TE','RB'].includes(nflPosOf(p))).length;
+      // Bring-back = opposing SKILL players only; the opposing DST isn't a
+      // correlation play, it's the opposite of one.
+      const back=l.filter(p=>qbOpp && TM(p)===qbOpp && ['WR','TE','RB','QB'].includes(nflPosOf(p))).length;
+      const tag=`${qbTeam||'?'} ${mates}-stack${back?` + ${back} back`:''}`;
+      stackCount[tag]=(stackCount[tag]||0)+1;
+    });
+    const top=Object.entries(stackCount).sort((a,b)=>b[1]-a[1]).slice(0,6);
+    if(top.length) log('Stacks: '+top.map(([t,n])=>`${t} ×${n}`).join(', '));
+  }
+  done();
+}
+
+// ═══════════════════════════════════════════════════════════
 // PGA TARGET-EXPOSURE GENERATOR
 // ═══════════════════════════════════════════════════════════
 // Architecture: decide exposure FIRST, then realize lineups against it.
@@ -10393,6 +11695,15 @@ async function runAutoGen(){
     if(slate.sport==='ufc') return runUFCSimGen();
     if(slate.sport==='nascar') return runNascarSimGen();
     if(slate.sport==='pga') return runPgaSimGen();
+    if(slate.sport==='nfl') return runNflSimGen();
+  }
+  // The generic (non-sim) builder is positionless — it would happily emit a
+  // 6-man NFL "lineup" with no QB and no DST, which then exports as a broken
+  // DK file. NFL builds go through the sim generator, which is slot-aware.
+  if(slate.sport==='nfl'){
+    alert('NFL lineups are built by the simulation engine (positional 9-slot rosters).\n\nSwitch to the Simulate tab and hit Generate.');
+    switchGenMode('simulate');
+    return;
   }
   let optimizeBy=document.getElementById('genOptimize').value;
   if(optimizeBy==='blend') optimizeBy='blend3'; // legacy 2-way blend → 3-signal mix
@@ -11852,10 +13163,12 @@ function detectSportFromTab(title){
   if(t.startsWith('ufc'))    return 'ufc';
   if(t.startsWith('nascar')) return 'nascar';
   if(t.startsWith('pga') || t.startsWith('golf')) return 'pga';
+  if(t.startsWith('nfl'))    return 'nfl';
   // fallback — try to detect from keywords
   if(t.includes('ufc') || t.includes('mma'))    return 'ufc';
   if(t.includes('nascar') || t.includes('race')) return 'nascar';
   if(t.includes('pga') || t.includes('golf'))    return 'pga';
+  if(t.includes('nfl'))      return 'nfl';
   return 'nascar'; // default
 }
 
@@ -11922,7 +13235,7 @@ function autoMapColumns(sport){
   // Mirror exactly what processFile() does after parsing:
   // 1. Reset colMapping, 2. Auto-detect via AUTO_MAP, 3. Build mapper UI
   colMapping = {};
-  applyAutoMap(parsedCSV.headers, colMapping);
+  applyAutoMap(parsedCSV.headers, colMapping, sport);
   document.getElementById('mapperSection').style.display = 'block';
   buildMapper();
 }
@@ -12032,6 +13345,7 @@ async function refreshFromSheet(){
         if(ni>=0){ const v=parseInt(row[ni]); p.ratingN=!isNaN(v)?v:null; }
       }
       if(slate.sport==='pga') applyPgaStats(p, row, headers);
+      if(slate.sport==='nfl') applyNflStats(p, row, headers);
     });
 
     // Late adds: sheet rows whose id didn't match any player become new pool
@@ -12069,6 +13383,7 @@ async function refreshFromSheet(){
         if(ni>=0){ const v=parseInt(row[ni]); if(!isNaN(v)) p.ratingN=v; }
       }
       if(slate.sport==='pga') applyPgaStats(p, row, headers);
+      if(slate.sport==='nfl') applyNflStats(p, row, headers);
       slate.players.push(p);
       lateAdds++;
     });
@@ -12181,7 +13496,8 @@ function processFile(file){
     parsedCSV.headers=parse(lines[0]);
     parsedCSV.rows=lines.slice(1).filter(l=>l.trim()).map(l=>parse(l));
     colMapping={};
-    applyAutoMap(parsedCSV.headers, colMapping);
+    // New-slate flow: the modal's sport select IS the right source here.
+    applyAutoMap(parsedCSV.headers, colMapping, document.getElementById('slateSport')?.value||'');
     buildMapper();
   };
   reader.readAsText(file);
@@ -12495,6 +13811,14 @@ function createSlate(){
       p.td_ou = get('TD O/U') || null;
     }
 
+    if(colMapping.position!=null) p.position=(row[colMapping.position]||'').trim().toUpperCase();
+
+    // NFL: prop + game-environment columns — read by header name (the odds
+    // puller writes these exact headers; DK salary CSVs contribute Position).
+    if(sport==='nfl'){
+      applyNflStats(p, row, parsedCSV.headers);
+    }
+
     // PGA: pick up cheat-sheet stat columns (dist/acc/gir + weighted SG) for archetypes
     if(sport==='pga') applyPgaStats(p, row, parsedCSV.headers);
 
@@ -12652,7 +13976,8 @@ function handleUpdatePoolFile(file){
 
     // Auto-map using priority + normal pass
     updateColMapping = {};
-    applyAutoMap(headers, updateColMapping);
+    // Update Pool acts on the ACTIVE slate — never the new-slate modal select.
+    applyAutoMap(headers, updateColMapping, activeSlate()?.sport||'');
 
     document.getElementById('updatePoolStatus').textContent = `Loaded ${rows.length} rows, ${headers.length} columns.`;
     document.getElementById('updatePoolDropZone').style.display='none';
@@ -12670,7 +13995,9 @@ function renderUpdatePoolMapper(){
     proj:  {label:'Proj',    required:false},
     own:   {label:'Own%',    required:false},
     rating:{label:'Rating',  required:false},
+    position:{label:'Position',required:false},
     start: {label:'Tee Time',required:false},
+    team:  {label:'Team',    required:false},
     opp:   {label:'Opponent',required:false},
     ml:    {label:'ML',           required:false},
     itd:   {label:'ITD',          required:false},
@@ -12798,6 +14125,7 @@ function applyPoolUpdate(){
     if(slate.sport==='ufc' && cm.start!=null){ const _fn=parseInt(p.start); if(_fn) p.fightNum=_fn; }
     applyUfcOdds(p, row);
     if(slate.sport==='pga') applyPgaStats(p, row, updateParsedCSV.headers);
+    if(slate.sport==='nfl') applyNflStats(p, row, updateParsedCSV.headers);
     delete newDataByName[key]; // mark consumed
   });
 
@@ -12837,6 +14165,7 @@ function applyPoolUpdate(){
     }
     applyUfcOdds(p, row);
     if(slate.sport==='pga') applyPgaStats(p, row, updateParsedCSV.headers);
+    if(slate.sport==='nfl') applyNflStats(p, row, updateParsedCSV.headers);
     slate.players.push(p);
     added++;
   });
@@ -13214,6 +14543,7 @@ window.switchTab=function(tab,el){
 const SIM_DIST_DOMAIN = {
   nascar: { domainMin: -20, domainMax: 160 },
   ufc:    { domainMin:   0, domainMax: 140 },
+  nfl:    { domainMin:  -2, domainMax:  50 },
 };
 
 function buildSimDist(scoresArr, sport) {
