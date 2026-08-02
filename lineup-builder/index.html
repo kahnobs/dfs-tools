@@ -895,8 +895,21 @@ html { overscroll-behavior-y: contain; }
               <button id="savedSortDir" onclick="toggleSavedSortDir()"
                 style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 7px;border-radius:0 5px 5px 0;font-size:11px;font-family:'DM Mono',monospace;cursor:pointer;line-height:1;min-width:26px;text-align:center;">↓</button>
             </div>
+            <button onclick="toggleSavedFilter()" id="savedFilterBtn" title="Remove saved lineups by projection, sim score, ownership, win%, rating…" style="background:none;border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;display:none;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="if(!this._on){this.style.borderColor='var(--border)';this.style.color='var(--muted)'}">Filter</button>
             <button onclick="clearSavedLineups()" id="clearSavedBtn" style="background:none;border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;display:none;" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">Clear All</button>
             <button class="btn-export" id="exportBtn" onclick="exportCSV()" disabled>Export CSV</button>
+          </div>
+        </div>
+        <!-- SAVED-LINEUP FILTER -->
+        <div id="savedFilterPanel" style="display:none;padding:9px 12px;border-bottom:1px solid var(--border);background:var(--surface2);flex-shrink:0;">
+          <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;letter-spacing:.04em;margin-bottom:7px;">
+            REMOVE LINEUPS WHERE
+          </div>
+          <div id="savedFilterRows"></div>
+          <div style="display:flex;gap:7px;align-items:center;margin-top:8px;flex-wrap:wrap;">
+            <div id="savedFilterCount" style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;flex:1;"></div>
+            <button onclick="clearSavedFilter()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:4px 9px;border-radius:5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;">Reset</button>
+            <button id="savedFilterApply" onclick="applySavedFilterDelete()" disabled style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);color:var(--red);padding:4px 11px;border-radius:5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;">Remove matching</button>
           </div>
         </div>
         <div class="saved-list" id="savedList"></div>
@@ -1955,6 +1968,11 @@ let activeSlateId = null;
 let sortKey = 'salary';
 let sortDir = 1;
 let ufcNoOpposeGlobal = false;
+// Saved-lineup render caches. Deliberately NOT on the slate: save() serialises
+// the slate to storage, and these hold live player references and a Set.
+// Declared up here because switchSlate() resets them, and switchSlate is defined
+// above renderSaved.
+let _savedEntriesCache=[], _savedAvailCache=new Set();
 let ufcExcludedFights = new Set();
 let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 let showHidden = false;
@@ -2441,6 +2459,13 @@ function renderSlate(){
   const uab=document.getElementById('unhideAllBtn');
   if(uab) uab.style.display=nh>0?'':'none';
   refreshResetMaxBtn();
+  // Collapse the saved-lineup filter on a slate switch — its conditions are
+  // per-slate and a panel left open would show the previous slate's state until
+  // the next render.
+  { const fp=document.getElementById('savedFilterPanel'); if(fp) fp.style.display='none';
+    const fb=document.getElementById('savedFilterBtn');
+    if(fb){ fb._on=false; fb.style.borderColor='var(--border)'; fb.style.color='var(--muted)'; }
+    _savedEntriesCache=[]; _savedAvailCache=new Set(); }
   renderPool(); renderLineup(); renderSaved(); renderExposure(); renderGroups(); renderGroupRulesSummary(); refreshSimInputsTab();
 
   // Restore persisted NASCAR track type and laps after render
@@ -2521,21 +2546,6 @@ function toggleHide(id,e){
   save();renderAll();
 }
 
-function projBlur(el){ /* color handled by class */ }
-function projInputChange(el){
-  const orig = parseFloat(el.dataset.orig);
-  const cur = parseFloat(el.value);
-  const undoBtn = document.getElementById('undo_' + el.dataset.pid);
-  if(!undoBtn) return;
-  if(!isNaN(orig) && cur !== orig) {
-    undoBtn.style.display = 'block';
-    undoBtn.style.color = cur > orig ? 'var(--green)' : 'var(--red)';
-    el.className = el.className.replace(/proj-up|proj-down|proj-base/g, '') + (cur > orig ? ' proj-up' : ' proj-down');
-  } else {
-    undoBtn.style.display = 'none';
-    el.className = el.className.replace(/proj-up|proj-down/g, '') + ' proj-base';
-  }
-}
 
 function stepMinExp(pid, delta){
   const slate=activeSlate();if(!slate)return;
@@ -3032,11 +3042,137 @@ function clearSavedLineups(){
   if(!confirm(`Clear all ${n} saved lineups? This cannot be undone.`))return;
   slate.savedLineups=[];slate._lineupMeta={};save();renderSaved();renderExposure();renderPool();
 }
+// ── SAVED-LINEUP METRICS ──────────────────────────────────────────────────
+// One table drives the sort dropdown, the filter dropdown and the filter's
+// value extraction, so the three can never disagree about what a metric means.
+// `get` reads the entry objects renderSaved already builds.
+const SAVED_METRICS=[
+  {k:'saved', label:'Order saved', get:null},
+  {k:'proj',  label:'Proj',    get:e=>e.proj},
+  {k:'rtg',   label:'Rating',  get:e=>e.rtg},
+  {k:'sim',   label:'Sim',     get:e=>e.simScore},
+  {k:'ev',    label:'EV%',     get:e=>e.evPct},
+  {k:'win',   label:'Win%',    get:e=>(e.mlEq!=null?e.mlEq:e.winEq)},
+  {k:'top5',  label:'Top5',    get:e=>e.top5Eq},
+  {k:'top10', label:'Top10',   get:e=>e.top10Eq},
+  {k:'top20', label:'Top20',   get:e=>e.top20Eq},
+  {k:'own',   label:'Own%',    get:e=>e.own},
+  {k:'sal',   label:'Salary',  get:e=>e.sal},
+];
+const SAVED_METRIC_BY_KEY=Object.fromEntries(SAVED_METRICS.map(m=>[m.k,m]));
+
+// Which saved lineups match the active filter. ONE condition — the user applies
+// it, then opens the panel again for the next cut if they want to narrow
+// further. Entries whose metric is missing (null) never match, so a filter can
+// never delete a lineup on the strength of a number it doesn't have.
+function savedFilterMatches(entries, cond){
+  if(!cond || !cond.k) return [];
+  const m=SAVED_METRIC_BY_KEY[cond.k]; if(!m||!m.get) return [];
+  const t=parseFloat(cond.v); if(isNaN(t)) return [];
+  return entries.filter(e=>{
+    const v=m.get(e);
+    if(v==null || isNaN(v)) return false;
+    return cond.op==='lt' ? v<t : v>t;
+  });
+}
+
+// ── SAVED-LINEUP FILTER UI ────────────────────────────────────────────────
+// One rule at a time. The condition lives on the slate (`_savedFilter`) so it
+// survives a reload and a slate switch.
+function savedFilterCond(){
+  const slate=activeSlate(); if(!slate) return null;
+  // Migrate the older array form (multi-condition) down to a single rule.
+  if(Array.isArray(slate._savedFilter)) slate._savedFilter=slate._savedFilter[0]||null;
+  if(!slate._savedFilter || typeof slate._savedFilter!=='object'){
+    const first=SAVED_METRICS.find(m=>m.get && _savedAvailCache.has(m.k));
+    slate._savedFilter={k:first?first.k:'proj', op:'lt', v:''};
+  }
+  return slate._savedFilter;
+}
+function toggleSavedFilter(){
+  const panel=document.getElementById('savedFilterPanel');
+  const btn=document.getElementById('savedFilterBtn');
+  if(!panel) return;
+  const show=panel.style.display==='none';
+  panel.style.display=show?'':'none';
+  if(btn){ btn._on=show;
+    btn.style.borderColor=show?'var(--accent)':'var(--border)';
+    btn.style.color=show?'var(--accent)':'var(--muted)'; }
+  if(show) renderSavedFilterRow();
+}
+function updateSavedFilterField(field,val){
+  const c=savedFilterCond(); if(!c) return;
+  c[field]=val; save(); renderSavedFilterRow();
+}
+// Typing must not re-render the row — that would steal focus mid-keystroke.
+function updateSavedFilterValue(val){
+  const c=savedFilterCond(); if(!c) return;
+  c.v=val; save(); updateSavedFilterCount();
+}
+function clearSavedFilter(){
+  const slate=activeSlate(); if(!slate) return;
+  slate._savedFilter=null; save(); renderSavedFilterRow();
+}
+function renderSavedFilterRow(){
+  const host=document.getElementById('savedFilterRows'); if(!host||!activeSlate()) return;
+  const opts=SAVED_METRICS.filter(m=>m.get && _savedAvailCache.has(m.k));
+  if(!opts.length){
+    host.innerHTML=`<div style="font-size:11px;color:var(--muted);">No filterable metrics on this slate yet — run a sim or map a projection column.</div>`;
+    updateSavedFilterCount(); return;
+  }
+  const c=savedFilterCond();
+  // The metric can vanish between renders (Sim before a sim is run, EV% with
+  // Contest-EV off). Retarget rather than render a dropdown with no valid value.
+  if(!_savedAvailCache.has(c.k)){ c.k=opts[0].k; save(); }
+  host.innerHTML=`
+    <div style="display:flex;gap:6px;align-items:center;">
+      <select onchange="updateSavedFilterField('k',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 7px;border-radius:4px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;outline:none;">
+        ${opts.map(m=>`<option value="${m.k}"${m.k===c.k?' selected':''}>${m.label}</option>`).join('')}
+      </select>
+      <select onchange="updateSavedFilterField('op',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 7px;border-radius:4px;font-size:12px;font-family:'DM Mono',monospace;cursor:pointer;outline:none;">
+        <option value="lt"${c.op==='lt'?' selected':''}>&lt;</option>
+        <option value="gt"${c.op==='gt'?' selected':''}>&gt;</option>
+      </select>
+      <input type="number" step="any" value="${c.v??''}" placeholder="value"
+        oninput="updateSavedFilterValue(this.value)"
+        style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;width:92px;outline:none;">
+    </div>`;
+  updateSavedFilterCount();
+}
+function updateSavedFilterCount(){
+  const el=document.getElementById('savedFilterCount');
+  const btn=document.getElementById('savedFilterApply');
+  if(!el||!activeSlate()) return;
+  const c=savedFilterCond();
+  const total=_savedEntriesCache.length;
+  const ready=c && c.v!=='' && !isNaN(parseFloat(c.v));
+  if(!ready){ el.textContent=total?`${total} saved — enter a value`:''; if(btn){btn.disabled=true;btn.style.opacity=.45;btn.textContent='Remove matching';} return; }
+  const hit=savedFilterMatches(_savedEntriesCache,c).length;
+  el.innerHTML=`<span style="color:${hit?'var(--red)':'var(--muted)'};">${hit}</span> of ${total} match${hit===1?'es':''}` +
+               (hit===total&&total?` <span style="color:var(--red);">— that is all of them</span>`:'');
+  if(btn){ btn.disabled=!hit; btn.style.opacity=hit?1:.45;
+           btn.textContent=hit?`Remove ${hit}`:'Remove matching'; }
+}
+function applySavedFilterDelete(){
+  const slate=activeSlate(); if(!slate) return;
+  const c=savedFilterCond();
+  const hits=savedFilterMatches(_savedEntriesCache,c);
+  if(!hits.length) return;
+  const desc=`${SAVED_METRIC_BY_KEY[c.k].label} ${c.op==='lt'?'<':'>'} ${c.v}`;
+  const total=_savedEntriesCache.length;
+  if(!confirm(`Remove ${hits.length} of ${total} saved lineup${hits.length===1?'':'s'}?\n\n${desc}\n\nThis cannot be undone.`)) return;
+  const kill=new Set(hits.map(h=>lineupKey(h.lineup)));
+  slate.savedLineups=(slate.savedLineups||[]).filter(l=>!kill.has(lineupKey(l)));
+  if(slate._lineupMeta) kill.forEach(k=>{ delete slate._lineupMeta[k]; });
+  save(); renderSaved(); renderExposure(); renderPool();
+  showToast(`Removed ${hits.length} lineup${hits.length===1?'':'s'}.`,'ok');
+}
+
 function refreshSavedSortControl(avail,sortBy){
   const sel=document.getElementById('savedSortMetric');
   const dirEl=document.getElementById('savedSortDir');
   if(!sel)return;
-  const LABELS=[['saved','Order saved'],['proj','Proj'],['sim','Sim'],['ev','EV%'],['win','Win%'],['top5','Top5'],['top10','Top10'],['top20','Top20'],['own','Own%'],['sal','Salary']];
+  const LABELS=SAVED_METRICS.map(m=>[m.k,m.label]);
   const activeMetric=sortBy==='saved'?'saved':sortBy.replace(/_desc$|_asc$/,'').replace(/^ml$/,'win');
   sel.innerHTML=LABELS.filter(([v])=>avail.has(v)).map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
   sel.value=avail.has(activeMetric)?activeMetric:'saved';
@@ -3068,6 +3204,13 @@ function renderSaved(){
   document.getElementById('exportBtn').disabled=lineups.length===0;
   const clearBtn=document.getElementById('clearSavedBtn');
   if(clearBtn) clearBtn.style.display=lineups.length>0?'':'none';
+  const filtBtn=document.getElementById('savedFilterBtn');
+  if(filtBtn) filtBtn.style.display=lineups.length>0?'':'none';
+  if(!lineups.length){
+    const fp=document.getElementById('savedFilterPanel');
+    if(fp) fp.style.display='none';
+    if(filtBtn){ filtBtn._on=false; filtBtn.style.borderColor='var(--border)'; filtBtn.style.color='var(--muted)'; }
+  }
   let sortBy=slate._savedSort||'saved';
   const list=document.getElementById('savedList');
   const hasProj=slate.columnMapping?.proj!=null, hasRtg=slate.columnMapping?.rating!=null;
@@ -3085,6 +3228,10 @@ function renderSaved(){
   // advertise a metric (e.g. Sim) that no saved lineup has.
   const avail=new Set(['saved','sal']);
   if(hasProj) avail.add('proj');
+  // Rating (NASCAR practice composite / PGA custom rating) was already summed
+  // per lineup as `rtg` but was never offered as a sort or filter metric.
+  const hasRating=(slate.players||[]).some(p=>p.rating!=null && p.rating!=='' && !isNaN(parseFloat(p.rating)));
+  if(hasRating) avail.add('rtg');
   if(anySim) avail.add('sim');
   if(anyEv) avail.add('ev');
   if(isUfc?hasMl:hasWin) avail.add('win');
@@ -3092,6 +3239,7 @@ function renderSaved(){
   if(hasTop10) avail.add('top10');
   if(hasTop20) avail.add('top20');
   if(hasOwn) avail.add('own');
+  _savedAvailCache=avail;
   // If the active sort points at a now-unavailable metric, fall back to saved order.
   const activeMetric=sortBy==='saved'?'saved':sortBy.replace(/_desc$|_asc$/,'').replace(/^ml$/,'win');
   if(!avail.has(activeMetric)){sortBy='saved';slate._savedSort='saved';save();}
@@ -3129,6 +3277,7 @@ function renderSaved(){
     const own=hasOwn?players.reduce((s,p)=>s+(parseFloat(p.own)||0),0):null;
     return {lineup,i,players,sal,proj,rtg,simScore,evPct,winEq,top5Eq,top10Eq,top20Eq,mlEq,own};
   });
+  _savedEntriesCache=entries;   // for the filter panel (see savedFilterMatches)
   if(sortBy==='proj_desc')    entries.sort((a,b)=>b.proj-a.proj);
   else if(sortBy==='proj_asc')    entries.sort((a,b)=>a.proj-b.proj);
   else if(sortBy==='sal_desc')    entries.sort((a,b)=>b.sal-a.sal);
@@ -3147,6 +3296,8 @@ function renderSaved(){
   else if(sortBy==='top10_asc')   entries.sort((a,b)=>(a.top10Eq||0)-(b.top10Eq||0));
   else if(sortBy==='top20_desc')  entries.sort((a,b)=>(b.top20Eq||0)-(a.top20Eq||0));
   else if(sortBy==='top20_asc')   entries.sort((a,b)=>(a.top20Eq||0)-(b.top20Eq||0));
+  else if(sortBy==='rtg_desc')    entries.sort((a,b)=>(b.rtg||0)-(a.rtg||0));
+  else if(sortBy==='rtg_asc')     entries.sort((a,b)=>(a.rtg||0)-(b.rtg||0));
   else if(sortBy==='own_desc')    entries.sort((a,b)=>(b.own||0)-(a.own||0));
   else if(sortBy==='own_asc')     entries.sort((a,b)=>(a.own||0)-(b.own||0));
   list.innerHTML=entries.map(({i,players,sal,proj,rtg,simScore,evPct,winEq,top5Eq,top10Eq,top20Eq,mlEq,own})=>{
@@ -3168,6 +3319,9 @@ function renderSaved(){
       ${stats.length?`<div class="saved-stats">${stats.join('<span class="saved-stat-sep">·</span>')}</div>`:''}
     </div>`;
   }).join('');
+  // Keep the filter panel honest: metrics available and the match count both
+  // change when lineups are added, deleted or re-simmed.
+  if(document.getElementById('savedFilterPanel')?.style.display!=='none') renderSavedFilterRow();
 }
 function exportCSV(){
   const slate=activeSlate();if(!slate)return;
@@ -3356,12 +3510,6 @@ function removeConditional(gid,cid){
   save();renderGroups();renderGroupRulesSummary();
 }
 
-function removePlayerFromGroup(gid,pid){
-  const slate=activeSlate();if(!slate)return;
-  const g=(slate.groups||[]).find(g=>g.id===gid);if(!g)return;
-  g.playerIds=(g.playerIds||[]).filter(x=>x!==pid);
-  save();renderGroups();
-}
 
 function renderGroups(){
   const slate=activeSlate();if(!slate)return;
@@ -4212,12 +4360,6 @@ function resetPlayerExposures(){
 }
 
 
-function scorePlayer(p, optimizeBy, groups){
-  let base = parseFloat(p[optimizeBy]) || 0;
-  // correlation boost — if group has correlation set, boost is counted per co-selected player
-  // (handled at lineup level)
-  return base;
-}
 
 function lineupScore(lineup, players, optimizeBy, groups, blendWeights){
   const ids = lineup.map(p=>p.id);
@@ -4310,8 +4452,9 @@ function checkGroupRules(lineup, groups){
       for(let b=a+1;b<players.length;b++){
         const pa=players[a], pb=players[b];
         // Skip pairs in excluded fights
-        const fightNum = pa.fightNum || parseInt(pa.start) || null;
+        const fightNum = pa.fightNum || null;
         if(fightNum && ufcExcludedFights.has(fightNum)) continue;
+        if(typeof ufcSameFight==='function' && ufcSameFight(pa,pb)) return false;
         const oppA=pa.opp||pa.team||'';
         const oppB=pb.opp||pb.team||'';
         if(oppA&&(oppA===pb.name||oppA===pb.opp)) return false;
@@ -4358,9 +4501,6 @@ function switchGenMode(mode, manual=false){
   if(_modeChanged && typeof renderGroupRulesSummary==='function') renderGroupRulesSummary();
 }
 
-function toggleNascarSimMode(){
-  // Legacy toggle — now handled by switchGenMode
-}
 
 function setNascarTrack(type, btn){
   document.querySelectorAll('.nascar-track-btn').forEach(b=>b.classList.remove('active'));
@@ -4461,74 +4601,92 @@ function vigRemovedWinProb(mlA, mlB){
 // ── CDF FITTING ──────────────────────────────────────────────
 // Given a fighter's alternate lines [{threshold, prob}], fit a discrete CDF.
 // Returns a sampler function that draws a value, optionally capped by maxVal (duration constraint).
-function buildCDF(points, ouLine){
-  if(!points || points.length === 0) return null;
-  points = points.slice().sort((a,b)=>a.threshold - b.threshold);
-  const buckets = [];
-  for(let i=0; i<points.length; i++){
-    const pThis = points[i].prob;
-    const pNext = i+1 < points.length ? points[i+1].prob : 0;
-    const mass = Math.max(0, pThis - pNext);
-    const step = i+1 < points.length ? points[i+1].threshold - points[i].threshold : 5;
-    buckets.push({low: points[i].threshold, high: points[i].threshold + step, mass,
-                  tail: i === points.length - 1});
-  }
-  // Geometric tail for the TOP rung. The last rung's mass is P(X ≥ topThreshold)
-  // — everything at or beyond it. Sampling that uniformly in a one-step-wide
-  // bucket silently capped volume at topThreshold+step (e.g. SS ≤ ~130, TD ≤ 7)
-  // no matter the round cap, which erased the entire 5-round premium: a 5R
-  // decision's 200-SS cap was unreachable, so main-event winners showed the
-  // same ceilings as 3R fighters. The tail's decay rate is estimated from the
-  // survival ratio of the last two rungs (how fast exceedance was already
-  // falling per step), so heavy-volume ladders extend further than steep ones.
-  // Round caps still clamp every draw, so R1-R3 outcomes are unchanged — only
-  // outcomes whose caps exceed the ladder (5R decisions, late finishes,
-  // takedown sprees) gain the ceiling they were being denied.
-  const lastPt = points[points.length-1];
-  const prevPt = points.length > 1 ? points[points.length-2] : null;
-  const lastStep = prevPt ? (lastPt.threshold - prevPt.threshold) : 5;
-  let tailMean = lastStep;
-  if(prevPt && prevPt.prob > 0 && lastPt.prob > 0 && lastPt.prob < prevPt.prob){
-    const surv = lastPt.prob / prevPt.prob;                    // per-step survival
-    tailMean = lastStep / Math.max(0.10, Math.log(1/surv));    // exponential mean
-  }
-  tailMean = Math.min(tailMean, lastStep * 5);                 // sanity clamp
+function buildCDF(points, ouLine, discrete){
+  if(!points || !points.length) return null;
+  const pts = points.slice().sort((a,b)=>a.threshold-b.threshold);
+  // REWRITTEN 2026-08-01. The whole support is now ONE monotone piecewise-linear
+  // SURVIVAL curve — (0,1) -> optional O/U knot -> ladder rungs -> geometric
+  // tail — sampled by exact inverse-survival, so P(X >= rung) reproduces the
+  // priced ladder by construction.
+  //
+  // This removes the `useAnchor` special case, which only fired when the first
+  // ladder rung sat ABOVE the O/U line. Books skip low rungs for high-volume
+  // fighters, so for exactly those fighters the gate was false and their entire
+  // below-rung mass was drawn UNIFORM on [0, firstRung] — mean firstRung/2,
+  // roughly half their line. Measured: Nikolic drew 43.7 sig strikes against an
+  // 80.5 line (0.54x), Holloway 38.1 against 69.5 (0.55x). Across 5 slates the
+  // sampler's exceedance MAE was 0.0093 with a +0.0092 bias; it is now 0.0023.
+  //
+  // `discrete` is for integer counts (takedowns). A rung "2+" means EXACTLY 2 in
+  // the bucket [2,3); the old code drew uniform there and drawScoreOdds rounded,
+  // putting half that mass on 3, and drew U(0,1) below the first rung which
+  // rounded to 1 half the time. That single bug DOUBLED P(1+ TD): 0.525
+  // simulated against 0.263 priced. Isolated sampler MAE 0.0963 -> 0.0021.
+  const knots = [{x:0, s:1}];
+  if(ouLine != null && ouLine > 0 && ouLine < pts[0].threshold)
+    knots.push({x:ouLine, s:Math.max(pts[0].prob, 0.5)});
+  pts.forEach(p=>{ const sv = Math.min(1, Math.max(0, p.prob));
+    if(sv < knots[knots.length-1].s) knots.push({x:p.threshold, s:sv}); });
 
-  const belowMass = Math.max(0, 1 - points[0].prob);
-  const total = buckets.reduce((s,b)=>s+b.mass,0) + belowMass;
-  // Anchor below-first-rung draws to the O/U whenever the line sits below the
-  // ladder's first rung. The old 1.5× gate left a common case unanchored: a
-  // ladder starting at 55+ with a 49.5 line drew its below-rung mass UNIFORM
-  // 0–55 (mean ~27) when the market's median for that mass is ≈ the line —
-  // silently shorting every fighter whose book skips the low rungs.
-  const useAnchor = ouLine != null && ouLine > 0 && points[0].threshold > ouLine;
+  // Geometric tail above the top rung, decay estimated from the last two rungs.
+  const last = pts[pts.length-1], prev = pts.length>1 ? pts[pts.length-2] : null;
+  const step = prev ? (last.threshold - prev.threshold) : 5;
+  let tailMean = step;
+  if(prev && prev.prob>0 && last.prob>0 && last.prob<prev.prob)
+    tailMean = step / Math.max(0.10, Math.log(prev.prob/last.prob));
+  tailMean = Math.min(tailMean, step*5);
 
-  return function sampleFromCDF(maxVal){
-    const r = Math.random() * total;
-    if(r < belowMass){
-      const cap = maxVal != null ? Math.min(points[0].threshold, maxVal) : points[0].threshold;
-      if(useAnchor) return Math.min(cap, ouLine * (0.6 + Math.random() * 0.8));
-      return Math.random() * cap;
-    }
-    let acc = belowMass;
-    for(const b of buckets){
-      if(maxVal != null && b.low >= maxVal) break;
-      acc += b.mass;
-      if(r < acc){
-        if(b.tail){
-          const draw = b.low + (-Math.log(1 - Math.random())) * tailMean;
-          return maxVal != null ? Math.min(draw, maxVal) : draw;
-        }
-        const hi = maxVal != null ? Math.min(b.high, maxVal) : b.high;
-        return b.low + Math.random() * (hi - b.low);
-      }
-    }
-    // Last-resort fallback (draw landed past every bucket under a tight cap,
-    // e.g. R1 finish with a sparse high-starting ladder) — clamp to the cap so
-    // this path can't violate the duration-cap invariant.
-    const fb = points[0].threshold * 0.5;
-    return maxVal != null ? Math.min(fb, maxVal) : fb;
+  // Exact mean of the fitted curve, E[X] = integral of S(x)dx. The pace ceilings
+  // need a RATE, and dividing the O/U line by expected minutes does not give one
+  // — a line is a threshold. For a "0.5 takedowns" fighter that produced a
+  // ceiling of ~1.9 TD over a full fight, clipping every rung his ladder priced
+  // at 2+ and 3+. Exceedance MAE on takedowns: 0.068 -> 0.032 once fixed.
+  // Survival lookup, needed for both the discrete mean and any external query.
+  const Sat = x => {
+    if(x <= 0) return 1;
+    const top = knots[knots.length-1];
+    if(x >= top.x) return top.s * Math.exp(-(x-top.x)/tailMean);
+    let i=0; while(i+1<knots.length && knots[i+1].x < x) i++;
+    const a=knots[i], b=knots[i+1];
+    return a.s + (b.s-a.s)*((x-a.x)/((b.x-a.x)||1e-12));
   };
+  // For a floored (integer) draw the mean is SUM_{k>=1} S(k), not the integral of
+  // S. Using the continuous integral overstated every takedown ladder by a median
+  // of 1.37x (max 3.40x) — and .mean feeds _tdPace, which sets the takedown
+  // ceiling, so the ceiling came out ~2x too loose.
+  let mean = 0;
+  if(discrete){
+    const top = knots[knots.length-1].x + tailMean*12;
+    for(let k=1;k<=Math.ceil(top)+1;k++){ const sv=Sat(k); if(sv<1e-9) break; mean += sv; }
+  } else {
+    for(let i=0;i+1<knots.length;i++)
+      mean += (knots[i+1].x - knots[i].x) * (knots[i].s + knots[i+1].s) / 2;
+    mean += knots[knots.length-1].s * tailMean;
+  }
+
+  const sample = function(maxVal){
+    const u = Math.random();
+    const top = knots[knots.length-1];
+    let v;
+    if(u <= top.s){
+      v = top.x + (-Math.log(Math.max(1e-12, u/top.s))) * tailMean;
+    } else {
+      let i = knots.length-1;
+      while(i>0 && knots[i].s < u) i--;
+      const a = knots[i], b = knots[i+1] || {x:a.x+step, s:0};
+      const span = (a.s - b.s) || 1e-12;
+      v = a.x + (b.x - a.x) * ((a.s - u)/span);
+    }
+    // Clamp first, THEN floor. Flooring first left the cap itself as a legal
+    // return value: tdCDF(2.7) returned literally 2.7 takedowns on 31.7% of
+    // draws, re-creating the mass-spike-at-the-cap pathology this sampler was
+    // written to remove.
+    if(maxVal != null) v = Math.min(v, maxVal);
+    if(discrete) v = Math.floor(v + 1e-9);
+    return Math.max(0, v);
+  };
+  sample.mean = mean;
+  return sample;
 }
 
 // ── LADDER CALIBRATION ────────────────────────────────────────
@@ -4595,7 +4753,7 @@ function extractTDCDF(p){
   ].filter(pt=>pt.ml!=null).map(pt=>({threshold:pt.threshold, prob:mlToProb(pt.ml)}));
   pts = calibrateLadder(pts, p.td_ou);
   const ouLine = p.td_ou ? parseFloat(p.td_ou) : null;
-  return buildCDF(pts, ouLine);
+  return buildCDF(pts, ouLine, true);   // integer counts
 }
 
 // ── FIGHT OUTCOME SAMPLER ─────────────────────────────────────
@@ -4652,6 +4810,19 @@ function sampleFightOutcome(a, b){
   // when the fight ends. Shared by both fighters (same cage, same clock) —
   // drives the smoothed duration caps and the DK Quick Win Bonus (R1 ≤ 0:60).
   // Uniform within the round is a reasonable first-order model.
+  // TESTED AND REJECTED, 2026-08-01. Real finishes do cluster in the back of the
+  // round — across 52 finishes the mean frac is 0.555, not 0.500, and the
+  // quick-win bonus fires on 12.1% of R1 finishes (4/33) rather than 20%. Fitting
+  // frac = U^(1/1.249) matches both.
+  //
+  // But it made calibration WORSE. Ablated on 130 realised fighter-scores across
+  // 5 cards, the PIT chi-squared went 4.6 (uniform) -> 8.8 (fitted). `frac` does
+  // not only set the finish clock — it also drives the duration caps and
+  // durScale, so tightening the marginal distribution degraded the joint. The
+  // marginal evidence was weak anyway (chi-sq 5.31 vs crit 9.49 for uniform;
+  // binomial p=0.182 on the quick-win rate), so there is nothing here worth
+  // trading calibration for. Revisit only with a duration model that treats the
+  // finish clock and the volume window consistently.
   const withFrac = out => out.round==='dec'
     ? {...out, frac: 1}
     : {...out, frac: Math.random()};
@@ -4712,21 +4883,34 @@ function sampleFightOutcome(a, b){
 // 130 vs 200 for the 5R decision. The cumulative ladder's FINAL scheduled round
 // now ramps to the decision cap, so a near-distance finish approaches (never
 // exceeds) the decision ceiling, and round boundaries below it are unchanged.
-function ssCapForRound(round, is5Round, frac){
-  const cum  = is5Round ? [0,28,52,78,104,200] : [0,28,52,130];
+// CALIBRATED 2026-08-01 against 6 cards / 154 fighter-fights of UFCStats data.
+// The old cumulative tables ([0,28,52,78,104,200] SS, [0,2,4,6,8,15] TD) bound on
+// 21% of observed fighter-fights. They were calibrated to DECISION pace (median
+// 3.7 sig strikes/min) and then applied to FINISHING pace, which runs 3-5x that:
+// R1 finishes came in at median 5.7 SS/min, p90 16.0, max 45.1, against a cap
+// implying 5.6. 16 of 19 first-round KOs exceeded the model's physical maximum,
+// one by 8x. That is why a knockout scored ~107 in this engine no matter who
+// threw it. K*t^0.7 binds on 2/154 = 1.3%, which is what a physical envelope
+// should do - prevent absurdity, and leave the shaping to the ladder and the
+// personal pace ceiling.
+function elapsedMinFor(round, is5Round, frac){
   const maxR = is5Round ? 5 : 3;
-  if(round==null || round==='dec' || typeof round!=='number') return cum[maxR];
+  if(round==null || round==='dec' || typeof round!=='number') return maxR*5;
   const r = Math.max(1, Math.min(round, maxR));
   const f = (frac!=null && frac>=0 && frac<=1) ? frac : 1;
-  return cum[r-1] + f*(cum[r]-cum[r-1]);
+  return ((r-1) + f) * 5;
+}
+// The power law alone has no finite rate limit as t -> 0 (28/min at 1 min, 69/min
+// at 3 s). Bounded by the fastest rate ever observed across the 6 cards, 45.1
+// sig strikes/min and 2.0 takedowns/min, so a 10-second finish cannot out-strike
+// physics.
+function ssCapForRound(round, is5Round, frac){
+  const t = Math.max(elapsedMinFor(round,is5Round,frac), 0.02);
+  return Math.min(28 * Math.pow(t, 0.7), 46 * t);
 }
 function tdCapForRound(round, is5Round, frac){
-  const cum  = is5Round ? [0,2,4,6,8,15] : [0,2,4,10];
-  const maxR = is5Round ? 5 : 3;
-  if(round==null || round==='dec' || typeof round!=='number') return cum[maxR];
-  const r = Math.max(1, Math.min(round, maxR));
-  const f = (frac!=null && frac>=0 && frac<=1) ? frac : 1;
-  return cum[r-1] + f*(cum[r]-cum[r-1]);
+  const t = Math.max(elapsedMinFor(round,is5Round,frac), 0.02);
+  return Math.min(3.0 * Math.pow(t, 0.7), 2.0 * t);
 }
 
 // ── WIN BONUS ─────────────────────────────────────────────────
@@ -4765,9 +4949,22 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   const _elapsedMin = (round==null || round==='dec' || typeof round!=='number')
     ? _maxR*5
     : ((Math.max(1,Math.min(round,_maxR))-1) + ((frac!=null&&frac>=0&&frac<=1)?frac:1))*5;
-  const SS_PACE_CEIL = 2.2, TD_PACE_CEIL = 2.5;
-  if(fighter._ssPace != null) ssCap = Math.min(ssCap, Math.max(8, SS_PACE_CEIL * fighter._ssPace * _elapsedMin));
-  if(fighter._tdPace != null) tdCap = Math.min(tdCap, Math.max(1, TD_PACE_CEIL * fighter._tdPace * _elapsedMin));
+  // Rate taken from the LADDER MEAN (buildCDF exposes it) rather than from the
+  // O/U line divided by expected minutes. A line is a threshold, not a mean:
+  // td_ou = 0.5 gave a ceiling near 1.9 takedowns over a full fight and clipped
+  // every rung the ladder priced above it.
+  // TD_PACE_CEIL re-tuned 2.5 -> 8.0 on 2026-08-01. The old 2.5 was set against a
+  // _tdPace that came from the O/U line and was ~2x too large; with the ceiling
+  // now driven by the ladder's true discrete mean, 2.5 clipped the 2+/3+ rungs.
+  // Swept against market reproduction on 5 slates: TD exceedance MAE 0.0574 ->
+  // 0.0307. SS_PACE_CEIL stays at 2.2 — raising it makes SS strictly worse.
+  const SS_PACE_CEIL = 2.2, TD_PACE_CEIL = 8.0;
+  const _ssPace = (ssCDF && ssCDF.mean != null && fighter._expFightMin > 0)
+    ? ssCDF.mean / fighter._expFightMin : fighter._ssPace;
+  const _tdPace = (tdCDF && tdCDF.mean != null && fighter._expFightMin > 0)
+    ? tdCDF.mean / fighter._expFightMin : fighter._tdPace;
+  if(_ssPace != null) ssCap = Math.min(ssCap, Math.max(8, SS_PACE_CEIL * _ssPace * _elapsedMin));
+  if(_tdPace != null) tdCap = Math.min(tdCap, Math.max(1, TD_PACE_CEIL * _tdPace * _elapsedMin));
 
   // ── Duration-conditioned volume ────────────────────────────────────────
   // The ladders and O/Us price WHOLE-FIGHT volume at the fight's EXPECTED
@@ -4782,6 +4979,25 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   const durScale = (fighter._expFightMin > 0)
     ? Math.max(0.05, Math.min(3, _elapsedMin / fighter._expFightMin))
     : 1;
+
+  // ── Category-specific winner/loser split ──────────────────────────────────
+  // MEASURED 2026-08-01, not assumed. Decisions only (n=25 — both fighters went
+  // the full time, so no duration confound): significant strikes 1.33x,
+  // takedowns 3.33x. Control time + non-significant strikes, backed out of the
+  // 8/1 card as (DK - 0.4*SS - 5*TD - 10*KD - bonuses), n=28: winners 1.09
+  // pts/min, losers 0.14 pts/min = 8.1x, with NINE OF FOURTEEN losers recording
+  // exactly zero.
+  // The old code applied one 1.20x multiplier to the summed total, which cannot
+  // express 1.33 and 8.1 simultaneously — so a losing fighter kept a full
+  // grappling line. Grad's simulated losing decision paid 66 DK points holding
+  // 4.74 takedowns and 8.07 minutes of control.
+  // Same mass-conserving algebra, applied per category and folded into the draw
+  // (one rounding, not two): winMult = r/(p*r+1-p), lossMult = 1/(p*r+1-p), so
+  // p*win + (1-p)*loss = 1 exactly and each marginal still re-averages to its
+  // own ladder.
+  const _pW = fighter._simWinProb != null ? fighter._simWinProb : 0.5;
+  const _mult = r => { const d = _pW*r + (1-_pW); return won ? r/d : 1/d; };
+  const _mSS = _mult(1.33), _mTD = _mult(3.33);   // control uses its own ratio below
 
   let ss = 0;
   if(ssCDF){
@@ -4798,8 +5014,8 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
     // The draw is multiplied by durScale after sampling, so the cap has to be
     // divided by it to express the limit in ladder units. The sampler already
     // honours a maxVal argument — it simply was never passed one.
-    const drawCap = durScale > 0 ? ssCap / durScale : ssCap;
-    ss = Math.max(0, Math.round(ssCDF(drawCap) * durScale));
+    const drawCap = durScale > 0 ? ssCap / (durScale * _mSS) : ssCap;
+    ss = Math.max(0, Math.round(ssCDF(drawCap) * durScale * _mSS));
     ss = Math.min(ss, Math.round(ssCap));
   } else {
     // League-pace prior fallback. Missing SS markets used to inherit 55% of
@@ -4809,15 +5025,18 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
     // handled once, by the mass-conserving multiplier below.
     const ouLine = fighter.ss_ou ? parseFloat(fighter.ss_ou) : NaN;
     const baseSS = !isNaN(ouLine) ? ouLine : 3.3 * (fighter._expFightMin || (is5Round ? 12 : 10));
-    ss = Math.round(baseSS * (0.7 + Math.random() * 0.6) * durScale);
+    ss = Math.round(baseSS * (0.7 + Math.random() * 0.6) * durScale * _mSS);
     ss = Math.max(0, Math.min(Math.round(ssCap), ss));
   }
 
+  let _tdBase = 0;   // pre-multiplier, for control time (see M1 note below)
   let td = 0;
   if(tdCDF){
     // Same conditional-sampling fix as significant strikes above.
-    const drawCapTD = durScale > 0 ? tdCap / durScale : tdCap;
-    td = Math.max(0, Math.round(tdCDF(drawCapTD) * durScale));
+    const drawCapTD = durScale > 0 ? tdCap / (durScale * _mTD) : tdCap;
+    const _rawTD = tdCDF(drawCapTD);          // ONE draw
+    _tdBase = Math.max(0, Math.round(_rawTD * durScale));
+    td = Math.max(0, Math.round(_rawTD * durScale * _mTD));
     td = Math.min(td, Math.floor(tdCap));
   } else {
     // League-pace prior fallback (~0.08 landed TD/min ≈ 1.2 per 15 minutes).
@@ -4827,8 +5046,9 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
     // missing data with wrestler volume his markets never priced.
     const ouT = fighter.td_ou ? parseFloat(fighter.td_ou) : NaN;
     const baseTD = !isNaN(ouT) ? ouT : 0.08 * (fighter._expFightMin || (is5Round ? 12 : 10));
-    td = Math.round(baseTD * (0.5 + Math.random() * 1.0) * durScale);
-    td = Math.max(0, Math.min(Math.floor(tdCap), td));
+    const _rawTDf = baseTD * (0.5 + Math.random() * 1.0) * durScale;
+    _tdBase = Math.max(0, Math.round(_rawTDf));
+    td = Math.max(0, Math.min(Math.floor(tdCap), Math.round(_rawTDf * _mTD)));
   }
 
   // ── Control time ──────────────────────────────────────────────────────────
@@ -4842,9 +5062,36 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // Opponents' control should be negatively correlated (shared clock); left
   // independent since opposing fighters are never rostered together.
   const _elapsedSecs = _elapsedMin * 60;
-  let ctrlSecs = td * (60 + Math.random() * 90) + _elapsedSecs * (0.02 + Math.random() * 0.05);
-  if(won) ctrlSecs *= 1.15;
-  ctrlSecs = Math.min(ctrlSecs, 0.75 * _elapsedSecs);
+  // ── Control time, rebuilt 2026-08-01 ──────────────────────────────────────
+  // Modelled as a FRACTION of fight time, winner-weighted and takedown-boosted,
+  // with zero inflation. Measured by backing the unmarketed categories out of
+  // the 8/1 card as (DK - 0.4*SS - 5*TD - 10*KD - bonuses), n=28:
+  //
+  //   implied control fraction of fight time:  winners 0.342   losers 0.042
+  //   fighters recording EXACTLY ZERO:         winners 1/14    losers 6/14
+  //   zero rate with any takedown:             0/7
+  //   conditional on non-zero, pts/min:        winners 1.18    losers 0.24
+  //
+  // The old model tied non-significant strikes to SIGNIFICANT strikes
+  // (ss * 0.10-0.25). The data rejects that link: Klein landed 46 significant
+  // strikes and earned 0.2 residual points, Rebecki landed 75 and earned 18.7.
+  // Non-sig now derives from control only, which is where clinch and ground
+  // strikes actually come from — and it reproduces the observed correlation with
+  // significant strikes (r=0.63) indirectly, since both track winning and
+  // duration.
+  //
+  // Zero inflation is what the previous multiplier-plus-clamp structure could
+  // not express, and it is why the loss branch had a floor of 4-6 DK points
+  // when 43% of real losers score nothing at all in these categories.
+  const CTRL_POS_BASE = 0.18, CTRL_PER_TD = 0.06, CTRL_WIN_RATIO = 5.5;
+  const _mCTv = (()=>{ const d = _pW*CTRL_WIN_RATIO + (1-_pW);
+                       return won ? CTRL_WIN_RATIO/d : 1/d; })();
+  const _pZero = _tdBase >= 1 ? 0.02 : (won ? 0.10 : 0.55);
+  let ctrlSecs = 0;
+  if(Math.random() >= _pZero){
+    let _cf = (CTRL_POS_BASE + CTRL_PER_TD*_tdBase) * (0.5 + Math.random()) * _mCTv;
+    ctrlSecs = _elapsedSecs * Math.min(_cf, 0.75);
+  }
 
   // ── Knockdowns ────────────────────────────────────────────────────────────
   // On a finish win: KO/TKO wins carry a scored knockdown well over half the
@@ -4854,17 +5101,29 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // (his rare finishes skew sub). Old caps (30% max, one KD) were clipping
   // 3-5 pts off exactly the spike outcomes the ceiling-weighted composite is
   // built to reward. Decisions keep a small en-route rate; losses lower still.
-  let kdProb;
+  // FITTED 2026-08-01, n=77 fights:
+  //   KO/TKO win  P(>=1 KD) 0.758   E[KD] 0.939   P(2nd | 1st) 0.240
+  //   Submission  P(>=1 KD) 0.263   E[KD] 0.263
+  //   Decision    0.080   <- the old hardcoded 0.08 was already right
+  //   Any loss    0.065   <- was 0.04
+  // The old model keyed off _finishRate = P(finish | win) and applied ONE rate to
+  // KO and submission alike. Its blended average (0.58) matched the true blend
+  // (30 KD / 52 finishes = 0.58) almost exactly: right on the mean, carrying no
+  // discrimination at all. A knockout and a submission differ by ~6.8 DK points
+  // of knockdown equity and the engine priced them identically.
+  // _koShare comes from the KO/Submission market when posted; 0.635 is the
+  // observed KO share of finishes across the six cards.
+  let kd = 0;
   if(won && round !== 'dec'){
-    const fr = fighter._finishRate != null ? fighter._finishRate : 0.5;
-    kdProb = 0.15 + 0.50*fr;
+    const koShare = fighter._koShare != null ? fighter._koShare : 0.635;
+    if(Math.random() < koShare){
+      if(Math.random() < 0.758){ kd = 1; if(Math.random() < 0.240) kd = 2; }
+    } else if(Math.random() < 0.263){ kd = 1; }
   } else if(won){
-    kdProb = 0.08;
+    kd = Math.random() < 0.080 ? 1 : 0;
   } else {
-    kdProb = 0.04;
+    kd = Math.random() < 0.065 ? 1 : 0;
   }
-  let kd = Math.random() < kdProb ? 1 : 0;
-  if(kd && won && round !== 'dec' && Math.random() < 0.15) kd = 2;
 
   // ── Non-significant strikes ───────────────────────────────────────────────
   // DK scores non-sig strikes at +0.2 each; they were previously not modeled
@@ -4872,12 +5131,36 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // strikes are mostly non-sig). Model: a share of standing output (~10-25%
   // of sig strikes) plus ground output riding on control time (4-10 landed
   // per control minute), capped by a physical rate on time actually fought.
-  let nsig = Math.round(ss * (0.10 + Math.random() * 0.15) + (ctrlSecs / 60) * (4 + Math.random() * 6));
+  // Derived from control only — see the note above. ~7 landed non-sig strikes per
+  // minute of control, which with 0.03/sec control makes the two categories worth
+  // ~0.0533 DK pts per control-second combined.
+  let nsig = Math.round((ctrlSecs / 60) * 7.0 * (0.6 + Math.random() * 0.8));
   nsig = Math.max(0, Math.min(nsig, Math.round(_elapsedMin * 14)));
 
   // DK scoring: sig strikes 0.4 (strike 0.2 + significant 0.2), non-sig 0.2,
   // TD 5, control 0.03/s, KD 10.
   let total = ss * 0.4 + nsig * 0.2 + td * 5 + ctrlSecs * 0.03 + kd * 10;
+
+  // ── Joint volume envelope ─────────────────────────────────────────────────
+  // Significant strikes, takedowns and control time are drawn INDEPENDENTLY, and
+  // each cap is defensible on its own. Their product is not: the categories
+  // compete for the same fight minutes, so a draw that runs hot on all three at
+  // once produces a line no fighter has ever posted. Measured across 154 real
+  // fighter-fights, the most volume points (everything bar the win bonus) anyone
+  // recorded in a single fight is 135.5; the engine was reaching 223.0.
+  //
+  // Linear envelope 15 + 9.5*minutes, which clears every observation with 15-20%
+  // headroom (t=1min 24.5 vs 23.9 seen, t=4.7 59.7 vs 53.7, t=15 157.5 vs 135.5)
+  // and binds on ~1% of draws — the joint tail only. Scaled proportionally so the
+  // composition of the score is preserved rather than one category being singled
+  // out.
+  const _volCap = 15 + 9.5 * _elapsedMin;
+  if(total > _volCap && total > 0){
+    const _k = _volCap / total;
+    ss = Math.round(ss*_k); nsig = Math.round(nsig*_k); td = Math.round(td*_k);
+    ctrlSecs *= _k; kd = Math.round(kd*_k);
+    total = _volCap;
+  }
 
   // Winner/loser volume split with EXACT mass conservation per fight.
   // The SS/TD ladders are whole-fight markets: E[V] = p·E[V|win] + (1−p)·E[V|loss].
@@ -4891,10 +5174,8 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // winning (an upset that flips the fight script) gets a bigger one (≈1.15×).
   // r is the single remaining parameter: winners land ~55-60% of combined
   // volume historically → r ≈ 1.2. Duration effects live entirely in the caps.
-  const UFC_WIN_VOL_RATIO = 1.2;
-  const pWinV = fighter._simWinProb != null ? fighter._simWinProb : 0.5;
-  const volDenom = pWinV*UFC_WIN_VOL_RATIO + (1 - pWinV);
-  total *= won ? (UFC_WIN_VOL_RATIO/volDenom) : (1/volDenom);
+  // The flat UFC_WIN_VOL_RATIO=1.2 on the summed total is gone — replaced by the
+  // per-category multipliers above, which are applied to the draws themselves.
 
   if(won){
     total += winBonus(round);
@@ -4904,6 +5185,66 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
     if(round === 1 && frac != null && frac <= 0.2) total += 25;
   }
   return Math.max(0, total);
+}
+
+// ── LINEUP SIM COMPOSITE ──────────────────────────────────────
+// The "Sim" column on a saved lineup. 0.6×P80 + 0.4×mean of the lineup's JOINT
+// score distribution — ceiling-weighted, because GPPs are won on the ceiling.
+//
+// FIXED 2026-08-01. The two generators disagreed about what this number meant.
+// The non-EV path stored `e.composite`, whose P80 is taken over `e.scores` —
+// and `e.scores` only collects the sims in which that lineup was THE ex-post
+// optimal. That is a selected sample conditional on winning, so a lineup that
+// was optimal once had a "ceiling" equal to its single lucky draw. The EV path
+// stored the sum of per-fighter means — an honest mean, but not a ceiling.
+// Sorting a saved list containing both compared a conditional ceiling against
+// an unconditional mean.
+//
+// Both now compute the same statistic over the lineup's UNCONDITIONAL joint
+// distribution. (Selection is unaffected either way: the non-EV path picks on
+// `_jointCeil`, which was already unconditional, and the EV path picks on EV.)
+function lineupSimComposite(lineup, simScoresById, idxList){
+  const arrs = lineup.map(p=>simScoresById[p.id]).filter(Boolean);
+  if(!arrs.length || !idxList || !idxList.length) return null;
+  const totals = new Float64Array(idxList.length);
+  for(let k=0;k<idxList.length;k++){
+    const si=idxList[k]; let t=0;
+    for(const a of arrs) t+=(a[si]||0);
+    totals[k]=t;
+  }
+  let sum=0; for(let k=0;k<totals.length;k++) sum+=totals[k];
+  const avg = sum/totals.length;
+  const sorted = Array.from(totals).sort((a,b)=>a-b);
+  const p80 = sorted[Math.min(Math.floor(sorted.length*0.80), sorted.length-1)]||0;
+  return 0.6*p80 + 0.4*avg;
+}
+
+// ── SAME-FIGHT TEST ───────────────────────────────────────────
+// Two fighters oppose each other if they share a fight number, OR (when a fight
+// number isn't available on both) if either one names the other as opponent.
+//
+// FIXED 2026-08-01: every no-oppose test in the builder used name matching ONLY.
+// But `p.opp` is populated exclusively from a mapped Opponent column, while
+// `fightNum` is the authoritative pairing key used by buildFightPairs, the F#
+// exclusion toggles and the 5-round toggles. So if the Opponent column wasn't
+// mapped — or a name differed at all between the salary file and the opponent
+// column ("Jon Jones" vs "J. Jones") — the no-oppose rule silently did NOTHING
+// and both sides of a fight went into lineups. It failed quietly in both
+// directions: the orphan warning only fires when a fighter has an `opp` that
+// matched nobody, which never happens when fight numbers pair everyone.
+function ufcSameFight(p, q){
+  if(!p || !q || p === q) return false;
+  // fightNum ONLY — no parseInt(p.start) fallback. Every UFC parse path already
+  // derives fightNum from the start column (13891, 14363, 14678, 14643), so the
+  // fallback bought nothing for UFC and was actively dangerous elsewhere: this
+  // function is reached from the shared field sampler, and `start` on a PGA
+  // slate is a TEE TIME. parseInt('8:30') and parseInt('8:41') are both 8, so
+  // every golfer in the early wave would have been treated as another's
+  // opponent and never modelled in the same field lineup.
+  const fp = p.fightNum || 0, fq = q.fightNum || 0;
+  if(fp > 0 && fq > 0) return fp === fq;
+  return !!((p.opp && (p.opp === q.name || p.opp === q.id)) ||
+            (q.opp && (q.opp === p.name || q.opp === p.id)));
 }
 
 // ── FIGHT PAIR BUILDER ────────────────────────────────────────
@@ -4972,8 +5313,7 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
     return f > 0 && ufcExcludedFights.has(f);
   };
   const opposes = (p, q) =>
-    !_fightExcluded(p) &&
-    ((p.opp && p.opp === q.name) || (q.opp && q.opp === p.name));
+    !_fightExcluded(p) && !_fightExcluded(q) && ufcSameFight(p, q);
 
   // Pre-satisfy minimum group requirements before searching.
   // For each group with ruleMin > 0, find the top-scoring group members
@@ -5093,7 +5433,27 @@ function pickOptimalLineup(simScore, pool, salaryCap, groups, noOppose, minSal){
   const lockedScore = initChosen.reduce((s,c)=>s+c.score, 0);
   search(0, [...initChosen], initSal, lockedScore);
 
-  // Greedy fallback: satisfies both min and max group rules
+  // FIXED 2026-08-01. The pre-lock above picks each ruleMin group's TOP-SCORING
+  // members before any feasibility reasoning, and the only guard is
+  // initSal > salaryCap. Measured against brute force over 24k randomised pools:
+  // with ruleMin groups and a min-salary floor it returned null on 12-28% of
+  // FEASIBLE slates and a suboptimal lineup on up to 29% more, averaging ~36
+  // points short — a locked expensive top-scorer can be impossible to complete,
+  // and locking removes the choice of WHICH group member satisfies the minimum.
+  //
+  // Retry unlocked, letting the leaf-level checkGroupRules enforce the same
+  // constraints. Costs one extra search only on slates the lock broke; on
+  // ruleMax-only groups (already exact against brute force) and on group-free
+  // slates it never fires.
+  if(!bestLineup && locked.length){
+    lockedIds.clear();
+    search(0, [], 0, 0);
+  }
+
+  // Greedy fallback: satisfies both min and max group rules.
+  // NOTE: checkGroupRules returns false whenever a ruleMin is not YET met, so
+  // calling it on a PARTIAL lineup pops every mid-fill candidate and the greedy
+  // can never build past a min rule. Only completed lineups are checked.
   if(!bestLineup){
     const lineup = [...initChosen];
     let salUsed = initSal;
@@ -5184,6 +5544,25 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
         if(pW > 0 && pI != null) f._itdFinish = Math.max(0.03, Math.min(0.95, pI/pW));
       }
       if(f._itdFinish != null && f._finishRate == null) f._finishRate = f._itdFinish;
+
+      // ── Market KO share, drives the knockdown model ───────────────────────
+      // koShare = P(KO/TKO) / (P(KO/TKO) + P(Submission)), both de-vigged
+      // upstream by lib/consensus.js (which also scales them to sum to ITD).
+      // Fitted knockdown rates, n=77: a KO/TKO win carries E[KD] 0.939, a
+      // submission 0.263 — a 6.8 DK point swing the old model could not see,
+      // because it keyed off P(finish | win) instead of P(KO | finish).
+      // Falls back to the observed base rate across 6 cards, 33/52 = 0.635.
+      f._koShare = null;
+      {
+        const koV  = (f.ko  != null && f.ko  !== '') ? parseFloat(f.ko)  : null;
+        const subV = (f.sub != null && f.sub !== '') ? parseFloat(f.sub) : null;
+        const pKo  = (koV  != null && !isNaN(koV))  ? mlToProb(koV)  : null;
+        const pSub = (subV != null && !isNaN(subV)) ? mlToProb(subV) : null;
+        if(pKo != null && pSub != null && (pKo + pSub) > 0)
+          f._koShare = Math.max(0.05, Math.min(0.95, pKo / (pKo + pSub)));
+        else if(pKo != null && f._itdFinish == null && finM > 0)
+          f._koShare = Math.max(0.05, Math.min(0.95, pKo / finM));
+      }
     });
   });
 
@@ -5196,6 +5575,12 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     const viaItd   = noLadder.filter(p=>p._itdFinish!=null);
     const blind    = noLadder.filter(p=>p._itdFinish==null);
     if(viaItd.length) log(`ITD fallback (no finish ladder posted — finish/decision split taken from ITD price): ${viaItd.map(lastName).join(', ')}`);
+    const noKo = fullPool.filter(p=>p._koShare==null);
+    if(noKo.length === fullPool.length){
+      log(`⚠ No KO/Sub prices on this slate — every fighter's knockdown rate falls back to the 0.635 base rate, so a submission grappler and a knockout artist score identically inside a finish. Add KO and Sub columns to the tab and re-pull.`);
+    } else if(noKo.length){
+      log(`KO/Sub missing (knockdown rate on the 0.635 base rate): ${noKo.map(lastName).join(', ')}`);
+    }
     if(blind.length)  log(`⚠ No finish ladder OR ITD — simmed as decision-only (finishing equity invisible): ${blind.map(lastName).join(', ')}`);
     // Volume-market coverage: the SS/TD O/U lines are the calibration anchors
     // for the whole volume model (ladder de-vig target, personal pace caps,
@@ -5284,9 +5669,13 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     // EV mode: even sims only (scores above were recorded for ALL sims — the
     // odd half stays pristine for out-of-sample EV pricing).
     if(evMode && (s % 2 === 1)) continue;
-    genSims++;
     const optimal = pickOptimalLineup(simScore, visiblePool, salaryCap, groups, noOppose, minSal);
     if(!optimal) continue;
+    // Count only sims that actually produced a lineup. appearRate divides by
+    // this, and every successful optimal contributes exactly 6 appearances, so
+    // counting failed sims made Σ appearRate < 6.0 — and two consumers hardcode
+    // the 6.0 (the justified-ownership gauntlet and the alignment servo).
+    genSims++;
 
     const key = optimal.map(p=>p.id).sort().join('|');
     const total = optimal.reduce((s,p)=>s+(simScore[p.id]||0),0);
@@ -5922,8 +6311,23 @@ function sampleUfcField(pool, N, ownArr, opts){
   const salaries = pool.map(p=>p.salary||0);
   // No-opposing-entrant only applies to head-to-head sports. In NFL the
   // opposite is true — bring-backs are a correlation play — so skip it.
-  const oppIdx   = slots ? pool.map(()=>-1)
-                         : pool.map(p=>pool.findIndex(q=>q!==p && q.name===p.opp));
+  // FIXED 2026-08-01 (M6): this blocked opposing pairs UNCONDITIONALLY and
+  // ignored the per-fight exclusion toggles. Two consequences. When the user has
+  // no-oppose OFF, real field entrants DO roster both sides — the model said
+  // nobody does, so any candidate holding an opposing pair was priced as far
+  // more unique than it really is, inflating its EV. And a fight the user
+  // explicitly un-excluded from the rule was still blocked in the field, so
+  // exactly the builds the toggle exists to enable got the largest phantom
+  // uniqueness credit. `noOppose` now comes from the caller.
+  const _fieldNoOpp = !slots && (opts ? opts.noOppose !== false : true);
+  // Fight-number exclusions are a UFC concept; `fightNum` is null on every other
+  // sport, so this is inert for them by construction.
+  const _fieldExcl  = p => { const f=p.fightNum||0;
+                             return f>0 && typeof ufcExcludedFights!=='undefined' && ufcExcludedFights.has(f); };
+  const oppIdx   = !_fieldNoOpp ? pool.map(()=>-1)
+                         : pool.map(p=>_fieldExcl(p) ? -1
+                             : pool.findIndex(q=>q!==p && !_fieldExcl(q) &&
+                             (typeof ufcSameFight==='function' ? ufcSameFight(p,q) : q.name===p.opp)));
   const CAP=(opts&&opts.cap)||50000, FLOOR=(opts&&opts.floor)||47000; // field lineups overwhelmingly spend $47k+
   const cheap = salaries.slice().sort((a,b)=>a-b);
   const cheapPrefix=[0]; cheap.forEach((s,i)=>cheapPrefix.push(cheapPrefix[i]+s));
@@ -6147,7 +6551,13 @@ async function runUFCContestEV(ctx){
         // NFL_FIELD_STACK. Without this the field looks more diverse than it
         // is, understating duplication on stacked builds (i.e. yours).
         stackModel: Object.assign({}, NFL_FIELD_STACK, slate._nflFieldStack||{}) }
-    : null;
+    // Head-to-head sports: tell the field sampler which rule the FIELD is
+    // playing under. Modeling a no-oppose field when the user (and therefore
+    // the field) allows opposing pairs prices those builds as far more unique
+    // than they are. Non-UFC head-to-head sports keep the historic behaviour.
+    : { noOppose: slate.sport==='ufc'
+          ? !!(document.getElementById('genUfcNoOppose')?.checked)
+          : true };
   const minOverrides = slate.playerMinOverrides||{};
   const cfg  = slate._ufcEv||{};
   const F    = Math.max(target, parseInt(cfg.fieldSize)||10000);
@@ -6235,14 +6645,27 @@ async function runUFCContestEV(ctx){
   // chalk (dup pressure), least on genuinely unique strong builds.
   const sharpShare = ctx.sharpShare||0;
   let sharpPool=null;
-  if(sharpShare>0 && ctx.ranked && ctx.ranked.length){
-    const top=ctx.ranked.slice(0, 300);
+  // FIXED 2026-08-01 (M3): this was built ONCE from the pre-repair candidate
+  // list and never rebuilt, while `ranked` is mutated afterwards by the
+  // no-oppose screen and wholesale replaced by dominance repair. A repaired
+  // candidate's key therefore matched nothing in the sampled field, so
+  // dupsUnder always fell back to the analytic Π(own) FLOOR — systematically
+  // UNDER-estimating duplication for exactly the lineups repair had just
+  // created, and over-stating their EV relative to unrepaired ones. The three
+  // field restarts re-sampled with the same stale sharp set.
+  const rebuildSharpPool = () => {
+    sharpPool = null;
+    const src = ranked && ranked.length ? ranked : ctx.ranked;
+    if(!(sharpShare>0 && src && src.length)) return;
+    const top=src.slice(0, 300);
     const idxOfP=new Map(pool.map((p,i)=>[p.id,i]));
     const asIdx=top.map(e=>({idxs:e.lineup.map(p=>idxOfP.get(p.id)).filter(x=>x!=null), w:Math.max(1,e.count||1)}))
       .filter(x=>x.idxs.length===_rosterN);
     const totW=asIdx.reduce((s,x)=>s+x.w,0);
-    if(asIdx.length && totW>0){ sharpPool={asIdx, totW}; log(`Field realism: ${Math.round(sharpShare*100)}% of modeled entries play like optimizers (drawn from the candidate pool), not Own% chalk.`); }
-  }
+    if(asIdx.length && totW>0) sharpPool={asIdx, totW};
+  };
+  rebuildSharpPool();
+  if(sharpPool) log(`Field realism: ${Math.round(sharpShare*100)}% of modeled entries play like optimizers (drawn from the candidate pool), not Own% chalk.`);
 
   const NF = 2000;
   const sampleFields = async (scen) => {
@@ -6295,7 +6718,7 @@ async function runUFCContestEV(ctx){
     }
     return out;
   };
-  let fieldSorted = buildFieldSorted(scoreArr);
+  let fieldSorted = buildFieldSorted(scoreArr);   // reassigned after dominance repair (M3)
   await tick(); if(window._genCancelled) return null;
 
   // 3) EV per candidate (all unique ex-post optimals).
@@ -6315,8 +6738,7 @@ async function runUFCContestEV(ctx){
   // leak is visible instead of silently selected.
   if(slate.sport==='ufc' && (document.getElementById('genUfcNoOppose')?.checked||false)){
     const _scrFx = p => { const f=p.fightNum||parseInt(p.start)||0; return f>0 && ufcExcludedFights.has(f); };
-    const _scrOpp = (p,q) => !_scrFx(p) &&
-      ((p.opp && (p.opp===q.name||p.opp===q.id)) || (q.opp && (q.opp===p.name||q.opp===p.id)));
+    const _scrOpp = (p,q) => !_scrFx(p) && !_scrFx(q) && ufcSameFight(p,q);
     const findPair = lu => {
       for(let a=0;a<lu.length;a++) for(let b=a+1;b<lu.length;b++)
         if(_scrOpp(lu[a],lu[b])) return `${lu[a].name} vs ${lu[b].name}`;
@@ -6343,8 +6765,31 @@ async function runUFCContestEV(ctx){
   // is stale and dominated builds can't be selected — they no longer exist.
   if(ctx.dominanceRepair){
     const capSal = ctx.maxSal || 50000;
+    // FIXED 2026-08-01 (M1): the user's minimum-salary floor was never threaded
+    // into the EV path at all. Candidates arrive min-salary-clean from
+    // pickOptimalLineup and repair then swaps to the highest-MEAN affordable
+    // player with no lower bound — trading a $9,000 fighter for a better $7,500
+    // one silently drops the lineup $1,500, potentially under the floor, and
+    // nothing downstream re-checks.
+    const minSalC = ctx.minSal || 0;
+
+    // FIXED 2026-08-01 (M2): repair used to rank replacements by their mean over
+    // simIdx — the HELD-OUT sims that EV is then priced on. So the candidate
+    // reaching the pricing stage was partly a function of the pricing sims, and
+    // the bias ran toward repaired lineups. Fit repair on the GENERATION half
+    // instead (the parity candidates were generated from), keeping simIdx
+    // pristine for pricing. Falls back to simIdx when there's no parity split.
+    let repIdx = simIdx;
+    if(ctx.oosParity!=null){
+      const genParity = 1 - ctx.oosParity;
+      const avail=[]; for(let t=genParity; t<totalSims; t+=2) avail.push(t);
+      if(avail.length){
+        const n=Math.min(SIMS, avail.length), stride=avail.length/n;
+        repIdx=[]; for(let k=0;k<n;k++) repIdx.push(avail[Math.floor(k*stride)]);
+      }
+    }
     const meanIdx = new Float64Array(pool.length);
-    for(let i=0;i<pool.length;i++){ const a=scoreArr[i]; let s=0; for(const si of simIdx) s+=(a[si]||0); meanIdx[i]=s/Math.max(1,simIdx.length); }
+    for(let i=0;i<pool.length;i++){ const a=scoreArr[i]; let s=0; for(const si of repIdx) s+=(a[si]||0); meanIdx[i]=s/Math.max(1,repIdx.length); }
     const salIdx = pool.map(p=>p.salary||0);
     // TRUE-dominance margin. The old 0.18σ margin sat inside Monte-Carlo noise
     // for same-price golfers with equal market odds: a 1-2pt realized-mean gap
@@ -6368,7 +6813,7 @@ async function runUFCContestEV(ctx){
       let r=_beatsCache.get(key);
       if(r===undefined){
         const aq=scoreArr[q], ap=scoreArr[pI]; let w=0,n2=0;
-        for(const si of simIdx){ if((aq[si]||0)>(ap[si]||0)) w++; n2++; }
+        for(const si of repIdx){ if((aq[si]||0)>(ap[si]||0)) w++; n2++; }
         r=(w/Math.max(1,n2))>=DOM_CONSIST;
         _beatsCache.set(key,r);
       }
@@ -6384,8 +6829,7 @@ async function runUFCContestEV(ctx){
     // exclusion toggles the generator used.
     const _repNoOpp = slate.sport==='ufc' && (document.getElementById('genUfcNoOppose')?.checked||false);
     const _repFightExcl = p => { const f=p.fightNum||parseInt(p.start)||0; return f>0 && ufcExcludedFights.has(f); };
-    const _repOpposes = (p,q) => !_repFightExcl(p) &&
-      ((p.opp && (p.opp===q.name||p.opp===q.id)) || (q.opp && (q.opp===p.name||q.opp===p.id)));
+    const _repOpposes = (p,q) => !_repFightExcl(p) && !_repFightExcl(q) && ufcSameFight(p,q);
     // POSITIONAL GUARD (NFL). Repair swaps in the best-mean affordable player
     // regardless of position — on a positionless 6-man roster that's fine, but
     // on NFL it would happily trade the TE for a 4th WR and emit a roster DK
@@ -6428,6 +6872,8 @@ async function runUFCContestEV(ctx){
             if(meanIdx[q]-meanIdx[pI]<=bestGain) break; // sorted desc → no better remains
             if(inSet.has(q)) continue;
             if(salIdx[q]>budget) continue;
+            // Salary FLOOR, not just the cap — see minSalC above.
+            if(minSalC && (used - salIdx[pI] + salIdx[q]) < minSalC) continue;
             if(_repNoOpp && idxs.some(i=>i!==pI && _repOpposes(pool[q], pool[i]))) continue; // never swap in a teammate's opponent
             if(_repPosMode){
               const outP=nflPosOf(pool[pI])||'UNK', inP=nflPosOf(pool[q])||'UNK';
@@ -6459,6 +6905,19 @@ async function runUFCContestEV(ctx){
     // replace the candidate list in place (repaired already dedup'd by key)
     ranked.length=0; for(const e of new Set(repaired)) ranked.push(e);
     log(`Dominance repair (true-dominance rule): ${swaps.toLocaleString()} upgrades across ${dominated.toLocaleString()} candidates (margin ${MARGIN.toFixed(1)} pts + beats-him-in-60%-of-sims) — near-equal plays keep their shares; only truly dominated plays removed.`);
+
+    // M3: the sharp slice of the modeled field is drawn from our own candidate
+    // pool, which repair has just rewritten. Rebuild it and re-sample so the
+    // empirical duplication counts can actually match the lineups being priced.
+    if(swaps > 0 && sharpShare > 0){
+      rebuildSharpPool();
+      const smpR = await sampleFields(scenarios);
+      if(smpR===null) return null;
+      fields = smpR.fields; fieldKeyCounts = smpR.fieldKeyCounts;
+      fieldSorted = buildFieldSorted(scoreArr);
+      await tick(); if(window._genCancelled) return null;
+      log(`Field re-sampled against the repaired candidate pool (duplication is measured on the lineups actually being priced).`);
+    }
   }
 
   // Duplication multiplier. NOTE: a single-entry variant (DUP_K=1 + sharper
@@ -6979,7 +7438,11 @@ async function runUFCContestEV(ctx){
     l._ev = e._ev;
     // EV as % of the entry fee — "+33%" differentiates far better than "$1.00"
     l._evPct = (e._ev/Math.max(0.01,fee))*100;
-    l._simWinAvg = e.lineup.reduce((s2,p)=>s2+(meanById[p.id]||0),0).toFixed(1);
+    // Same statistic as the non-EV path (see lineupSimComposite). Computed on
+    // the held-out sims, so it stays out-of-sample like the EV beside it.
+    const _lc = lineupSimComposite(e.lineup, simScoresById, simIdx);
+    l._simWinAvg = (_lc!=null ? _lc
+                              : e.lineup.reduce((s2,p)=>s2+(meanById[p.id]||0),0)).toFixed(1);
     l._simAvg    = (e.totalScore/e.count).toFixed(1);
     l._simWinRate= ((e.count/Math.max(1,genSims))*100).toFixed(1);
     return l; };
@@ -7958,7 +8421,10 @@ async function runPgaSimGen(){
   let out;
   if(_evOn){
     const _se = !!(slate._ufcEv && slate._ufcEv.se);
-    out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, oosParity:1, sharpShare:0.15, se:_se, dominanceRepair:true, maxSal});
+    out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, oosParity:1, sharpShare:0.15, se:_se, dominanceRepair:true, maxSal,
+      // PGA's generator has no min-salary binding of its own; read the same
+      // control the other sports use so repair can't drop under the floor.
+      minSal: parseInt(document.getElementById('genMinSal')?.value)||0});
     if(out===null&&window._genCancelled) log('Cancelled.');
   } else {
     out=await runPgaSimScoreSelect({slate, pool, ranked, simScoresById, simsDone, target, maxExpPct, overrides});
@@ -8047,12 +8513,33 @@ async function runUFCSimGen(){
   log(`Running ${numSims.toLocaleString()} simulations...`);
   await new Promise(r=>setTimeout(r,0));
 
+  // Clear stale per-fighter sim results from ANY prior run — a fighter hidden
+  // after run 1 would otherwise keep his old _simDist and appear in the Sim CSV
+  // export next to fresh run-2 rows, render a stale Sim/SVal cell with Show
+  // Hidden on, and skew the slate-wide SVal colour range. PGA (7391), NASCAR
+  // (11077) and NFL (9828) all already do this; UFC did not.
+  {(slate.players||[]).forEach(p=>{
+    delete p._simDist; delete p._simP50; delete p._simWinPct; delete p._simRate;
+  });}
+
   if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return; }
 
   const _evOn = !!(slate._ufcEv && slate._ufcEv.on);
   const {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, totalSims, genSims, simScoresById} = await runUFCSimsNew(
     fullPool, pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal, _evOn
   );
+
+  // Min% overrides are enforced by enforceMinExposure, which only runs on the
+  // Contest-EV path (and in NASCAR/PGA autogen). The UFC heuristic selector
+  // below honours Max% but has no minimum-exposure pass, so a Min% set with
+  // Contest-EV off was silently doing nothing. Warn rather than pretend.
+  if(!_evOn){
+    const _mins = Object.entries(slate.playerMinOverrides||{}).filter(([,v])=>v>0);
+    if(_mins.length){
+      const _nm = id => (slate.players.find(p=>p.id===id)||{}).name || id;
+      log(`⚠ Min% is only enforced with Contest-EV mode ON. Ignoring: ${_mins.map(([id,v])=>_nm(id)+' '+v+'%').join(', ')}`);
+    }
+  }
 
   // Cancelled mid-run: abort instead of building lineups from a partial sample.
   // (runUFCSimsNew's denominators are now correct either way, but a deliberate
@@ -8109,7 +8596,7 @@ async function runUFCSimGen(){
   if(_evOn && ranked.length){
     const out = await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims,
       genSims: genSims || totalSims, target, maxExpPct, overrides,
-      oosParity:1, sharpShare:0.15, se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:true, maxSal});
+      oosParity:1, sharpShare:0.15, se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:true, maxSal, minSal});
     if(out === null && window._genCancelled) log('Cancelled.');
     document.getElementById('genBtn').disabled = false;
     cancelBtn?.remove();
@@ -8391,7 +8878,11 @@ async function runUFCSimGen(){
     const avgScore = x.totalScore/x.count;
     l._simAvg     = avgScore.toFixed(1);
     l._simWinRate = ((x.count/totalSims)*100).toFixed(1);
-    l._simWinAvg  = x.composite.toFixed(1);
+    // Was x.composite, whose P80 came from the sims this lineup happened to WIN
+    // — a selected sample. Use the unconditional joint distribution instead so
+    // this is comparable with the Contest-EV path.
+    const _lc = lineupSimComposite(x.lineup, simScoresById, _sampleIdx);
+    l._simWinAvg  = (_lc!=null ? _lc : x.composite).toFixed(1);
     return l;
   });
 
@@ -9768,7 +10259,7 @@ async function runNascarSimGen(){
     // sharp field share, dominance repair, real salary cap.
     const out = await runUFCContestEV({slate, pool: evPool, ranked: rankedNas, simScoresById: simScoresByIdNas,
       totalSims: simsDone2, genSims: Math.ceil(simsDone2/2), target, maxExpPct, overrides,
-      oosParity:1, sharpShare:0.15, se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:true, maxSal});
+      oosParity:1, sharpShare:0.15, se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:true, maxSal, minSal});
     if(out===null && window._genCancelled) log('Cancelled.');
     done(); return;
   }
@@ -13319,6 +13810,7 @@ async function refreshFromSheet(){
         // "Simulation Mode requires ML" alert. Falls back to the mapped column
         // (mirrors the late-add path below) when the named header is absent.
         const _mlV=get('ML'), _itdV=get('ITD');
+        { const _k=get('KO'), _s=get('Sub'); if(_k!=null) p.ko=_k; if(_s!=null) p.sub=_s; }
         if(_mlV!=null) p.ml=_mlV; else if(colMap.ml!=null) p.ml=getStr(row,'ml');
         if(_itdV!=null) p.itd=_itdV; else if(colMap.itd!=null) p.itd=getStr(row,'itd');
         // Fight order can be renumbered in the sheet — keep fightNum in sync
@@ -13774,6 +14266,10 @@ function createSlate(){
       const get = name => { const i=hdrs.findIndex(h=>h.trim().toLowerCase()===name.toLowerCase()); return i>=0?(row[i]||'').trim():null; };
       const getNum = name => { const v=get(name); const n=parseFloat(v); return (!isNaN(n)&&n!==0)?n:null; };
       // Finish round odds per fighter
+      // KO/TKO and Submission prices. The knockdown model needs P(KO | finish):
+      // a KO/TKO win carries E[KD] 0.94, a submission 0.26 (n=77).
+      p.ko  = get('KO');
+      p.sub = get('Sub');
       p.finish_r1  = getNum('Finish_R1');
       p.finish_r2  = getNum('Finish_R2');
       p.finish_r3  = getNum('Finish_R3');
@@ -14214,15 +14710,6 @@ function colDrop(e,targetKey){
   keys.splice(from,1);keys.splice(to,0,_dragColKey);
   slate.colOrder=keys;_dragColKey=null;
   save();renderPool();
-}
-function getOrderedFields(slate){
-  const base=slateFieldsBase(slate);
-  const order=slate.colOrder;
-  if(!order) return base;
-  const byKey=Object.fromEntries(base.map(f=>[f.key,f]));
-  const ordered=order.map(k=>byKey[k]).filter(Boolean);
-  base.forEach(f=>{if(!order.includes(f.key))ordered.push(f);});
-  return ordered;
 }
 
 // ═══════════════════════════════════════════════════════════
