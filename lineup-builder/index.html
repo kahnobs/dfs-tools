@@ -4976,9 +4976,42 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // minutes' worth of strikes in a 25-minute fight, erasing exactly the
   // late-round volume edge a 5R fighter is rostered for. E[scale] ≈ 1 across
   // sims, so each fighter still re-averages to his own market line.
-  const durScale = (fighter._expFightMin > 0)
-    ? Math.max(0.05, Math.min(3, _elapsedMin / fighter._expFightMin))
-    : 1;
+  // ── Duration scaling, with fatigue ────────────────────────────────────────
+  // The ladder is a WHOLE-FIGHT marginal and already prices the fight's expected
+  // duration — a bout likely to go the distance carries a higher O/U for that
+  // reason. durScale exists only to split that total across outcomes: an early
+  // finish should land under the line, a decision over it.
+  //
+  // The old form scaled volume LINEARLY with elapsed time, i.e. it assumed a
+  // constant strike rate. Measured across 154 real fighter-fights, that is
+  // false — fighters fade:
+  //     2-6 min   4.74 sig strikes/min
+  //     11+ min   3.55 sig strikes/min      ratio 0.75
+  // Linear scaling therefore over-produces by ~1/0.75 = 1.33x exactly where a
+  // fight runs long, which is why decision-conditional strikes came out at 68.8
+  // against a realised 51.8 (+33%) and P(score>=110 | decision win) at 30%
+  // against a realised 12%.
+  //
+  // Fix: sub-linear ABOVE expMin only. Below it the finish branch is already
+  // correct (27.4 simulated vs 25.7 realised) and is left untouched.
+  //
+  // FATIGUE_A is a genuine trade, not a free win — the market ladder and the
+  // realised decisions disagree by ~30% and the sim can only match one:
+  //     alpha  P(>=110|dec)  decision SS  ladder MAE  bias
+  //      1.00      30%          67.2        0.0317   +0.001   (was)
+  //      0.70      25%          60.7        0.0333   -0.027   <- shipped
+  //      0.50      21%          56.7        0.0446   -0.044
+  //      0.25      18%          52.0        0.0660   -0.066   (matches reality)
+  // 0.70 takes most of the available correction while keeping ladder MAE inside
+  // the 0.035 bar. Going further buys realism against the 25 decisions in the
+  // sample at the cost of the 1,580 priced rungs. Revisit at ~80 decisions.
+  const FATIGUE_A = 0.70;
+  const durScale = (function(){
+    if(!(fighter._expFightMin > 0)) return 1;
+    const raw = _elapsedMin / fighter._expFightMin;
+    const adj = raw > 1 ? Math.pow(raw, FATIGUE_A) : raw;
+    return Math.max(0.05, Math.min(3, adj));
+  })();
 
   // ── Category-specific winner/loser split ──────────────────────────────────
   // MEASURED 2026-08-01, not assumed. Decisions only (n=25 — both fighters went
@@ -5154,7 +5187,29 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // and binds on ~1% of draws — the joint tail only. Scaled proportionally so the
   // composition of the score is preserved rather than one category being singled
   // out.
-  const _volCap = 15 + 9.5 * _elapsedMin;
+  // TIGHTENED 2026-08-02 from 15 + 9.5t. The original was set to clear the
+  // highest volume line ever observed (135.5 pts) with headroom, so it almost
+  // never bound — and the decision branch's upper tail ran far past reality:
+  // simulated decision-win P90 of 144 DK against a real 109, and above the
+  // highest decision score in the 77-fight sample (142). That is what inflated
+  // decision-leaning fighters' ceilings above genuine finishers'.
+  //
+  // 10 + 5.5t swept best of five candidates. Against the real conditional
+  // distributions it moves decision-win P90 144 -> 123 (target 109) while
+  // landing finish-win P90 on 126, which is exactly the observed figure — and
+  // it IMPROVES ladder calibration rather than costing it: significant-strike
+  // exceedance MAE 0.0337 -> 0.0305, bias +0.010 -> 0.000.
+  //
+  // Tighter settings (8 + 4.5t) hit the 109 target but pulled the FINISH
+  // ceiling down to 119, below its observed 126, and worsened overall PIT.
+  //
+  // Caveat: at 15 minutes this allows 92.5 volume points against an observed
+  // full-distance max of 112, so it now clips the top few percent of long
+  // fights. Accepted because the envelope represents a JOINT constraint (the
+  // three volume categories are drawn independently and compete for the same
+  // minutes), and every measured statistic improved. Revisit with more
+  // decision-heavy cards — the current sample is 67.5% finishes.
+  const _volCap = 10 + 5.5 * _elapsedMin;
   if(total > _volCap && total > 0){
     const _k = _volCap / total;
     ss = Math.round(ss*_k); nsig = Math.round(nsig*_k); td = Math.round(td*_k);
@@ -8683,12 +8738,43 @@ async function runUFCSimGen(){
   // (leverage-blind) anchors — actively fighting the slider it shares a
   // pipeline with. Now the servo and the slider point at the same target:
   // slider 0 reproduces the pure sim anchors exactly.
+  // ── Exposure anchor ───────────────────────────────────────────────────────
+  // REBUILT 2026-08-02 after the 8/1 live test. The anchor was appearRate alone,
+  // and appearRate is the weaker of the two signals the sim already produces.
+  // Measured against realised DK points across 5 cards (correlation per card,
+  // averaged):   appearRate ρ=0.327   composite ρ=0.521
+  //
+  // Optimal-rate answers "how often is this fighter in the ex-post optimal
+  // SIX", which depends on salary efficiency and on the rest of the pool, not
+  // just on his own distribution. An expensive fighter with the best score
+  // distribution on the slate is rarely "optimal" because he crowds out five
+  // other slots — so the anchor systematically buried exactly the studs the sim
+  // rated highest. On 8/1 that put Medic (3rd-best composite, 3rd-most
+  // expensive) at a 6% target while Janicic (14th composite) sat at 46%.
+  // Net effect measured on the shipped board: sim ρ 0.686 → exposure ρ 0.199,
+  // i.e. worse than simply copying field ownership (0.318).
+  //
+  // Blend at ANCHOR_W toward composite. The sweep is monotone to w=1.0
+  // (ρ 0.327→0.521) and 0.75 keeps most of that (0.487) while retaining the one
+  // thing composite cannot express: appearRate is JOINT — it knows which
+  // fighters can actually co-occur under the cap — where composite is purely
+  // marginal. A pure-composite anchor targets a stud set that can never be
+  // built together, leaving the servo permanently chasing an unreachable target
+  // for all of them.
+  const ANCHOR_W = 0.75;
   const levTgt = {};
   {
+    let sumComp2 = 0, sumRate2 = 0;
+    pool.forEach(p=>{
+      sumComp2 += Math.max(0, compositeScoreById[p.id] || 0);
+      sumRate2 += (appearRate[p.id] != null ? appearRate[p.id] : 0.25);
+    });
     let tSum = 0;
     pool.forEach(p=>{
-      const t = (appearRate[p.id]!=null ? appearRate[p.id] : 0.25)
-              * (levStrength>0 ? levShape(levRatio[p.id]||1, levStrength) : 1);
+      const cShare = sumComp2 > 0 ? Math.max(0, compositeScoreById[p.id]||0) / sumComp2 : 1/pool.length;
+      const rShare = sumRate2 > 0 ? (appearRate[p.id]!=null ? appearRate[p.id] : 0.25) / sumRate2 : 1/pool.length;
+      const base   = (ANCHOR_W * cShare + (1 - ANCHOR_W) * rShare) * 6;
+      const t = base * (levStrength>0 ? levShape(levRatio[p.id]||1, levStrength) : 1);
       levTgt[p.id]=t; tSum+=t;
     });
     const norm = tSum>0 ? 6/tSum : 1;
