@@ -5809,13 +5809,26 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   // and the decision-volume exponent doesn't move it at all. So the finish
   // term has to be added explicitly rather than extracted from the shape.
   //
-  // w = 0.75 is an interior optimum, not an extrapolation: rank correlation
-  // vs realized DK on 8/1 runs .669 (w=0) -> .685 (0.5) -> .690 (0.75) ->
-  // .685 (1.0) -> .677 (1.5). Centering on the slate mean keeps the board's
-  // overall scale intact — this redistributes between fighters, it doesn't
-  // inflate everyone. Deliberately uncapped downward so low-ITD/low-volume
-  // fighters sim genuinely low.
-  const FINISH_TILT_W = 0.75;
+  // Rank correlation vs realized DK on 8/1 is FLAT across the useful range:
+  // .669 (w=0) -> .685 (0.5) -> .690 (0.75) -> .685 (1.0) -> .677 (1.5). The
+  // .685/.690 difference is noise on n=28 from a single card, so ρ does not
+  // pick a value here — it only rules out 0 and >1.25.
+  //
+  // Magnitude does pick one. The tilt is a MULTIPLIER, so it stretches gaps
+  // that already exist rather than adding a fixed premium. Cepo (P(ITD) .67)
+  // vs Oliveira (.53) is 5.9 points apart untilted; w=0.75 stretches that to
+  // 17.2, which over-separates two fighters whose finish equity differs by
+  // .14. w=0.50 gives 13.4 and still clears the case this was built for
+  // (Medic vs Milosevic: -0.5 untilted -> +12.4).
+  //
+  // 0.50 also keeps the division of labour clean: the tilt prices finish
+  // EQUITY, and ownership-relative value stays in levRatio where it belongs.
+  // Oliveira being cheaper-owned than Cepo is a leverage argument, not a
+  // reason to compress their sim scores.
+  //
+  // Centering on the slate mean keeps the board's overall scale intact — this
+  // redistributes between fighters, it doesn't inflate everyone.
+  const FINISH_TILT_W = 0.50;
   const _pItdById = {};
   visiblePool.forEach(p=>{
     const itdV = (p.itd != null && p.itd !== '') ? parseFloat(p.itd) : NaN;
@@ -8814,6 +8827,12 @@ async function runUFCSimGen(){
   // for all of them.
   const ANCHOR_W = 0.75;
   const levTgt = {};
+  // The same blend BEFORE the leverage multiplier, kept separately because the
+  // justified-ownership gauntlet below needs "how much exposure does this
+  // fighter's equity support" without ownership already folded in — levTgt has
+  // levShape applied, which is itself a function of ownership, so reusing it
+  // there would double-count ownership against the fighter.
+  const anchorBase = {};
   {
     let sumComp2 = 0, sumRate2 = 0;
     pool.forEach(p=>{
@@ -8825,6 +8844,7 @@ async function runUFCSimGen(){
       const cShare = sumComp2 > 0 ? Math.max(0, compositeScoreById[p.id]||0) / sumComp2 : 1/pool.length;
       const rShare = sumRate2 > 0 ? (appearRate[p.id]!=null ? appearRate[p.id] : 0.25) / sumRate2 : 1/pool.length;
       const base   = (ANCHOR_W * cShare + (1 - ANCHOR_W) * rShare) * 6;
+      anchorBase[p.id] = base;   // sums to 6.0 by construction
       const t = base * (levStrength>0 ? levShape(levRatio[p.id]||1, levStrength) : 1);
       levTgt[p.id]=t; tSum+=t;
     });
@@ -8875,7 +8895,24 @@ async function runUFCSimGen(){
   const _sumOwnU = pool.reduce((a,p)=>a+Math.max(0,parseFloat(p.own)||0),0) || 1;
   const _unjOwnU = {};
   pool.forEach(p=>{
-    const rate = appearRate[p.id]!=null ? appearRate[p.id] : 0.1;
+    // Was: rate = appearRate (raw optimal-rate). That re-imported the exact
+    // bias removed from the exposure anchor, one layer further down. Optimal-
+    // rate is salary-efficiency-driven — an expensive fighter with the best
+    // distribution on the slate is rarely in the ex-post optimal SIX because
+    // he crowds out five slots — so it UNDER-credits precisely the studs the
+    // sim rates highest, and this gauntlet then reads their ownership as
+    // "unjustified chalk" and culls the lineups holding them.
+    //
+    // Measured on 8/1 with the finish tilt live: Medic optimal-rate 24%, own
+    // 29.9% -> 5.9 pts of "unjustified" ownership; Gugnon optimal-rate 30%,
+    // own 30.3% -> 0.3. gOwn carries the heaviest gauntlet weight (3), so
+    // lineups holding the 2nd-best fighter on the board died on that axis.
+    // That is the 24%-supply -> 10%-exposure collapse.
+    //
+    // anchorBase is the blended composite/optimal-rate target (also summing to
+    // 6.0), pre-leverage, so it credits equity the same way the anchor does.
+    const rate = anchorBase[p.id]!=null ? anchorBase[p.id]
+               : (appearRate[p.id]!=null ? appearRate[p.id] : 0.1);
     const justified = (rate/6) * _sumOwnU;
     _unjOwnU[p.id] = Math.max(0, (parseFloat(p.own)||0) - justified);
   });
