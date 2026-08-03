@@ -5209,7 +5209,22 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // three volume categories are drawn independently and compete for the same
   // minutes), and every measured statistic improved. Revisit with more
   // decision-heavy cards — the current sample is 67.5% finishes.
-  const _volCap = 10 + 5.5 * _elapsedMin;
+  // REVERTED to 15 + 9.5t on 2026-08-02. The 10 + 5.5t tightening was a clamp
+  // that treated the symptom; once FATIGUE_A gave the mechanism a real fix, the
+  // envelope stopped doing any work — with fatigue on, 3-round decision median
+  // (85) and P(score>=110) (23-24%) are IDENTICAL at 10+5.5t, 15+9.5t, 20+12t
+  // and with the cap removed entirely.
+  //
+  // Worse, the tight version was clipping legitimate performances: at 13-16 min
+  // it allowed 90 volume points against a real observed maximum of 121, i.e. it
+  // bound at 0.7x reality, while at 20-26 min it still allowed 2.5x. A LINEAR
+  // envelope cannot fit both ends when volume itself is sub-linear in time —
+  // it contradicted the fatigue finding sitting directly above it.
+  //
+  // Back to the original, whose job is what a physical cap should do: prevent
+  // absurdity, not shape the distribution. Best ladder MAE of the four tested
+  // (0.0301).
+  const _volCap = 15 + 9.5 * _elapsedMin;
   if(total > _volCap && total > 0){
     const _k = _volCap / total;
     ss = Math.round(ss*_k); nsig = Math.round(nsig*_k); td = Math.round(td*_k);
@@ -5782,6 +5797,39 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   const medianScoreById = {};
   const distById = {};
   const compositeScoreById = {};
+
+  // ── Finish-equity tilt ────────────────────────────────────────────────────
+  // Percentiles of the score distribution cannot see finish equity, only win
+  // equity: p80 sits inside a fighter's *win* outcomes, so anyone finishing
+  // more than ~20% of the time has a finish at his 80th percentile and p80
+  // saturates. Measured on 8/1: Medic (P(ITD) .71) p80 112, Milosevic (.45)
+  // p80 111, Luciano (.25) p80 113 — flat across wildly different finish
+  // equity, and P(>=110) was flat too (23/21/23%). Pushing the quantile deeper
+  // makes it worse, not better (p88 collapsed the play/fade gap 11.9 -> 4.1),
+  // and the decision-volume exponent doesn't move it at all. So the finish
+  // term has to be added explicitly rather than extracted from the shape.
+  //
+  // w = 0.75 is an interior optimum, not an extrapolation: rank correlation
+  // vs realized DK on 8/1 runs .669 (w=0) -> .685 (0.5) -> .690 (0.75) ->
+  // .685 (1.0) -> .677 (1.5). Centering on the slate mean keeps the board's
+  // overall scale intact — this redistributes between fighters, it doesn't
+  // inflate everyone. Deliberately uncapped downward so low-ITD/low-volume
+  // fighters sim genuinely low.
+  const FINISH_TILT_W = 0.75;
+  const _pItdById = {};
+  visiblePool.forEach(p=>{
+    const itdV = (p.itd != null && p.itd !== '') ? parseFloat(p.itd) : NaN;
+    const wp = (winProb[p.id] != null ? winProb[p.id] : 0.5);
+    let v = null;
+    if(!isNaN(itdV)) v = mlToProb(itdV);
+    if(v == null || !isFinite(v) || v <= 0 || v >= 1){
+      v = (p._finishRate != null ? p._finishRate : 0.40) * wp;
+    }
+    _pItdById[p.id] = Math.max(0.02, Math.min(0.95, v));
+  });
+  const _itdVals = visiblePool.map(p=>_pItdById[p.id]);
+  const _itdMean = _itdVals.length ? _itdVals.reduce((s,v)=>s+v,0)/_itdVals.length : 0.30;
+
   visiblePool.forEach(p=>{
     const arr = fighterAllScores[p.id].slice().sort((a,b)=>a-b);
     medianScoreById[p.id] = arr.length>0 ? arr[Math.floor(arr.length*0.5)] : 0;
@@ -5807,7 +5855,10 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
       // (capped at 1) so it never rewards chalk, just taxes unreliability.
       const wp = (winProb[p.id] != null ? winProb[p.id] : 0.5);
       const reliability = Math.min(1, 0.60 + 0.45*wp);
-      compositeScoreById[p.id] = Math.round((ceiling * reliability) * 10) / 10;
+      // Finish-equity tilt (see note above the loop). Floored at 0.25 so a
+      // fighter with no ITD price can't be zeroed out by a parsing gap.
+      const finishTilt = Math.max(0.25, 1 + FINISH_TILT_W * (_pItdById[p.id] - _itdMean));
+      compositeScoreById[p.id] = Math.round((ceiling * reliability * finishTilt) * 10) / 10;
     } else {
       compositeScoreById[p.id] = medianScoreById[p.id];
     }
