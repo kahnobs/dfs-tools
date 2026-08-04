@@ -3031,19 +3031,17 @@ function renderPool(){
     const dimmed=(isFull||cantAfford)&&!isSelected&&!isHidden;
     const exp=ec[p.id]||0;
     // Dots: user groups first (their membership has no other per-row surface),
-    // then archetype tags. Capped at ARCH_MAX_ROW_DOTS auto dots so a golfer who
-    // qualifies for six of them cannot wrap the name cell onto a second line and
-    // change the row height — the overflow collapses into a "+N" whose tooltip
-    // names the rest. Archetype dots carry their definition in the tooltip
-    // ("Elite Putter — Blended SG:PUTT ≥ 80th percentile").
+    // then archetype tags — ALL of them (the "+N" overflow collapse was
+    // removed 2026-08-04 by request: the name cell has the horizontal room,
+    // and a hidden dot is an archetype the eye never sees). Archetype dots
+    // carry their definition in the tooltip ("Elite Putter — Blended SG:PUTT
+    // ≥ 80th percentile").
     const grps=dotGroupsFor(_grpIdx.get(p.id));
     const _tip=g=>g.autoArch?`${g.autoArch}${g.archDesc?' — '+g.archDesc:''}`:g.name;
     const _user=grps.filter(g=>!g.autoArch), _auto=grps.filter(g=>g.autoArch);
-    const _show=_auto.slice(0,ARCH_MAX_ROW_DOTS), _rest=_auto.slice(ARCH_MAX_ROW_DOTS);
-    const dots=_user.concat(_show).map(g=>
+    const dots=_user.concat(_auto).map(g=>
       `<div class="grp-dot${g.autoArch?' grp-dot-auto':''}" style="background:${g.color}" title="${esc(_tip(g))}"></div>`
-    ).join('')
-      +(_rest.length?`<span class="grp-dot-more" title="${esc(_rest.map(_tip).join('\n'))}">+${_rest.length}</span>`:'');
+    ).join('');
     const extraCells=fields.map(f=>{
       let v=p[f.key];if(v==null||v==='')v='—';
        if(f.key==='proj' && slate.columnMapping?.proj!=null){
@@ -7747,9 +7745,19 @@ async function runUFCContestEV(ctx){
   // 1.77 (8/1) / 2.00 (7/25) → 1.9. The empirical exact-match channel (max())
   // still owns mega-dup chalk — one match in a 2,000-lineup sample already
   // implies 24 dups at F=47.5k, so the analytic floor only governs the unique
-  // tail it was over-taxing. PGA/NASCAR/NFL keep 4 (PGA's fit runs the OTHER
-  // way — DUP_K=4 UNDER-predicts there — and their fields were not re-fitted).
-  const DUP_K = (slate.sport==='ufc') ? 1.9 : 4;
+  // tail it was over-taxing.
+  // NASCAR refit 2026-08-04 from the same dupform study (59,328-entry Cup
+  // Indianapolis contest): DUP_K=4 over-predicted E[dup] 42.9 vs actual 16.0
+  // on projected own — fitted 1.49 → 1.5. Same defect, same direction as UFC.
+  // PGA deliberately KEPT at 4 despite its fit running the other way (Rocket:
+  // actual E[dup] 1.52 vs 0.15 predicted at K=4; fitted K ≈ 40 on projected
+  // own): a 10× swing on the most frontier-tested path in the engine ships
+  // only after an evgrade backtest against the Rocket data in simlab/pipe —
+  // and the per-lineup stakes there are cents (PGA dup levels are tiny).
+  // NFL keeps 4.
+  const DUP_K = (slate.sport==='ufc')    ? 1.9
+              : (slate.sport==='nascar') ? 1.5
+              : 4;
   if(ctx.se) log('Single-entry contest: building for one bullet — max win equity, standard field model (SE-specific duplication tuning tested worse).');
   // ── Robust aggregation across ownership scenarios ──
   // Averaging scenario EVs does NOT penalize input-fragile positions — under
@@ -7807,12 +7815,20 @@ async function runUFCContestEV(ctx){
   //           clone concentration self-limits via own-rank pushdown and dup
   //           pricing. Rides the leverage slider's chalk-bust weighting.
   //   FLAT  = the rest — cash tiebreak, as before.
-  // Non-UFC sports keep the original 0.1% head / no mid tier until their
-  // paths are re-benchmarked (same scoping doctrine as everything above).
-  const HEAD_RANK = (slate.sport==='ufc')
+  // EXTENDED to PGA/NASCAR 2026-08-04: the tiering is a property of GPP payout
+  // curves, not of any sport — the top ~2% is where single-slot leverage pays
+  // (reachable with N−1 hits) in every DK GPP shape, and the 0.5% head cut is
+  // about sample resolution (NF=2,000 makes a 0.1% cut the top TWO sample
+  // entries in ANY sport). Smoke-verified on a real-odds Wyndham pool and the
+  // UFC regression suite; treat the first live PGA/NASCAR slates as the
+  // acceptance run (the objective log line states the tiers every build).
+  // NFL keeps the original 0.1% head / no mid tier until its stack-correlated
+  // path is re-benchmarked.
+  const _3TIER = (slate.sport==='ufc' || slate.sport==='pga' || slate.sport==='nascar');
+  const HEAD_RANK = _3TIER
     ? Math.max(10, Math.round(F*0.005))
     : Math.max(10, Math.round(F*0.001));
-  const MID_RANK  = (slate.sport==='ufc') ? Math.max(HEAD_RANK, Math.round(F*0.02)) : HEAD_RANK;
+  const MID_RANK  = _3TIER ? Math.max(HEAD_RANK, Math.round(F*0.02)) : HEAD_RANK;
   const headFloor = payout.at(HEAD_RANK);
   const midFloor  = payout.at(MID_RANK);
   const headPartAt = r => r<=HEAD_RANK ? Math.max(0, payout.at(r)-headFloor) : 0;
@@ -7849,11 +7865,11 @@ async function runUFCContestEV(ctx){
   // tail fit applies. Deep ranks keep the legacy estimate: the curve is flat
   // there and the raw count is already accurate.
   const beatersEst = (beating, tied, sampleN, arr, t) => {
-    // Gated to UFC until the other sports' EV paths are re-benchmarked with it
-    // — the refinement is sport-agnostic in principle, but PGA/NASCAR/NFL were
-    // tuned end-to-end against the legacy estimator and get to keep it until
-    // measured (same doctrine as the DUP_K and repair scoping above).
-    if(slate.sport==='ufc' && arr && t != null && sampleN > 200){
+    // Extended to PGA/NASCAR with the three-tier credit (2026-08-04) — the
+    // refinement is pure rank math (sample-tail extrapolation) and the two
+    // ship together: a 0.5% head cut without it is still the top ~2 sample
+    // entries of noise. NFL keeps the legacy estimator until re-benchmarked.
+    if(_3TIER && arr && t != null && sampleN > 200){
       const M = Math.max(20, Math.min(100, Math.ceil(sampleN*0.02)));
       const xM = arr[sampleN - M];
       if(t >= xM){
