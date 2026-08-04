@@ -1308,7 +1308,7 @@ html { overscroll-behavior-y: contain; }
                   <button onclick="saveContestPreset()" title="Save the current field size / fee / payout structure as a contest for one-click reuse"
                     style="width:100%;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);color:var(--green);padding:5px 8px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;">💾 Save as contest</button>
                 </div>
-                <div style="font-size:9px;color:var(--muted);line-height:1.5;">Field modeled from Own% under cap/no-oppose, dup-adjusted, with a standard ±35% allowance for ownership projection error. Risk is standardized to the slate stake (assumes entries follow your bankroll management). The leverage slider is ignored in this mode — uniqueness is priced by the payout curve itself.</div>
+                <div style="font-size:9px;color:var(--muted);line-height:1.5;">Field modeled from Own% under cap/no-oppose, dup-adjusted, with a standard ±35% allowance for ownership projection error. Risk is standardized to the slate stake (assumes entries follow your bankroll management). At leverage 0 uniqueness is priced by the payout curve alone; above 0 the slider tilts tournament-head credit toward fighters the sim says the field under-owns (equity-vs-ownership), leaving cash EV untouched.</div>
               </div>
             </div>
             <div style="padding:6px 8px;background:rgba(168,85,247,.07);border:1px solid rgba(168,85,247,.2);border-radius:5px;font-size:9px;color:var(--muted);line-height:1.5;">
@@ -2117,6 +2117,73 @@ let ufcNoOpposeGlobal = false;
 let _savedEntriesCache=[], _savedAvailCache=new Set();
 let ufcExcludedFights = new Set();
 let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
+
+// ═══ RUN STAMP — reproducibility + settings fingerprint ═════════════════════
+// Two boards have now come back from the browser showing exposures OUTSIDE the
+// whole 6-seed envelope the harness measures (Rebecki 14% against a measured
+// 22–36%), and there was no way to tell from the export whether the cause was
+// the draw, a hidden fighter, a stale contest preset or a different Min%. The
+// run stamp closes that: one machine-parseable line naming the RNG seed and
+// every setting that shapes a build, written to BOTH the generation log and
+// the Sim CSV header. Bump BUILD_ID on every ship.
+const BUILD_ID = '2.0/2026-08-04-f4prot';
+// mulberry32 — small, fast, well-distributed 32-bit generator. Installed over
+// Math.random for the duration of a seeded run (see runUFCSimGen).
+function mulberry32(a){
+  return function(){
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+let _lastRunStamp = null;   // most recent generation's stamp (Sim CSV reads it)
+let _runSeed      = null;   // seed of the run in progress, null when unseeded
+// Everything that changes a build, in `key=value` fields separated by " | ".
+// Values are sanitised so a slate name can never break the parse.
+function buildRunStamp(slate, o){
+  o = o || {};
+  const ev  = (slate && slate._ufcEv) || {};
+  const q   = v => (v == null ? '' : String(v)).replace(/[|=\r\n]/g, '/');
+  const cnt = ob => Object.keys(ob || {}).length;
+  const minOv = (slate && slate.playerMinOverrides) || {};
+  const maxOv = (slate && slate.playerExpOverrides) || {};
+  const excl  = (typeof ufcExcludedFights !== 'undefined' && ufcExcludedFights.size)
+    ? [...ufcExcludedFights].sort((a,b)=>a-b).join('/') : 'none';
+  return [
+    'build=' + BUILD_ID,
+    'ts=' + new Date().toISOString(),
+    'sport=' + q(slate && slate.sport),
+    'slate=' + q(slate && slate.name),
+    'seed=' + (o.seed == null ? 'unseeded' : 'm32:' + (o.seed >>> 0)),
+    'target=' + q(o.target),
+    'sims=' + q(o.sims),
+    'minSal=' + q(o.minSal),
+    'maxSal=' + q(o.maxSal),
+    'maxExp=' + q(o.maxExp),
+    'lev=' + q(o.lev),
+    'noOppose=' + (o.noOppose ? 1 : 0),
+    'exclFights=' + excl,
+    'evMode=' + (ev.on ? 'on' : 'off'),
+    'evField=' + q(ev.fieldSize),
+    'evFee=' + q(ev.fee),
+    'evPreset=' + q(ev.preset || (ev.custom ? 'custom' : '')),
+    'evSE=' + (ev.se ? 1 : 0),
+    'evContestId=' + q(ev.contestId || ''),
+    'hidden=' + ((slate && slate.hiddenIds || []).length),
+    'minPct=' + Object.keys(minOv).filter(k => minOv[k] > 0).length,
+    'maxPct=' + Object.keys(maxOv).filter(k => maxOv[k] < 100).length,
+    'groups=' + ((slate && slate.groups || []).length),
+    'pool=' + ((slate && slate.players || []).filter(p => p && p.salary > 0).length),
+    'overrideKeys=' + (cnt(minOv) + cnt(maxOv)),
+  ].join(' | ');
+}
+// Build it, remember it, and put it in the generation log. Returns the stamp.
+function stampRun(slate, o){
+  _lastRunStamp = buildRunStamp(slate, o);
+  if(typeof log === 'function') log('run: ' + _lastRunStamp);
+  return _lastRunStamp;
+}
 let showHidden = false;
 let tempRevealPid = null;
 let parsedCSV = {headers:[], rows:[]};
@@ -3581,7 +3648,14 @@ function exportSimCSV(){
                    : nfl ? [nflPosOf(p)||'', p.team||'', p._simCut, p._simBoom]
                    :       [p._simWin,p._simT5,p._simT10,p._simT20,p._simCut];
   const header=['Name','Salary',nas?'Rating':'ModelScore','SimScore','Mean','Floor(P10)','P25','Median','P75','Ceiling(P90)',...tailH];
-  const lines=[header.join(',')];
+  // Run stamp first, as a comment row: the seed + the full settings
+  // fingerprint of the generation that produced these distributions. Every
+  // spreadsheet and CSV reader treats a leading '#' row as data or skips it,
+  // and every parser we use here ignores it — but it means an exported board
+  // carries the state that made it instead of arriving context-free.
+  const lines=[];
+  lines.push('# run: ' + (_lastRunStamp || 'no generation recorded in this session — re-run the simulation to stamp the export'));
+  lines.push(header.join(','));
   rows.sort((a,b)=>(parseFloat(b._simP50)||0)-(parseFloat(a._simP50)||0)).forEach(p=>{
     const d=p._simDist;
     lines.push([p.name,p.salary,p.rating,p._simP50,d.mean,d.p10,d.p25,d.p50,d.p75,d.p90,
@@ -5005,7 +5079,38 @@ function calibrateLadder(pts, ouStr){
     if(pLadder > 0.001) k = target / pLadder;
   }
   k = Math.max(0.60, Math.min(1.15, k)); // never inflate much, never gut the ladder
-  return pts.map(pt=>({threshold:pt.threshold, prob:Math.min(0.97, pt.prob * k)}));
+
+  // ── Tail de-vig (favorite-longshot bias), added 2026-08-04 ────────────────
+  // The flat k treats every rung as equally juiced, but alt-line OVERS carry
+  // longshot bias that grows with depth: a +500 "100+ strikes" rung is priced
+  // like a lottery ticket, not a probability. Passing that through was why
+  // decision-win tails ran ~2x reality (sim P(score>=110 | decision win) 25-41%
+  // per fighter against a realised 12% on 154 fighter-fights) — the engine
+  // believed the book's deep rungs literally, then the optimizer built around
+  // phantom 100-strike decisions (Vologdin drew P(>=110)=41.5% INSIDE decision
+  // wins on 8/1). Power-tilt the survival curve BELOW the O/U anchor:
+  //   p' = pA * (p/pA)^TAIL_BETA   for p < pA (deeper than the anchor)
+  // Identity at the anchor, untouched above it, so the O/U-line calibration and
+  // every shallow rung are preserved exactly; only the deep tail thins. BETA
+  // 1.35 fitted on the 8/1 card to put slate-wide P(>=110 | decision win) near
+  // the realised ~12% while leaving finish-branch scores unchanged (they're
+  // duration-capped, not tail-driven). Measured sweep (8k sims, seed 4242):
+  // beta 1.00 -> slate P(>=110|dec) 20.7% (Vologdin 40.9%, mean decision-win
+  // score 104); 1.20 -> 16.8%; 1.35 -> 14.5% (Vologdin 33.8%); 1.50 -> 12.5%.
+  // 1.35 takes most of the correction; 1.50 matches the point estimate of a
+  // 25-decision sample exactly, which is over-fitting a noisy target (95% CI
+  // roughly ±13pts) at the cost of thinning calibrated finish-dog tails
+  // (Urbina P(>=110) 11.1% -> 8.0% at 1.50 vs 8.6% at 1.35).
+  const TAIL_BETA = 1.35;
+  const pA = (line != null && line > 0)
+    ? (()=>{ const rawOver = overMl != null ? mlToProb(overMl) : null;
+             return rawOver != null ? Math.max(0.05, Math.min(0.95, rawOver/1.045)) : 0.50; })()
+    : 0.50;
+  return pts.map(pt=>{
+    let p = Math.min(0.97, pt.prob * k);
+    if(p < pA && p > 0) p = pA * Math.pow(p/pA, TAIL_BETA);
+    return {threshold:pt.threshold, prob:p};
+  });
 }
 
 function extractSSCDF(p){
@@ -7064,7 +7169,74 @@ async function runUFCContestEV(ctx){
   const fee  = parseFloat(cfg.fee)||20;
   const payout = buildPayoutFn({fieldSize:F, fee, preset:cfg.preset||'gpp', custom:cfg.custom});
   const tick = ()=>new Promise(r=>setTimeout(r,0));
-  log(`Contest EV: ${payout.desc}. Leverage slider ignored — uniqueness is priced by the curve.`);
+  // ── Leverage slider, EV-mode semantics (added 2026-08-04) ─────────────────
+  // The EV engine's honest answer prices uniqueness through the payout curve,
+  // and with calibrated inputs it lands most fighters NEAR their field
+  // ownership — it will not, on its own, jam an under-owned finisher against
+  // 38%-owned chalk the way a leverage-seeking entrant deliberately does
+  // (measured on 8/1: the entire real top-100 held the 13.8%-owned +385-ITD
+  // dog; the engine's neutral build held him at ~his ownership). That extra
+  // lean is a risk POSTURE, not a mispricing — so it belongs on the dial the
+  // user already owns. In EV mode the slider now tilts the HEAD-COVERAGE
+  // credit (never flat cash, so min-cash EV stays honest) by each lineup's
+  // equity-vs-ownership ratio — the same equity-relative levShape the non-EV
+  // path uses: ratio_i = (optimal-rate share) / (field-ownership share).
+  // >1 = the sim says the field under-holds him (boost); <1 = over-held chalk
+  // (fade). Punts stay neutral (low equity ÷ low own ≈ 1) — cranking the
+  // slider cannot bury a stud under a scrub. Slider 0 = the engine's neutral
+  // answer, exactly as before.
+  // Mechanism: SIM REWEIGHTING of the head-coverage credit. Each priced sim
+  // gets a CHALK-BUST score b(s) — the ownership-weighted fraction of the
+  // TOP-OWNED quartile of the board that LOST in that sim (the chalk block is
+  // where a bust actually redistributes tournament equity; averaging over the
+  // whole board flattens the signal to nothing). At slider L the head credit
+  // in sim s is scaled by an exponential tilt in sd units,
+  //   w(s) ∝ exp( L · 1.5 · (b(s) − mean b) / sd b ),   renormalized to mean 1,
+  // so at L=1 a +2σ chalk-massacre world carries ~20× the coverage weight of a
+  // −2σ all-chalk-holds world, and the greedy buys its tournament coverage in
+  // the worlds where the field's rosters die (Cepo busting zeroes a slot on
+  // 38% of entries) and an under-owned finisher's win is worth the most.
+  // Slider 0 → every sim weighs 1.00, the engine's neutral answer, identical
+  // to the old behavior. Flat cash EV and every REPORTED $ figure stay
+  // unweighted — the slider changes what the portfolio COVERS, never what
+  // the math claims it earns.
+  const _levStr = (slate.sport==='ufc')
+    ? Math.max(0, Math.min(1, (parseInt(document.getElementById('ufcLeverageSlider')?.value)||0)/100))
+    : 0;
+  let _simW = null;   // filled after simIdx is built below (needs the sim list)
+  const _buildSimW = (idxList) => {
+    if(!(_levStr > 0)) return null;
+    const _ownV = pool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
+    const _oppOf = pool.map(p=>pool.findIndex(q=>q!==p && typeof ufcSameFight==='function' && ufcSameFight(p,q)));
+    const _sArr = pool.map(p=>simScoresById[p.id]||[]);
+    // Chalk block: top-owned quartile of paired fighters (min 4).
+    const _paired = pool.map((p,i2)=>({i:i2, own:_ownV[i2]})).filter(x=>_oppOf[x.i]>=0)
+      .sort((a,b)=>b.own-a.own);
+    const _chalk = _paired.slice(0, Math.max(4, Math.ceil(_paired.length/4)));
+    const bust=[]; let bSum2=0;
+    for(let s2=0;s2<idxList.length;s2++){
+      const si=idxList[s2];
+      let num=0, den=0;
+      for(const {i:i2, own} of _chalk){
+        const o=_oppOf[i2];
+        den += own;
+        if((_sArr[i2][si]||0) < (_sArr[o][si]||0)) num += own;
+      }
+      const b = den>0 ? num/den : 0.5;
+      bust.push(b); bSum2+=b;
+    }
+    const bMean = bSum2/Math.max(1,bust.length) || 0.5;
+    let v2=0; for(const b of bust){ const d=b-bMean; v2+=d*d; }
+    const bSd = Math.sqrt(v2/Math.max(1,bust.length)) || 0.1;
+    const w = bust.map(b=>Math.exp(_levStr*1.5*(b-bMean)/bSd));
+    const wm=w.reduce((a,b)=>a+b,0)/w.length;
+    if(wm>0) for(let s2=0;s2<w.length;s2++) w[s2]/=wm;
+    return w;
+  };
+  const simWAt = s2 => _simW ? (_simW[s2]!=null?_simW[s2]:1) : 1;
+  log(_levStr>0
+    ? `Contest EV: ${payout.desc}. Leverage ${Math.round(_levStr*100)}: head coverage reweighted toward chalk-bust worlds (ownership-weighted upset mass per sim); cash EV and all reported $ stay honest.`
+    : `Contest EV: ${payout.desc}. Leverage 0 — uniqueness priced by the curve alone.`);
   // Same overlay guard as the contest summary line: pool > entries×fee means
   // the field size is almost certainly the places-paid count, not total
   // entries — every EV% that follows would be inflated by the phantom overlay.
@@ -7093,6 +7265,7 @@ async function runUFCContestEV(ctx){
   } else {
     const stride = totalSims/SIMS; for(let k=0;k<SIMS;k++) simIdx.push(Math.floor(k*stride));
   }
+  _simW = _buildSimW(simIdx);   // leverage slider's chalk-bust sim weights (null at slider 0)
 
   // 1) OWNERSHIP-UNCERTAINTY SCENARIOS + field models.
   // Ownership projections are point estimates of the least-knowable input, and
@@ -7439,7 +7612,22 @@ async function runUFCContestEV(ctx){
   // win, so cutting the duplication tax just made the build chalkier and cost
   // ROI/cash/win-rate across seeds. So SE uses the standard field model; the SE
   // template's value is the accurate payout/field/fee and a single-lineup build.
-  const DUP_K = 4;
+  // DUP_K RECALIBRATED FOR UFC 2026-08-04 against the two real DK contests
+  // (8/1: 47,079 entries; 7/25: 38,910). The analytic floor F·Π(own)·DUP_K at
+  // K=4 over-taxed real duplication by 2.3-5.8x on UFC — the actual 8/1
+  // winning lineup (Valentin/Urbina/Musayev/Grad/Rebecki/Leka) duplicated 5
+  // times in 47,079 entries while the model floor said 29. At the HEAD that's
+  // the whole game: offset = dups/2 pushes a true rank-3 finish to modeled
+  // rank ~15 ($3,000 → $300), crushing every unique build's head equity toward
+  // the flat region — which is exactly why under-owned finish-equity builds
+  // (the Urbina/Musayev shape that actually chopped the 8/1 GPP) never priced
+  // a premium over chalk floors. Fitted per-contest DUP_K on projected own:
+  // 1.77 (8/1) / 2.00 (7/25) → 1.9. The empirical exact-match channel (max())
+  // still owns mega-dup chalk — one match in a 2,000-lineup sample already
+  // implies 24 dups at F=47.5k, so the analytic floor only governs the unique
+  // tail it was over-taxing. PGA/NASCAR/NFL keep 4 (PGA's fit runs the OTHER
+  // way — DUP_K=4 UNDER-predicts there — and their fields were not re-fitted).
+  const DUP_K = (slate.sport==='ufc') ? 1.9 : 4;
   if(ctx.se) log('Single-entry contest: building for one bullet — max win equity, standard field model (SE-specific duplication tuning tested worse).');
   // ── Robust aggregation across ownership scenarios ──
   // Averaging scenario EVs does NOT penalize input-fragile positions — under
@@ -7479,10 +7667,52 @@ async function runUFCContestEV(ctx){
   const HEAD_RANK = Math.max(10, Math.round(F*0.001));
   const headFloor = payout.at(HEAD_RANK);
   const headPartAt = r => r<=HEAD_RANK ? Math.max(0, payout.at(r)-headFloor) : 0;
+  // ── Tail-refined beater estimate (added 2026-08-04) ───────────────────────
+  // The sampled field (N per scenario) stands in for F entries, so each sample
+  // slot represents F/N of them (~24 at 2k/47.5k). The Gamma posterior alone
+  // therefore CANNOT resolve the top of the curve: a candidate beating the
+  // entire sample still prices at true rank ~12 — and 1st place is 12.5% of
+  // the whole prize pool. MEASURED on 8/1 (fix2 engine): candidates holding
+  // Urbina beat the field's top-48-equivalent cut in a mere 1.4% of the sims
+  // where Urbina actually WINS, and their mean modeled head there was $1.6 —
+  // the model was structurally blind to exactly the region that pays for
+  // rostering an under-owned finisher against 38%-owned chalk (the real 8/1
+  // top-48 was 100% Urbina lineups; the winning build duplicated 5x, not 30x).
+  // Refinement: inside the sample's observed top-M, fit an exponential to the
+  // sample's upper-tail excesses (mean-excess λ over the top M) and estimate
+  // the candidate's TRUE expected beater count over all F entries as F·p̂,
+  //   p̂ = (M/N)·exp(−(t−x_M)/λ)
+  // — consistent with the empirical count at the trigger boundary (at t = the
+  // sample max, F·p̂ ≈ F/N ≈ the raw posterior's own mean), and bounded
+  // extrapolation only (t can't earn a rank the margin over the sample's own
+  // top doesn't justify). The Gamma/WH integration below is unchanged — only
+  // (shape, scale) sharpen from (count+0.5, F/N) to (F·p̂+0.5, 1) when the
+  // tail fit applies. Deep ranks keep the legacy estimate: the curve is flat
+  // there and the raw count is already accurate.
+  const beatersEst = (beating, tied, sampleN, arr, t) => {
+    // Gated to UFC until the other sports' EV paths are re-benchmarked with it
+    // — the refinement is sport-agnostic in principle, but PGA/NASCAR/NFL were
+    // tuned end-to-end against the legacy estimator and get to keep it until
+    // measured (same doctrine as the DUP_K and repair scoping above).
+    if(slate.sport==='ufc' && arr && t != null && sampleN > 200){
+      const M = Math.max(20, Math.min(100, Math.ceil(sampleN*0.02)));
+      const xM = arr[sampleN - M];
+      if(t >= xM){
+        let ex = 0; for(let j = sampleN - M; j < sampleN; j++) ex += arr[j] - xM;
+        const lam = Math.max(1e-6, ex / M);
+        const pHat = (M / sampleN) * Math.exp(-(t - xM) / lam);
+        return { shape: F * pHat + 0.5, scale: 1 };
+      }
+    }
+    return { shape: beating + tied/2 + 0.5, scale: F / sampleN };
+  };
   // Returns [totalPay, headPart] integrated over the true-rank posterior.
-  const expPayoutSplit = (beating, tied, sampleN, dups, myBeats) => {
-    const shape  = beating + tied/2 + 0.5;
-    const scale  = F/sampleN;
+  // Optional (arr, t): the sim's sorted field totals and the candidate's own
+  // total — supplying them enables the tail refinement above.
+  const expPayoutSplit = (beating, tied, sampleN, dups, myBeats, arr, t) => {
+    const est    = beatersEst(beating, tied, sampleN, arr, t);
+    const shape  = est.shape;
+    const scale  = est.scale;
     const offset = 1 + dups/2 + myBeats;
     if(shape > 30){
       const r = shape*scale + offset;
@@ -7497,8 +7727,8 @@ async function runUFCContestEV(ctx){
     }
     return [s/5, h/5];
   };
-  const expPayout = (beating, tied, sampleN, dups, myBeats) =>
-    expPayoutSplit(beating, tied, sampleN, dups, myBeats)[0];
+  const expPayout = (beating, tied, sampleN, dups, myBeats, arr, t) =>
+    expPayoutSplit(beating, tied, sampleN, dups, myBeats, arr, t)[0];
   const robustAgg = (bSum, bCnt) => {
     let tot=0, n=0, minB=Infinity;
     for(let k=0;k<K;k++){
@@ -7547,7 +7777,10 @@ async function runUFCContestEV(ctx){
         while(lo2<hi2){ const mid=(lo2+hi2)>>1; if(arr[mid]<t) lo2=mid+1; else hi2=mid; }
         const beating = arr.length-lo;
         const tied    = lo-lo2;
-        bSum[s%K] += expPayout(beating, tied, arr.length, dups, 0); bCnt[s%K]++;
+        // Leverage slider: head part rides the chalk-bust sim weight; flat
+        // cash is never reweighted (see _buildSimW above).
+        const [_pay, _hd] = expPayoutSplit(beating, tied, arr.length, dups, 0, arr, t);
+        bSum[s%K] += (_pay - _hd) + _hd*simWAt(s); bCnt[s%K]++;
       }
       e._ev = robustAgg(bSum, bCnt) - fee;
       if(c>0 && c%400===0){
@@ -7648,7 +7881,7 @@ async function runUFCContestEV(ctx){
       const {beating,tied,n} = fieldStats(t,s);
       const dupsS = e._dupsK ? e._dupsK[s%K] : 0;
       const j0 = mySlot(t,s);
-      const [ownPay, ownHead] = expPayoutSplit(beating, tied, n, dupsS, j0);
+      const [ownPay, ownHead] = expPayoutSplit(beating, tied, n, dupsS, j0, fieldSorted[s], t);
       // Flat part additive (incl. the rank-pushdown cost to entries below).
       // Head credit is strictly NEW-SCENARIO: a winning outcome is either
       // covered by the portfolio or it isn't — the goal is ONE unique winner
@@ -7661,7 +7894,9 @@ async function runUFCContestEV(ctx){
       // a covered scenario earns nothing, an upgrade (rank-40 caliber → rank-1
       // caliber) earns the difference. Weighted max-coverage: submodular, and
       // exactly "one winner per scenario, and when it wins, win the most".
-      const headGain = Math.max(0, ownHead - bestHead[s]);
+      // Leverage slider: coverage credit earned in a chalk-bust world weighs
+      // more than the same credit in a chalk-holds world (simWAt ≡ 1 at 0).
+      const headGain = Math.max(0, ownHead - bestHead[s]) * simWAt(s);
       hSum[s%K] += headGain;
       bSum[s%K] += flat + headGain - fee; bCnt[s%K]++;
     }
@@ -7674,11 +7909,14 @@ async function runUFCContestEV(ctx){
       const t=tots[s];
       const {beating,tied,n} = fieldStats(t,s);
       const dupsS = e._dupsK ? e._dupsK[s%K] : 0;
-      const rbase = ((beating + tied/2 + 0.5)/(n+1))*F + 1 + dupsS/2;
+      // Rank base refined by the same tail estimate the pricing uses, so the
+      // portfolio's flat-money bookkeeping agrees with what selection priced.
+      const _est = beatersEst(beating, tied, n, fieldSorted[s], t);
+      const rbase = _est.shape*_est.scale + 1 + dupsS/2;
       const mt=myTots[s], rb=myRb[s];
       const a = mySlot(t,s);
       // Coverage state: record the head payout this entry holds in this sim
-      const [, ownHead] = expPayoutSplit(beating, tied, n, dupsS, a);
+      const [, ownHead] = expPayoutSplit(beating, tied, n, dupsS, a, fieldSorted[s], t);
       if(ownHead > bestHead[s]) bestHead[s] = ownHead;
       mt.splice(a,0,t); rb.splice(a,0,rbase);
       // Portfolio net: own pay at slot a, minus fee, plus the shift cost of
@@ -7788,7 +8026,7 @@ async function runUFCContestEV(ctx){
         while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid]<=t) lo=mid+1; else hi=mid; }
         let lo2=0, hi2=lo;
         while(lo2<hi2){ const mid=(lo2+hi2)>>1; if(arr[mid]<t) lo2=mid+1; else hi2=mid; }
-        gross += expPayout(arr.length-lo, lo-lo2, arr.length, tots[mi].dups, mi);
+        gross += expPayout(arr.length-lo, lo-lo2, arr.length, tots[mi].dups, mi, arr, t);
       }
       netSum += gross-stake;
       if(gross < 0.10*stake) dead++;
@@ -8115,14 +8353,39 @@ async function runUFCContestEV(ctx){
         const guard = Math.max(cnt[id]||0, preMax);
         return user==null ? guard : Math.min(user, guard);
       };
+      // ── TIER PROTECTION ──────────────────────────────────────────────────
+      // The floor pass funds a raise by evicting a lineup and inserting one
+      // that holds the starved anchor. Left unconstrained it took that lineup
+      // from whoever happened to score worst — and on a 6-man board the
+      // worst-EV lineups are disproportionately the ones holding the OTHER
+      // top-tier fighters, so the rule that exists to protect the tier was
+      // paying for itself out of the tier. MEASURED (8/1, 50 lineups, 2k sims,
+      // seeds 101/202) against a UFC_ANCHOR_F=0 build: Cepo 44%→32%,
+      // Milosevic 22%→10%, Rebecki 40%→32% while Medic/Oliveira/Rakic rose.
+      // Fix: every tier member — INCLUDING the ones already above their own
+      // anchor, who previously carried no target at all and were therefore
+      // free eviction fodder — enters the pass with a floor at his PRE-PASS
+      // count, and enforceMinExposure runs in protectMins mode, which vets the
+      // (remove, insert) pair on its NET effect. Raises are therefore funded
+      // out of below-tier exposure only. If that makes a floor unreachable the
+      // pass stops short and says so; it never degrades by robbing the tier.
+      //
+      // Targets are assembled in LINEUP COUNTS and converted back to a
+      // percentage at the end, so no rounding trip can quietly lower a floor.
+      const NLf = Math.max(1, finalLineups.length);
+      const tgtCount = {};
+      const wantCount = (id, c) => { if(c>0 && (tgtCount[id]||0) < c) tgtCount[id] = c; };
+      Object.keys(floors).forEach(id=>wantCount(id, Math.ceil(floors[id]/100*NLf)));
+      tier.forEach(({p})=>wantCount(p.id, cnt[p.id]||0));
       // Carry the user's own Min% pins into the map. They are already satisfied
       // (enforceMinExposure ran above), so they add no insertions — but they do
       // populate minTarget, which is what stops this pass from evicting the very
       // lineup that was holding a pinned fighter at his floor.
-      const floorsPlusUser = Object.assign({}, floors);
-      Object.keys(minOverrides).forEach(id=>{ if(minOverrides[id]>0 && floorsPlusUser[id]==null)
-        floorsPlusUser[id]=minOverrides[id]; });
-      finalLineups = enforceMinExposure(finalLineups, minCands, floorsPlusUser, sfScore, ()=>{}, floorCapFn, {hardCaps:true});
+      Object.keys(minOverrides).forEach(id=>{ if(minOverrides[id]>0) wantCount(id, Math.ceil(minOverrides[id]/100*NLf)); });
+      const floorsPlusUser = {};
+      Object.keys(tgtCount).forEach(id=>{ floorsPlusUser[id] = 100*tgtCount[id]/NLf; });
+      const _fRep = {};
+      finalLineups = enforceMinExposure(finalLineups, minCands, floorsPlusUser, sfScore, ()=>{}, floorCapFn, {hardCaps:true, protectMins:true, report:_fRep});
       const after  = evalSet(finalLineups);
       const dEv    = after.ev - before.ev;
       const cnt2={}; finalLineups.forEach(l=>l.forEach(p=>{ cnt2[p.id]=(cnt2[p.id]||0)+1; }));
@@ -8131,10 +8394,15 @@ async function runUFCContestEV(ctx){
         const got = Math.round(100*(cnt2[fi.p.id]||0)/Math.max(1,finalLineups.length));
         const short = got + 2 < (floors[fi.p.id]||0);
         if(short) anyShort = true;
-        return `${fi.p.name} ${Math.round(fi.cur)}%→${got}%${short?` of ${floors[fi.p.id]}% target — UNREACHABLE cap-clean`:''} (sim ${fi.m.toFixed(0)}, field own ${fi.own.toFixed(0)}%)`;
+        return `${fi.p.name} ${Math.round(fi.cur)}%→${got}%${short?` of ${floors[fi.p.id]}% target — UNREACHABLE`:''} (sim ${fi.m.toFixed(0)}, field own ${fi.own.toFixed(0)}%)`;
       }).join(', ');
+      // Did the pass hold the whole tier, including the members it was not
+      // raising? Reported explicitly — this is the invariant, not a side note.
+      const cutTier = tier.filter(({p})=>(cnt2[p.id]||0) < (cnt[p.id]||0))
+        .map(({p})=>`${p.name} ${Math.round(100*(cnt[p.id]||0)/NLf)}%→${Math.round(100*(cnt2[p.id]||0)/NLf)}%`);
       log(`Anchor floor (F4): top-${tierN} fighters by sim score floored at ${Math.round(UFC_ANCHOR_F*100)}% of their field ownership — ${desc}. Portfolio EV Δ ${dEv>=0?'+':'−'}$${Math.abs(Math.round(dEv))}/slate. Correctly-priced chalk is a play; duplication still prices everyone else.`);
-      if(anyShort) log(`⚠ Anchor floor (F4): floor(s) above could not be reached without breaching a Max% cap — raise the cap or pin a manual Min%.`);
+      log(`Anchor floor (F4) funding: raises paid for out of below-tier exposure only — ${cutTier.length? '⚠ TIER CUT: '+cutTier.join(', ') : `all ${tierN} tier members held at or above their pre-pass exposure`}.`);
+      if(anyShort) log(`⚠ Anchor floor (F4): floor(s) above stopped short — no swap existed that reached them without breaching a Max% cap or cutting another top-tier fighter. Raise the cap, pin a manual Min%, or accept the shortfall.`);
     }
   }
 
@@ -8154,7 +8422,14 @@ async function runUFCContestEV(ctx){
   log(`Risk profile: loses ≥50% of entries in ${(bustHalf/simN2*100).toFixed(0)}% of sims, ≥90% in ${(bustAll/simN2*100).toFixed(0)}%.`);
   let _cov=0; for(let s=0;s<simN2;s++) if(sel.bestHead[s]>0) _cov++;
   log(`Tournament coverage: portfolio holds a top-${HEAD_RANK.toLocaleString()} caliber finish in ${(_cov/simN2*100).toFixed(0)}% of sims.`);
-  const expRows = pool.map(p=>({p, e:(sel.expCount[p.id]||0)}))
+  // Count from finalLineups, NOT sel.expCount. sel.expCount is the GREEDY's
+  // tally, frozen before enforceMinExposure and the F2/F4 floor passes rewrite
+  // the slate — so this line disagreed with the board the user is looking at,
+  // by up to 14pp (MEASURED 8/1, 10k sims: log said "Grad 48%, Klein 36%" while
+  // the delivered board was Grad 44% / Klein 50%). The co-exposure line below
+  // already recomputes from finalLineups; this one didn't.
+  const _expFinal = {}; finalLineups.forEach(l=>l.forEach(p=>{ _expFinal[p.id]=(_expFinal[p.id]||0)+1; }));
+  const expRows = pool.map(p=>({p, e:(_expFinal[p.id]||0)}))
     .filter(r=>r.e>0).sort((a,b)=>b.e-a.e).slice(0,6);
   log(`Top exposure: ${expRows.map(r=>`${r.p.name.split(' ').slice(-1)[0]} ${Math.round(r.e/finalLineups.length*100)}%`).join(', ')}`);
   // Tightest surviving pair coupling — shows the conditional cap did its job
@@ -9207,6 +9482,12 @@ async function runPgaSimGen(){
   }
   const done=()=>{ document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); };
 
+  // Settings fingerprint for the log + Sim CSV header. PGA generation is NOT
+  // seeded (only UFC Contest-EV is), so the stamp says so rather than implying
+  // a reproducibility this path does not have.
+  stampRun(slate, {seed:null, target, sims:numSims, minSal, maxSal, maxExp:maxExpPct,
+    lev:(parseInt(document.getElementById('leverageSlider')?.value)||0), noOppose:false});
+
   // The sim samples finishes from the market curves — they must exist.
   const hasCurves=ensureOddsScores(simPool, slate) && simPool.some(p=>p._curve);
   if(!hasCurves){
@@ -9526,7 +9807,37 @@ async function runPgaSimGen(){
   done();
 }
 
+// ── Seeded entry point for the UFC sim generator ────────────────────────────
+// Contest-EV generation is the path whose boards the user exports and asks
+// questions about, so it is the path that gets a CAPTURED seed: a 32-bit value
+// is drawn (or taken from window.__runSeed, which is the hook the harness uses
+// to reproduce a stamped run), a mulberry32 stream is installed over
+// Math.random for the whole run — sims, per-sim optimals, field sampling,
+// greedy, floors — and the original is restored in a finally. Feed the stamped
+// seed back in and the same settings rebuild the same 50 lineups.
+// SCOPE, stated plainly:
+//  • Contest-EV ON only. Sim-Score mode, and PGA/NASCAR/NFL, run unseeded and
+//    are byte-identical to the previous build; their stamp says seed=unseeded.
+//  • The generator yields to the event loop between chunks. Anything else that
+//    draws from Math.random during a yield (a UI render that mints an id) is
+//    part of the stream, so interacting with the page mid-run can break exact
+//    reproduction. Settings changes mid-run always could.
 async function runUFCSimGen(){
+  const _s  = activeSlate();
+  const _ev = !!(_s && _s._ufcEv && _s._ufcEv.on);
+  if(!_ev){ _runSeed = null; return await runUFCSimGenInner(); }
+  _runSeed = (typeof window !== 'undefined' && window.__runSeed != null)
+    ? (window.__runSeed >>> 0)
+    : (Math.floor(Math.random() * 4294967296) >>> 0);
+  const _origRandom = Math.random, _seeded = mulberry32(_runSeed);
+  try {
+    Math.random = _seeded;
+    return await runUFCSimGenInner();
+  } finally {
+    Math.random = _origRandom;
+  }
+}
+async function runUFCSimGenInner(){
   const slate = activeSlate(); if(!slate) return;
   const target     = parseInt(document.getElementById('genCount').value)||20;
   const maxExpPct  = parseInt(document.getElementById('genMaxExp').value)||100;
@@ -9566,6 +9877,13 @@ async function runUFCSimGen(){
     cancelBtn.onclick = ()=>{ window._genCancelled=true; cancelBtn.remove(); };
     el.parentNode.insertBefore(cancelBtn, el.nextSibling);
   }
+
+  // Reproducibility stamp: seed + every setting that shapes this build. First
+  // line of the log (the element was just cleared above) and the header of the
+  // Sim CSV, so a board the user sends back can be rebuilt exactly.
+  stampRun(slate, {seed:_runSeed, target, sims:numSims, minSal, maxSal, maxExp:maxExpPct,
+    lev:(parseInt(document.getElementById('ufcLeverageSlider')?.value)||0),
+    noOppose:ufcNoOpposeGlobal});
 
   // Run sims in async chunks to avoid blocking the UI
   log(`Running ${numSims.toLocaleString()} simulations...`);
@@ -9652,9 +9970,23 @@ async function runUFCSimGen(){
   // repair upgrades single-sim fluke slots, and maxSal lets the repair
   // respect the real cap.
   if(_evOn && ranked.length){
+    // dominanceRepair OFF for UFC as of 2026-08-04. Repair was built for PGA
+    // (150-player pools, per-sim optimals carrying one-sim fluke slots) and
+    // measured there. On a 28-fighter UFC board the candidates are per-sim
+    // optimals over COARSE win/loss branches — nothing in them is a fluke
+    // slot, and repair's mean+consistency test is a FLOOR criterion that
+    // systematically trades win-gated ceiling for chalk floor. MEASURED on
+    // 8/1 (2k sims, probe build): 709 swaps rewrote 596 of ~1,100 candidates;
+    // supply share Urbina 15.4%→6.5%, Rakic 13.8%→4.5% while Cepo 34.6%→47.4%,
+    // Nikolic +8pts, Grad +9pts — i.e. it strips exactly the low-owned
+    // finish-equity coverage the EV stage exists to price (the real 8/1
+    // contest's entire top-100 held Urbina, at 13.8% field ownership), and
+    // hands the greedy a chalk-tilted menu before pricing begins. The EV
+    // engine judges unrepaired per-sim optimals on equal footing already;
+    // UFC needs the coverage, not the polish. PGA/NFL/NASCAR keep repair.
     const out = await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims,
-      genSims: genSims || totalSims, target, maxExpPct, overrides,
-      oosParity:1, sharpShare:0.15, se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:true, maxSal, minSal});
+      genSims: genSims || totalSims, target, maxExpPct, overrides, appearRate,
+      oosParity:1, sharpShare:0.15, se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:false, maxSal, minSal});
     if(out === null && window._genCancelled) log('Cancelled.');
     document.getElementById('genBtn').disabled = false;
     cancelBtn?.remove();
@@ -11294,6 +11626,11 @@ async function runNascarSimGen(){
   }
   const done = ()=>{ document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); };
 
+  // Settings fingerprint for the log + Sim CSV header. NASCAR generation is NOT
+  // seeded (only UFC Contest-EV is) — the stamp reports seed=unseeded.
+  stampRun(slate, {seed:null, target, sims:numSims, minSal, maxSal, maxExp:maxExpPct,
+    lev:(parseInt(document.getElementById('nascarLeverageSlider')?.value)||0), noOppose:false});
+
   await new Promise(r=>setTimeout(r,0));
   if(window._genCancelled){ log('Cancelled.'); done(); return; }
 
@@ -12216,6 +12553,18 @@ function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, 
   // by the F2 chalk floor (a soft rule must not override a user's Max%); user
   // Min% keeps the default breach-as-last-resort-with-loud-log behavior.
   const hardCaps = !!(opts && opts.hardCaps);
+  // opts.protectMins: JOINT (victim, candidate) swap search — a swap is legal
+  // only if the NET count change leaves every min-constrained player at or
+  // above his own target. The default path decides the victim on a
+  // REMOVAL-ONLY test and then falls back to an unprotected victim when every
+  // removal would break someone's min, which is how the F4 anchor floor funded
+  // its raises by evicting OTHER members of the same tier (MEASURED 8/1, 50
+  // lineups: Cepo 44→32, Milosevic 22→10, Rebecki 40→32 paying for Medic /
+  // Oliveira / Rakic). The removal-only test also cannot see that the INCOMING
+  // lineup usually restores the very player the outgoing one held, so it
+  // rejects swaps that are in fact free. Used by F4 only; user Min% and the
+  // NASCAR/PGA floors keep the original behaviour.
+  const protectMins = !!(opts && opts.protectMins);
   const playersWithMin = Object.keys(minOverrides).filter(id => minOverrides[id] > 0);
   if(!playersWithMin.length) return finalLineups;
 
@@ -12256,6 +12605,64 @@ function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, 
   needs.forEach(({ id, minCount }) => {
     let stillNeeded = minCount - (counts[id]||0);
     if(stillNeeded <= 0) return;
+
+    if(protectMins){
+      // ── Protected joint swap ────────────────────────────────────────────
+      // Evaluate (remove victim, insert candidate) as ONE move on the net
+      // count delta. Legal iff, for every player the move would DECREMENT,
+      // the post-move count stays at or above his min target, and for every
+      // player it would INCREMENT the post-move count stays inside his cap.
+      // Victims are tried worst-score-first (same intent as the default
+      // path); for each victim the best-scoring legal candidate is taken.
+      // If no (victim, candidate) pair is legal we STOP and leave the min
+      // short — the caller logs it as unreachable. Never rob a protected
+      // player to reach another protected player's floor.
+      const liveKeys = new Set(result.map(l => l.map(p=>p.id).sort().join(',')));
+      const cands = candidatePool
+        .filter(l => l.some(p => p.id === id))
+        .map(l => ({ l, key: l.map(p=>p.id).sort().join(','), score: scoreFn(l) }))
+        .sort((a, b) => b.score - a.score);
+      let replaced = 0;
+      for(let n = 0; n < stillNeeded; n++){
+        const victims = result
+          .map((l, li) => ({ li, l, key: l.map(p=>p.id).sort().join(','), score: scoreFn(l) }))
+          .filter(v => !v.l.some(p => p.id === id))
+          .sort((a, b) => a.score - b.score);
+        let moved = false;
+        for(const v of victims){
+          const base = {};
+          v.l.forEach(p => { base[p.id] = (base[p.id]||0) - 1; });
+          for(let ci = 0; ci < cands.length; ci++){
+            const c = cands[ci];
+            if(liveKeys.has(c.key)) continue;
+            const d = Object.assign({}, base);
+            c.l.forEach(p => { d[p.id] = (d[p.id]||0) + 1; });
+            let ok = true;
+            for(const pid in d){
+              const delta = d[pid]; if(!delta) continue;
+              const nc = (counts[pid]||0) + delta;
+              if(delta < 0 && minTarget[pid] != null && nc < minTarget[pid]){ ok = false; break; }
+              if(delta > 0){ const cp = capOf(pid); if(cp != null && nc > cp){ ok = false; break; } }
+            }
+            if(!ok) continue;
+            liveKeys.delete(v.key);
+            bump(v.l, -1);
+            result[v.li] = c.l;
+            bump(c.l, 1);
+            liveKeys.add(c.key);
+            cands.splice(ci, 1);
+            replaced++; moved = true; break;
+          }
+          if(moved) break;
+        }
+        if(!moved) break;
+      }
+      if(opts.report) opts.report[id] = { replaced, got: (counts[id]||0), want: minCount };
+      if(replaced > 0 && logFn){
+        logFn(`Min exposure: inserted ${replaced} lineup${replaced>1?'s':''} for player ${id} to reach ${counts[id]||0}/${result.length} (target ${minCount})`);
+      }
+      return;
+    }
 
     // Candidate lineups containing this player, not already in the set,
     // best score first. Cap safety is decided LIVE at insertion time below —
@@ -12953,6 +13360,11 @@ async function runNflSimGen(){
     done(); return;
   }
   if(!_evOn) log('Contest EV Mode off — Sim Score mode: lineups ranked by held-out sim totals (0.6×P80 + 0.4×mean), no payout/field modeling.');
+
+  // Settings fingerprint for the log + Sim CSV header. NFL generation is NOT
+  // seeded (only UFC Contest-EV is) — the stamp reports seed=unseeded.
+  stampRun(slate, {seed:null, target, sims:numSims, minSal, maxSal, maxExp:maxExpPct,
+    lev:(parseInt(document.getElementById('leverageSlider')?.value)||0), noOppose:false});
 
   log(`Running ${numSims.toLocaleString()} simulated slates (${simPool.length} players${pool.length<simPool.length?`, ${pool.length} in selection pool`:''})…`);
   await new Promise(r=>setTimeout(r,0));
