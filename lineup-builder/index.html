@@ -7203,43 +7203,62 @@ async function runUFCContestEV(ctx){
   // the price paid are logged every run. The slider is now a manual OVERRIDE
   // only: 0 = auto-solve (default), >0 pins β = slider/100 and restores the
   // three identical stability restarts.
+  // MECHANISM REVISED 2026-08-04 (same day): world-weighting was measured too
+  // blunt — upweighting a chalk-bust world rewards ANY lineup strong there,
+  // and with 13 other independent fights that is mostly the usual mid-block
+  // (measured: Cepo-bust worlds upweighted, yet Urbina 14% / Buzukja 0% while
+  // Grad 54%). The stance now attaches to the CAPTOR instead: a lineup earns
+  // extra head+mid credit in exactly the sims where a fighter it holds beat
+  // an OVER-OWNED opponent, in proportion to that opponent's excess ownership
+  // — the direct claim on the orphaned equity, leaking nowhere.
   const _levStr = (slate.sport==='ufc')
     ? Math.max(0, Math.min(1, (parseInt(document.getElementById('ufcLeverageSlider')?.value)||0)/100))
     : 0;
   const _levAuto = (slate.sport==='ufc') && !(_levStr > 0);
-  let _oeZ = null;    // per-sim orphaned-equity z-scores (built after simIdx exists)
-  let _simW = null;   // current β's normalized weights (null ⇒ all 1)
-  const _buildOeZ = (idxList) => {
-    if(slate.sport!=='ufc') return null;
+  let _levB = 0;        // active stance strength (set per sweep arm)
+  let _oppIdx = null;   // fighter -> pool index of his opponent
+  let _oppExcess = null;// fighter -> his OPPONENT's excess ownership (own − optimal-rate, floored at 0)
+  const _STANCE_NORM = 15;  // excess points at which the stance multiplier reaches 1+β
+  const _buildStance = () => {
+    if(slate.sport!=='ufc') return;
     const _ownV = pool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
-    const _oppOf = pool.map(p=>pool.findIndex(q=>q!==p && typeof ufcSameFight==='function' && ufcSameFight(p,q)));
-    const _sArr = pool.map(p=>simScoresById[p.id]||[]);
-    const oe=[]; let sum=0;
-    for(let s2=0;s2<idxList.length;s2++){
-      const si=idxList[s2];
-      let v=0;
-      for(let i2=0;i2<pool.length;i2++){
-        const o=_oppOf[i2]; if(o<0) continue;
-        const sl=(_sArr[i2][si]||0), sw=(_sArr[o][si]||0);
-        if(sl < sw){                       // i2 lost; his opponent is the beneficiary
-          const R = Math.min(1, sw/100);   // rosterability of the beneficiary's actual score
-          v += _ownV[i2] * R * R;
-        }
+    _oppIdx = pool.map(p=>pool.findIndex(q=>q!==p && typeof ufcSameFight==='function' && ufcSameFight(p,q)));
+    // EXCESS ownership only: orphaned equity is the field's MISTAKE dying, not
+    // its fair positions. Each fighter's opponent contributes only ownership
+    // ABOVE the opponent's price-aware likelihood (optimal-rate — P(in the
+    // per-sim optimal), which already prices salary). Cepo at 37.7% own vs
+    // 26.8% optimal-rate leaves +10.9 excess points orphaned when he busts —
+    // the slate's real spot; a proportionally-owned fight (Valentin 30.5%/59%
+    // vs Todorovic 26.5%/41%) carries ~zero excess either way, so it reverts
+    // to the honest auction instead of flipping toward the dog (measured
+    // defect of the raw-ownership version: 14%/50% toward the 41% side).
+    const _appR = ctx.appearRate || {};
+    const _excess = pool.map((p,i2)=>{
+      const ar = _appR[p.id]!=null ? 100*_appR[p.id] : null;
+      return ar==null ? 0 : Math.max(0, _ownV[i2] - ar);
+    });
+    _oppExcess = pool.map((p,i2)=>{
+      const o=_oppIdx[i2];
+      return o>=0 ? _excess[o] : 0;
+    });
+  };
+  const setLevBeta = (b) => { _levB = (b>0 && _oppExcess) ? b : 0; };
+  // Stance multiplier for a candidate lineup in one sim: 1 + β·(claimed excess
+  // ÷ norm), where claimed excess = Σ over held fighters who WON this sim of
+  // their opponent's excess ownership. Holding Urbina pays exactly in the
+  // sims where he beats Cepo; nothing anywhere else; mids holding fairly-
+  // owned opponents get 1.0 everywhere.
+  const stanceMult = (idxs, si) => {
+    if(!(_levB>0)) return 1;
+    let ex=0;
+    for(const i of idxs){
+      if(_oppExcess[i] > 0){
+        const o=_oppIdx[i];
+        if((scoreArr[i][si]||0) > (scoreArr[o][si]||0)) ex += _oppExcess[i];
       }
-      oe.push(v); sum+=v;
     }
-    const mean=sum/Math.max(1,oe.length)||1;
-    let vv=0; for(const x of oe){ const d=x-mean; vv+=d*d; }
-    const sd=Math.sqrt(vv/Math.max(1,oe.length))||1;
-    return oe.map(x=>(x-mean)/sd);
+    return ex>0 ? 1 + _levB*Math.min(2, ex/_STANCE_NORM) : 1;
   };
-  const setLevBeta = (b) => {
-    if(!_oeZ || !(b>0)){ _simW=null; return; }
-    const w=_oeZ.map(z=>Math.exp(b*1.5*z));
-    const m=w.reduce((a,c)=>a+c,0)/Math.max(1,w.length);
-    _simW = m>0 ? w.map(x=>x/m) : null;
-  };
-  const simWAt = s2 => _simW ? (_simW[s2]!=null?_simW[s2]:1) : 1;
   log(slate.sport==='ufc'
     ? (_levAuto
       ? `Contest EV: ${payout.desc}. Leverage stances: AUTO — worlds weighted by orphaned equity (dead ownership × beneficiary rosterability); strength β solved per slate via the restart sweep below.`
@@ -7273,7 +7292,7 @@ async function runUFCContestEV(ctx){
   } else {
     const stride = totalSims/SIMS; for(let k=0;k<SIMS;k++) simIdx.push(Math.floor(k*stride));
   }
-  _oeZ = _buildOeZ(simIdx);            // orphaned-equity world scores (UFC)
+  _buildStance();                      // per-fighter opponent-excess claims (UFC)
   setLevBeta(_levAuto ? 0 : _levStr);  // auto: initial pricing at β=0; the F1 sweep prices each β itself
 
   // 1) OWNERSHIP-UNCERTAINTY SCENARIOS + field models.
@@ -7476,9 +7495,16 @@ async function runUFCContestEV(ctx){
       // one-sim accidents rather than the core's reason for existing. Variants
       // on only the single weakest let junk PAIRS survive (swap Prepolec out,
       // the Elliott next to him inherits the exposure).
+      // Stance carriers are exempt: a fighter whose opponent holds real excess
+      // ownership (>3 pts over optimal-rate) is a lineup's CLAIM on that
+      // orphaned equity, not a weak slot — "upgrading" him away is what
+      // starved the leverage tier's candidate supply (measured: Urbina 19.5%
+      // optimal-rate → 9.8% of candidates while his variants fed Musayev).
+      const _idxOfVe = new Map(pool.map((p2,i2)=>[p2.id,i2]));
       const order = lu.map((p,k2)=>({k2, c:_comp(p)})).sort((a,b)=>a.c-b.c).slice(0,2);
       for(const {k2:wi} of order){
         const p = lu[wi];
+        if(typeof _oppExcess !== 'undefined' && _oppExcess && _oppExcess[_idxOfVe.get(p.id)] > 3) continue;
         let made=0;
         for(const q of _byCompDesc){
           if(made>=VARIANTS_PER) break;
@@ -7910,10 +7936,10 @@ async function runUFCContestEV(ctx){
         while(lo2<hi2){ const mid=(lo2+hi2)>>1; if(arr[mid]<t) lo2=mid+1; else hi2=mid; }
         const beating = arr.length-lo;
         const tied    = lo-lo2;
-        // Leverage slider: head AND mid parts ride the chalk-bust sim weight;
-        // flat cash is never reweighted (see _buildSimW above).
+        // Leverage stance: head AND mid parts ride the captor's stance
+        // multiplier (claimed opponent-excess in this sim); flat cash never.
         const [_pay, _hd, _md] = expPayoutSplit(beating, tied, arr.length, dups, 0, arr, t);
-        bSum[s%K] += (_pay - _hd - _md) + (_hd + _md)*simWAt(s); bCnt[s%K]++;
+        bSum[s%K] += (_pay - _hd - _md) + (_hd + _md)*stanceMult(idxs, si); bCnt[s%K]++;
       }
       e._ev = robustAgg(bSum, bCnt) - fee;
       if(c>0 && c%400===0){
@@ -8010,6 +8036,7 @@ async function runUFCContestEV(ctx){
   };
   const marginalVal = e => {
     const tots = e._tots || (e._tots = totalsOf(e));
+    const _sIdxs = e._idxs || (e._idxs = e.lineup.map(p=>idxById.get(p.id)).filter(i=>i!=null));
     const bSum=new Float64Array(K), bCnt=new Float64Array(K), hSum=new Float64Array(K);
     for(let s=0; s<simN; s++){
       const t=tots[s];
@@ -8032,9 +8059,10 @@ async function runUFCContestEV(ctx){
       // MID tier (0.5%-2%) is ADDITIVE at full weight: presence money that a
       // multi-entry book legitimately collects several times per world —
       // own-rank pushdown (j0) and dup pricing keep clones self-limiting.
-      // Leverage slider: head AND mid credit earned in a chalk-bust world
-      // weigh more than in a chalk-holds world (simWAt ≡ 1 at 0).
-      const headGain = (Math.max(0, ownHead - bestHead[s]) + ownMid) * simWAt(s);
+      // Leverage stance: head AND mid credit ride the captor multiplier —
+      // extra credit exactly in the sims where a held fighter beat an
+      // over-owned opponent (stanceMult ≡ 1 at β=0).
+      const headGain = (Math.max(0, ownHead - bestHead[s]) + ownMid) * stanceMult(_sIdxs, simIdx[s]);
       hSum[s%K] += headGain;
       bSum[s%K] += flat + headGain - fee; bCnt[s%K]++;
     }
@@ -8236,12 +8264,27 @@ async function runUFCContestEV(ctx){
     // each runs at a different orphaned-equity weighting strength on its own
     // independent field sample. Manual slider pin (or non-UFC) keeps three
     // identical-β restarts, the original stability semantics.
-    const BETAS = _levAuto ? [0, 0.5, 1.0]
-                           : [ _levStr, _levStr, _levStr ];
+    // Grid matched to the CAPTOR-stance mechanism: the multiplier only touches
+    // credit in the sims where a held fighter beat an over-owned opponent, so
+    // it re-orders near-tie candidates rather than distorting worlds — it
+    // measured nearly free at low β (−$1-6). Authority requires range: at
+    // β=1.5 an Urbina-win sim's credit runs ~2.1× (claim 10.9/15 excess pts),
+    // and stacked claims (Urbina+Rodriguez both winning) reach the 2× cap.
+    // The allowance rule still prices every step. Manual slider maps 0-100 →
+    // β 0-1.5 on the same scale.
+    const BETAS = _levAuto ? [0, 0.75, 1.5]
+                           : [ _levStr*1.5, _levStr*1.5, _levStr*1.5 ];
     let selCtx = null, kept = 0, keptQ = null;
     const results = [];
     for(let r=0; r<RESTARTS; r++){
-      if(r>0){
+      // AUTO β sweep: all βs run on the SAME (primary) field sample, so the
+      // comparison isolates the stance — mixing one field sample per β
+      // confounded the choice with restart noise (±$10-15 per their own F1
+      // measurements) and made the kept board a single-sample lottery. The
+      // out-of-sample safeguard is unchanged: every arm is judged on the
+      // common, independent eval field. Manual/non-UFC keeps the original
+      // one-sample-per-restart stability semantics.
+      if(r>0 && !_levAuto){
         const c = await makeCtx();
         if(c===null) return null;
         activateCtx(c); curCtx = c;
