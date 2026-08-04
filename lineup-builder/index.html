@@ -6739,23 +6739,38 @@ function sampleUfcField(pool, N, ownArr, opts){
   const salaries = pool.map(p=>p.salary||0);
   // No-opposing-entrant only applies to head-to-head sports. In NFL the
   // opposite is true — bring-backs are a correlation play — so skip it.
-  // FIXED 2026-08-01 (M6): this blocked opposing pairs UNCONDITIONALLY and
-  // ignored the per-fight exclusion toggles. Two consequences. When the user has
-  // no-oppose OFF, real field entrants DO roster both sides — the model said
-  // nobody does, so any candidate holding an opposing pair was priced as far
-  // more unique than it really is, inflating its EV. And a fight the user
-  // explicitly un-excluded from the rule was still blocked in the field, so
-  // exactly the builds the toggle exists to enable got the largest phantom
-  // uniqueness credit. `noOppose` now comes from the caller.
-  const _fieldNoOpp = !slots && (opts ? opts.noOppose !== false : true);
+  //
+  // M6 (2026-08-01) made this follow the USER's no-oppose checkbox. That was
+  // wrong in kind: what the FIELD does is an empirical fact about other
+  // entrants, not a consequence of the user's own build rule. MEASURED on the
+  // real 39,102-entry 8/1 DK contest (14 fights): 2.50% of entries roster both
+  // sides of some fight — per fight 0.06%–0.87%. With the checkbox OFF (the
+  // app default) M6's field sampler produced 54.84% — a 22× overstatement, and
+  // 47× on the specific Cepo/Urbina fight (5.64% modeled vs 0.12% real). The
+  // consequence is precisely the "underdog leverage never emerges" symptom:
+  // a field where half the entries hedge some fight barely loses top-end score
+  // when a favorite is upset, so the sampled field's p99.9 was flat across the
+  // upset branch (666.4 vs 657.0) and holding the dog bought nothing.
+  // So the rate is modeled at the MEASURED value instead of toggled, and — like
+  // the NFL stack shares — the lever is calibrated against the REALIZED rate
+  // each iteration, because an entry drawn unconstrained only lands an opposing
+  // pair some of the time. M6's actual concern (a candidate holding an opposing
+  // pair must not be priced as impossibly unique) is served better by the true
+  // rate than by switching the constraint off: such builds really are rare.
+  const FIELD_HEDGE_RATE = 0.025;
+  const _headToHead = !slots;
   // Fight-number exclusions are a UFC concept; `fightNum` is null on every other
   // sport, so this is inert for them by construction.
   const _fieldExcl  = p => { const f=p.fightNum||0;
                              return f>0 && typeof ufcExcludedFights!=='undefined' && ufcExcludedFights.has(f); };
-  const oppIdx   = !_fieldNoOpp ? pool.map(()=>-1)
+  const oppIdx   = !_headToHead ? pool.map(()=>-1)
                          : pool.map(p=>_fieldExcl(p) ? -1
                              : pool.findIndex(q=>q!==p && !_fieldExcl(q) &&
                              (typeof ufcSameFight==='function' ? ufcSameFight(p,q) : q.name===p.opp)));
+  // PGA/NASCAR pools have no fightNum and no `opp`, so oppIdx is all -1 and
+  // every line below is inert for them — same field they always drew.
+  const _hasPairs = oppIdx.some(i=>i>=0);
+  let hedgeLever = _hasPairs ? FIELD_HEDGE_RATE : 0;
   const CAP=(opts&&opts.cap)||50000, FLOOR=(opts&&opts.floor)||47000; // field lineups overwhelmingly spend $47k+
   const cheap = salaries.slice().sort((a,b)=>a-b);
   const cheapPrefix=[0]; cheap.forEach((s,i)=>cheapPrefix.push(cheapPrefix[i]+s));
@@ -6853,6 +6868,9 @@ function sampleUfcField(pool, N, ownArr, opts){
       // they do in real fields, which is exactly the crowding that punishes
       // "stud + the obvious value block" lineups at the top of the curve.
       const gamma = 0.7 + Math.random()*0.9;
+      // Per-entry hedge draw: this entry is one of the small minority willing to
+      // roster both sides of a fight (see FIELD_HEDGE_RATE above).
+      const hedging = hedgeLever>0 && Math.random() < hedgeLever;
       const picks=[]; const used=new Set(); let sal=0; let dead=false;
 
       // Decide this entry's stack shape and pre-select the forced players.
@@ -6902,7 +6920,7 @@ function sampleUfcField(pool, N, ownArr, opts){
         let tw=0; const elig=[]; const ew=[];
         const consider = (i) => {
           if(used.has(i)) return;
-          if(oppIdx[i]>=0 && used.has(oppIdx[i])) return;
+          if(!hedging && oppIdx[i]>=0 && used.has(oppIdx[i])) return;
           if(sal+salaries[i]+headroom > CAP) return;
           const wi = Math.pow(w[i], gamma);
           elig.push(i); ew.push(wi); tw+=wi;
@@ -6925,6 +6943,18 @@ function sampleUfcField(pool, N, ownArr, opts){
     for(let i=0;i<pool.length;i++){
       const real=(cnt[i]/field.length)*100;
       w[i]=Math.max(0.02, w[i]*Math.pow((target[i]+0.5)/(real+0.5), 0.85));
+    }
+    // Re-aim the hedge lever at the REALIZED both-sides rate (same doctrine as
+    // the ownership re-weighting and the NFL stack shares: drive the observable
+    // onto the measurement, not the lever). An unconstrained draw only lands an
+    // opposing pair ~half the time, so lever ≠ rate.
+    if(hedgeLever>0){
+      let both=0;
+      for(const l of field){ const st=new Set(l);
+        if(l.some(i=>oppIdx[i]>=0 && st.has(oppIdx[i]))) both++; }
+      const r = Math.max(0.0005, both/field.length);
+      const ratio = Math.min(4, Math.max(0.25, FIELD_HEDGE_RATE/r));
+      hedgeLever = Math.min(0.5, Math.max(0.0005, hedgeLever*Math.pow(ratio, 0.8)));
     }
     // Re-aim the stack lever at the realized shape distribution.
     if(SM && shapeP){
@@ -6983,9 +7013,51 @@ async function runUFCContestEV(ctx){
     // playing under. Modeling a no-oppose field when the user (and therefore
     // the field) allows opposing pairs prices those builds as far more unique
     // than they are. Non-UFC head-to-head sports keep the historic behaviour.
-    : { noOppose: slate.sport==='ufc'
-          ? !!(document.getElementById('genUfcNoOppose')?.checked)
-          : true };
+    : Object.assign(
+        { noOppose: slate.sport==='ufc'
+            ? !!(document.getElementById('genUfcNoOppose')?.checked)
+            : true },
+        // UFC FIELD SALARY FLOOR — fitted on two real DK contests (8/1:
+        // 39,102 entries; 7/25: 38,910). Real UFC fields almost never leave
+        // money on the table: p5 lineup salary $49,300 / $49,200 and only
+        // 2.23% / 2.58% of entries under $49k. The unfloored sampler puts
+        // 26.0% / 25.8% under $49k — the single largest structural error in
+        // the field model. KS distance between the modelled and real
+        // lineup-salary CDF drops 0.362 -> 0.128 (-65%), and the argmin is
+        // $49,500 on BOTH cards (per-card argmin 49,600 / 49,500, adjacent
+        // grid points), so this is one constant, not a per-contest fit.
+        // Portfolio grading: neutral-to-positive on both cards under both
+        // alternate-realisation generators (all four Δ P(top 1%) 95% CIs
+        // straddle zero) and better than the unfloored sampler on both
+        // cards' actual realisation (paired over build seeds, t=-0.90 on
+        // 8/1, t=-1.94 on 7/25).
+        // Deliberately NOT paired with a reachability prune: pruning
+        // branches that cannot reach the floor is ~2.5x faster but distorts
+        // the draw (KS 0.126 -> 0.244), which defeats the point.
+        // NASCAR FIELD SALARY FLOOR — the same fit, on the 59,328-entry Cup
+        // Indianapolis 7/26 DK contest (the first NASCAR field ever measured
+        // here). Real NASCAR entries also spend: p5 lineup salary $48,700,
+        // p50 $49,800, and only 7.30% sit under $49k. The unfloored ($47,000)
+        // sampler puts 40.5% under $49k — same defect, same size as UFC's.
+        // KS between the modelled and real lineup-salary CDF: 0.389 -> 0.133
+        // at $49,200 (argmin; stable to +-0.003 across 3 sampler seeds, and
+        // every value in $49,000-$49,400 beats $47,000 by >50%, so this is not
+        // knife-edge). NASCAR sits BELOW the UFC constant because racing
+        // fields punt more — $49,500 over-shoots here (KS 0.213).
+        // GRADED on the real card, Contest-EV target 20, paired over 8 build
+        // seeds: Δmean pts -2.2 (t=-0.35), Δlog(bestRank) -0.31 (t=-0.66),
+        // Δ#top-5% +0.25 (t=0.68) — all straddle zero, i.e. neutral at the
+        // output exactly like the UFC floor, which is what the measured
+        // seed-to-seed noise floor predicts (two same-build NASCAR runs share
+        // 0.3 of 20 lineups; only driver-level exposure is stable, r≈0.87).
+        // Shipped for FIDELITY, not for a points edge. Costs 1.5-3x on
+        // Contest-EV wall time (rejection sampling) — see the hard-truncation
+        // note: the model now has ZERO entries under $49k where the real field
+        // has 7.3%, so a soft/weighted floor is still the better end state.
+        // n=1 on the NASCAR value; re-fit when a second Cup contest lands.
+        // PGA/NFL keep the historic $47,000 default.
+        (slate.sport==='ufc'    ? { floor: 49500 } :
+         slate.sport==='nascar' ? { floor: 49200 } : null));
   const minOverrides = slate.playerMinOverrides||{};
   const cfg  = slate._ufcEv||{};
   const F    = Math.max(target, parseInt(cfg.fieldSize)||10000);
@@ -7962,6 +8034,107 @@ async function runUFCContestEV(ctx){
         const desc = floorInfo.map(fi=>`${fi.p.name} held at ${Math.round(fi.cur)}% vs ${fi.own.toFixed(0)}% field (fair win ${fi.fairWin.toFixed(1)}%)`).join(', ');
         log(`⚠ Chalk floor (F2) DECLINED: ${desc} — forcing the ⅓-ownership floor costs $${Math.abs(Math.round(dEv))}/slate (> $${Math.round(SF_THRESH)} noise threshold), exposures left as selected. If you disagree with the fade, pin a manual Min%.`);
       }
+    }
+  }
+
+  // ═══ F4: TOP-TIER ANCHOR FLOOR (UFC) ═════════════════════════════════════
+  // Contest-EV inherits its candidate pool from the per-sim optimizer, which
+  // ranks on points-per-dollar, and then prices on duplication. Both push the
+  // same way against a correctly-priced favourite: he is expensive, so he is
+  // in fewer optimals, and he is popular, so every build holding him is taxed
+  // for dup. MEASURED on the 8/1 card (50 lineups, 8 seeds, slider 0): the
+  // #2 and #4 fighters by mean sim score landed at 16% and 9% exposure while
+  // #11 and #14 sat at 45% and 44%; ρ(sim score, exposure) 0.40–0.50 against
+  // 0.81 on the non-EV path over the SAME candidate pool. That is not the
+  // duplication edge earning its keep — an expensive favourite the market has
+  // priced correctly is a fine play, and being under his own field ownership
+  // is a position, not a default.
+  // Rule, in the spirit of the make-cut cap and the NASCAR chalk floor: a
+  // fighter in the TOP 20% of the board by sim score gets exposure of at least
+  // UFC_ANCHOR_F × his projected field ownership. Self-scaling (his own
+  // anchor, not a constant), enforced through the cap-respecting min machinery
+  // so it never breaches a Max% cap and never lowers a user Min%, and — unlike
+  // the NASCAR floor — applied as a FIXED STANDARD with its price measured and
+  // logged rather than declined on a noisy EV comparison. It only ever RAISES
+  // starved anchors, so the dup-priced fades on everyone else are untouched.
+  // Skipped for single-entry and micro-slates, same reasoning as F2.
+  // CHOSEN FROM A MEASURED FRONTIER (8/1 card, 50 lineups, 6 build seeds, 600
+  // alternate realisations against the real 39,102-entry field, scored under
+  // BOTH the app's own drawScoreOdds and an empirical-branch generator fitted on
+  // the other four cards, two-level bootstrap over seeds × realisations):
+  //   F     Medic  Oliveira  Rakic  Urbina | ΔP(top1%) genA / genB vs shipped
+  //   0.0    17.0     10.0     3.3   14.3  |  −0.3 [−3.9,3.7] / −0.8 [−4.5,2.7]
+  //   0.6    19.7     14.3    12.0   13.7  |  −1.4 [−5.4,2.4] / −2.2 [−5.6,1.3]
+  //   0.7    21.0     17.3    14.0   16.3  |  −2.4 [−6.4,1.9] / −2.5 [−5.9,1.6]
+  //   0.8    24.3     20.0    16.0   18.3  |  −2.8 [−6.8,1.1] / −3.7 [−7.6,0.2]
+  //   1.0    29.7     26.0    20.0   18.0  |  −6.1 [−10.3,−1.8] / −5.3 [−8.7,−1.6]
+  // 1.0 degrades significantly on both generators — rejected. 0.7 is the knee:
+  // the anchors reach real exposure, both simulated deltas still straddle zero,
+  // and on the REAL 8/1 outcome it was the best arm tested (mean 429.7 pts and
+  // 10.2 top-10% finishes per 50 vs 416.5 / 7.8 shipped). Raise it if you want
+  // more anchor and accept a measured tax; lower it to buy back uniqueness.
+  const UFC_ANCHOR_F = 0.7;
+  if(slate && slate.sport==='ufc' && UFC_ANCHOR_F>0 && finalLineups.length>=10 && !ctx.se){
+    const NL = finalLineups.length;
+    const cnt = {}; finalLineups.forEach(l=>l.forEach(p=>{ cnt[p.id]=(cnt[p.id]||0)+1; }));
+    const tierN = Math.max(3, Math.ceil(pool.length/5));
+    // Rank on the SAME statistic the pool board shows in its Sim column
+    // (_simP50, the ceiling-weighted composite), not the flat sim mean — the
+    // rule has to agree with the board the user is reading, and the two orders
+    // differ (mean points is nearly a win-probability ranking, so it demoted
+    // the #4 composite fighter out of the tier on 3 of 4 seeds). Falls back to
+    // the mean when the composite hasn't been written.
+    const tierM = p => (p._simP50!=null ? parseFloat(p._simP50) : (meanById[p.id]||0));
+    const tier = pool.map((p,i)=>({p, i, m:tierM(p)}))
+                     .sort((a,b)=>b.m-a.m).slice(0, tierN);
+    const floors = {}, info = [];
+    tier.forEach(({p,i})=>{
+      const floorPct = UFC_ANCHOR_F * baseOwn[i];
+      const curPct   = 100*(cnt[p.id]||0)/NL;
+      const userMin  = minOverrides[p.id]||0;
+      if(floorPct > Math.max(curPct, userMin) + 2){
+        floors[p.id] = Math.round(floorPct);
+        info.push({p, cur:curPct, own:baseOwn[i], m:meanById[p.id]||0});
+      }
+    });
+    if(info.length){
+      const evalSet = ls => evalPortfolio({chosen: ls.map(l=>l._entry).filter(Boolean)}, scoreArr, fieldSorted);
+      const before = evalSet(finalLineups);
+      // Anti-concentration guard. enforceMinExposure inserts the HIGHEST-EV
+      // candidates holding the floored fighter, and on a 6-man slate those all
+      // share the same mid-tier core — measured pushing one $8,000 fighter from
+      // 40% to 82% while fixing a $9,200 anchor. So the floor pass runs under a
+      // ceiling equal to the portfolio's own pre-floor maximum: it may
+      // redistribute toward starved anchors but may never make anyone MORE
+      // concentrated than the greedy already had someone. Self-scaling, never
+      // forces a removal (a player at/over the ceiling keeps his own count),
+      // and hardCaps means the floor stops short rather than breaching it.
+      const preMax = Math.max(1, ...pool.map(p=>cnt[p.id]||0));
+      const floorCapFn = id => {
+        const user = capFn(id);
+        const guard = Math.max(cnt[id]||0, preMax);
+        return user==null ? guard : Math.min(user, guard);
+      };
+      // Carry the user's own Min% pins into the map. They are already satisfied
+      // (enforceMinExposure ran above), so they add no insertions — but they do
+      // populate minTarget, which is what stops this pass from evicting the very
+      // lineup that was holding a pinned fighter at his floor.
+      const floorsPlusUser = Object.assign({}, floors);
+      Object.keys(minOverrides).forEach(id=>{ if(minOverrides[id]>0 && floorsPlusUser[id]==null)
+        floorsPlusUser[id]=minOverrides[id]; });
+      finalLineups = enforceMinExposure(finalLineups, minCands, floorsPlusUser, sfScore, ()=>{}, floorCapFn, {hardCaps:true});
+      const after  = evalSet(finalLineups);
+      const dEv    = after.ev - before.ev;
+      const cnt2={}; finalLineups.forEach(l=>l.forEach(p=>{ cnt2[p.id]=(cnt2[p.id]||0)+1; }));
+      let anyShort=false;
+      const desc = info.map(fi=>{
+        const got = Math.round(100*(cnt2[fi.p.id]||0)/Math.max(1,finalLineups.length));
+        const short = got + 2 < (floors[fi.p.id]||0);
+        if(short) anyShort = true;
+        return `${fi.p.name} ${Math.round(fi.cur)}%→${got}%${short?` of ${floors[fi.p.id]}% target — UNREACHABLE cap-clean`:''} (sim ${fi.m.toFixed(0)}, field own ${fi.own.toFixed(0)}%)`;
+      }).join(', ');
+      log(`Anchor floor (F4): top-${tierN} fighters by sim score floored at ${Math.round(UFC_ANCHOR_F*100)}% of their field ownership — ${desc}. Portfolio EV Δ ${dEv>=0?'+':'−'}$${Math.abs(Math.round(dEv))}/slate. Correctly-priced chalk is a play; duplication still prices everyone else.`);
+      if(anyShort) log(`⚠ Anchor floor (F4): floor(s) above could not be reached without breaching a Max% cap — raise the cap or pin a manual Min%.`);
     }
   }
 
