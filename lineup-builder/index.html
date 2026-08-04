@@ -109,6 +109,12 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 /* GROUP DOTS in pool */
 .grp-dots{display:flex;gap:2px;flex-wrap:wrap;justify-content:center;}
 .grp-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+/* Auto archetype tags read as indicators rather than as user-made groups:
+   a touch smaller and softer, brightening on hover. Same 7px footprint so the
+   name column never reflows when archetypes appear. */
+.grp-dot-auto{width:6px;height:6px;margin:0.5px;opacity:.8;}
+.grp-dots:hover .grp-dot-auto{opacity:1;}
+.grp-dot-more{font-family:'DM Mono',monospace;font-size:8px;color:var(--muted);line-height:7px;flex-shrink:0;cursor:help;}
 
 /* RIGHT PANEL */
 .right-panel{display:flex;flex-direction:column;overflow:hidden;}
@@ -836,6 +842,7 @@ html { overscroll-behavior-y: contain; }
         </div>
       </div>
     </div>
+    <div id="archLegend" style="display:none;flex-shrink:0;"></div>
     <div class="col-headers" id="colHeaders"></div>
     <div id="groupEditBanner" style="display:none;flex-shrink:0;"></div>
     <div class="driver-list" id="driverList"></div>
@@ -1732,6 +1739,41 @@ const PRIORITY_MAP = {
   rating: /^(averaged?|avg|mean|combined|composite|overall|blended|total)[\s_]?.*(rating|rtg)$/i,
 };
 
+// ── ALT-LINE LADDER DISCOVERY (UFC) ──────────────────────────────────────────
+// Books do not post a fixed rung set. The 8/1/2026 card priced significant
+// strikes from 15+ all the way to 140+; the July cards only posted 55+ to 125+.
+// Every import path used to enumerate a HARDCODED 35+…125+ list, so on 8/1 seven
+// priced rungs (15/20/25/30 at the low end, 130/135/140 in the tail) were read
+// off the sheet and thrown away — the low ones are exactly what pins the
+// loser/early-finish side of the CDF.
+//
+// Discover the rungs from the header row instead. Accepts "SS_15plus",
+// "SS 15 plus", "ss15plus"; same for "TD_2plus". Returns numeric-string keys in
+// ascending order, which is the form every downstream reader wants ('ss_'+k).
+// Returns [{k:'15', i:17}, …] ascending — the rung value and the column index it
+// lives in, so readers never have to reconstruct the header string.
+function _ladderCols(headers, pref){
+  const rx = new RegExp('^'+pref+'[\\s_]*(\\d+)\\s*plus$','i');
+  const out = [], seen = new Set();
+  (headers||[]).forEach((h,i)=>{
+    const m = rx.exec(String(h||'').trim());
+    if(m){ const k = String(parseInt(m[1],10)); if(!seen.has(k)){ seen.add(k); out.push({k, i}); } }
+  });
+  return out.sort((a,b)=>(+a.k)-(+b.k));
+}
+function ssLadderCols(headers){ return _ladderCols(headers, 'ss'); }
+function tdLadderCols(headers){ return _ladderCols(headers, 'td'); }
+// Rungs actually stored on a player object, ascending. Used by the CDF builders
+// and by anything that needs "does this fighter have a ladder at all".
+// `p.ss_ou` / `p.td_ou` are excluded by the \d+ anchor.
+function ladderRungs(p, pref){
+  const out = [];
+  if(!p) return out;
+  const rx = new RegExp('^'+pref+'(\\d+)$');
+  for(const k in p){ const m=rx.exec(k); if(m && p[k]!=null && p[k]!=='' && isFinite(p[k])) out.push(parseInt(m[1],10)); }
+  return out.sort((a,b)=>a-b);
+}
+
 // PGA model blend: instead of uploading one pre-averaged "model score", drop the
 // five rolling-window model scores (L8 / L12 / L24 / L36 / L50) as separate columns
 // and the tool builds the weighted average automatically. L24/L36 are the core;
@@ -1865,22 +1907,41 @@ function blSG(p,cat){
   return null;
 }
 
+// ── Membership thresholds ───────────────────────────────────────────────────
+// One named quantile per tier rather than a percentile number inlined in nine
+// places. All are FIELD-RELATIVE and recomputed per slate, and — because pctl()
+// ignores nulls — they are quantiles of the golfers who actually HAVE the stat,
+// not of the whole field. That is what makes a partially-covered slate (the
+// Scottish Open carries SG for 71 of 157) still produce honest tags: the 86
+// golfers with no SG line simply hold no archetype rather than being scored
+// against a threshold computed from someone else's data.
+const ARCH_Q_TOP   = 0.75;  // broad tier — "this is a bomber"
+const ARCH_Q_SPEC  = 0.80;  // single-skill specialist (APP / PUTT)
+const ARCH_Q_ELITE = 0.90;  // "Elite …" — the top of the field on that axis
+const ARCH_Q_MED   = 0.50;  // "at least average" (All-Around's four-way test)
+const _qLbl = q => Math.round(q*100)+'th percentile';
+// `sup` = this tag is a strict superset of another, so the pool-table DOT for
+// it is suppressed when the golfer also holds the narrower one (an Elite Bomber
+// is a Bomber; showing both dots is noise). GROUP membership is unaffected —
+// a "max 2 Bombers" rule must still count the elite ones.
 const ARCHETYPE_DEFS=[
-  {name:'Elite Bomber',color:'#e8421a',desc:'Driving distance ≥ 90th percentile of field',
+  {name:'Elite Bomber',color:'#e8421a',desc:'Driving distance ≥ '+_qLbl(ARCH_Q_ELITE)+' of field',
    test:(p,T)=>p.dist!=null&&T.dist90!=null&&p.dist>=T.dist90},
-  {name:'Bomber',color:'#f97316',desc:'Driving distance ≥ 75th percentile (includes Elite Bombers)',
+  {name:'Bomber',color:'#f97316',desc:'Driving distance ≥ '+_qLbl(ARCH_Q_TOP)+' (includes Elite Bombers)',
+   sup:'Elite Bomber',
    test:(p,T)=>p.dist!=null&&T.dist75!=null&&p.dist>=T.dist75},
-  {name:'Elite Accuracy',color:'#3b82f6',desc:'Driving accuracy ≥ 90th percentile of field',
+  {name:'Elite Accuracy',color:'#3b82f6',desc:'Driving accuracy ≥ '+_qLbl(ARCH_Q_ELITE)+' of field',
    test:(p,T)=>p.acc!=null&&T.acc90!=null&&p.acc>=T.acc90},
-  {name:'Accuracy',color:'#14b8a6',desc:'Driving accuracy ≥ 75th percentile (includes Elite Accuracy)',
+  {name:'Accuracy',color:'#14b8a6',desc:'Driving accuracy ≥ '+_qLbl(ARCH_Q_TOP)+' (includes Elite Accuracy)',
+   sup:'Elite Accuracy',
    test:(p,T)=>p.acc!=null&&T.acc75!=null&&p.acc>=T.acc75},
-  {name:'Iron Specialist',color:'#a855f7',desc:'Blended SG:APP (60% weighted / 40% raw) ≥ 80th percentile',
+  {name:'Iron Specialist',color:'#a855f7',desc:'Blended SG:APP (60% weighted / 40% raw) ≥ '+_qLbl(ARCH_Q_SPEC),
    test:(p,T)=>{const v=blSG(p,'app');return v!=null&&T.app80!=null&&v>=T.app80;}},
-  {name:'Short-Game Specialist',color:'#ec4899',desc:'Blended ARG & PUTT both positive, combined ≥ 75th percentile',
+  {name:'Short-Game Specialist',color:'#ec4899',desc:'Blended ARG & PUTT both positive, combined ≥ '+_qLbl(ARCH_Q_TOP),
    test:(p,T)=>{const a=blSG(p,'arg'),u=blSG(p,'putt');return a!=null&&u!=null&&T.combo75!=null&&a>0&&u>0&&(a+u)>=T.combo75;}},
-  {name:'Elite Ball-Striker',color:'#f5c518',desc:'Blended SG:T2G (60% weighted / 40% raw) ≥ 90th percentile',
+  {name:'Elite Ball-Striker',color:'#f5c518',desc:'Blended SG:T2G (60% weighted / 40% raw) ≥ '+_qLbl(ARCH_Q_ELITE),
    test:(p,T)=>{const v=blSG(p,'t2g');return v!=null&&T.t2g90!=null&&v>=T.t2g90;}},
-  {name:'Elite Putter',color:'#22c55e',desc:'Blended SG:PUTT (60% weighted / 40% raw) ≥ 80th percentile',
+  {name:'Elite Putter',color:'#22c55e',desc:'Blended SG:PUTT (60% weighted / 40% raw) ≥ '+_qLbl(ARCH_Q_SPEC),
    test:(p,T)=>{const v=blSG(p,'putt');return v!=null&&T.putt80!=null&&v>=T.putt80;}},
   {name:'All-Around',color:'#eab308',desc:'All four blended SG categories ≥ field median',
    test:(p,T)=>{const o=blSG(p,'ott'),a=blSG(p,'app'),g=blSG(p,'arg'),u=blSG(p,'putt');
@@ -1892,14 +1953,14 @@ function archetypeData(slate){
   const col=c=>ps.map(p=>p[c]);
   const bcol=c=>ps.map(p=>blSG(p,c));
   const T={
-    dist75:pctl(col('dist'),.75), dist90:pctl(col('dist'),.90),
-    acc75:pctl(col('acc'),.75), acc90:pctl(col('acc'),.90),
-    app80:pctl(bcol('app'),.80),
-    combo75:pctl(ps.map(p=>{const a=blSG(p,'arg'),u=blSG(p,'putt');return a!=null&&u!=null?a+u:null;}),.75),
-    t2g90:pctl(bcol('t2g'),.90),
-    putt80:pctl(bcol('putt'),.80),
-    medOtt:pctl(bcol('ott'),.50), medApp:pctl(bcol('app'),.50),
-    medArg:pctl(bcol('arg'),.50), medPutt:pctl(bcol('putt'),.50),
+    dist75:pctl(col('dist'),ARCH_Q_TOP), dist90:pctl(col('dist'),ARCH_Q_ELITE),
+    acc75:pctl(col('acc'),ARCH_Q_TOP), acc90:pctl(col('acc'),ARCH_Q_ELITE),
+    app80:pctl(bcol('app'),ARCH_Q_SPEC),
+    combo75:pctl(ps.map(p=>{const a=blSG(p,'arg'),u=blSG(p,'putt');return a!=null&&u!=null?a+u:null;}),ARCH_Q_TOP),
+    t2g90:pctl(bcol('t2g'),ARCH_Q_ELITE),
+    putt80:pctl(bcol('putt'),ARCH_Q_SPEC),
+    medOtt:pctl(bcol('ott'),ARCH_Q_MED), medApp:pctl(bcol('app'),ARCH_Q_MED),
+    medArg:pctl(bcol('arg'),ARCH_Q_MED), medPutt:pctl(bcol('putt'),ARCH_Q_MED),
   };
   const out=ARCHETYPE_DEFS.map(d=>({name:d.name,color:d.color,desc:d.desc,
     playerIds:ps.filter(p=>{try{return d.test(p,T);}catch(e){return false;}}).map(p=>p.id)}))
@@ -1912,8 +1973,83 @@ function archetypeData(slate){
   return Object.entries(map).map(([name,ids],i)=>{
     const def=ARCHETYPE_DEFS.find(d=>d.name===name);
     return {name,color:def?def.color:GROUP_COLORS[i%GROUP_COLORS.length],
-      desc:def?def.desc:'From imported Archetypes column',playerIds:ids};
+      desc:def?def.desc:'From imported Archetypes column',sup:def?def.sup:null,playerIds:ids};
   });
+}
+
+// ═══════════════════════════════════════════════════════════
+// AUTO ARCHETYPE GROUPS
+// ═══════════════════════════════════════════════════════════
+// The archetype machinery already existed (ARCHETYPE_DEFS / archetypeData and
+// the "Archetype Groups" checkbox panel), but it was strictly OPT-IN: the tags
+// only became groups — and therefore only became pool dots, since renderPool
+// draws one dot per group a player belongs to — after the user opened the panel
+// and ticked boxes. This makes them appear by themselves on every PGA slate the
+// data supports, as PASSIVE indicators: ruleMin and ruleMax are 0, so the
+// generator (which as of this change genuinely enforces group rules) is not
+// steered at all until the user dials a rule in.
+//
+// Auto-groups are identified by an `autoArch` field holding the archetype name,
+// never by their display name — the user is free to rename them.
+const AUTO_ARCH_PREFIX='Auto: ';
+// Most archetype dots a single pool row will draw before collapsing the rest
+// into "+N". Measured on the July/Rocket slates: after the superset dedupe the
+// worst case is 6 (Schauffele, McIlroy, Knapp), which wraps the name cell.
+const ARCH_MAX_ROW_DOTS=4;
+function syncAutoArchetypeGroups(slate){
+  if(!slate) return;
+  // PGA only. Structured so another sport can supply its own definitions later:
+  // everything below consumes archetypeData()'s {name,color,desc,playerIds}
+  // shape and knows nothing about golf.
+  if(slate.sport!=='pga'){
+    // A slate that changed sport (or a non-PGA slate that somehow carries them)
+    // should not keep stale golf tags around.
+    if((slate.groups||[]).some(g=>g.autoArch)) slate.groups=slate.groups.filter(g=>!g.autoArch);
+    return;
+  }
+  slate.groups=slate.groups||[];
+  const archs=archetypeData(slate);
+  // Deleting an auto-group is a real choice, not a glitch to be undone on the
+  // next render — remember it for this slate so it stays gone.
+  const dead=new Set(slate._autoArchDeleted||[]);
+  const have=new Map();
+  slate.groups.forEach(g=>{ if(g.autoArch) have.set(g.autoArch,g); });
+  // Names already used by USER groups (including ones made by the old opt-in
+  // panel, which wrote the bare archetype name) — never shadow those.
+  const taken=new Set(slate.groups.filter(g=>!g.autoArch).map(g=>String(g.name||'').trim()));
+  archs.forEach(a=>{
+    if(dead.has(a.name)) return;
+    const ex=have.get(a.name);
+    if(ex){                            // refresh membership; keep name/color/rules
+      ex.playerIds=a.playerIds.slice();
+      ex.archDesc=a.desc;
+      return;
+    }
+    if(taken.has(a.name)||taken.has(AUTO_ARCH_PREFIX+a.name)) return;
+    slate.groups.push({id:uid(),name:AUTO_ARCH_PREFIX+a.name,color:a.color,
+      ruleMin:0,ruleMax:0,correlation:0,ufcNoOppose:false,
+      playerIds:a.playerIds.slice(),condGroups:[],
+      autoArch:a.name, archDesc:a.desc});
+  });
+  // Drop auto-groups the current slate's columns no longer support (e.g. the
+  // pool was updated with a CSV that has no SG columns).
+  const live=new Set(archs.map(a=>a.name));
+  for(let i=slate.groups.length-1;i>=0;i--){
+    const g=slate.groups[i];
+    if(g.autoArch && !live.has(g.autoArch)){
+      const gid=g.id; slate.groups.splice(i,1);
+      slate.groups.forEach(x=>{ x.condGroups=(x.condGroups||[]).filter(c=>c.targetGid!==gid); });
+    }
+  }
+}
+
+// Auto-archetype groups on this slate, in ARCHETYPE_DEFS order (so the legend
+// and the row dots always agree on ordering).
+function autoArchGroups(slate){
+  if(!slate||slate.sport!=='pga') return [];
+  const gs=(slate.groups||[]).filter(g=>g.autoArch);
+  const ord={}; ARCHETYPE_DEFS.forEach((d,i)=>ord[d.name]=i);
+  return gs.sort((a,b)=>(ord[a.autoArch]??99)-(ord[b.autoArch]??99));
 }
 
 function toggleArchetypePanel(){
@@ -1952,15 +2088,21 @@ function createArchetypeGroups(){
   if(!checked.length){showToast('Select at least one archetype','err');return;}
   const archs=archetypeData(slate).filter(a=>checked.includes(a.name));
   // Replace any existing groups with the same names (fresh data wins), and
-  // clean up conditionals that pointed at the removed group ids.
-  const removedIds=(slate.groups||[]).filter(g=>checked.includes(g.name)).map(g=>g.id);
-  slate.groups=(slate.groups||[]).filter(g=>!checked.includes(g.name));
+  // clean up conditionals that pointed at the removed group ids. The AUTO
+  // group for the same archetype is removed too and marked dismissed, so the
+  // explicit choice "own this as a normal group" wins and syncAutoArchetype-
+  // Groups does not recreate a duplicate on the next render.
+  slate._autoArchDeleted=slate._autoArchDeleted||[];
+  checked.forEach(n=>{ if(!slate._autoArchDeleted.includes(n)) slate._autoArchDeleted.push(n); });
+  const _drop=g=>checked.includes(g.name)||(g.autoArch&&checked.includes(g.autoArch));
+  const removedIds=(slate.groups||[]).filter(_drop).map(g=>g.id);
+  slate.groups=(slate.groups||[]).filter(g=>!_drop(g));
   slate.groups.forEach(g=>{g.condGroups=(g.condGroups||[]).filter(c=>!removedIds.includes(c.targetGid));});
   archs.forEach(a=>{slate.groups.push({id:uid(),name:a.name,color:a.color,ruleMin:0,ruleMax:0,correlation:0,ufcNoOppose:false,playerIds:a.playerIds.slice(),condGroups:[]});});
   save();
   const el=document.getElementById('archetypePanel'); if(el) el.remove();
   showToast(`✓ Created ${archs.length} archetype group${archs.length>1?'s':''}`,'ok');
-  renderGroups();renderGroupRulesSummary();
+  renderGroups();renderGroupRulesSummary();renderArchetypeLegend();renderPool();
 }
 
 let slates = [];
@@ -2397,6 +2539,60 @@ function getPlayerGroups(slate, playerId) {
   return (slate.groups||[]).filter(g=>(g.playerIds||[]).includes(playerId));
 }
 
+// One pass over every group's member list instead of one Array.includes scan
+// per (player × group). renderPool runs on every keystroke in the search box,
+// and auto archetype groups took a PGA slate from 0 groups to ~9 with ~30
+// members each — the old per-row getPlayerGroups was O(players × groups ×
+// members) (≈ 150×9×30 = 40k string compares a render); this is O(memberships).
+function buildGroupIndex(slate){
+  const idx=new Map();
+  (slate.groups||[]).forEach(g=>{
+    (g.playerIds||[]).forEach(id=>{
+      const a=idx.get(id); if(a) a.push(g); else idx.set(id,[g]);
+    });
+  });
+  return idx;
+}
+
+// Which groups get a dot for this player. Auto archetype tags that are strict
+// supersets of a narrower tag the player ALSO holds are suppressed, so an Elite
+// Bomber shows one red dot rather than red + orange. User groups are never
+// filtered — the dot is the only place their membership is visible per-row.
+function dotGroupsFor(groups){
+  if(!groups||groups.length<2) return groups||[];
+  const held=new Set();
+  groups.forEach(g=>{ if(g.autoArch) held.add(g.autoArch); });
+  if(!held.size) return groups;
+  const supOf={};
+  ARCHETYPE_DEFS.forEach(d=>{ if(d.sup) supOf[d.name]=d.sup; });
+  return groups.filter(g=>!(g.autoArch && supOf[g.autoArch] && held.has(supOf[g.autoArch])));
+}
+
+// Legend above the pool table. Doubles as the discoverability surface for the
+// feature — without it a new colour in a row is just an unexplained dot.
+function renderArchetypeLegend(){
+  const el=document.getElementById('archLegend'); if(!el) return;
+  const slate=activeSlate();
+  const gs=slate?autoArchGroups(slate):[];
+  if(!gs.length){ el.style.display='none'; el.innerHTML=''; return; }
+  const dismissed=(slate._autoArchDeleted||[]).length;
+  el.style.display='block';
+  el.innerHTML=`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:5px 10px;border-bottom:1px solid var(--border);background:var(--surface2);">
+    <span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;flex:none;"
+      title="Auto-tagged from this slate's own stat columns, as field-relative percentiles. No rules are applied — set Use between … in the Groups panel to make one bind.">Archetypes</span>
+    ${gs.map(g=>{
+      const n=(g.playerIds||[]).length;
+      const rule=(g.ruleMin||0)||(g.ruleMax||0)
+        ? ` · rule ${g.ruleMin||0}–${g.ruleMax||'∞'}` : '';
+      return `<span title="${esc(g.archDesc||'')}${rule?' — RULE ACTIVE':''}" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--muted);font-family:'DM Sans',sans-serif;white-space:nowrap;">
+        <span style="width:7px;height:7px;border-radius:50%;background:${g.color};flex:none;"></span>${esc(String(g.autoArch))}
+        <span style="font-family:'DM Mono',monospace;opacity:.6;">${n}</span>${rule?`<span style="color:var(--accent);font-family:'DM Mono',monospace;">${rule.replace(' · ','')}</span>`:''}</span>`;
+    }).join('')}
+    ${dismissed?`<button onclick="restoreAutoArchetypes()" title="Re-add the archetype groups you deleted on this slate" style="background:none;border:none;color:var(--muted);font-size:10px;cursor:pointer;text-decoration:underline;padding:0;">restore ${dismissed} hidden</button>`:''}
+  </div>`;
+}
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
 // ═══════════════════════════════════════════════════════════
 // TOP BAR
 // ═══════════════════════════════════════════════════════════
@@ -2442,6 +2638,13 @@ function deleteSlate(id){
 // ═══════════════════════════════════════════════════════════
 function renderSlate(){
   const slate=activeSlate();if(!slate)return;
+  // Every path that changes the pool — createSlate, applyPoolUpdate,
+  // refreshFromSheet, switchSlate — ends in renderSlate, so this one hook keeps
+  // the auto archetype groups in step with the data without duplicating them
+  // (membership is keyed on g.autoArch, not on array position). renderGroups()
+  // below already calls archetypeData() unconditionally on PGA slates, so the
+  // percentile pass here is not new work.
+  syncAutoArchetypeGroups(slate);
   const cfg=SPORT_CFG[slate.sport]||SPORT_CFG.nascar;
   document.getElementById('poolTitle').textContent=cfg.label+' Pool';
   const fields=slateFields(slate);
@@ -2466,6 +2669,7 @@ function renderSlate(){
     const fb=document.getElementById('savedFilterBtn');
     if(fb){ fb._on=false; fb.style.borderColor='var(--border)'; fb.style.color='var(--muted)'; }
     _savedEntriesCache=[]; _savedAvailCache=new Set(); }
+  renderArchetypeLegend();
   renderPool(); renderLineup(); renderSaved(); renderExposure(); renderGroups(); renderGroupRulesSummary(); refreshSimInputsTab();
 
   // Restore persisted NASCAR track type and laps after render
@@ -2749,6 +2953,8 @@ function renderPool(){
     const c = {..._nflCur}; c[pos]++;
     return !nflFeasible(c);
   };
+  // Group membership, indexed once for the whole render (see buildGroupIndex).
+  const _grpIdx = buildGroupIndex(slate);
   list.innerHTML=players.map((p,i)=>{
     const isSelected=current.includes(p.id),isHidden=hidden.includes(p.id);
     const isFull=!isSelected&&(isNfl(slate)
@@ -2757,8 +2963,20 @@ function renderPool(){
     const cantAfford=!isSelected&&p.salary>rem;
     const dimmed=(isFull||cantAfford)&&!isSelected&&!isHidden;
     const exp=ec[p.id]||0;
-    const grps=getPlayerGroups(slate,p.id);
-    const dots=grps.map(g=>`<div class="grp-dot" style="background:${g.color}" title="${g.name}"></div>`).join('');
+    // Dots: user groups first (their membership has no other per-row surface),
+    // then archetype tags. Capped at ARCH_MAX_ROW_DOTS auto dots so a golfer who
+    // qualifies for six of them cannot wrap the name cell onto a second line and
+    // change the row height — the overflow collapses into a "+N" whose tooltip
+    // names the rest. Archetype dots carry their definition in the tooltip
+    // ("Elite Putter — Blended SG:PUTT ≥ 80th percentile").
+    const grps=dotGroupsFor(_grpIdx.get(p.id));
+    const _tip=g=>g.autoArch?`${g.autoArch}${g.archDesc?' — '+g.archDesc:''}`:g.name;
+    const _user=grps.filter(g=>!g.autoArch), _auto=grps.filter(g=>g.autoArch);
+    const _show=_auto.slice(0,ARCH_MAX_ROW_DOTS), _rest=_auto.slice(ARCH_MAX_ROW_DOTS);
+    const dots=_user.concat(_show).map(g=>
+      `<div class="grp-dot${g.autoArch?' grp-dot-auto':''}" style="background:${g.color}" title="${esc(_tip(g))}"></div>`
+    ).join('')
+      +(_rest.length?`<span class="grp-dot-more" title="${esc(_rest.map(_tip).join('\n'))}">+${_rest.length}</span>`:'');
     const extraCells=fields.map(f=>{
       let v=p[f.key];if(v==null||v==='')v='—';
        if(f.key==='proj' && slate.columnMapping?.proj!=null){
@@ -3467,18 +3685,34 @@ function addGroup(){
 
 function deleteGroup(gid){
   const slate=activeSlate();if(!slate)return;
+  // An auto archetype group the user deletes must STAY deleted — otherwise the
+  // next renderSlate (slate switch, pool update, sheet refresh) puts it back.
+  const g0=(slate.groups||[]).find(g=>g.id===gid);
+  if(g0&&g0.autoArch){
+    slate._autoArchDeleted=slate._autoArchDeleted||[];
+    if(!slate._autoArchDeleted.includes(g0.autoArch)) slate._autoArchDeleted.push(g0.autoArch);
+  }
   slate.groups=(slate.groups||[]).filter(g=>g.id!==gid);
   (slate.groups||[]).forEach(g=>{g.condGroups=(g.condGroups||[]).filter(c=>c.targetGid!==gid);});
-  save();renderGroups();renderGroupRulesSummary();
+  save();renderGroups();renderGroupRulesSummary();renderArchetypeLegend();
+}
+
+// Bring back every auto archetype group the user has dismissed on this slate.
+function restoreAutoArchetypes(){
+  const slate=activeSlate();if(!slate)return;
+  slate._autoArchDeleted=[];
+  syncAutoArchetypeGroups(slate);
+  save();renderGroups();renderGroupRulesSummary();renderArchetypeLegend();renderPool();
 }
 
 function updateGroup(gid,field,value){
   const slate=activeSlate();if(!slate)return;
   const g=(slate.groups||[]).find(g=>g.id===gid);if(!g)return;
   g[field]=value;save();
-  if(field==='color') renderGroups();
+  if(field==='color'){ renderGroups(); renderArchetypeLegend(); renderPool(); }
   if(field==='name') renderGroupRulesSummary();
   if(field==='ruleMin'||field==='ruleMax'||field==='correlation') renderGroupRulesSummary();
+  if(field==='ruleMin'||field==='ruleMax') renderArchetypeLegend();
 }
 
 function onCorrSlide(gid, val){
@@ -3589,6 +3823,7 @@ function renderGroups(){
       <div class="group-header">
         <div class="group-color-swatch" style="background:${g.color}" onclick="pickColor('${g.id}',this)" title="Click to change color"></div>
         <input class="group-name-input" value="${g.name}" data-gid="${g.id}" placeholder="Group name" oninput="updateGroup('${g.id}','name',this.value)" onchange="updateGroup('${g.id}','name',this.value)">
+        ${g.autoArch?`<span title="Auto-tagged from this slate's stat columns — ${esc(g.archDesc||'')}. Membership refreshes with the pool; no rule is applied until you set one below." style="font-family:'DM Mono',monospace;font-size:8px;letter-spacing:.5px;color:var(--purple,#a855f7);border:1px solid rgba(168,85,247,.4);border-radius:3px;padding:1px 4px;flex:none;">AUTO</span>`:''}
         <button class="group-del-btn" onclick="deleteGroup('${g.id}')">Delete</button>
       </div>
       <div class="group-rules">
@@ -3968,10 +4203,24 @@ function renderGroupRulesSummary(){
 
   const el=document.getElementById('groupRulesSummary');
   if(!groups.length){el.textContent='No groups defined yet.';return;}
-  // Honesty note: the PGA sim engine builds from per-sim optimal lineups and
-  // never applies group min/max rules — say so instead of implying they bind.
-  const _pgaSimNote = pgaSimOn
-    ? '<div style="font-size:10px;color:var(--muted);font-style:italic;margin-bottom:6px;">Simulate mode: group rules are not applied — the sim builds from per-sim optimal lineups. Switch to Optimize to enforce them.</div>'
+  // Honesty note: a sim path that builds from per-sim optimal lineups and never
+  // applies group min/max rules must SAY so instead of implying they bind.
+  // The note fired for PGA (both sim modes) and NASCAR Contest-EV until those
+  // paths were fixed on 2026-08-03; it now fires for NFL Simulate only —
+  // runNflSimGen still never reads slate.groups.
+  // RE-MEASURED 2026-08-03 after the NASCAR Contest-EV fix, binding
+  // max-1-of-top-6-salary and min-3-of-a-10-driver-mid-tier rules, 50 lineups
+  // per run, $49,000 floor:
+  //   UFC Simulate (EV off / EV on) ......... 0/50, 0/50 — rules bind
+  //   NASCAR Simulate, EV off ............... 0/50 — rules bind (always did)
+  //   NASCAR Simulate, EV on ................ 0/50 on all 8 July slates
+  //                                           (was 27/50 and 29/50 before)
+  //   PGA Simulate (EV off / EV on) ......... 0/50, 0/50 — rules bind
+  const _noGroupsHere = (slate.sport==='nfl' && _genMode==='simulate');
+  const _pgaSimNote = _noGroupsHere
+    ? '<div style="font-size:10px;color:var(--muted);font-style:italic;margin-bottom:6px;">'
+      + 'Simulate mode: group rules are not applied — the sim builds from per-sim optimal lineups. Switch to Optimize to enforce them.'
+      + '</div>'
     : '';
   el.innerHTML=_pgaSimNote+groups.map(g=>{
     const lines=[];
@@ -4141,6 +4390,17 @@ function levShape(ratio, strength){
 // would quietly re-chalk deliberately contrarian builds and fight the leverage
 // slider). items: [{...metric fields}], axes: [{key, dir:'high'|'low', weight,
 // label}]. Axes whose metric is missing across the pool are skipped.
+// Percentile threshold for an axis with minBadPct set: the value at that
+// quantile of the candidates' own distribution, on the BAD side of the axis.
+// dir:'high' → cull only above the minBadPct quantile; dir:'low' → only below
+// the (1 - minBadPct) quantile. Computed once per cull, from `items` (the full
+// candidate set) so the bar doesn't drift as the pool shrinks.
+function _pctThreshold(items, ax){
+  const v = items.map(it => it[ax.key] || 0).sort((a,b) => a-b);
+  if(!v.length) return null;
+  const q = ax.dir === 'high' ? ax.minBadPct : (1 - ax.minBadPct);
+  return v[Math.min(v.length - 1, Math.max(0, Math.floor(v.length * q)))];
+}
 function gauntletCull(items, targetCount, axes, logFn, label){
   if(items.length <= targetCount) return items;
   const usable = axes.filter(ax => items.some(it => it[ax.key] != null && isFinite(it[ax.key])));
@@ -4148,6 +4408,26 @@ function gauntletCull(items, targetCount, axes, logFn, label){
   const alive = new Set(items);
   const dropped = {};
   usable.forEach(ax => dropped[ax.key] = 0);
+  // Per-axis "genuinely bad" threshold, resolved ONCE (it is a property of the
+  // candidate set, not of the current pass — and _pctThreshold sorts, so
+  // recomputing it inside the loop would be O(passes · n log n)).
+  //
+  // An axis only culls entries that are GENUINELY bad on it. Needed for sparse
+  // metrics like unjustified ownership where most lineups score ~0 — without
+  // the floor, the axis rank-orders on mostly-zeros and spends every cycle
+  // deleting the same few nonzero lineups (one modestly-chalky driver ≠ junk;
+  // a stack of them = junk).
+  //
+  // minBadPct is the same idea expressed as a PERCENTILE of the actual
+  // candidate distribution instead of an absolute number. Measured 2026-08-03
+  // on five UFC cards: the absolute `minBad:35` on the UFC ownership axis was
+  // unreachable — max gOwn across ~3,600 candidates was 24-48, so that axis
+  // culled 0 lineups on 4 of 5 cards and 47 on the fifth. A weight-3 axis that
+  // never fires silently turns a 3-axis gauntlet into a 2-axis one. An absolute
+  // threshold cannot survive a change of pool size, roster size or ownership
+  // scale; a percentile can.
+  const thresh = {};
+  usable.forEach(ax => { thresh[ax.key] = ax.minBadPct != null ? _pctThreshold(items, ax) : ax.minBad; });
   let guard = 0;
   while(alive.size > targetCount && guard++ < 10000){
     let progressed = false;
@@ -4158,13 +4438,9 @@ function gauntletCull(items, targetCount, axes, logFn, label){
       let arr = [...alive].sort((a,b) => ax.dir === 'high'
         ? ((b[ax.key]||0) - (a[ax.key]||0))
         : ((a[ax.key]||0) - (b[ax.key]||0)));
-      // Optional threshold: an axis only culls entries that are GENUINELY bad
-      // on it. Needed for sparse metrics like unjustified ownership where most
-      // lineups score ~0 — without the floor, the axis rank-orders on
-      // mostly-zeros and spends every cycle deleting the same few nonzero
-      // lineups (one modestly-chalky driver ≠ junk; a stack of them = junk).
-      if(ax.minBad != null){
-        arr = arr.filter(it => ax.dir === 'high' ? (it[ax.key]||0) > ax.minBad : (it[ax.key]||0) < ax.minBad);
+      const _thr = thresh[ax.key];
+      if(_thr != null){
+        arr = arr.filter(it => ax.dir === 'high' ? (it[ax.key]||0) > _thr : (it[ax.key]||0) < _thr);
       }
       for(let i = 0; i < k && i < arr.length; i++){ alive.delete(arr[i]); dropped[ax.key]++; progressed = true; }
     }
@@ -4477,6 +4753,7 @@ function stepRule(gid, field, delta){
   if(el) el.textContent=next;
   save();
   renderGroupRulesSummary();
+  renderArchetypeLegend();   // the legend flags which archetypes now BIND
 }
 
 // Current gen mode: 'optimize' or 'simulate'
@@ -4732,25 +5009,18 @@ function calibrateLadder(pts, ouStr){
 }
 
 function extractSSCDF(p){
-  let pts = [
-    {threshold:35,ml:p.ss_35},{threshold:40,ml:p.ss_40},{threshold:45,ml:p.ss_45},
-    {threshold:50,ml:p.ss_50},{threshold:55,ml:p.ss_55},{threshold:60,ml:p.ss_60},
-    {threshold:65,ml:p.ss_65},{threshold:70,ml:p.ss_70},{threshold:75,ml:p.ss_75},
-    {threshold:80,ml:p.ss_80},{threshold:85,ml:p.ss_85},{threshold:90,ml:p.ss_90},
-    {threshold:95,ml:p.ss_95},{threshold:100,ml:p.ss_100},{threshold:105,ml:p.ss_105},
-    {threshold:110,ml:p.ss_110},{threshold:115,ml:p.ss_115},{threshold:120,ml:p.ss_120},
-    {threshold:125,ml:p.ss_125},
-  ].filter(pt=>pt.ml!=null).map(pt=>({threshold:pt.threshold, prob:mlToProb(pt.ml)}));
+  // Rungs are DISCOVERED off the player object (ladderRungs), not enumerated —
+  // the priced set varies card to card (15+…140+ on 8/1, 55+…125+ in July).
+  let pts = ladderRungs(p,'ss_').map(t=>({threshold:t, ml:p['ss_'+t]}))
+    .filter(pt=>pt.ml!=null).map(pt=>({threshold:pt.threshold, prob:mlToProb(pt.ml)}));
   pts = calibrateLadder(pts, p.ss_ou);
   const ouLine = p.ss_ou ? parseFloat(p.ss_ou) : null;
   return buildCDF(pts, ouLine);
 }
 
 function extractTDCDF(p){
-  let pts = [
-    {threshold:1,ml:p.td_1},{threshold:2,ml:p.td_2},{threshold:3,ml:p.td_3},
-    {threshold:4,ml:p.td_4},{threshold:5,ml:p.td_5},{threshold:6,ml:p.td_6},
-  ].filter(pt=>pt.ml!=null).map(pt=>({threshold:pt.threshold, prob:mlToProb(pt.ml)}));
+  let pts = ladderRungs(p,'td_').map(t=>({threshold:t, ml:p['td_'+t]}))
+    .filter(pt=>pt.ml!=null).map(pt=>({threshold:pt.threshold, prob:mlToProb(pt.ml)}));
   pts = calibrateLadder(pts, p.td_ou);
   const ouLine = p.td_ou ? parseFloat(p.td_ou) : null;
   return buildCDF(pts, ouLine, true);   // integer counts
@@ -5657,7 +5927,7 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     // below-rung draw anchor). Their absence silently degrades every volume
     // draw to flat-haircut ladders and league-pace priors — say so before the
     // user builds on it. Books usually post totals fight day: re-pull.
-    const noSsLadder = fullPool.filter(p=>![35,40,45,50,55,60,65,70,75,80,85,90,95,100,105,110,115,120,125].some(t=>p['ss_'+t]!=null));
+    const noSsLadder = fullPool.filter(p=>ladderRungs(p,'ss_').length===0);
     const noOu = fullPool.filter(p=>!p.ss_ou);
     if(noOu.length === fullPool.length){
       log(`⚠ NO SS O/U lines on this slate — volume ladders get a flat vig haircut instead of O/U-anchored calibration, and pace ceilings are off. Re-pull odds closer to lock (books post totals fight day).`);
@@ -5798,6 +6068,45 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   const distById = {};
   const compositeScoreById = {};
 
+  // ── HOW MUCH IS THIS SCORER ALLOWED TO BE WORTH? (measured 2026-08-03) ────
+  // Read this before rebuilding the composite. Four sessions have now tried to
+  // beat the moneyline here; the reason none succeeded is that there is almost
+  // nothing to win, and the 130-observation audit set cannot see what little
+  // there is. Measured, not argued (simlab/pipe/{power,power2,volume,loco2,
+  // calib2,contestsim}.js — all re-runnable):
+  //
+  //  * Forward-simulating the market as if its prices were TRUE, a PERFECT
+  //    scorer gets mean per-card ρ 0.399 vs realised DK. De-vigged win
+  //    probability alone gets 0.380. TOTAL HEADROOM = 0.019 (sd 0.025).
+  //    Nothing built here can be worth more than about two ρ points.
+  //  * On the real 130 obs nothing beats winProb. Paired per-card, vs winProb:
+  //    shipped composite -0.013 (t=-0.33), four-branch prototype -0.007
+  //    (t=-0.47), SALARY -0.021 (t=-0.55). Even raw salary ties the moneyline.
+  //    ρ-vs-realised-DK CANNOT rank two sane scorers on this sample — stop
+  //    using it as a decision rule.
+  //  * Every candidate feature's incremental information over the moneyline has
+  //    a bootstrap CI covering zero (best: appearRate ρ 0.073). The sample IS
+  //    powered to catch a large edge (a hidden per-fighter within-branch signal
+  //    of σ=0.5 would show as headroom 0.215 vs sd 0.081) and finds none.
+  //  * The user's "high-volume striker" model is not supported: within outcome
+  //    branch, ρ(SS O/U, DK z-score) = 0.073, card-cluster 95% CI [-0.017,
+  //    0.152]. Among WINNERS it is NEGATIVE (-0.133) — finishing early beats
+  //    accumulating. 22 of the 26 biggest realised DK scores were finish wins;
+  //    the decision-win ceilings came from TAKEDOWN volume (17 TDs = 140 pts)
+  //    and 5-round fights, not from strike volume. The finish leg of the user's
+  //    model is right, the volume leg is not (in 130 observations).
+  //  * This sim's own predictive distribution is WELL CALIBRATED: PIT over the
+  //    130 realised scores gives chi2 5.1 on 9 df (crit 16.9), mean PIT 0.494,
+  //    P(above its own p90) = 9.2% vs 10% wanted. Whatever is wrong with the
+  //    composite, the underlying score distribution is not it.
+  //
+  // Consequence: prefer changes that make this scorer a CLEANER read of the
+  // market (calibration, coverage, not corrupting inputs) over changes that try
+  // to add information to it. And do not accept a scorer comparison run against
+  // a generator that is one of the two scorers' own model — that test is a
+  // mirror and will always crown whichever side supplied the generator
+  // (contestsim.js demonstrates this explicitly, both directions).
+  //
   // ── Finish-equity tilt ────────────────────────────────────────────────────
   // Percentiles of the score distribution cannot see finish equity, only win
   // equity: p80 sits inside a fighter's *win* outcomes, so anyone finishing
@@ -6947,6 +7256,17 @@ async function runUFCContestEV(ctx){
     // the generator was told to split. Honor the same rule + per-fight
     // exclusion toggles the generator used.
     const _repNoOpp = slate.sport==='ufc' && (document.getElementById('genUfcNoOppose')?.checked||false);
+    // Group rules, same "an upgrade may not break a user constraint" principle
+    // the NFL stack guard below already applies. MEASURED 2026-08-03: with a
+    // max-2-of-the-top-8-salaries group set, UFC Contest-EV emitted 4/50 and
+    // 1/50 lineups violating it while the non-EV path emitted 0/50 — the
+    // candidates arrive group-legal from pickOptimalLineup and repair broke
+    // them. The guard is MONOTONE: it only refuses a swap that would turn a
+    // COMPLIANT lineup non-compliant, so a pool that was already illegal (e.g.
+    // NASCAR Contest-EV, which never filters on groups) is not frozen by it.
+    const _repGroups = (slate.groups||[]).filter(g =>
+      (g.ruleMin||0)>0 || (g.ruleMax||0)>0 || g.ufcNoOppose ||
+      (g.condGroups||[]).some(c=>c.type==='hard'));
     const _repFightExcl = p => { const f=p.fightNum||parseInt(p.start)||0; return f>0 && ufcExcludedFights.has(f); };
     const _repOpposes = (p,q) => !_repFightExcl(p) && !_repFightExcl(q) && ufcSameFight(p,q);
     // POSITIONAL GUARD (NFL). Repair swaps in the best-mean affordable player
@@ -6983,6 +7303,7 @@ async function runUFCContestEV(ctx){
         const used=idxs.reduce((s,i)=>s+salIdx[i],0);
         const leftover=capSal-used;
         const curC=_repPosMode?_repCounts(idxs):null;
+        const _grpWasOk = _repGroups.length ? checkGroupRules(idxs.map(i=>pool[i]), _repGroups) : false;
         // find the slot with the largest available upgrade gain
         let bestGain=MARGIN, bestSlot=-1, bestUp=-1;
         for(const pI of idxs){
@@ -7006,6 +7327,7 @@ async function runUFCContestEV(ctx){
                 if(!nflStackOk(after,_repRules)) continue;
               }
             }
+            if(_grpWasOk && !checkGroupRules(idxs.map(i=>i===pI?pool[q]:pool[i]), _repGroups)) continue;
             if(!beatsEnough(q,pI)) continue; // mean gap alone ≠ dominance — must beat him sim by sim
             bestGain=meanIdx[q]-meanIdx[pI]; bestSlot=pI; bestUp=q; break;
           }
@@ -8269,27 +8591,176 @@ async function runPgaSims(pool, numSims, log){
 // budget — 150+ golfer pools can explode worst-case, so the search falls back
 // to best-found when the budget is hit; in practice the exact optimal is found
 // almost immediately because sim scores are top-heavy).
-function pgaOptimalForSim(pool, scores, salArr, cheapPre, maxSal){
+// minSal added 2026-08-03. It was the ONLY per-sim optimizer in the app that
+// ignored the Min Salary control — UFC (pickOptimalLineup), NASCAR (bucket
+// generation) and NFL (nflOptimalForSim) all enforce it at generation. MEASURED
+// on all four July PGA slates at a $49,000 floor, 50 lineups each: Sim Score
+// mode emitted 13/50, 17/50, 16/50 and 27/50 lineups BELOW the floor (lowest
+// $46,700). Contest-EV mode hid the same defect because its salary-jam
+// augmentation and dominance repair pull candidates back up to the floor.
+//
+// Enforced at the leaf, with a best-any fallback so a floor that no lineup can
+// reach degrades to the old behaviour instead of returning null and starving
+// the candidate pool. With minSal = 0 the search is byte-identical to before:
+// bestScore is then updated on exactly the same nodes as the old `best`.
+//
+// GROUP RULES added 2026-08-03 (gp = pgaGroupPrep(...) or null). Before this,
+// PGA generation ignored slate.groups ENTIRELY in both modes — runPgaSimGen
+// never read them and this function had no groups parameter, so every rule the
+// user set in the Groups panel was decorative. MEASURED on the Rocket Classic
+// board, 1,500 sims, target 50, $49,000 floor: a max-1-of-the-top-8-salaries
+// rule was violated by 32/50 lineups in Sim Score mode and 37/50 in Contest-EV;
+// a min-3-from-a-30-golfer-mid-tier rule by 47/50 and 49/50. Reproduces in the
+// pre-session builds, so it is long-standing rather than a regression.
+//
+// Enforcing at the LEAF alone would be far too slow here (unlike UFC's 12k-node
+// budget this search runs 1,000+ times per generation), so max is enforced as
+// the pick is made and min via a suffix-count feasibility prune: a partial pick
+// that can no longer reach a ruleMin is abandoned instead of completed and
+// rejected. Both bestPick and the below-floor anyPick fallback are therefore
+// group-legal by construction — the fallback can relax the SALARY floor, never
+// a group rule. With gp = null every branch below is skipped and the search is
+// byte-identical to the pre-group version.
+//
+// `cap` (added 2026-08-03) overrides the per-sim node budget. Only the
+// once-per-generation feasibility probe passes it: that probe's answer is used
+// as the provable salary CEILING the rules allow, and a budget-truncated search
+// would report a ceiling that is merely the best it happened to reach before
+// giving up — sliding the user's salary window onto a wrong number. Omitted
+// everywhere else, so every per-sim call keeps the original 250k budget and the
+// group-free path is byte-identical.
+function pgaOptimalForSim(pool, scores, salArr, cheapPre, maxSal, minSal, gp, cap){
   const nP=pool.length;
+  const floor=minSal||0;
+  const NCAP=cap||250000;
   const order=[...Array(nP).keys()].sort((a,b)=>scores[b]-scores[a]);
   const sc=order.map(i=>scores[i]), sl=order.map(i=>salArr[i]);
   const preS=new Float64Array(nP+1);
   for(let i=0;i<nP;i++) preS[i+1]=preS[i]+sc[i];
-  let bestScore=-Infinity, bestPick=null, nodes=0;
-  const pick=new Array(6);
-  const dfs=(idx,k,curSal,curScore)=>{
-    if(nodes++>250000) return;
-    if(k===0){ if(curScore>bestScore){ bestScore=curScore; bestPick=pick.slice(); } return; }
-    for(let i=idx;i<=nP-k;i++){
-      if(curScore+(preS[i+k]-preS[i])<=bestScore) return;
-      if(curSal+sl[i]+cheapPre[k-1]>maxSal) continue;
-      pick[6-k]=i;
-      dfs(i+1,k-1,curSal+sl[i],curScore+sc[i]);
-      if(nodes>250000) return;
+  // Most-expensive-k prefix: an upper bound on the salary still addable, so a
+  // partial pick that cannot possibly reach the floor is pruned rather than
+  // explored. Without it the floor would only be checked at the leaf and the
+  // score bound (which keys off the best FEASIBLE score) would prune far less.
+  const expPre=new Float64Array(7);
+  if(floor){ const desc=[...salArr].sort((a,b)=>b-a);
+             for(let k=1;k<=6;k++) expPre[k]=expPre[k-1]+(desc[k-1]||0); }
+  // Group membership re-indexed into THIS sim's score order, plus a suffix
+  // count per group (gsuf[g][j] = members at order positions ≥ j) that powers
+  // the ruleMin feasibility prune. O(nGroups·nP) per sim — negligible next to
+  // the search itself, and only paid when rules exist.
+  const nG = gp ? gp.nG : 0;
+  let gm=null, gsuf=null, gcnt=null;
+  if(nG){
+    gm=new Uint8Array(nG*nP); gsuf=new Int32Array(nG*(nP+1)); gcnt=new Int32Array(nG);
+    for(let g=0;g<nG;g++){
+      const mb=g*nP, sb=g*(nP+1);
+      for(let j=0;j<nP;j++) gm[mb+j]=gp.memb[mb+order[j]];
+      for(let j=nP-1;j>=0;j--) gsuf[sb+j]=gsuf[sb+j+1]+gm[mb+j];
     }
+  }
+  // Feasibility witness: ONE group-legal, floor-clearing lineup found once per
+  // generation (see the probe in runPgaSimGen) and reused by every sim. It seeds
+  // the incumbent below.
+  //
+  // WHY IT IS NEEDED. The score bound is this search's only real pruner, and it
+  // needs a FEASIBLE incumbent to bite: until some leaf clears the floor,
+  // bestScore is −Infinity and nothing is pruned at all. Without groups that is
+  // harmless — the highest-scoring lineups also spend near the cap, so the very
+  // first leaves clear the floor. With a group rule that forces cheap golfers in
+  // (measured: max 1 of the top-20 salaries on the Rocket board, $49,000 floor)
+  // the top-of-order leaves are all UNDER the floor, the 250k-node budget
+  // expires before a qualifying one is reached, and the floor-released retry
+  // then produced 249/250 lineups below the floor the user set — even though a
+  // $49,100 group-legal lineup exists. Seeding bestScore with the witness's own
+  // score fixes it: 18/20 → 0/20 sub-floor per-sim optimals, and the search gets
+  // ~30× faster on that case (69ms → 2ms per sim) because pruning starts at the
+  // root. Ties go to the witness, which is optimal-equal by construction.
+  const wit = (gp && gp.witness) ? gp.witness : null;
+  let witSal=0, witScore=0;
+  if(wit){ for(const i of wit){ witSal+=salArr[i]; witScore+=scores[i]; } }
+  // One branch & bound pass under a given salary floor. Returns the best
+  // group-legal lineup at or above `fl` (as POOL indices), or null if none.
+  const search=(fl)=>{
+    const seeded = !!(wit && fl && witSal>=fl);
+    let bestScore=seeded?witScore:-Infinity, bestPick=null;
+    let nodes=0;
+    const pick=new Array(6);
+    if(nG) gcnt.fill(0);
+    const dfs=(idx,k,curSal,curScore)=>{
+      if(nodes++>NCAP) return;
+      if(k===0){
+        // ruleMax is guaranteed by the descent; ruleMin can only be confirmed here.
+        for(let g=0;g<nG;g++) if(gp.mins[g] && gcnt[g]<gp.mins[g]) return;
+        if(curSal>=fl && curScore>bestScore){ bestScore=curScore; bestPick=pick.slice(); }
+        return;
+      }
+      for(let i=idx;i<=nP-k;i++){
+        if(curScore+(preS[i+k]-preS[i])<=bestScore) return;
+        if(curSal+sl[i]+cheapPre[k-1]>maxSal) continue;
+        if(fl && curSal+sl[i]+expPre[k-1] < fl) continue;
+        if(nG){
+          let ok=true;
+          for(let g=0;g<nG;g++){
+            const c=gcnt[g]+gm[g*nP+i];
+            if(gp.maxs[g] && c>gp.maxs[g]){ ok=false; break; }
+            // k−1 slots remain after taking i, and only gsuf[i+1] members are
+            // still reachable (the search only ever moves forward in `order`).
+            if(gp.mins[g]){
+              const avail=gsuf[g*(nP+1)+i+1], room=(k-1)<avail?(k-1):avail;
+              if(c+room<gp.mins[g]){ ok=false; break; }
+            }
+          }
+          if(!ok) continue;
+          for(let g=0;g<nG;g++) gcnt[g]+=gm[g*nP+i];
+        }
+        pick[6-k]=i;
+        dfs(i+1,k-1,curSal+sl[i],curScore+sc[i]);
+        if(nG) for(let g=0;g<nG;g++) gcnt[g]-=gm[g*nP+i];
+        if(nodes>NCAP) return;
+      }
+    };
+    dfs(0,6,0,0);
+    // bestPick holds ORDER positions; the witness is already pool indices.
+    return bestPick ? bestPick.map(i=>order[i]) : (seeded ? wit.slice() : null);
   };
-  dfs(0,6,0,0);
-  return bestPick?bestPick.map(i=>order[i]):null;
+  // FIXED 2026-08-03. The floor used to be enforced with an in-pass "best
+  // ignoring the floor" fallback (anyPick), which was documented as degrading
+  // to the pre-floor behaviour when no lineup can reach the floor. It did not:
+  // the most-expensive-k prune above is precisely "this branch cannot reach the
+  // floor", so when the floor is genuinely unreachable it prunes every leaf and
+  // the fallback never records anything — the function returned null and the
+  // sim contributed no candidate. Reproduced on the Rocket pool in the pre-group
+  // build: floor $58,801 against a $58,800 maximum returned null instead of the
+  // best affordable lineup. Harmless before groups existed (a floor under the
+  // cap is always reachable from a 145-golfer pool), but a binding ruleMin can
+  // put the group-legal subspace entirely below the floor, and then EVERY sim
+  // returned null. Retry with the floor released instead — one extra pass, only
+  // in the degenerate case, and group rules stay hard while the floor gives way.
+  let out=search(floor);
+  if(!out && floor) out=search(0);
+  return out;
+}
+
+// Flattened group-rule tables for pgaOptimalForSim. Built ONCE per generation
+// (membership is a set lookup per golfer per group; doing it inside the per-sim
+// search would dominate the search). Returns null when no rule is set, which
+// keeps the group-free path exactly as it was.
+// NOTE: only ruleMin / ruleMax are compiled here. ufcNoOppose is meaningless in
+// golf (no opponents), and conditional sub-group rules are handled by the
+// post-generation checkGroupRules sweep in runPgaSimGen rather than inside the
+// hot search — they are rare and the sweep is exact.
+function pgaGroupPrep(pool, groups){
+  const gs=(groups||[]).filter(g=>(g.ruleMin||0)>0||(g.ruleMax||0)>0);
+  if(!gs.length) return null;
+  const nG=gs.length, nP=pool.length;
+  const memb=new Uint8Array(nG*nP);
+  const mins=new Int32Array(nG), maxs=new Int32Array(nG);
+  for(let g=0;g<nG;g++){
+    const ids=new Set(gs[g].playerIds||[]);
+    for(let i=0;i<nP;i++) if(ids.has(pool[i].id)) memb[g*nP+i]=1;
+    mins[g]=gs[g].ruleMin||0; maxs[g]=gs[g].ruleMax||0;
+  }
+  return {gs, nG, nP, memb, mins, maxs};
 }
 
 // ── Sim Score selection (PGA, Contest EV off) ───────────────────────────────
@@ -8338,30 +8809,172 @@ async function runPgaSimScoreSelect(ctx){
   }
   cands.sort((a,b)=>b.score-a.score);
   // Exposure caps: min(user Max% / override, simulated make-cut rate)
+  // No PGA-specific DEFAULT cap is set, deliberately. Before the servo below
+  // existed, forcing Max% down was the only lever and it worked monotonically
+  // (Rocket, target 150: median best finish 362→285→32 at 100/33/20%) at the
+  // cost of lineups — a 20% cap could only fill 136 of 150. With the servo the
+  // output tops out at 17-30% by itself on all five PGA slates, so a 25-30%
+  // default is measurably a no-op (identical portfolios on 12 seeds) and 20%
+  // buys only a small, n=1 improvement (median 96→64 at target 150). Max% is
+  // still the right knob for a user who wants flatter; it now costs nothing.
   const capMap={};
   pool.forEach(p=>{
     const userPct=overrides[p.id]!=null?overrides[p.id]:maxExpPct;
     const cutPct=p._simCut!=null?Math.max(5,p._simCut):100;
     capMap[p.id]=Math.max(1, Math.ceil(target*Math.min(userPct,cutPct)/100));
   });
-  const expCount={}; const chosen=[]; const chosenSets=[]; const used=new Set();
+  // ── Exposure anchor + alignment servo (2026-08-03) ────────────────────────
+  // REPLACES a naked greedy that walked the score-sorted candidates and took
+  // the first legal one. That greedy failed in BOTH directions at once
+  // (measured on the Rocket Classic board, 12 seeds, target 50):
+  //   • concentration — Clark 24.8% of candidates → 40% of the output, because
+  //     every top-scoring candidate contains him and nothing pushed back;
+  //   • truncation — Cameron Young, the LARGEST candidate mass on the board
+  //     (26.7%), landed at 3%, and Schauffele (20.0%) at 0.0%. Expensive
+  //     golfers only appear in candidates whose JOINT total is mid-pack, so a
+  //     score-ordered walk fills up long before it reaches them. It is not that
+  //     the sim dislikes them — the sim's own candidate pool is full of them.
+  //     Same failure on 4 of 5 July/Rocket slates: Scheffler (the #1 sim score
+  //     AND top-3 mass at the Scottish) 1-3%, Rahm/Schauffele/Rose 0% at The
+  //     Open, Spieth/Bridgeman 0% at the John Deere.
+  // The fix is the UFC servo (runUFCSimGen) adapted to PGA's structure: score
+  // every still-legal candidate each pick as quality × alignFactor and take the
+  // best, where alignFactor rewards lineups whose members are under their
+  // anchor and taxes those already over it. Same constraints as before — Max%,
+  // per-player overrides, make-cut cap, ≤half-roster shared, relaxation ladder.
+  // Measured, 12 seeds, Rocket Classic, real 21,758-entry contest, defaults:
+  //     target 150  median best finish 257 → 96, P(≥1 top-1%) 33% → 92%,
+  //                 max exposure 43% → 23%, ρ(mass,exp) 0.89 → 0.97
+  //     target  50  median best finish 1269 → 179, P(≥1 top-1%) 8% → 50%,
+  //                 max exposure 53% → 24%, zero-exposure top-15-mass 1.7 → 0
+  // Reference on the same board: 150 random lineups drawn 6-from-the-top-45
+  // scored 55 / 97%, so the fix closes most, not all, of that gap.
+  //
+  // HONESTY: the SHAPE of this (exposure should track candidate mass; nobody
+  // with real mass should sit at zero) is structural and holds on all 5 PGA
+  // slates. The PARAMETERS below rest on ONE real contest — a week in which the
+  // top of the sim's board busted (Clark 21.0, Gotterup 27.5 actual DK), i.e.
+  // the week most favourable to spreading out. Mitigating that: the (ANCHOR_G,
+  // ALIGN_M) grid is a PLATEAU, not a peak — every combination of G∈[0.35,1],
+  // M∈[3,12] lands at median best finish 86-162 and P(top-1%) 55-91% vs the old
+  // 257/33%, so nothing here sits on a cliff. Revisit when a second PGA contest
+  // export exists.
+  const _tune = ctx.tune || {};   // lab-only override hook; never set by the UI
+  // ANCHOR_G: exponent applied to candidate mass before it becomes the target.
+  // 1.0 = "exposure exactly equals the sim's optimal-lineup share"; 0 = flat
+  // over everyone the pool supports. Per-sim argmax AMPLIFIES small edges (a
+  // golfer one point better in composite can appear in twice as many optimals),
+  // so some shrinkage is de-amplification rather than a fade. Swept 1.0 → 0.25
+  // on the Rocket; see the report attached to this change.
+  const ANCHOR_G = _tune.anchorG!=null ? _tune.anchorG : 0.55;
+  // ANCHOR_W: weight on composite-score share, the UFC anchor's second leg.
+  // Measured at 0 for PGA and left as a knob only. UFC blends 0.75 toward
+  // composite because appearRate there buries expensive studs; in PGA the
+  // candidate mass ALREADY carries them (Young/Schauffele are top-6 mass), and
+  // composite share across a 145-golfer field is nearly flat (2.1%–6.0% of the
+  // budget on the Rocket), so any real weight on it converts the portfolio into
+  // "roster the whole field equally" and destroys ρ(mass, exposure).
+  const ANCHOR_W = _tune.anchorW!=null ? _tune.anchorW : 0;
+  // ALIGN_M: servo gain. Candidate quality spans only ~6% (p50/max = 0.94), so
+  // the gain has to be on that scale to trade off against it at all.
+  const ALIGN_M  = _tune.alignM !=null ? _tune.alignM  : 6;
+  // …but a 1-3 lineup build cannot express an exposure distribution at all —
+  // one appearance is already 33% — so the servo would be steering toward
+  // targets that are unreachable in either direction, and it measurably costs
+  // quality there (Rocket, 6 seeds: mean actual/lineup 408.8→394.2 at target 1,
+  // 407.3→396.8 at target 3, while target 5 goes 399.6→413.1 and target 50
+  // 386.8→397.0). Below 5 lineups the servo stands down and the build is pure
+  // quality, exactly as it was before this change.
+  const SERVO_W  = Math.min(1, Math.max(0, (target-1)/4));
+  const GAIN     = ALIGN_M * SERVO_W;
+  const anchor={};
+  {
+    // Candidate mass: share of the per-sim optimal lineups containing p.
+    // Sums to _rs across the pool — i.e. it is already denominated in "slots
+    // of the roster", the same units as exposure.
+    const massCnt={}; let massTot=0;
+    for(const e of ranked){ massTot+=e.count; for(const p of e.lineup) massCnt[p.id]=(massCnt[p.id]||0)+e.count; }
+    let aSum=0, cSum=0;
+    const A={}, C={};
+    pool.forEach(p=>{
+      const m=(massCnt[p.id]||0)/Math.max(1,massTot);
+      // Zero mass = the sim never built him into an optimal lineup; he is
+      // unreachable, and giving him a target would leave a permanent deficit
+      // that inflates every alignFactor equally and tells the servo nothing.
+      A[p.id]= m>0 ? Math.pow(m, ANCHOR_G) : 0;
+      C[p.id]= m>0 ? Math.max(0, p._simP50||0) : 0;
+      aSum+=A[p.id]; cSum+=C[p.id];
+    });
+    pool.forEach(p=>{
+      const a=aSum>0?A[p.id]/aSum:0, c=cSum>0?C[p.id]/cSum:0;
+      anchor[p.id]=((1-ANCHOR_W)*a + ANCHOR_W*c)*_rs;
+    });
+    // Clip to each player's cap and re-spread the freed budget over everyone
+    // still below theirs (water-filling), so the servo never chases a target
+    // the caps forbid — an unreachable target is a constant bias, not a signal.
+    const capFrac={}; pool.forEach(p=>capFrac[p.id]=capMap[p.id]/Math.max(1,target));
+    for(let it=0;it<30;it++){
+      let over=0, freeSum=0;
+      pool.forEach(p=>{ if(anchor[p.id]>capFrac[p.id]){ over+=anchor[p.id]-capFrac[p.id]; anchor[p.id]=capFrac[p.id]; } });
+      if(over<=1e-9) break;
+      pool.forEach(p=>{ if(anchor[p.id]<capFrac[p.id]-1e-12) freeSum+=anchor[p.id]; });
+      if(freeSum<=1e-12) break;
+      pool.forEach(p=>{ if(anchor[p.id]<capFrac[p.id]-1e-12) anchor[p.id]+=over*anchor[p.id]/freeSum; });
+    }
+  }
+  const expCount={}; const chosen=[]; const chosenSets=[];
+  const used=new Uint8Array(cands.length);
   const _half=Math.ceil(_rs/2);
   const RELAX=[_half,_half+1,_half+2];
-  for(let ri=0;ri<RELAX.length;ri++){
+  const maxScore=cands.length?Math.max(1e-9,cands[0].score):1;   // cands are score-sorted
+  for(let ri=0;ri<RELAX.length && chosen.length<target;ri++){
     const maxShared=RELAX[ri];
-    for(let i=0;i<cands.length && chosen.length<target;i++){
-      if(used.has(i)) continue;
-      const c=cands[i];
-      if(c.lineup.some(p=>(expCount[p.id]||0)>=capMap[p.id])) continue;
-      let dup=false;
+    // Alive set for this uniqueness level: every unused candidate that is legal
+    // against everything already chosen. Rebuilt once per level, then pruned
+    // incrementally — both the ≤maxShared rule and the caps are monotone (once
+    // a candidate is blocked it stays blocked), so nothing legal is lost.
+    let alive=[];
+    for(let i=0;i<cands.length;i++){
+      if(used[i]) continue;
+      let ok=true;
       for(const s of chosenSets){
-        let sh=0; for(const p of c.lineup) if(s.has(p.id)) sh++;
-        if(sh>maxShared){ dup=true; break; }
+        let sh=0; for(const p of cands[i].lineup) if(s.has(p.id)) sh++;
+        if(sh>maxShared){ ok=false; break; }
       }
-      if(dup) continue;
-      used.add(i); chosen.push(c.lineup.slice());
-      chosenSets.push(new Set(c.lineup.map(p=>p.id)));
+      if(ok) alive.push(i);
+    }
+    let sinceYield=0;
+    while(chosen.length<target && alive.length){
+      const denom=Math.max(1, chosen.length);
+      let bestI=-1, bestVal=-Infinity;
+      const keep=[];
+      for(let a=0;a<alive.length;a++){
+        const i=alive[a], c=cands[i];
+        if(c.lineup.some(p=>(expCount[p.id]||0)>=capMap[p.id])) continue;   // capped out for good
+        keep.push(i);
+        let align=0;
+        for(const p of c.lineup) align+=(anchor[p.id]||0)-(expCount[p.id]||0)/denom;
+        // Quality is the candidate's own held-out joint score, relative to the
+        // best candidate — the same number the old greedy sorted on, so a
+        // zero-gain servo reproduces the old behaviour exactly.
+        const val=(c.score/maxScore)*Math.max(0.25, 1+GAIN*(align/_rs));
+        if(val>bestVal){ bestVal=val; bestI=i; }
+      }
+      alive=keep;
+      if(bestI<0) break;
+      const c=cands[bestI]; used[bestI]=1;
+      chosen.push(c.lineup.slice());
+      const st=new Set(c.lineup.map(p=>p.id));
+      chosenSets.push(st);
       c.lineup.forEach(p=>expCount[p.id]=(expCount[p.id]||0)+1);
+      const next=[];
+      for(let a=0;a<alive.length;a++){
+        const i=alive[a]; if(i===bestI) continue;
+        let sh=0; for(const p of cands[i].lineup) if(st.has(p.id)) sh++;
+        if(sh<=maxShared) next.push(i);
+      }
+      alive=next;
+      if(++sinceYield>=25){ sinceYield=0; await new Promise(r=>setTimeout(r,0)); if(window._genCancelled) return null; }
     }
     if(chosen.length>=target) break;
     if(ri<RELAX.length-1) log(`  uniqueness relaxed to ≤${RELAX[ri+1]} shared ${_unit} (${chosen.length}/${target} so far)…`);
@@ -8371,7 +8984,12 @@ async function runPgaSimScoreSelect(ctx){
   // Exposure + cut-cap readout, same spirit as the EV path's diagnostics
   {
     const top=pool.map(p=>({p, e:expCount[p.id]||0})).filter(x=>x.e>0).sort((a,b)=>b.e-a.e).slice(0,6);
-    log('Top exposure: '+top.map(x=>`${x.p.name.split(' ').slice(-1)[0]} ${Math.round(100*x.e/chosen.length)}% (cut ${x.p._simCut==null?'n/a':x.p._simCut+'%'})`).join(', '));
+    log('Top exposure: '+top.map(x=>`${x.p.name.split(' ').slice(-1)[0]} ${Math.round(100*x.e/chosen.length)}% (target ${Math.round(100*(anchor[x.p.id]||0))}%, cut ${x.p._simCut==null?'n/a':x.p._simCut+'%'})`).join(', '));
+    // Biggest remaining gaps to the anchor — normally caps or a thin candidate
+    // pool; if this list is long the servo is being fought by something.
+    const gap=pool.map(p=>({p, d:(anchor[p.id]||0)-(expCount[p.id]||0)/chosen.length}))
+      .filter(x=>x.d>0.06).sort((a,b)=>b.d-a.d).slice(0,4);
+    if(gap.length) log(`  under target (caps / candidate supply): ${gap.map(x=>`${x.p.name.split(' ').slice(-1)[0]} ${Math.round(100*(expCount[x.p.id]||0)/chosen.length)}% vs ${Math.round(100*anchor[x.p.id])}%`).join(', ')}`);
     const sals=chosen.map(l=>l.reduce((s,p)=>s+(p.salary||0),0));
     log(`Done! ${chosen.length} lineups by Sim Score. Salary $${Math.min(...sals).toLocaleString()}–$${Math.max(...sals).toLocaleString()}.`);
   }
@@ -8387,6 +9005,10 @@ async function runPgaSimGen(){
   const target=parseInt(document.getElementById('genCount').value)||20;
   const maxExpPct=parseInt(document.getElementById('genMaxExp').value)||100;
   const maxSal=Math.min(SALARY_CAP, parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP);
+  // Min Salary was read only at the runUFCContestEV call below, so the per-sim
+  // optimizer never saw it and Sim Score mode shipped sub-floor lineups. Hoisted
+  // to the top of the function and passed to pgaOptimalForSim as well.
+  const minSal=parseInt(document.getElementById('genMinSal')?.value)||0;
   const numSims=slate._simCount||parseInt(document.getElementById('pgaSimCountSlider')?.value)||2000;
   const hidden=slate.hiddenIds||[];
   // Removing golfers takes them out of LINEUP SELECTION only — NOT the
@@ -8482,6 +9104,89 @@ async function runPgaSimGen(){
   const salArr=pool.map(p=>p.salary||0);
   const cheapSorted=salArr.slice().sort((a,b)=>a-b);
   const cheapPre=[0]; cheapSorted.forEach((v,i)=>cheapPre.push(cheapPre[i]+v));
+  // ── Group rules ───────────────────────────────────────────────────────────
+  // Compiled once and threaded into every per-sim optimal below, so candidates
+  // arrive group-legal in BOTH modes. Selection can then only ever pick whole
+  // legal candidates (Sim Score) or repair them under the monotone group guard
+  // in runUFCContestEV's dominance pass (Contest EV) — see the note there.
+  const _pgaGroups = slate.groups||[];
+  const _gp = pgaGroupPrep(pool, _pgaGroups);
+  // The floor the per-sim searches actually enforce. Equals minSal unless the
+  // probe below proves the rules cannot reach it, in which case the whole
+  // salary WINDOW slides down onto the reachable ceiling — not to zero, which
+  // is what "the floor is relaxed" used to mean here. MEASURED on the Rocket
+  // board (146 golfers, max 1 of the top-30 salaries, $49,000–$50,000 request,
+  // 400 sims, target 50): the old behaviour shipped 50/50 lineups under the
+  // floor, salaries $42,100–$46,600, against a group-legal ceiling of $47,400.
+  // With no groups set _gp is null, _floorEff === minSal, and every call below
+  // is byte-identical to before.
+  let _floorEff = minSal;
+  if(_gp){
+    // ── Pre-flight feasibility probe ────────────────────────────────────────
+    // ONE search, run with SALARY as the objective, answers both questions:
+    //  • null ⇒ no 6-golfer lineup satisfies the rules at all → name the rules
+    //    and abort, instead of 1,000 sims of empty results and a generic
+    //    "no valid lineups" alert;
+    //  • otherwise its salary is provably the CEILING the rules allow, which
+    //    makes the floor message exact and IS the number the window slides onto.
+    //
+    // It used to be two flat-score probes (rules alone, then rules + floor).
+    // A flat score vector makes the search return the first roster it reaches
+    // in `order`, and with a flat vector `order` is just the pool's own order —
+    // so the reported "best group-legal lineup reaches $X" was whatever the
+    // input CSV happened to list first, not a maximum. MEASURED: on all five
+    // July PGA boards it was nevertheless exact in 302/302 (slate × rule × Max
+    // Salary) cases, because DK exports arrive sorted by salary descending and
+    // the sort is stable — the flat probe was walking the pool most-expensive-
+    // first by accident. Shuffle the same pool and it breaks: 77/80 cases wrong,
+    // understating the ceiling by up to $9,800. Exactness by accident is not
+    // good enough to slide a salary window onto, hence the salary objective —
+    // exact in 512/512 cases checked against an independently written brute
+    // force, on both the real and the shuffled pools.
+    const _rules=_gp.gs.map(g=>`"${g.name}" ${[(g.ruleMin||0)>0?'min '+g.ruleMin:null,(g.ruleMax||0)>0?'max '+g.ruleMax:null].filter(Boolean).join(' / ')}`).join(', ');
+    // Probe budget, far above the per-sim 250k: this runs once per generation,
+    // and a probe that gave up early would mis-report the ceiling and slide the
+    // window onto a number the rules do not actually cap. Unlike NASCAR's probe
+    // this is NOT exhaustive — C(146,6) ≈ 1.4e10 — so it is a safety valve, not
+    // a proof. MEASURED over the five July boards × five rule sets × Max Salary
+    // $45,000–$50,000 in $250 steps (525 probes): every one agreed with an
+    // independently written brute force, worst wall time 1.7 s. Node counts from
+    // that same reference search: 2.2M worst in the realistic $49k–$50k cap band
+    // (11% of this budget), 11.2M at the pathological $45,250 (56%). If a future
+    // pool does exhaust it the failure is graceful — an understated ceiling
+    // slides the window lower than it needed to, it never places it too high.
+    const _PROBE_CAP = 20000000;
+    const _salScores=Float64Array.from(salArr);
+    const _probe=pgaOptimalForSim(pool, _salScores, salArr, cheapPre, maxSal, 0, _gp, _PROBE_CAP);
+    if(!_probe){
+      log(`⚠ No 6-golfer lineup can satisfy the group rules with this pool: ${_rules}.`);
+      alert(`No lineup can satisfy your group rules with this pool.\n\n${_rules}\n\nLoosen a rule, add golfers to a min-group, or unhide players.`);
+      done(); return;
+    }
+    const _probeSal=_probe.reduce((s,i)=>s+salArr[i],0);
+    // Hand the witness to every per-sim search as its starting incumbent — see
+    // the long note in pgaOptimalForSim. The seeding test inside that function
+    // (witSal >= fl) is what decides whether it is actually used, and after the
+    // slide below the witness clears _floorEff by construction.
+    // TRIED AND REJECTED: re-deriving the witness under the pool's composite
+    // sim score (a "good" feasible lineup rather than merely a legal one) to
+    // tighten the per-sim bound further. Measured on the max-1-of-top-20 case
+    // it changed nothing — 74.1 → 77.6 ms/sim — because a per-sim optimal is
+    // driven by that sim's draws, not by the composite, so a composite-good
+    // incumbent is no closer to it. Left out rather than carried unearned.
+    _gp.witness=_probe;
+    if(minSal && _probeSal<minSal){
+      // Translate the user's WINDOW onto the reachable ceiling rather than
+      // dropping the floor to zero. Clamping to the ceiling itself was tried on
+      // the NASCAR side and rejected — it is an equality constraint and emitted
+      // 1 lineup of the 50 asked for. Same width, slid down to what the rules
+      // allow: a $49,000–$50,000 request on the Rocket board under max-1-of-the
+      // -top-30 becomes $46,400–$47,400.
+      _floorEff = Math.max(0, _probeSal - Math.max(0, maxSal - minSal));
+      log(`⚠ Group rules and the $${minSal.toLocaleString()} Min Salary floor cannot both be met — the most expensive lineup these rules allow is $${_probeSal.toLocaleString()}. Group rules are kept; the salary window slides down to $${_floorEff.toLocaleString()}–$${_probeSal.toLocaleString()}.`);
+    }
+    log(`Group rules enforced in every generated lineup: ${_rules}.`);
+  }
   const rankedMap=new Map();
   const colScores=new Float64Array(pool.length);
   const addCand=(lu,pivot)=>{ if(!lu) return; let t=0; for(const i of lu) t+=colScores[i];
@@ -8494,7 +9199,7 @@ async function runPgaSimGen(){
   // which are optimal only in the freak draws that birthed them.
   for(let s=0;s<simsDone;s+=2){
     for(let i=0;i<pool.length;i++) colScores[i]=poolScores[i][s];
-    addCand(pgaOptimalForSim(pool, colScores, salArr, cheapPre, maxSal));
+    addCand(pgaOptimalForSim(pool, colScores, salArr, cheapPre, maxSal, _floorEff, _gp));
     if(s>0&&s%100===0){
       if(s%500===0) log(`  optimals: ${s.toLocaleString()}/${simsDone.toLocaleString()}…`);
       await new Promise(r=>setTimeout(r,0));
@@ -8515,19 +9220,65 @@ async function runPgaSimGen(){
     // greedy will later concentrate can sit below 50% at the candidate level yet
     // get jammed in the output — generate his pivots pre-emptively.
     const chalk=pool.map((p,i)=>({p,i,f:(app[p.id]||0)/Math.max(1,tot)})).filter(x=>x.f>0.30);
-    for(const {i:gi} of chalk){
-      const before=rankedMap.size;
+    // The pillar is excluded by giving him a −1e9 score, so the GLOBAL witness
+    // is wrong here the moment it contains him: pgaOptimalForSim seeds its
+    // incumbent with the witness's score under THIS sim's vector, which is then
+    // ≈ −1e9, so (a) the score bound stops pruning and the search runs to its
+    // full 250k-node budget, and (b) when nothing beats that incumbent the
+    // function returns the witness itself — a "pillar-free alternative" that
+    // contains the pillar. MEASURED on the Rocket board, max-1-of-the-top-20,
+    // $49,000 floor: 10/10 pivot searches on a witness golfer returned a lineup
+    // containing him, at 131 ms/sim. Pre-existing (it reproduces unchanged in
+    // the build shipped before this one), and setting the witness unconditionally
+    // at the probe above would have widened it.
+    //
+    // So each pivot gets its OWN witness: the same salary-objective probe, run
+    // with the pillar excluded. Same doctrine as NASCAR's chaos runner-up —
+    // pivots are OPTIONAL enrichment, so a pillar whose removal leaves nothing
+    // group-legal that clears the floor is SKIPPED, not shipped under the floor
+    // or shipped with the pillar still in it.
+    const _skipped=[];
+    for(const {i:gi, p:gp_} of chalk){
+      const _savedWit = _gp ? _gp.witness : null;
+      if(_gp){
+        _gp.witness = null;                     // never seed the pivot probe itself
+        const _pvScores=Float64Array.from(salArr); _pvScores[gi]=-1e9;
+        const _pvWit=pgaOptimalForSim(pool, _pvScores, salArr, cheapPre, maxSal, 0, _gp, 20000000);
+        const _pvSal=(_pvWit && !_pvWit.includes(gi)) ? _pvWit.reduce((a,i)=>a+salArr[i],0) : -1;
+        if(_pvSal < (_floorEff||0)){ _gp.witness=_savedWit; _skipped.push(gp_.name); continue; }
+        _gp.witness=_pvWit;
+      }
       for(let s=0;s<simsDone;s+=2){
         for(let i=0;i<pool.length;i++) colScores[i]=poolScores[i][s];
         colScores[gi]=-1e9;
-        addCand(pgaOptimalForSim(pool, colScores, salArr, cheapPre, maxSal), true);
+        addCand(pgaOptimalForSim(pool, colScores, salArr, cheapPre, maxSal, _floorEff, _gp), true);
       }
+      if(_gp) _gp.witness=_savedWit;
       await new Promise(r=>setTimeout(r,0));
       if(window._genCancelled){ log('Cancelled.'); done(); return; }
     }
     if(chalk.length) log(`Pivot generation: ${chalk.map(x=>`${x.p.name.split(' ').slice(-1)[0]} (${Math.round(100*x.f)}% of optimals)`).join(', ')} — generated pillar-free alternatives; ${rankedMap.size.toLocaleString()} total candidates now.`);
+    if(_skipped.length) log(`  (no group-legal lineup inside the salary window excludes ${_skipped.join(', ')} — pivot pass skipped rather than shipped with the pillar still in it)`);
   }
   const ranked=[...rankedMap.values()].sort((a,b)=>b.count-a.count);
+  // Never ship a lineup that violates the rules the user set (same doctrine as
+  // the NFL stack-rule sweep). The search above already guarantees min/max, so
+  // this is normally a no-op; it exists to catch the two cases the hot search
+  // deliberately does not model — conditional sub-group rules, and a candidate
+  // salvaged at the 250k-node budget — and to make any future regression loud
+  // instead of silent.
+  if(_pgaGroups.length){
+    const _hard=_pgaGroups.filter(g=>(g.ruleMin||0)>0||(g.ruleMax||0)>0||(g.condGroups||[]).some(c=>c.type==='hard'));
+    if(_hard.length){
+      const before=ranked.length;
+      for(let i=ranked.length-1;i>=0;i--) if(!checkGroupRules(ranked[i].lineup,_hard)) ranked.splice(i,1);
+      if(ranked.length<before) log(`  (${(before-ranked.length).toLocaleString()} candidate(s) dropped by the group-rule check)`);
+      if(!ranked.length){
+        alert('Every candidate lineup was rejected by your group rules — loosen them and re-run.');
+        done(); return;
+      }
+    }
+  }
   log(`${ranked.length.toLocaleString()} unique optimal lineups from ${Math.ceil(simsDone/2).toLocaleString()} generation sims (EV priced on the ${Math.floor(simsDone/2).toLocaleString()} held-out sims).`);
 
   // ── Candidate augmentation: salary-jammed neighbors ──────────────────────
@@ -8538,12 +9289,27 @@ async function runPgaSimGen(){
   // the SAME contest-EV pricing judge originals and neighbors on equal
   // footing. Nothing is forced: if the cheap build carries more EV, it wins.
   let out;
+  // NOTE (2026-08-03): the exposure servo added to runPgaSimScoreSelect below
+  // was deliberately NOT ported into this Contest-EV branch. Measured on the
+  // Rocket board, Contest-EV shows the concentration half of the defect
+  // (max exposure ~50%, Clark 34% at target 150) but NOT the truncation half —
+  // no top-10-composite golfer sits at zero, and its exposure-weighted actual
+  // was the best of anything tested that week. Structurally it also can't take
+  // this servo as-is: its portfolio loop is a LAZY greedy that re-scores only
+  // the head of the queue and relies on marginals being monotonically
+  // decreasing (see the submodularity note in runUFCContestEV). An alignment
+  // factor RISES as a player falls behind his anchor, which breaks that
+  // invariant and would silently let stale valuations win picks. It also
+  // already owns an exposure mechanism (AUTO-EXPOSURE re-runs the greedy under
+  // tightened pillar caps and compares whole portfolios). Fixing concentration
+  // there means working inside those two mechanisms, and it needs a full-
+  // fidelity backtest to justify — flagged, not attempted.
   if(_evOn){
     const _se = !!(slate._ufcEv && slate._ufcEv.se);
     out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, oosParity:1, sharpShare:0.15, se:_se, dominanceRepair:true, maxSal,
-      // PGA's generator has no min-salary binding of its own; read the same
-      // control the other sports use so repair can't drop under the floor.
-      minSal: parseInt(document.getElementById('genMinSal')?.value)||0});
+      // Same floor the per-sim optimizer above now enforces, so repair can't
+      // drop a candidate back under it.
+      minSal});
     if(out===null&&window._genCancelled) log('Cancelled.');
   } else {
     out=await runPgaSimScoreSelect({slate, pool, ranked, simScoresById, simsDone, target, maxExpPct, overrides});
@@ -8771,11 +9537,58 @@ async function runUFCSimGen(){
   const fieldAvgOwn = _ownVals.length ? _ownVals.reduce((a,b)=>a+b,0)/_ownVals.length : 0;
   const sumComp = pool.reduce((s,p)=>s+(compositeScoreById[p.id]||0), 0) || 1;
   const sumOwn  = pool.reduce((s,p)=>s+((parseFloat(p.own)||0)||fieldAvgOwn), 0) || 1;
+  // ── Market-disagreement term ──────────────────────────────────────────────
+  // The share ratio alone is a weak leverage signal here, for a structural
+  // reason: ρ(SIM, salary) is 0.94, so "equity share" is mostly "price", and
+  // ownership is also price-driven (ρ 0.52). Their ratio therefore carries
+  // little information about where the sim actually DISAGREES with the market
+  // — which is the only thing that can be an edge. Measured over five cards:
+  // ρ(levRatio, salary) = +0.51 but ρ(levRatio, ownership) = only -0.27, i.e.
+  // the "leverage" slider was mostly a salary tilt.
+  //
+  // zResid is the sim composite minus its own least-squares fit on salary,
+  // standardised per slate: "how much more (or less) than his price the sim
+  // says he is worth". It is zero for a correctly-priced fighter, so it leaves
+  // fairly-priced chalk exactly where it was — the explicit requirement here.
+  //
+  // Applied MULTIPLICATIVELY on the existing share ratio (exp form, so the
+  // combined value stays positive and levShape's log-tanh still behaves).
+  // Measured, five cards + the real 39,280-entry 8/1 contest:
+  //                                   AUC top-6 finisher    AUC "GPP lift > 1"
+  //   eqShare/ownShare (was)                0.629                 0.539
+  //   + exp(0.35 × zResid) (now)            0.75                  0.86
+  // and +5.9 DK points per 50-lineup portfolio at slider 35 (t=2.31, paired,
+  // 15 obs). The sweep over the weight is flat from 0.25 to 0.50, so 0.35 is
+  // the middle of a plateau rather than a fitted point.
+  //
+  // NOT DONE, deliberately: the form "SIM-residual ÷ ownership" was tested and
+  // is unsound. Half the pool has a negative residual by construction, and
+  // dividing a negative number by a larger ownership makes it LESS negative —
+  // so among the 65 fighters the sim rated below their price, that metric
+  // correlates +0.61 with ownership. On 8/1 it ranked Milosevic (11.9% owned,
+  // the least-owned fighter on the board) as the single hardest FADE. A
+  // leverage metric has to be monotone decreasing in ownership; a ratio with a
+  // sign-changing numerator cannot be.
+  const _levResidZ = {};
+  {
+    const xs = pool.map(p=>p.salary||0), ys = pool.map(p=>compositeScoreById[p.id]||0);
+    const n = xs.length || 1;
+    const mx = xs.reduce((a,b)=>a+b,0)/n, my = ys.reduce((a,b)=>a+b,0)/n;
+    let sxy=0, sxx=0;
+    for(let i=0;i<n;i++){ sxy += (xs[i]-mx)*(ys[i]-my); sxx += (xs[i]-mx)*(xs[i]-mx); }
+    const slope = sxx>0 ? sxy/sxx : 0;
+    const res = pool.map((p,i)=> ys[i] - (my + slope*(xs[i]-mx)));
+    const mr = res.reduce((a,b)=>a+b,0)/n;
+    const sd = Math.sqrt(res.reduce((a,b)=>a+(b-mr)*(b-mr),0)/n) || 1;
+    pool.forEach((p,i)=>{ _levResidZ[p.id] = (res[i]-mr)/sd; });
+  }
+  const LEV_DISAGREE_W = 0.35;
   const levRatio = {};
   pool.forEach(p=>{
     const eqShare  = (compositeScoreById[p.id]||0) / sumComp;
     const ownShare = ((parseFloat(p.own)||0)||fieldAvgOwn) / sumOwn;
-    levRatio[p.id] = ownShare>0 ? eqShare/ownShare : 1;
+    const base     = ownShare>0 ? eqShare/ownShare : 1;
+    levRatio[p.id] = base * Math.exp(LEV_DISAGREE_W * (_levResidZ[p.id]||0));
   });
   // Per-lineup leverage factor: PRODUCT of each fighter's multiplier (sum of
   // logs, NOT the mean). The old geometric mean divided the log-sum by 6,
@@ -8922,8 +9735,34 @@ async function runUFCSimGen(){
     gMl:   e.lineup.reduce((s,p)=>s+(winProb[p.id]!=null ? winProb[p.id] : 0.5),0),
     gComp: e.lineup.reduce((s,p)=>s+(compositeScoreById[p.id]||0),0),
   }));
-  const _survivors = gauntletCull(_annotated, Math.max(target*8, 200), [
-    {key:'gOwn',  dir:'high', weight:3, label:'most-unjustified-chalk', minBad:35},
+  // ── Survivor target ───────────────────────────────────────────────────────
+  // MEASURED FIX 2026-08-03. The target was Math.max(target*8, 200): an
+  // ABSOLUTE count, while the candidate pool grows with the sim count. At 20
+  // lineups × 2,000 sims that culls ~80%; at 50 × 8,000 it culls 94%. Culling
+  // 94% is not "remove the tail" (the documented intent) — it is a hard
+  // rank-order, and gMl/gComp are both strongly salary-correlated (ρ 0.53-0.83
+  // across five cards), so the survivors collapse toward flat max-salary
+  // structures and the exposure allocator below can no longer reach the sim's
+  // own targets. Measured effect of the absolute target, five cards:
+  //     sims:      500    1,000   2,000   4,000   8,000
+  //     ρ(SIM,exp) 0.72   0.72    0.68    0.63    0.55
+  // i.e. the tool got WORSE the more evidence you gave it — the tell that this
+  // is a bug and not a trade-off. Adding a floor at 30% of the candidate pool
+  // makes cull depth bounded and the result sim-count-stable: ρ 0.71 → 0.83 at
+  // 2,000 sims and 0.63 → 0.86 at 5,000, at a cost of 4.6 mean DK points per
+  // 50-lineup portfolio (t=-3.4) and 2.1 points of p90 (noise). The mean cost
+  // is real and expected: spreading exposure toward the anchor necessarily
+  // gives up some of the top-EV concentration. The CEILING is what a GPP
+  // portfolio is bought for, and it is unchanged.
+  const _survTarget = Math.max(target*8, 200, Math.ceil(_annotated.length * 0.30));
+  const _survivors = gauntletCull(_annotated, _survTarget, [
+    // minBadPct, not minBad: the old absolute 35 was unreachable on every UFC
+    // card measured (max gOwn 24-48 over ~3,600 candidates), so this weight-3
+    // axis culled nothing and the gauntlet was silently running on two axes.
+    // At the 90th percentile it only touches genuinely chalk-stacked lineups,
+    // which is what the comment below always claimed it did. Measured neutral
+    // on points (Δmean -0.4, t=-0.43; Δp90 -2.1) across five cards.
+    {key:'gOwn',  dir:'high', weight:3, label:'most-unjustified-chalk', minBadPct:0.90},
     {key:'gMl',   dir:'low',  weight:2, label:'lowest-ML-equity'},
     {key:'gComp', dir:'low',  weight:2, label:'lowest-composite'},
   ], log);
@@ -9025,7 +9864,18 @@ async function runUFCSimGen(){
         const cur = (outputExpCount[p.id]||0) / denomA;
         align += (tgt - cur);
       });
-      const ALIGN_M = 3.0;
+      // ALIGN_M raised 3.0 → 10.0, measured 2026-08-03. The servo is the ONLY
+      // stage that enforces the exposure target — ablating it drops
+      // ρ(SIM, exposure) from 0.71 to 0.51, further than removing any other
+      // stage — but at gain 3 its authority (±25% on the selection value) was
+      // roughly the same size as the per-pick noise (±18%) and the spread of
+      // joint ceilings, so it could nudge but not steer. Paired sweep on five
+      // cards, 20 reps, at the fixed candidate pool:
+      //     ALIGN_M    3      6      10     18
+      //     ρ(SIM,exp) 0.70   0.74   0.77   0.78     (Δmean DK 0, -2.5, -2.6, -4.5)
+      // 10 is where ρ stops improving materially and before the points cost
+      // becomes significant (t=-1.65 at 10, t=-2.69 at 18).
+      const ALIGN_M = 10.0;
       const alignFactor = Math.max(0.5, 1 + ALIGN_M * (align / 6));
       const val = quality * leverageFactor * dupPenalty * alignFactor;
       if(val>bestVal){ bestVal=val; bestIdx=ri; }
@@ -10298,9 +11148,24 @@ async function runNascarSimGen(){
     // score (30+ DK pts — finished on the lead-lap-ish and didn't kill the
     // lineup). Feeds the same auto-exposure machinery as PGA's make-cut rule:
     // a punt's exposure is capped at his own usable-score rate, so the greedy
-    // can't jam a $4,500 back-marker into half the slate on salary relief
-    // alone. Self-scaling — studs clear 30 in ~85%+ of sims and are untouched;
-    // the rule only ever fires on drivers whose floor is genuinely rotten.
+    // can't jam a $4,500 back-marker into half the slate on salary relief alone.
+    //
+    // MEASURED 2026-08-03 on all eight July slates (2,000 sims each). The old
+    // comment here claimed "studs clear 30 in ~85%+ of sims and are untouched";
+    // that is FALSE. The top-6 drivers by sim composite clear 30 in 56-90% of
+    // sims (superspeedways top out at 72-73% for ANY driver) and the median
+    // driver clears it in 39-51%. What is true is the conclusion, for a
+    // different reason than the comment gives:
+    //   • In the DEFAULT (non-EV) NASCAR path the cap is never applied at all —
+    //     _simCut is display/export only. Output exposure exceeded a driver's
+    //     own _simCut on 3 of 8 slates and nothing clipped it.
+    //   • In Contest-EV mode (where runUFCContestEV's pillar rule does read it,
+    //     at the NASCAR-specific 35% trigger) it stayed inert on 7 of 8 slates;
+    //     on the eighth it clipped exactly what it is for — Muniz 50% use on a
+    //     25% usable rate — plus 2-6pp trims on three studs.
+    // So: the guard is not distorting exposure, but it is also not the
+    // self-scaling stud-safe rule the old comment described. Re-derive the
+    // 30-point bar per track type before relying on it.
     const arr = simScoreArrays[i] || [];
     let usable = 0; for(const v of arr) if(v >= 30) usable++;
     r.player._simCut = arr.length ? Math.round(100 * usable / arr.length) : null;
@@ -10336,6 +11201,10 @@ async function runNascarSimGen(){
     const salArr = evPool.map(p=>p.salary||0);
     const cheapSorted = salArr.slice().sort((a,b)=>a-b);
     const cheapPre=[0]; cheapSorted.forEach((v,i)=>cheapPre.push(cheapPre[i]+v));
+    // Most-expensive-k prefix — the mirror of cheapPre, used to prune branches
+    // that can no longer reach the min-salary floor.
+    const dearSorted = salArr.slice().sort((a,b)=>b-a);
+    const expPre=[0]; for(let k=1;k<=6;k++) expPre.push(expPre[k-1]+(dearSorted[k-1]||0));
     const rankedMap = new Map();
     const nP = evPool.length;
     const order = new Array(nP), sortScore = new Float64Array(nP), sortSal = new Float64Array(nP), preS = new Float64Array(nP+1);
@@ -10358,31 +11227,196 @@ async function runNascarSimGen(){
     const CHAOS_MIN_INC = ({road:6, short:8, intermediate:10, superspeedway:13})[trackType] || 10;
     let chaosCands = 0, chaosSims = 0;
 
+    // ── GROUP RULES in Contest-EV (added 2026-08-03) ──────────────────────
+    // Before this, NASCAR Contest-EV ignored slate.groups ENTIRELY: the two
+    // searches below honoured maxSal (and, since earlier today, minSal) and
+    // nothing else, so every rule set in the Groups panel was decorative the
+    // moment Contest EV was toggled on. MEASURED on the 7/12 Cup board, 600
+    // sims, target 50, $49,000 floor: a max-1-of-the-top-6-salaries rule was
+    // violated by 27/50 lineups (mean 1.64 in-group), a min-3-of-a-10-driver
+    // mid-tier by 29/50 (mean 1.90 against 3 required); on the 7/11 Trucks
+    // board with both rules set, 28/50. The non-EV bucket path emitted 0/50 on
+    // the same slates and rules — enforcement existed there and only there.
+    //
+    // Same doctrine as the PGA fix shipped alongside it (see pgaOptimalForSim):
+    // rules are hard at the DFS LEAF, the salary floor is what gives way. The
+    // compile step is literally pgaGroupPrep — it is sport-agnostic (it only
+    // reads player .id and the ruleMin/ruleMax fields), so it is reused rather
+    // than cloned. ufcNoOppose and conditional sub-groups are NOT modelled in
+    // the hot search (no opponents in racing; conditionals are rare) — the
+    // post-generation checkGroupRules sweep below is exact and catches them.
+    const _nasGroups = slate.groups || [];
+    const _gp = pgaGroupPrep(evPool, _nasGroups);
+    const _nG = _gp ? _gp.nG : 0;
+    let _gmA=null,_gsufA=null,_gcnt=null,_gmB=null,_gsufB=null;
+    if(_nG){
+      _gcnt =new Int32Array(_nG);
+      _gmA  =new Uint8Array(_nG*nP); _gsufA=new Int32Array(_nG*(nP+1));
+      _gmB  =new Uint8Array(_nG*nP); _gsufB=new Int32Array(_nG*(nP+1));
+    }
+    // Re-index group membership into a given search order and build the
+    // per-group suffix counts (members still reachable at or beyond position j)
+    // that power the ruleMin feasibility prune. Called once per search, O(nG·n).
+    const _buildG=(ord,n,mArr,sArr)=>{
+      for(let g=0;g<_nG;g++){
+        const mb=g*nP, sb=g*(nP+1);
+        for(let j=0;j<n;j++) mArr[mb+j]=_gp.memb[mb+ord[j]];
+        sArr[sb+n]=0;
+        for(let j=n-1;j>=0;j--) sArr[sb+j]=sArr[sb+j+1]+mArr[mb+j];
+      }
+    };
+    // Node budget, applied ONLY when rules exist so the rule-free path keeps
+    // its exact previous node sequence. A binding rule can flatten the score
+    // bound (below) and this search runs once per generation sim.
+    const _NODE_CAP = 400000;
+    // The pre-flight probe runs ONCE per generation, so it gets a budget large
+    // enough to be exhaustive on any real NASCAR field (C(40,6) ≈ 3.8M leaves).
+    // A probe that gave up early would mis-report a reachable floor as
+    // unreachable and silently drop the witness with it.
+    const _PROBE_CAP = 20000000;
+    let _capHits=0;                // per-sim searches that exhausted the budget
+    let _wit=null, _witSal=0;      // feasibility witness, as POOL indices
+    // The floor the searches actually enforce. Equals minSal unless the probe
+    // proves the rules cannot reach it, in which case the whole salary WINDOW
+    // slides down onto the reachable ceiling (see the probe) — not to zero,
+    // which is what "relax the floor" used to mean and which shipped $34,400
+    // lineups against a $47,000 request.
+    let _floorEff = minSal||0;
+    const curScores = new Float64Array(nP);
+
+    // Primary per-sim optimal, hoisted out of the loop so the pre-flight probe
+    // can drive the exact same search. `curScores` / `order` / `sortScore` /
+    // `sortSal` / `preS` (and _gmA/_gsufA when rules exist) must already hold
+    // this sim's state. Returns POOL indices, or null if nothing legal clears
+    // the floor `fl`.
+    //
+    // WHY THE WITNESS. The score bound is this search's only real pruner and it
+    // needs a FEASIBLE incumbent to bite: until some leaf clears the floor,
+    // bestScore is −Infinity and nothing prunes at all. Rule-free that is
+    // harmless (top-of-order lineups also spend near the cap), but a rule that
+    // forces cheap drivers in puts every top-of-order leaf under the floor, the
+    // node budget expires, and the floor-released retry then ships sub-floor
+    // lineups — the exact failure mode measured on PGA. Seeding with one
+    // group-legal, floor-clearing lineup found once per generation fixes it.
+    const nasOptimal=(fl,cap)=>{
+      const CAP = cap||_NODE_CAP;
+      const seeded = !!(_wit && fl && _witSal>=fl);
+      let witScore=0; if(seeded) for(const i of _wit) witScore+=curScores[i];
+      let bestScore = seeded ? witScore : -Infinity, bestPick=null;
+      let nodes=0;
+      const pick=new Array(6);
+      if(_nG) _gcnt.fill(0);
+      const dfs=(idx,k,curSal,curScore)=>{
+        if(_nG && nodes++>CAP) return;
+        if(k===0){
+          // ruleMax is guaranteed by the descent; ruleMin can only be confirmed here.
+          for(let g=0;g<_nG;g++) if(_gp.mins[g] && _gcnt[g]<_gp.mins[g]) return;
+          if(curSal>=fl && curScore>bestScore){ bestScore=curScore; bestPick=pick.slice(); }
+          return;
+        }
+        for(let i=idx;i<=nP-k;i++){
+          if(curScore + (preS[i+k]-preS[i]) <= bestScore) return;
+          if(curSal + sortSal[i] + cheapPre[k-1] > maxSal) continue;
+          if(fl && curSal + sortSal[i] + expPre[k-1] < fl) continue;
+          if(_nG){
+            let ok=true;
+            for(let g=0;g<_nG;g++){
+              const c=_gcnt[g]+_gmA[g*nP+i];
+              if(_gp.maxs[g] && c>_gp.maxs[g]){ ok=false; break; }
+              // k−1 slots remain after taking i, and only gsuf[i+1] members are
+              // still reachable (the search only moves forward in `order`).
+              if(_gp.mins[g]){
+                const avail=_gsufA[g*(nP+1)+i+1], room=(k-1)<avail?(k-1):avail;
+                if(c+room<_gp.mins[g]){ ok=false; break; }
+              }
+            }
+            if(!ok) continue;
+            for(let g=0;g<_nG;g++) _gcnt[g]+=_gmA[g*nP+i];
+          }
+          pick[6-k]=i;
+          dfs(i+1,k-1,curSal+sortSal[i],curScore+sortScore[i]);
+          if(_nG){
+            for(let g=0;g<_nG;g++) _gcnt[g]-=_gmA[g*nP+i];
+            if(nodes>CAP) return;
+          }
+        }
+      };
+      dfs(0,6,0,0);
+      if(nodes>CAP) _capHits++;
+      // bestPick holds ORDER positions; the witness is already pool indices.
+      return bestPick ? bestPick.map(i=>order[i]) : (seeded ? _wit.slice() : null);
+    };
+
+    if(_gp){
+      // ── Pre-flight feasibility probe ────────────────────────────────────
+      // ONE search, run with SALARY as the objective, answers both questions:
+      //  • null ⇒ no 6-driver lineup satisfies the rules at all → name the rules
+      //    and abort, instead of 1,000 sims of empty results and a generic
+      //    "no valid lineups" alert;
+      //  • otherwise its salary is provably the CEILING the rules allow, so the
+      //    floor message is exact (an arbitrary flat-score probe would only
+      //    report "some legal lineup I happened to reach first"), and the
+      //    lineup itself is the ideal feasibility witness for every sim below.
+      const _rules=_gp.gs.map(g=>`"${g.name}" ${[(g.ruleMin||0)>0?'min '+g.ruleMin:null,(g.ruleMax||0)>0?'max '+g.ruleMax:null].filter(Boolean).join(' / ')}`).join(', ');
+      for(let i=0;i<nP;i++){ order[i]=i; curScores[i]=salArr[i]; }
+      order.sort((a,b)=>curScores[b]-curScores[a]);
+      for(let i=0;i<nP;i++){ sortScore[i]=curScores[order[i]]; sortSal[i]=salArr[order[i]]; preS[i+1]=preS[i]+sortScore[i]; }
+      _buildG(order,nP,_gmA,_gsufA);
+      const _probe = nasOptimal(0,_PROBE_CAP);
+      _capHits=0;   // probe budget is separate — don't report it as a sim shortfall
+      if(!_probe){
+        log(`⚠ No 6-driver lineup can satisfy the group rules with this pool: ${_rules}.`);
+        alert(`No lineup can satisfy your group rules with this pool.\n\n${_rules}\n\nLoosen a rule, add drivers to a min-group, or unhide drivers.`);
+        done(); return;
+      }
+      const _probeSal = _probe.reduce((a,i)=>a+salArr[i],0);
+      _wit=_probe; _witSal=_probeSal;
+      if(minSal && _probeSal<minSal){
+        // Translate the user's WINDOW onto the reachable ceiling rather than
+        // dropping the floor to zero (which shipped $34,400 lineups against a
+        // $47,000 request) or clamping it to the ceiling itself (which is an
+        // equality constraint: on the 7/12 Cup board, max-1-of-the-top-15 has a
+        // $47,200 ceiling and exactly 3 lineups reach it, so the run emitted 1
+        // lineup of the 50 asked for). Same width, slid down to what the rules
+        // allow: a $49,000–$50,000 request becomes $46,200–$47,200, which left
+        // ~147 legal builds on that board.
+        _floorEff = Math.max(0, _probeSal - Math.max(0, maxSal - minSal));
+        log(`⚠ Group rules and the $${minSal.toLocaleString()} Min Salary floor cannot both be met — the most expensive lineup these rules allow is $${_probeSal.toLocaleString()}. Group rules are kept; the salary window slides down to $${_floorEff.toLocaleString()}–$${_probeSal.toLocaleString()}.`);
+      }
+      log(`Group rules enforced in every generated lineup: ${_rules}.`);
+    }
+
     // TRAIN/TEST SPLIT (same as UFC/PGA): candidates from EVEN sims only; EV
     // priced on the held-out odd sims via oosParity below. Without it, punt
     // fills were priced on the exact spike sims that made them optimal —
     // in-sample optimism that jammed the same two cheap trucks into half the
     // portfolio.
     for(let s=0; s<simsDone2; s+=2){
-      for(let i=0;i<nP;i++) order[i]=i;
-      order.sort((a,b)=>(evScores[b][s]||0)-(evScores[a][s]||0));
-      for(let i=0;i<nP;i++){ sortScore[i]=evScores[order[i]][s]||0; sortSal[i]=salArr[order[i]]; preS[i+1]=preS[i]+sortScore[i]; }
+      for(let i=0;i<nP;i++){ order[i]=i; curScores[i]=evScores[i][s]||0; }
+      order.sort((a,b)=>curScores[b]-curScores[a]);
+      for(let i=0;i<nP;i++){ sortScore[i]=curScores[order[i]]; sortSal[i]=salArr[order[i]]; preS[i+1]=preS[i]+sortScore[i]; }
+      if(_nG) _buildG(order,nP,_gmA,_gsufA);
       // Branch-and-bound over score-sorted drivers: bound = sum of the next k
       // best scores (prefix sums); salary feasibility via k-cheapest suffix.
-      let bestScore=-Infinity, bestPick=null;
-      const pick=new Array(6);
-      const dfs=(idx,k,curSal,curScore)=>{
-        if(k===0){ if(curScore>bestScore){ bestScore=curScore; bestPick=pick.slice(); } return; }
-        for(let i=idx;i<=nP-k;i++){
-          if(curScore + (preS[i+k]-preS[i]) <= bestScore) return;
-          if(curSal + sortSal[i] + cheapPre[k-1] > maxSal) continue;
-          pick[6-k]=i;
-          dfs(i+1,k-1,curSal+sortSal[i],curScore+sortScore[i]);
-        }
-      };
-      dfs(0,6,0,0);
-      if(bestPick){
-        const ids = bestPick.map(i=>order[i]);
+      // See nasOptimal above for the search itself.
+      // MIN SALARY (added 2026-08-03): this search only ever honoured maxSal, so
+      // Contest-EV mode shipped lineups under the user's floor while the non-EV
+      // bucket path (which checks `sal<minSal`) did not. MEASURED on the eight
+      // July slates at a $49,000 floor, 50 lineups each: 5 of 8 slates emitted
+      // 1-11 sub-floor lineups, worst $35,700 — an entire driver's salary short.
+      // runUFCContestEV's minSalC only refuses swaps that would drop BELOW the
+      // floor; it cannot lift a candidate that starts there. `expPre` bounds the
+      // salary still addable so unreachable branches are pruned.
+      // FLOOR RETRY (2026-08-03): the old in-pass "best ignoring the floor"
+      // fallback could never fire when the floor was genuinely unreachable —
+      // the expPre prune IS "this branch cannot reach the floor", so it killed
+      // every leaf before the fallback could record one and the sim produced no
+      // candidate at all. A binding ruleMin can put the whole group-legal
+      // subspace below the floor, so re-run with the floor released instead:
+      // group rules stay hard, the floor is what gives way.
+      let ids = nasOptimal(_floorEff);
+      if(!ids && _floorEff) ids = nasOptimal(0);
+      if(ids){
         let t=0; for(const i of ids) t+=evScores[i][s]||0;
         const key = ids.slice().sort((a,b)=>a-b).join('|');
         const e = rankedMap.get(key);
@@ -10390,25 +11424,78 @@ async function runNascarSimGen(){
       }
       // Chaos sim → also record the disjoint runner-up for this world:
       // best lineup with zero overlap vs the optimal just found above
-      if(simIncidents && (simIncidents[s]||0) >= CHAOS_MIN_INC && bestPick){
+      if(simIncidents && (simIncidents[s]||0) >= CHAOS_MIN_INC && ids){
         chaosSims++;
-        const usedIdx = new Set(bestPick.map(i=>order[i]));
+        const usedIdx = new Set(ids);
         const ord2 = [];
         for(let i=0;i<nP;i++) if(!usedIdx.has(order[i])) ord2.push(order[i]);
         const n2 = ord2.length;
         if(n2 >= 6){
           const sc2=new Float64Array(n2), sl2=new Float64Array(n2), pre2=new Float64Array(n2+1);
           for(let i=0;i<n2;i++){ sc2[i]=evScores[ord2[i]][s]||0; sl2[i]=salArr[ord2[i]]; pre2[i+1]=pre2[i]+sc2[i]; }
-          let bS=-Infinity, bP=null; const pk=new Array(6);
-          const dfs2=(idx,k,curSal,curScore)=>{
-            if(k===0){ if(curScore>bS){ bS=curScore; bP=pk.slice(); } return; }
-            for(let i=idx;i<=n2-k;i++){
-              if(curScore + (pre2[i+k]-pre2[i]) <= bS) return;
-              if(curSal + sl2[i] + cheapPre[k-1] > maxSal) continue;
-              pk[6-k]=i; dfs2(i+1,k-1,curSal+sl2[i],curScore+sc2[i]);
-            }
+          if(_nG) _buildG(ord2,n2,_gmB,_gsufB);
+          // Same min-salary floor as the primary search above — the chaos
+          // runner-up is the WORST offender for under-spending (it is by
+          // construction a cheap-survivor build) and was the source of the
+          // $35,700 lineup measured against a $49,000 floor.
+          // Group rules bind here too: this DFS assembles finished lineups that
+          // go straight into the candidate pool, so leaving it rule-blind would
+          // have re-opened the whole hole on exactly the high-attrition sims.
+          // No witness is available (the legal set here is the pool MINUS this
+          // sim's optimal six, which changes every sim and would cost a probe
+          // per sim to re-derive) — the node cap bounds the worst case and a
+          // capped-out chaos search simply contributes no extra candidate.
+          const search2=(fl)=>{
+            let bS=-Infinity, bP=null; const pk=new Array(6);
+            let nodes2=0;
+            if(_nG) _gcnt.fill(0);
+            const dfs2=(idx,k,curSal,curScore)=>{
+              if(_nG && nodes2++>_NODE_CAP) return;
+              if(k===0){
+                for(let g=0;g<_nG;g++) if(_gp.mins[g] && _gcnt[g]<_gp.mins[g]) return;
+                if(curSal>=fl && curScore>bS){ bS=curScore; bP=pk.slice(); }
+                return;
+              }
+              for(let i=idx;i<=n2-k;i++){
+                if(curScore + (pre2[i+k]-pre2[i]) <= bS) return;
+                if(curSal + sl2[i] + cheapPre[k-1] > maxSal) continue;
+                if(fl && curSal + sl2[i] + expPre[k-1] < fl) continue;
+                if(_nG){
+                  let ok=true;
+                  for(let g=0;g<_nG;g++){
+                    const c=_gcnt[g]+_gmB[g*nP+i];
+                    if(_gp.maxs[g] && c>_gp.maxs[g]){ ok=false; break; }
+                    if(_gp.mins[g]){
+                      const avail=_gsufB[g*(nP+1)+i+1], room=(k-1)<avail?(k-1):avail;
+                      if(c+room<_gp.mins[g]){ ok=false; break; }
+                    }
+                  }
+                  if(!ok) continue;
+                  for(let g=0;g<_nG;g++) _gcnt[g]+=_gmB[g*nP+i];
+                }
+                pk[6-k]=i; dfs2(i+1,k-1,curSal+sl2[i],curScore+sc2[i]);
+                if(_nG){
+                  for(let g=0;g<_nG;g++) _gcnt[g]-=_gmB[g*nP+i];
+                  if(nodes2>_NODE_CAP) return;
+                }
+              }
+            };
+            dfs2(0,6,0,0);
+            if(nodes2>_NODE_CAP) _capHits++;
+            return bP;
           };
-          dfs2(0,6,0,0);
+          // NO floor-released retry here, deliberately — unlike the primary
+          // search this one is OPTIONAL enrichment, so "can't clear the floor"
+          // means "skip it", not "ship it under the floor". MEASURED 2026-08-03
+          // on the 7/12 Cup board with max-1-of-the-top-15-salaries and a
+          // $47,000 floor (the group-legal maximum is $47,200, i.e. barely
+          // reachable): the runner-up's own pool is the field MINUS that sim's
+          // optimal six, which routinely cannot reach the floor at all, and a
+          // retry at fl=0 put 49/50 output lineups under it, lowest $34,400.
+          // Dropping the retry returns that to 0/50. With no group rules the
+          // floor is always reachable from a 30-driver remainder, so
+          // search2(minSal) succeeds and this is a no-op.
+          const bP = search2(_floorEff);
           if(bP){
             const ids2 = bP.map(i=>ord2[i]);
             let t2=0; for(const i of ids2) t2+=evScores[i][s]||0;
@@ -10425,6 +11512,32 @@ async function runNascarSimGen(){
       }
     }
     const rankedNas = [...rankedMap.values()].sort((a,b)=>b.count-a.count);
+    // A capped-out search still returns a group-legal lineup (or none), never an
+    // illegal one — but it may not be that sim's true optimal, so say so rather
+    // than let a very tight rule quietly degrade candidate quality.
+    if(_capHits) log(`  (${_capHits.toLocaleString()} per-sim search(es) hit the ${(_NODE_CAP/1000).toFixed(0)}k-node budget under these group rules — those candidates are rule-legal but may not be that race's exact optimal.)`);
+    // Never ship a lineup that violates the rules the user set (same doctrine
+    // as the NFL stack-rule sweep and the PGA sweep in runPgaSimGen). Both
+    // searches above already guarantee min/max, so this is normally a no-op; it
+    // exists to catch the two cases the hot searches deliberately do not model
+    // — conditional sub-group rules — and to make any future regression loud
+    // instead of silent. Downstream is safe by construction: the dominance
+    // repair in runUFCContestEV carries a monotone group guard (it refuses any
+    // swap that would turn a compliant lineup non-compliant) and both
+    // enforceMinExposure passes substitute WHOLE candidate lineups, which are
+    // all group-legal once this sweep has run.
+    if(_nasGroups.length){
+      const _hard=_nasGroups.filter(g=>(g.ruleMin||0)>0||(g.ruleMax||0)>0||(g.condGroups||[]).some(c=>c.type==='hard'));
+      if(_hard.length){
+        const before=rankedNas.length;
+        for(let i=rankedNas.length-1;i>=0;i--) if(!checkGroupRules(rankedNas[i].lineup,_hard)) rankedNas.splice(i,1);
+        if(rankedNas.length<before) log(`  (${(before-rankedNas.length).toLocaleString()} candidate(s) dropped by the group-rule check)`);
+        if(!rankedNas.length){
+          alert('Every candidate lineup was rejected by your group rules — loosen them and re-run.');
+          done(); return;
+        }
+      }
+    }
     log(`${rankedNas.length.toLocaleString()} unique ex-post optimal lineups from ${Math.ceil(simsDone2/2).toLocaleString()} generation sims (EV priced on the held-out half).`);
     if(chaosSims) log(`Chaos candidates: ${chaosCands.toLocaleString()} disjoint runner-up builds from ${chaosSims.toLocaleString()} high-attrition sims (${CHAOS_MIN_INC}+ cars out).`);
     const simScoresByIdNas = {};
@@ -10773,7 +11886,17 @@ async function runNascarSimGen(){
       const survTargetN = Math.ceil(Math.max((bucket.allocatedLineups||1)*6, 60) * capFactorN);
       const survivorsN = gauntletCull(annotatedN, survTargetN, [
         {key:'gVal',  dir:'low',  weight:3, label:'worst-value'},
-        {key:'gOwn',  dir:'high', weight:2, label:'most-unjustified-chalk', minBad:45},
+        // minBadPct, not the old absolute minBad:45. MEASURED 2026-08-03 on all
+        // eight July NASCAR slates (Cup/Xfinity/Trucks, 1,000–2,000 sims):
+        // 100% of every bucket's candidates scored above 45 (per-bucket median
+        // gOwn 126–166, min > 45 on every slate), so the threshold never once
+        // restricted the axis — the documented guarantee ("only lineups STACKED
+        // with unsupported chalk die here") was not being delivered. 0.75 keeps
+        // the axis's share of the cull at ~24%, closest to the ~28% it takes
+        // today, so this is a form fix (scale-free) rather than a re-tune.
+        // ρ(sim composite, output exposure) over 16 paired runs: 0.722 → 0.728,
+        // not significant — no outcome claim is made here.
+        {key:'gOwn',  dir:'high', weight:2, label:'most-unjustified-chalk', minBadPct:0.75},
         {key:'gComp', dir:'low',  weight:2, label:'lowest-composite'},
       ], log, bucket.playerName);
       remaining = survivorsN.map(a=>a.x);
@@ -12945,9 +14068,23 @@ async function runAutoGen(){
         gRtg:  slate.columnMapping?.rating!=null ? x.lineup.filter(p=>p.rating!=null&&!p._ratingImputed).reduce((s,p)=>s+(parseFloat(p.rating)||0),0) : null,
       }));
       const gauntletAxes = [
-        // minBad mirrors the sim engines: only lineups STACKED with unsupported
-        // ownership die on this axis, not any lineup holding one popular player.
-        {key:'gOwn',  dir:'high', weight:3, label:'most-unjustified-chalk', minBad:35},
+        // Only lineups STACKED with unsupported ownership die on this axis, not
+        // any lineup holding one popular player. Expressed as a PERCENTILE of
+        // the candidate set, not the old absolute minBad:35 — measured
+        // 2026-08-03 on four July PGA slates × {proj, rating} and eight NASCAR
+        // slates, this path's gOwn scale is entirely slate-dependent:
+        //   PGA Scottish Open   max gOwn 30.3–33.3  → axis culled 0, i.e. a
+        //                       weight-3 axis silently disabled and the
+        //                       4-axis gauntlet quietly ran on three.
+        //   PGA Open C'ship     p50 34.2            → axis culled 354 (its cap)
+        //   NASCAR (any slate)  p50 39–61           → 62–84% of candidates were
+        //                       "genuinely bad", i.e. the floor did nothing.
+        // Same absolute number, three different meanings. 0.75 pins the axis at
+        // ~20-27% of the total cull on every slate — the middle of what the
+        // absolute 35 happened to produce where it worked — so this is a form
+        // fix, not a re-tune. ρ(score, exposure), 16 paired PGA runs:
+        // 0.708 → 0.721 (t≈1.7, n.s.). No outcome data exists for these sports.
+        {key:'gOwn',  dir:'high', weight:3, label:'most-unjustified-chalk', minBadPct:0.75},
         {key:'gEq',   dir:'low',  weight:3, label:'lowest-equity'},
         {key:'gProj', dir:'low',  weight:1, label:'lowest-proj'},
         {key:'gRtg',  dir:'low',  weight:1, label:'lowest-rating'},
@@ -13993,10 +15130,14 @@ async function refreshFromSheet(){
         ['finish_r1','finish_r2','finish_r3','finish_r4','finish_r5','decision'].forEach(k=>{
           p[k]=getN(k.replace('_r','_R').replace('finish','Finish').replace('decision','Decision'));
         });
-        const ssKeys=['35','40','45','50','55','60','65','70','75','80','85','90','95','100','105','110','115','120','125'];
-        ssKeys.forEach(k=>{ p['ss_'+k]=getN(`SS_${k}plus`); });
-        const tdKeys=['1','2','3','4','5','6'];
-        tdKeys.forEach(k=>{ p['td_'+k]=getN(`TD_${k}plus`); });
+        // Rungs discovered from the header row — see ssLadderKeys. Stale rungs
+        // from a previous (wider) sheet are cleared first so a refresh against a
+        // narrower sheet doesn't leave orphan ladder points behind.
+        ladderRungs(p,'ss_').forEach(t=>{ delete p['ss_'+t]; });
+        ladderRungs(p,'td_').forEach(t=>{ delete p['td_'+t]; });
+        const _cell = i => { const n=parseFloat((row[i]||'').trim()); return (!isNaN(n)&&n!==0)?n:null; };
+        ssLadderCols(headers).forEach(c=>{ p['ss_'+c.k]=_cell(c.i); });
+        tdLadderCols(headers).forEach(c=>{ p['td_'+c.k]=_cell(c.i); });
         p.ss_ou=get('SS O/U')||null;
         p.td_ou=get('TD O/U')||null;
       }
@@ -14037,8 +15178,9 @@ async function refreshFromSheet(){
         ['finish_r1','finish_r2','finish_r3','finish_r4','finish_r5','decision'].forEach(k=>{
           p[k]=getN2(k.replace('_r','_R').replace('finish','Finish').replace('decision','Decision'));
         });
-        ['35','40','45','50','55','60','65','70','75','80','85','90','95','100','105','110','115','120','125'].forEach(k=>{ p['ss_'+k]=getN2(`SS_${k}plus`); });
-        ['1','2','3','4','5','6'].forEach(k=>{ p['td_'+k]=getN2(`TD_${k}plus`); });
+        const _cell2 = i => { const n=parseFloat((row[i]||'').trim()); return (!isNaN(n)&&n!==0)?n:null; };
+        ssLadderCols(headers).forEach(c=>{ p['ss_'+c.k]=_cell2(c.i); });
+        tdLadderCols(headers).forEach(c=>{ p['td_'+c.k]=_cell2(c.i); });
         p.ss_ou=get2('SS O/U')||null; p.td_ou=get2('TD O/U')||null;
         p.fightNum = parseInt(p.start)||null;
       }
@@ -14189,12 +15331,13 @@ function buildMapper(){
   // Columns auto-read by the UFC sim — hidden from optional mapper
   const UFC_SIM_COLS = new Set([
     'finish_r1','finish_r2','finish_r3','finish_r4','finish_r5','decision',
-    'ss_35plus','ss_40plus','ss_45plus','ss_50plus',
-    'ss_55plus','ss_60plus','ss_65plus','ss_70plus','ss_75plus','ss_80plus','ss_85plus','ss_90plus',
-    'ss_95plus','ss_100plus','ss_105plus','ss_110plus','ss_115plus','ss_120plus','ss_125plus',
-    'td_1plus','td_2plus','td_3plus','td_4plus','td_5plus','td_6plus',
     'ss o/u','td o/u',
   ]);
+  // Any SS_<n>plus / TD_<n>plus column on the sheet is sim-read, whatever the
+  // rung — the old hardcoded 35+…125+ list left 15+/20+/…/140+ showing up in
+  // the optional mapper as if they were unrecognised columns.
+  ssLadderCols(parsedCSV.headers).forEach(c=>UFC_SIM_COLS.add(String(parsedCSV.headers[c.i]||'').trim().toLowerCase()));
+  tdLadderCols(parsedCSV.headers).forEach(c=>UFC_SIM_COLS.add(String(parsedCSV.headers[c.i]||'').trim().toLowerCase()));
   const isUFCUpload = document.getElementById('slateSport')?.value === 'ufc';
   const isPGAUpload = document.getElementById('slateSport')?.value === 'pga';
 
@@ -14450,33 +15593,13 @@ function createSlate(){
       p.finish_r4  = getNum('Finish_R4');
       p.finish_r5  = getNum('Finish_R5');
       p.decision   = getNum('Decision');
-      // Sig strike alternate lines
-      p.ss_35  = getNum('SS_35plus');
-      p.ss_40  = getNum('SS_40plus');
-      p.ss_45  = getNum('SS_45plus');
-      p.ss_50  = getNum('SS_50plus');
-      p.ss_55  = getNum('SS_55plus');
-      p.ss_60  = getNum('SS_60plus');
-      p.ss_65  = getNum('SS_65plus');
-      p.ss_70  = getNum('SS_70plus');
-      p.ss_75  = getNum('SS_75plus');
-      p.ss_80  = getNum('SS_80plus');
-      p.ss_85  = getNum('SS_85plus');
-      p.ss_90  = getNum('SS_90plus');
-      p.ss_95  = getNum('SS_95plus');
-      p.ss_100 = getNum('SS_100plus');
-      p.ss_105 = getNum('SS_105plus');
-      p.ss_110 = getNum('SS_110plus');
-      p.ss_115 = getNum('SS_115plus');
-      p.ss_120 = getNum('SS_120plus');
-      p.ss_125 = getNum('SS_125plus');
-      // Takedown alternate lines
-      p.td_1 = getNum('TD_1plus');
-      p.td_2 = getNum('TD_2plus');
-      p.td_3 = getNum('TD_3plus');
-      p.td_4 = getNum('TD_4plus');
-      p.td_5 = getNum('TD_5plus');
-      p.td_6 = getNum('TD_6plus');
+      // Sig-strike / takedown alternate lines. Rungs are DISCOVERED from the
+      // header row (ssLadderCols) instead of a hardcoded 35+…125+ list — books
+      // post different sets per card and the fixed list silently discarded the
+      // priced rungs outside it.
+      const _lc = i => { const n=parseFloat((row[i]||'').trim()); return (!isNaN(n)&&n!==0)?n:null; };
+      ssLadderCols(hdrs).forEach(c=>{ p['ss_'+c.k]=_lc(c.i); });
+      tdLadderCols(hdrs).forEach(c=>{ p['td_'+c.k]=_lc(c.i); });
       p.ss_ou = get('SS O/U') || null;
       p.td_ou = get('TD O/U') || null;
     }
@@ -14755,9 +15878,15 @@ function applyPoolUpdate(){
     const getStr = name => { const i=idx(name); return i>=0?((row[i]||'').trim()||null):null; };
     ['1','2','3','4','5'].forEach(r=>{ if(has('Finish_R'+r)) p['finish_r'+r]=getNum('Finish_R'+r); });
     if(has('Decision')) p.decision=getNum('Decision');
-    ['35','40','45','50','55','60','65','70','75','80','85','90','95','100','105','110','115','120','125']
-      .forEach(k=>{ if(has('SS_'+k+'plus')) p['ss_'+k]=getNum('SS_'+k+'plus'); });
-    ['1','2','3','4','5','6'].forEach(k=>{ if(has('TD_'+k+'plus')) p['td_'+k]=getNum('TD_'+k+'plus'); });
+    // Rungs discovered from the update sheet's headers. A sheet that carries a
+    // ladder replaces the stored one wholesale (stale rungs cleared first); a
+    // salary-only sheet carries none and leaves the stored ladder untouched.
+    const _ssC = ssLadderCols(ufcHdrs), _tdC = tdLadderCols(ufcHdrs);
+    const _lcU = i => { const n=parseFloat((row[i]||'').trim()); return (!isNaN(n)&&n!==0)?n:null; };
+    if(_ssC.length){ ladderRungs(p,'ss_').forEach(t=>{ delete p['ss_'+t]; });
+                     _ssC.forEach(c=>{ p['ss_'+c.k]=_lcU(c.i); }); }
+    if(_tdC.length){ ladderRungs(p,'td_').forEach(t=>{ delete p['td_'+t]; });
+                     _tdC.forEach(c=>{ p['td_'+c.k]=_lcU(c.i); }); }
     if(has('SS O/U')) p.ss_ou=getStr('SS O/U');
     if(has('TD O/U')) p.td_ou=getStr('TD O/U');
   };
@@ -15000,22 +16129,19 @@ function renderSimInputs(){
   const FIGHTER_COLORS = ['var(--accent)','var(--blue)','var(--purple)'];
 
   // Check if any selected fighter is missing the extended odds fields
-  // (finish_r1, ss_55, td_1) — signals a stale stored slate
+  // (finish ladder, ANY SS rung, ANY TD rung) — signals a stale stored slate.
+  // Keying this off the literal ss_55/td_1 rungs broke on cards that don't
+  // price those particular rungs.
   const missingOdds = fighters.some(p =>
-    p.finish_r1 == null && p.ss_55 == null && p.td_1 == null
+    p.finish_r1 == null && ladderRungs(p,'ss_').length===0 && ladderRungs(p,'td_').length===0
   );
 
-  const SS_FIELDS = [
-    {k:'ss_35',l:'35+'},{k:'ss_40',l:'40+'},{k:'ss_45',l:'45+'},{k:'ss_50',l:'50+'},
-    {k:'ss_55',l:'55+'},{k:'ss_60',l:'60+'},{k:'ss_65',l:'65+'},{k:'ss_70',l:'70+'},
-    {k:'ss_75',l:'75+'},{k:'ss_80',l:'80+'},{k:'ss_85',l:'85+'},{k:'ss_90',l:'90+'},
-    {k:'ss_95',l:'95+'},{k:'ss_100',l:'100+'},{k:'ss_105',l:'105+'},{k:'ss_110',l:'110+'},
-    {k:'ss_115',l:'115+'},{k:'ss_120',l:'120+'},{k:'ss_125',l:'125+'},
-  ];
-  const TD_FIELDS = [
-    {k:'td_1',l:'1+'},{k:'td_2',l:'2+'},{k:'td_3',l:'3+'},
-    {k:'td_4',l:'4+'},{k:'td_5',l:'5+'},{k:'td_6',l:'6+'},
-  ];
+  // Rows are built from whatever rungs the selected fighters actually carry,
+  // so a card priced 15+…140+ shows all of them and a narrow card shows fewer.
+  const _uSS = [...new Set(fighters.flatMap(p=>ladderRungs(p,'ss_')))].sort((a,b)=>a-b);
+  const _uTD = [...new Set(fighters.flatMap(p=>ladderRungs(p,'td_')))].sort((a,b)=>a-b);
+  const SS_FIELDS = _uSS.map(t=>({k:'ss_'+t, l:t+'+'}));
+  const TD_FIELDS = _uTD.map(t=>({k:'td_'+t, l:t+'+'}));
 
   function fmtOdds(val){
     const n = parseFloat(val);
@@ -15126,13 +16252,13 @@ renderTopBar();
 if(activeSlateId)renderSlate();
 
 // Auto-refresh sheet-backed UFC slates that are missing extended odds fields
-// (finish_r1, ss_55, td_1). This happens when a slate was saved before the
-// odds column-scan was added, or after a browser storage clear.
+// (finish ladder / any SS rung / any TD rung). This happens when a slate was
+// saved before the odds column-scan was added, or after a browser storage clear.
 (function autoRefreshUFCOdds(){
   const sl = activeSlate();
   if(!sl || sl.sport !== 'ufc' || !sl.sheetTab) return;
   const hasOdds = (sl.players||[]).some(p =>
-    p.finish_r1 != null || p.ss_55 != null || p.td_1 != null
+    p.finish_r1 != null || ladderRungs(p,'ss_').length>0 || ladderRungs(p,'td_').length>0
   );
   if(!hasOdds){
     // Silently trigger a sheet refresh to repopulate odds fields
