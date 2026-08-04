@@ -1308,7 +1308,7 @@ html { overscroll-behavior-y: contain; }
                   <button onclick="saveContestPreset()" title="Save the current field size / fee / payout structure as a contest for one-click reuse"
                     style="width:100%;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);color:var(--green);padding:5px 8px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;">💾 Save as contest</button>
                 </div>
-                <div style="font-size:9px;color:var(--muted);line-height:1.5;">Field modeled from Own% under cap/no-oppose, dup-adjusted, with a standard ±35% allowance for ownership projection error. Risk is standardized to the slate stake (assumes entries follow your bankroll management). At leverage 0 uniqueness is priced by the payout curve alone; above 0 the slider tilts tournament-head credit toward fighters the sim says the field under-owns (equity-vs-ownership), leaving cash EV untouched.</div>
+                <div style="font-size:9px;color:var(--muted);line-height:1.5;">Field modeled from Own% under cap/no-oppose, dup-adjusted, with a standard ±35% allowance for ownership projection error. Risk is standardized to the slate stake (assumes entries follow your bankroll management). Leverage stances are AUTO-solved per slate: worlds are weighted by orphaned equity (dead ownership × how rosterable the beneficiary was), and the strength is chosen by a logged sweep — most top-0.5% coverage within a bounded EV give-up. Slider 0 = auto (default); above 0 pins the strength manually.</div>
               </div>
             </div>
             <div style="padding:6px 8px;background:rgba(168,85,247,.07);border:1px solid rgba(168,85,247,.2);border-radius:5px;font-size:9px;color:var(--muted);line-height:1.5;">
@@ -7181,74 +7181,70 @@ async function runUFCContestEV(ctx){
   const fee  = parseFloat(cfg.fee)||20;
   const payout = buildPayoutFn({fieldSize:F, fee, preset:cfg.preset||'gpp', custom:cfg.custom});
   const tick = ()=>new Promise(r=>setTimeout(r,0));
-  // ── Leverage slider, EV-mode semantics (added 2026-08-04) ─────────────────
-  // The EV engine's honest answer prices uniqueness through the payout curve,
-  // and with calibrated inputs it lands most fighters NEAR their field
-  // ownership — it will not, on its own, jam an under-owned finisher against
-  // 38%-owned chalk the way a leverage-seeking entrant deliberately does
-  // (measured on 8/1: the entire real top-100 held the 13.8%-owned +385-ITD
-  // dog; the engine's neutral build held him at ~his ownership). That extra
-  // lean is a risk POSTURE, not a mispricing — so it belongs on the dial the
-  // user already owns. In EV mode the slider now tilts the HEAD-COVERAGE
-  // credit (never flat cash, so min-cash EV stays honest) by each lineup's
-  // equity-vs-ownership ratio — the same equity-relative levShape the non-EV
-  // path uses: ratio_i = (optimal-rate share) / (field-ownership share).
-  // >1 = the sim says the field under-holds him (boost); <1 = over-held chalk
-  // (fade). Punts stay neutral (low equity ÷ low own ≈ 1) — cranking the
-  // slider cannot bury a stud under a scrub. Slider 0 = the engine's neutral
-  // answer, exactly as before.
-  // Mechanism: SIM REWEIGHTING of the head-coverage credit. Each priced sim
-  // gets a CHALK-BUST score b(s) — the ownership-weighted fraction of the
-  // TOP-OWNED quartile of the board that LOST in that sim (the chalk block is
-  // where a bust actually redistributes tournament equity; averaging over the
-  // whole board flattens the signal to nothing). At slider L the head credit
-  // in sim s is scaled by an exponential tilt in sd units,
-  //   w(s) ∝ exp( L · 1.5 · (b(s) − mean b) / sd b ),   renormalized to mean 1,
-  // so at L=1 a +2σ chalk-massacre world carries ~20× the coverage weight of a
-  // −2σ all-chalk-holds world, and the greedy buys its tournament coverage in
-  // the worlds where the field's rosters die (Cepo busting zeroes a slot on
-  // 38% of entries) and an under-owned finisher's win is worth the most.
-  // Slider 0 → every sim weighs 1.00, the engine's neutral answer, identical
-  // to the old behavior. Flat cash EV and every REPORTED $ figure stay
-  // unweighted — the slider changes what the portfolio COVERS, never what
-  // the math claims it earns.
+  // ── LEVERAGE-YIELD WORLD WEIGHTING (UFC, 2026-08-04) ──────────────────────
+  // Where to take leverage stances is not a taste dial — it is a computable
+  // property of each simulated world: how much field ownership DIED there,
+  // and how ROSTERABLE the beneficiaries were. Per priced sim s the engine
+  // scores the world's ORPHANED EQUITY:
+  //   OE(s) = Σ over losers i of  own_i × R(winner's score)²,  R = min(1, s/100)
+  // A Cepo bust (37.7% owned, Urbina scoring ~105) is a heavy world; a
+  // -10000 favorite's bust barely exists in the sims (probability gates the
+  // unchaseable, exactly as it should); a decision-grinder's win over chalk
+  // earns partial credit (R² on a 70-point score ≈ half weight); and finisher
+  // chalk (Valentin, 49% ITD) keeps its OWN hold-worlds heavy because his
+  // hits orphan his opponent's ownership at full R. Head+mid coverage credit
+  // is reweighted ∝ exp(β·1.5·zscore(OE)); flat cash and every REPORTED $
+  // stay unweighted.
+  // β IS SOLVED PER SLATE, not dialed: the selection-stability restarts (F1)
+  // now sweep β ∈ {0, 0.5, 1.0} — one portfolio each on independent field
+  // samples — and the winner is judged on the common eval field by a
+  // documented rule: among portfolios within max($10, 10% of stake) of the
+  // best EV, take the most top-0.5%-coverage; tiebreak EV. The chosen β and
+  // the price paid are logged every run. The slider is now a manual OVERRIDE
+  // only: 0 = auto-solve (default), >0 pins β = slider/100 and restores the
+  // three identical stability restarts.
   const _levStr = (slate.sport==='ufc')
     ? Math.max(0, Math.min(1, (parseInt(document.getElementById('ufcLeverageSlider')?.value)||0)/100))
     : 0;
-  let _simW = null;   // filled after simIdx is built below (needs the sim list)
-  const _buildSimW = (idxList) => {
-    if(!(_levStr > 0)) return null;
+  const _levAuto = (slate.sport==='ufc') && !(_levStr > 0);
+  let _oeZ = null;    // per-sim orphaned-equity z-scores (built after simIdx exists)
+  let _simW = null;   // current β's normalized weights (null ⇒ all 1)
+  const _buildOeZ = (idxList) => {
+    if(slate.sport!=='ufc') return null;
     const _ownV = pool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
     const _oppOf = pool.map(p=>pool.findIndex(q=>q!==p && typeof ufcSameFight==='function' && ufcSameFight(p,q)));
     const _sArr = pool.map(p=>simScoresById[p.id]||[]);
-    // Chalk block: top-owned quartile of paired fighters (min 4).
-    const _paired = pool.map((p,i2)=>({i:i2, own:_ownV[i2]})).filter(x=>_oppOf[x.i]>=0)
-      .sort((a,b)=>b.own-a.own);
-    const _chalk = _paired.slice(0, Math.max(4, Math.ceil(_paired.length/4)));
-    const bust=[]; let bSum2=0;
+    const oe=[]; let sum=0;
     for(let s2=0;s2<idxList.length;s2++){
       const si=idxList[s2];
-      let num=0, den=0;
-      for(const {i:i2, own} of _chalk){
-        const o=_oppOf[i2];
-        den += own;
-        if((_sArr[i2][si]||0) < (_sArr[o][si]||0)) num += own;
+      let v=0;
+      for(let i2=0;i2<pool.length;i2++){
+        const o=_oppOf[i2]; if(o<0) continue;
+        const sl=(_sArr[i2][si]||0), sw=(_sArr[o][si]||0);
+        if(sl < sw){                       // i2 lost; his opponent is the beneficiary
+          const R = Math.min(1, sw/100);   // rosterability of the beneficiary's actual score
+          v += _ownV[i2] * R * R;
+        }
       }
-      const b = den>0 ? num/den : 0.5;
-      bust.push(b); bSum2+=b;
+      oe.push(v); sum+=v;
     }
-    const bMean = bSum2/Math.max(1,bust.length) || 0.5;
-    let v2=0; for(const b of bust){ const d=b-bMean; v2+=d*d; }
-    const bSd = Math.sqrt(v2/Math.max(1,bust.length)) || 0.1;
-    const w = bust.map(b=>Math.exp(_levStr*1.5*(b-bMean)/bSd));
-    const wm=w.reduce((a,b)=>a+b,0)/w.length;
-    if(wm>0) for(let s2=0;s2<w.length;s2++) w[s2]/=wm;
-    return w;
+    const mean=sum/Math.max(1,oe.length)||1;
+    let vv=0; for(const x of oe){ const d=x-mean; vv+=d*d; }
+    const sd=Math.sqrt(vv/Math.max(1,oe.length))||1;
+    return oe.map(x=>(x-mean)/sd);
+  };
+  const setLevBeta = (b) => {
+    if(!_oeZ || !(b>0)){ _simW=null; return; }
+    const w=_oeZ.map(z=>Math.exp(b*1.5*z));
+    const m=w.reduce((a,c)=>a+c,0)/Math.max(1,w.length);
+    _simW = m>0 ? w.map(x=>x/m) : null;
   };
   const simWAt = s2 => _simW ? (_simW[s2]!=null?_simW[s2]:1) : 1;
-  log(_levStr>0
-    ? `Contest EV: ${payout.desc}. Leverage ${Math.round(_levStr*100)}: head coverage reweighted toward chalk-bust worlds (ownership-weighted upset mass per sim); cash EV and all reported $ stay honest.`
-    : `Contest EV: ${payout.desc}. Leverage 0 — uniqueness priced by the curve alone.`);
+  log(slate.sport==='ufc'
+    ? (_levAuto
+      ? `Contest EV: ${payout.desc}. Leverage stances: AUTO — worlds weighted by orphaned equity (dead ownership × beneficiary rosterability); strength β solved per slate via the restart sweep below.`
+      : `Contest EV: ${payout.desc}. Leverage stances: MANUAL β=${_levStr.toFixed(2)} (slider pin) on orphaned-equity world weighting.`)
+    : `Contest EV: ${payout.desc}.`);
   // Same overlay guard as the contest summary line: pool > entries×fee means
   // the field size is almost certainly the places-paid count, not total
   // entries — every EV% that follows would be inflated by the phantom overlay.
@@ -7277,7 +7273,8 @@ async function runUFCContestEV(ctx){
   } else {
     const stride = totalSims/SIMS; for(let k=0;k<SIMS;k++) simIdx.push(Math.floor(k*stride));
   }
-  _simW = _buildSimW(simIdx);   // leverage slider's chalk-bust sim weights (null at slider 0)
+  _oeZ = _buildOeZ(simIdx);            // orphaned-equity world scores (UFC)
+  setLevBeta(_levAuto ? 0 : _levStr);  // auto: initial pricing at β=0; the F1 sweep prices each β itself
 
   // 1) OWNERSHIP-UNCERTAINTY SCENARIOS + field models.
   // Ownership projections are point estimates of the least-knowable input, and
@@ -7487,6 +7484,15 @@ async function runUFCContestEV(ctx){
           if(made>=VARIANTS_PER) break;
           if(_comp(q) <= _comp(p)) break;             // only upward variants; original keeps the downside worlds
           if(lu.some(x=>x.id===q.id)) continue;
+          // PRICE-BANDED (fixed 2026-08-04): alternatives come from the SAME
+          // price notch (≤ +$400), not from anywhere the cap allows. Unbanded,
+          // the scan walked down from the top of the composite board and
+          // "upgraded" every $7,100 leverage body into a $7,700-8,000 mid
+          // floor whenever leftover existed — measured cutting Urbina's
+          // exposure from ~12-18% to 6% while feeding the mid block. Within
+          // the notch, the swap answers the question it was built for ("why
+          // hold Cowan when Urbina costs $400 more") and nothing else.
+          if((q.salary||0) > (p.salary||0) + 400) continue;
           if((q.salary||0) > (p.salary||0) + leftover) continue;
           if(_minSalC && (used - (p.salary||0) + (q.salary||0)) < _minSalC) continue;
           if(_veNoOpp && lu.some((x,j)=>j!==wi && _veOpps(q,x))) continue;
@@ -7754,9 +7760,38 @@ async function runUFCContestEV(ctx){
   // coverage-credited (per sim, max over entries — a second lineup stacking
   // an already-covered winning scenario earns zero head credit). Flat
   // structures (double-ups) have no head, so this reduces to pure EV there.
-  const HEAD_RANK = Math.max(10, Math.round(F*0.001));
+  // ── Three-tier payout credit (UFC, 2026-08-04) ────────────────────────────
+  // The old objective covered the top 0.1% and relegated EVERYTHING below rank
+  // ~48 to a 1% cash tiebreak. That is structurally blind to where single-
+  // fighter ownership leverage actually pays: an under-owned fighter beating a
+  // 38%-owned opponent converts to rank-jumps through the $10-$100 tiers with
+  // only 4-5 other hits — ~22% of the prize pool lives in ranks 49-1,625 and
+  // the engine weighted it at 1%. Measured symptom: the clearest leverage spot
+  // on the 8/1 card (Urbina, 21% ITD at 15% own vs the most-owned fighter)
+  // priced out at ~his ownership no matter what upstream was fixed.
+  //   HEAD  = top 0.5% — COVERAGE-credited. Widened from 0.1%: the difference
+  //           between a top-0.1% and top-0.5% lineup is mostly which breaks
+  //           landed (a knockdown, a quick-win bonus) — both are winnable-world
+  //           signals — and at NF=2,000 the 0.1% cut is the top TWO sample
+  //           entries (pure noise) while 0.5% is the top ~10 (measurable).
+  //           Credit self-scales (payout − floor), so rank-1-caliber covers
+  //           still dominate the auction; chop/dup logic is unchanged.
+  //   MID   = 0.5%-2% — ADDITIVE. Broad, near-uniform presence money where a
+  //           multi-entry book legitimately collects several prizes at once;
+  //           clone concentration self-limits via own-rank pushdown and dup
+  //           pricing. Rides the leverage slider's chalk-bust weighting.
+  //   FLAT  = the rest — cash tiebreak, as before.
+  // Non-UFC sports keep the original 0.1% head / no mid tier until their
+  // paths are re-benchmarked (same scoping doctrine as everything above).
+  const HEAD_RANK = (slate.sport==='ufc')
+    ? Math.max(10, Math.round(F*0.005))
+    : Math.max(10, Math.round(F*0.001));
+  const MID_RANK  = (slate.sport==='ufc') ? Math.max(HEAD_RANK, Math.round(F*0.02)) : HEAD_RANK;
   const headFloor = payout.at(HEAD_RANK);
+  const midFloor  = payout.at(MID_RANK);
   const headPartAt = r => r<=HEAD_RANK ? Math.max(0, payout.at(r)-headFloor) : 0;
+  const midPartAt  = r => (MID_RANK>HEAD_RANK && r<=MID_RANK)
+    ? Math.max(0, Math.min(payout.at(r), headFloor) - midFloor) : 0;
   // (2026-08-04) A fully ADDITIVE head credit was tested here — it re-created
   // the near-clone stacking the coverage rule exists to prevent (measured:
   // Valentin+Gugnon co-exposure 67%, Gugnon 60% — flat-region rank money does
@@ -7804,9 +7839,9 @@ async function runUFCContestEV(ctx){
     }
     return { shape: beating + tied/2 + 0.5, scale: F / sampleN };
   };
-  // Returns [totalPay, headPart] integrated over the true-rank posterior.
-  // Optional (arr, t): the sim's sorted field totals and the candidate's own
-  // total — supplying them enables the tail refinement above.
+  // Returns [totalPay, headPart, midPart] integrated over the true-rank
+  // posterior. Optional (arr, t): the sim's sorted field totals and the
+  // candidate's own total — supplying them enables the tail refinement above.
   const expPayoutSplit = (beating, tied, sampleN, dups, myBeats, arr, t) => {
     const est    = beatersEst(beating, tied, sampleN, arr, t);
     const shape  = est.shape;
@@ -7814,16 +7849,16 @@ async function runUFCContestEV(ctx){
     const offset = 1 + dups/2 + myBeats;
     if(shape > 30){
       const r = shape*scale + offset;
-      return [payout.at(r), headPartAt(r)];
+      return [payout.at(r), headPartAt(r), midPartAt(r)];
     }
-    let s=0, h=0;
+    let s=0, h=0, m=0;
     const rt = 3*Math.sqrt(shape), corr = 1 - 1/(9*shape);
     for(let q=0;q<5;q++){
       const c = corr + WH_Z[q]/rt;
       const r = shape * Math.max(0, c*c*c) * scale + offset;
-      s += payout.at(r); h += headPartAt(r);
+      s += payout.at(r); h += headPartAt(r); m += midPartAt(r);
     }
-    return [s/5, h/5];
+    return [s/5, h/5, m/5];
   };
   const expPayout = (beating, tied, sampleN, dups, myBeats, arr, t) =>
     expPayoutSplit(beating, tied, sampleN, dups, myBeats, arr, t)[0];
@@ -7875,10 +7910,10 @@ async function runUFCContestEV(ctx){
         while(lo2<hi2){ const mid=(lo2+hi2)>>1; if(arr[mid]<t) lo2=mid+1; else hi2=mid; }
         const beating = arr.length-lo;
         const tied    = lo-lo2;
-        // Leverage slider: head part rides the chalk-bust sim weight; flat
-        // cash is never reweighted (see _buildSimW above).
-        const [_pay, _hd] = expPayoutSplit(beating, tied, arr.length, dups, 0, arr, t);
-        bSum[s%K] += (_pay - _hd) + _hd*simWAt(s); bCnt[s%K]++;
+        // Leverage slider: head AND mid parts ride the chalk-bust sim weight;
+        // flat cash is never reweighted (see _buildSimW above).
+        const [_pay, _hd, _md] = expPayoutSplit(beating, tied, arr.length, dups, 0, arr, t);
+        bSum[s%K] += (_pay - _hd - _md) + (_hd + _md)*simWAt(s); bCnt[s%K]++;
       }
       e._ev = robustAgg(bSum, bCnt) - fee;
       if(c>0 && c%400===0){
@@ -7903,7 +7938,9 @@ async function runUFCContestEV(ctx){
   // diversification across distinct #1 paths emerges from the objective, not
   // from constraints. Also makes the objective submodular, which the lazy
   // greedy formally requires (marginals only shrink as the portfolio grows).
-  log(`Objective: TOURNAMENT WIN EQUITY — head = top ${Math.max(10, Math.round(F*0.001)).toLocaleString()} places, coverage-credited per outcome, dup-adjusted; cash EV is a tiebreak, not a goal. (Flat curves like double-ups revert to pure cash EV.)`);
+  log(MID_RANK > HEAD_RANK
+    ? `Objective: TOURNAMENT WIN EQUITY — head = top ${HEAD_RANK.toLocaleString()} (0.5%), coverage-credited per outcome; mid = through ${MID_RANK.toLocaleString()} (2%), additive presence money; both dup-adjusted; flat cash is a tiebreak. (Flat curves like double-ups revert to pure cash EV.)`
+    : `Objective: TOURNAMENT WIN EQUITY — head = top ${HEAD_RANK.toLocaleString()} places, coverage-credited per outcome, dup-adjusted; cash EV is a tiebreak, not a goal. (Flat curves like double-ups revert to pure cash EV.)`);
   // ── Portfolio selection, wrapped so AUTO-EXPOSURE can re-run it with
   // per-pillar caps and compare WHOLE PORTFOLIOS. pillarCap: Map(id→capPct);
   // it only ever TIGHTENS the user's manual caps, never loosens them.
@@ -7979,26 +8016,29 @@ async function runUFCContestEV(ctx){
       const {beating,tied,n} = fieldStats(t,s);
       const dupsS = e._dupsK ? e._dupsK[s%K] : 0;
       const j0 = mySlot(t,s);
-      const [ownPay, ownHead] = expPayoutSplit(beating, tied, n, dupsS, j0, fieldSorted[s], t);
+      const [ownPay, ownHead, ownMid] = expPayoutSplit(beating, tied, n, dupsS, j0, fieldSorted[s], t);
       // Flat part additive (incl. the rank-pushdown cost to entries below).
       // Head credit is strictly NEW-SCENARIO: a winning outcome is either
       // covered by the portfolio or it isn't — the goal is ONE unique winner
       // per scenario, so a second entry landing in an already-covered
       // scenario earns zero head credit (not the incremental upgrade the
       // previous max-based rule paid, which still rewarded soft stacking).
-      const flat = (ownPay - ownHead) + sufShift[s][j0];
+      const flat = (ownPay - ownHead - ownMid) + sufShift[s][j0];
       // Incremental head coverage: credit only the IMPROVEMENT over the best
       // head finish the portfolio already holds in this outcome — a clone of
       // a covered scenario earns nothing, an upgrade (rank-40 caliber → rank-1
       // caliber) earns the difference. Weighted max-coverage: submodular, and
       // exactly "one winner per scenario, and when it wins, win the most".
-      // Leverage slider: coverage credit earned in a chalk-bust world weighs
-      // more than the same credit in a chalk-holds world (simWAt ≡ 1 at 0).
-      const headGain = Math.max(0, ownHead - bestHead[s]) * simWAt(s);
+      // MID tier (0.5%-2%) is ADDITIVE at full weight: presence money that a
+      // multi-entry book legitimately collects several times per world —
+      // own-rank pushdown (j0) and dup pricing keep clones self-limiting.
+      // Leverage slider: head AND mid credit earned in a chalk-bust world
+      // weigh more than in a chalk-holds world (simWAt ≡ 1 at 0).
+      const headGain = (Math.max(0, ownHead - bestHead[s]) + ownMid) * simWAt(s);
       hSum[s%K] += headGain;
       bSum[s%K] += flat + headGain - fee; bCnt[s%K]++;
     }
-    // head: new-winning-scenario equity only; cash: full marginal EV
+    // head: new-winning-scenario equity + additive mid presence; cash: full marginal EV
     return { head: robustAgg(hSum, bCnt), cash: robustAgg(bSum, bCnt) };
   };
   const acceptEntry = e => {
@@ -8110,26 +8150,29 @@ async function runUFCContestEV(ctx){
   // entries counted ahead), summed to portfolio gross per sim.
   const evalPortfolio = (sel, arrs, fsrt, dupsFn) => {
     const stake = fee*sel.chosen.length;
-    let netSum=0, dead=0;
+    let netSum=0, dead=0, cov=0;
     const ents = sel.chosen.map(e=>({ idxs:e.lineup.map(p=>idxById.get(p.id)).filter(i=>i!=null), dups: dupsFn ? dupsFn(e) : e._dupsK }));
     for(let s=0; s<fsrt.length; s++){
       const si=simIdx[s];
       const tots = ents.map(en=>{ let t=0; for(const i of en.idxs) t+=(arrs[i][si]||0); return {t, dups:en.dups?en.dups[s%K]:0}; })
         .sort((a,b)=>b.t-a.t);
       const arr=fsrt[s];
-      let gross=0;
+      let gross=0, covered=false;
       for(let mi=0; mi<tots.length; mi++){
         const t=tots[mi].t;
         let lo=0, hi=arr.length;
         while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid]<=t) lo=mid+1; else hi=mid; }
         let lo2=0, hi2=lo;
         while(lo2<hi2){ const mid=(lo2+hi2)>>1; if(arr[mid]<t) lo2=mid+1; else hi2=mid; }
-        gross += expPayout(arr.length-lo, lo-lo2, arr.length, tots[mi].dups, mi, arr, t);
+        const [_p2,_h2] = expPayoutSplit(arr.length-lo, lo-lo2, arr.length, tots[mi].dups, mi, arr, t);
+        gross += _p2;
+        if(_h2 > 0.5) covered=true;   // holds a head-caliber (top-0.5%) finish in this world
       }
       netSum += gross-stake;
+      if(covered) cov++;
       if(gross < 0.10*stake) dead++;
     }
-    return { ev: netSum/Math.max(1,fsrt.length), dead: dead/Math.max(1,fsrt.length) };
+    return { ev: netSum/Math.max(1,fsrt.length), dead: dead/Math.max(1,fsrt.length), cov: cov/Math.max(1,fsrt.length) };
   };
 
   // ── AUTO-EXPOSURE (make-cut rule; no knobs, no extra decisions) ────────────
@@ -8189,13 +8232,22 @@ async function runUFCContestEV(ctx){
     const evalCtx = await makeCtx();
     if(evalCtx===null) return null;
     let curCtx = { scenarios, fields, fieldKeyCounts, fieldSorted }; // restart 1 = the already-built-and-priced context
-    let selCtx = null, bestEv = -Infinity, kept = 0;
-    const evs = [];
+    // β SWEEP (UFC auto-leverage): the restarts double as the leverage solve —
+    // each runs at a different orphaned-equity weighting strength on its own
+    // independent field sample. Manual slider pin (or non-UFC) keeps three
+    // identical-β restarts, the original stability semantics.
+    const BETAS = _levAuto ? [0, 0.5, 1.0]
+                           : [ _levStr, _levStr, _levStr ];
+    let selCtx = null, kept = 0, keptQ = null;
+    const results = [];
     for(let r=0; r<RESTARTS; r++){
       if(r>0){
         const c = await makeCtx();
         if(c===null) return null;
         activateCtx(c); curCtx = c;
+      }
+      setLevBeta(BETAS[r]);
+      if(r>0 || (BETAS[r]>0)){          // restart 1 was pre-priced at β=BETAS[0] only if that was 0
         const el2 = await priceCandidates(true);
         if(el2===null) return null;
         evList = el2;
@@ -8205,19 +8257,46 @@ async function runUFCContestEV(ctx){
       if(window._genCancelled) return null;
       const q = evalPortfolio(s, scoreArr, evalCtx.fieldSorted,
         e => entryDups(e, evalCtx.scenarios, evalCtx.fieldKeyCounts, evalCtx.fields));
-      evs.push(q.ev);
-      if(q.ev > bestEv){ bestEv = q.ev; sel = s; selCtx = curCtx; kept = r; }
+      results.push({r, beta:BETAS[r], s, q, ctx:curCtx});
       await tick(); if(window._genCancelled) return null;
     }
-    // Reactivate the winner's field context (and its candidate pricing) if a
-    // later restart's context is currently live.
+    // Judge on the COMMON eval field. Auto mode's documented rule: take the
+    // LARGEST β whose honest-EV give-up vs the best portfolio stays within
+    // max($10, 10% of stake). Judged purely on model-internal currency the
+    // neutral build wins by construction (β=0 IS the EV-optimal greedy), so
+    // "auto" cannot mean "the model picks freely" — it means the leverage
+    // stance is taken wherever orphaned equity says it lives, at a price
+    // bounded by a fixed standard (same doctrine as the ±35% ownership
+    // allowance and the F4 anchor: a documented allowance, measured and
+    // logged every slate, not a vibe). Manual/non-UFC: best EV, the original
+    // F1 rule.
+    let win;
+    if(_levAuto){
+      const bestEv = Math.max(...results.map(x=>x.q.ev));
+      const tol = Math.max(10, 0.10*fee*target);
+      const elig = results.filter(x=>x.q.ev >= bestEv - tol);
+      elig.sort((a,b)=> b.beta - a.beta || b.q.ev - a.q.ev);
+      win = elig[0];
+    } else {
+      results.sort((a,b)=> b.q.ev - a.q.ev);
+      win = results[0];
+    }
+    sel = win.s; selCtx = win.ctx; kept = win.r; keptQ = win.q;
+    // Reactivate the winner's field context, pricing and β so everything
+    // downstream (floors, reporting) is coherent with the kept portfolio.
+    setLevBeta(BETAS[kept]);
     if(selCtx && selCtx.fieldSorted !== fieldSorted){
       activateCtx(selCtx);
       const el2 = await priceCandidates(true);
       if(el2===null) return null;
       evList = el2;
     }
-    log(`Selection stability (F1): best-of-${RESTARTS} greedy restarts vs independent field samples — portfolio EV ${evs.map(v=>(v>=0?'+':'−')+'$'+Math.abs(Math.round(v))).join(' / ')} on the common eval field; kept restart #${kept+1}.`);
+    if(_levAuto){
+      const fmt = x=>`β=${x.beta.toFixed(1)}: EV ${x.q.ev>=0?'+':'−'}$${Math.abs(Math.round(x.q.ev))}, top-0.5% cov ${(100*x.q.cov).toFixed(0)}%`;
+      log(`Leverage auto-solve (F1 sweep): ${results.slice().sort((a,b)=>a.beta-b.beta).map(fmt).join(' · ')} — kept β=${BETAS[kept].toFixed(1)} (rule: largest β within max($10, 10% of stake) of best EV; the give-up is the stance's logged price).`);
+    } else {
+      log(`Selection stability (F1): best-of-${RESTARTS} greedy restarts vs independent field samples — portfolio EV ${results.map(x=>(x.q.ev>=0?'+':'−')+'$'+Math.abs(Math.round(x.q.ev))).join(' / ')} on the common eval field; kept restart #${kept+1}.`);
+    }
   }
   if(sel===null) return null;
   if(window._genCancelled) return null;
