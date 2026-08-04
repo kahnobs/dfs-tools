@@ -5380,7 +5380,19 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // 0.70 takes most of the available correction while keeping ladder MAE inside
   // the 0.035 bar. Going further buys realism against the 25 decisions in the
   // sample at the cost of the 1,580 priced rungs. Revisit at ~80 decisions.
-  const FATIGUE_A = 0.70;
+  // RE-TUNED 0.70 -> 0.45 on 2026-08-04, after the deep-rung tail de-vig
+  // (calibrateLadder TAIL_BETA) changed the reference this constant was fitted
+  // against. The old sweep rejected lower alpha on ladder-MAE measured against
+  // the PRICED rungs — which the de-vig now identifies as juiced at the depths
+  // that were inflating decision volume. With TAIL_BETA 1.35 active, 0.45 hits
+  // BOTH realized targets at once (8k sims, 8/1): slate P(>=110 | decision
+  // win) 14.5% -> 11.8% (realized ~12%) and mean decision-win score 82.1 ->
+  // 79.1 (realized decision winners ~72-77; Nikolic's actual 8/1 decision win
+  // scored 76.15 while the engine was crediting his decision wins a mean of 85
+  // with P(>=100)=26% — which made a 65%-win volume mid a member of most
+  // modeled tournament-head entries, and is exactly why the builder kept
+  // buying 8.0-8.6k floor stacks over finishers).
+  const FATIGUE_A = 0.45;
   const durScale = (function(){
     if(!(fighter._expFightMin > 0)) return 1;
     const raw = _elapsedMin / fighter._expFightMin;
@@ -7425,6 +7437,84 @@ async function runUFCContestEV(ctx){
     if(dropped) log(`⚠ No-oppose screen: dropped ${dropped} candidate(s) containing opposing fighters (e.g. ${ex}) — an upstream stage leaked past the rule.`);
   }
 
+  // ── BODY-VARIANT ENRICHMENT (UFC, 2026-08-04) ─────────────────────────────
+  // Per-sim optimals carry exactly ONE body per core: whoever spiked in the
+  // sim that generated the lineup. The EV auction downstream can only choose
+  // among candidates that EXIST — so when the greedy wants "this core, in a
+  // new world", its only option may be the Cowan variant, and a bottom-of-
+  // board body inherits exposure it could never win in a fair fight. Hard
+  // fixes were tried and rejected (a value-line exclusion and a dominance
+  // swap both impose a rule where the engine should simply not WANT the bad
+  // play, and a forced swap deletes the diversification a leverage body's
+  // LOSS worlds deserve). The no-rule fix is supply: for each candidate, ADD
+  // sibling variants with its weakest-composite slot swapped to each of the
+  // top affordable alternatives — the ORIGINAL candidate is kept, nothing is
+  // forced, and pricing decides which body each core actually carries. A bad
+  // body now loses the auction on equity (its variants price lower in every
+  // world except its own wins, which stay covered by the originals), while
+  // the value tier spreads across ALL its live members instead of whichever
+  // one the generation sims happened to spike.
+  if(slate.sport==='ufc' && ranked.length){
+    const _comp = p => (p._simP50!=null ? parseFloat(p._simP50) : 0);
+    const _capSal = ctx.maxSal || 50000;
+    const _minSalC = ctx.minSal || 0;
+    const _veNoOpp = (document.getElementById('genUfcNoOppose')?.checked||false);
+    const _veFx = p => { const f=p.fightNum||parseInt(p.start)||0; return f>0 && ufcExcludedFights.has(f); };
+    const _veOpps = (p,q) => !_veFx(p) && !_veFx(q) && ufcSameFight(p,q);
+    const _veGrps = (slate.groups||[]).filter(g =>
+      (g.ruleMin||0)>0 || (g.ruleMax||0)>0 || g.ufcNoOppose ||
+      (g.condGroups||[]).some(c=>c.type==='hard'));
+    const _byCompDesc = pool.slice().sort((a,b)=>_comp(b)-_comp(a));
+    const VARIANTS_PER = 2;
+    const seen = new Map();
+    ranked.forEach(e=>seen.set(e.lineup.map(p=>p.id).sort().join('|'), e));
+    const added = [];
+    for(const e of ranked){
+      if(e._pivot || e._chaos) continue;
+      const lu = e.lineup;
+      const used = lu.reduce((s2,p)=>s2+(p.salary||0),0);
+      const leftover = _capSal - used;
+      const wasOk = _veGrps.length ? checkGroupRules(lu, _veGrps) : true;
+      // The TWO weakest slots by composite — the identities most likely to be
+      // one-sim accidents rather than the core's reason for existing. Variants
+      // on only the single weakest let junk PAIRS survive (swap Prepolec out,
+      // the Elliott next to him inherits the exposure).
+      const order = lu.map((p,k2)=>({k2, c:_comp(p)})).sort((a,b)=>a.c-b.c).slice(0,2);
+      for(const {k2:wi} of order){
+        const p = lu[wi];
+        let made=0;
+        for(const q of _byCompDesc){
+          if(made>=VARIANTS_PER) break;
+          if(_comp(q) <= _comp(p)) break;             // only upward variants; original keeps the downside worlds
+          if(lu.some(x=>x.id===q.id)) continue;
+          if((q.salary||0) > (p.salary||0) + leftover) continue;
+          if(_minSalC && (used - (p.salary||0) + (q.salary||0)) < _minSalC) continue;
+          if(_veNoOpp && lu.some((x,j)=>j!==wi && _veOpps(q,x))) continue;
+          const v = lu.map((x,j)=>j===wi?q:x);
+          if(_veGrps.length && wasOk && !checkGroupRules(v, _veGrps)) continue;
+          const key = v.map(x=>x.id).sort().join('|');
+          if(seen.has(key)){ continue; }
+          const ne = {lineup:v, count:1, totalScore:0, _variant:true};
+          seen.set(key, ne); added.push(ne); made++;
+        }
+      }
+    }
+    if(added.length){
+      added.forEach(e=>ranked.push(e));
+      log(`Body-variant enrichment: +${added.length.toLocaleString()} sibling candidates (weakest slot swapped to affordable higher-composite alternatives; originals kept) — the auction now chooses each core's body instead of inheriting it.`);
+      // Same M3 lesson as repair: the sharp slice of the modeled field is
+      // drawn from the candidate pool this pass just widened.
+      if(sharpShare > 0){
+        rebuildSharpPool();
+        const smpV = await sampleFields(scenarios);
+        if(smpV===null) return null;
+        fields = smpV.fields; fieldKeyCounts = smpV.fieldKeyCounts;
+        fieldSorted = buildFieldSorted(scoreArr);
+        await tick(); if(window._genCancelled) return null;
+      }
+    }
+  }
+
   // ── Dominance repair ──────────────────────────────────────────────────────
   // A lineup that leaves real salary on a weak player is making a false claim:
   // that no affordable, unused, clearly-better golfer exists. Per-sim optimals
@@ -7667,6 +7757,14 @@ async function runUFCContestEV(ctx){
   const HEAD_RANK = Math.max(10, Math.round(F*0.001));
   const headFloor = payout.at(HEAD_RANK);
   const headPartAt = r => r<=HEAD_RANK ? Math.max(0, payout.at(r)-headFloor) : 0;
+  // (2026-08-04) A fully ADDITIVE head credit was tested here — it re-created
+  // the near-clone stacking the coverage rule exists to prevent (measured:
+  // Valentin+Gugnon co-exposure 67%, Gugnon 60% — flat-region rank money does
+  // not decay, so mid-core clones farm it). Coverage-increment retained; the
+  // "engine keeps buying bad cheap bodies" defect it interacted with was a
+  // SUPPLY artifact and is fixed at the source instead — see the body-variant
+  // enrichment pass below (candidates now carry every affordable body per
+  // core, so the auction can decline a bad one rather than inherit it).
   // ── Tail-refined beater estimate (added 2026-08-04) ───────────────────────
   // The sampled field (N per scenario) stands in for F entries, so each sample
   // slot represents F/N of them (~24 at 2k/47.5k). The Gamma posterior alone
