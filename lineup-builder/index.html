@@ -8102,11 +8102,27 @@ async function runUFCContestEV(ctx){
       let _s=0,_s2=0,_n=0;
       for(const e of ranked){ let d=0; for(const p of e.lineup) d += (_dwById[p.id]||0); e._dw = d; _s+=d; _s2+=d*d; _n++; }
       const _sdD = _n>4 ? Math.sqrt(Math.max(0, _s2/_n - (_s/_n)*(_s/_n))) : 0;
-      _dwW = _sdD > 1e-6 ? DW_NOISE_SD/_sdD : 0;
+      // BOARD PRIOR PRICED AS HARD CURRENCY (2026-08-05). The noise-scale
+      // weight (1σ of D = 1σ of pricing noise) only decided ties, and the
+      // model's own exchange rate for board points is measured near zero
+      // ($0.0029 of win equity per point, R²=0.21, 11.9k candidates) — the
+      // engine is INDIFFERENT to which same-price filler rides, which is
+      // exactly why the board's clear value calls (Urbina 51.7 vs Elliott
+      // 40.8 at the same money) produced no exposure separation. That
+      // separation is the USER'S prior, so it is priced at the user's own
+      // declaration — "I would play 0 of anyone below the red line": $0.05
+      // of win-equity per board point given away, the smallest weight that
+      // prices the sub-frontier value tier to ~0 exposure (measured sweep:
+      // 0.015 → Elliott 16%; 0.05 → Elliott 4%, Blachowicz 4%, Spasic/Cowan
+      // 0%, board-best value Urbina 26% with real separation; 0.09 → no
+      // further red-line gain, order instability). Not model-derived and
+      // not pretending to be.
+      const DW_PRIOR_W = 0.05;
+      _dwW = Math.max(_sdD > 1e-6 ? DW_NOISE_SD/_sdD : 0, DW_PRIOR_W);
       if(_dwW>0){
         const _worst = _rest.map(p=>({nm:p.name.split(' ').slice(-1)[0], d:_dwById[p.id]||0}))
                             .filter(x=>x.d>2).sort((a,b)=>b.d-a.d).slice(0,5);
-        log(`Deadweight prior: board's value frontier charges near-ties for points given away (1σ of lineup deadweight = $${DW_NOISE_SD.toFixed(2)}, the measured pricing noise — decides only where EV is silent). Top offenders: ${_worst.map(x=>`${x.nm} −${x.d.toFixed(0)}pts`).join(', ')||'none'}; anchor tier exempt (F4 doctrine).`);
+        log(`Board prior: points given away vs the value frontier are priced at $${_dwW.toFixed(2)}/pt of win equity — the user's red-line declaration (sub-frontier value plays price to ~0), not a model estimate (the model's own measured rate is ~$0.003/pt, i.e. indifferent). Top offenders: ${_worst.map(x=>`${x.nm} −${x.d.toFixed(0)}pts`).join(', ')||'none'}; anchor tier exempt (F4 doctrine).`);
       }
     } else {
       for(const e of ranked) e._dw = 0;
