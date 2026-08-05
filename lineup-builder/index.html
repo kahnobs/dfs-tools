@@ -7231,9 +7231,25 @@ async function runUFCContestEV(ctx){
     // to the honest auction instead of flipping toward the dog (measured
     // defect of the raw-ownership version: 14%/50% toward the 41% side).
     const _appR = ctx.appearRate || {};
+    // NOISE SOFT-THRESHOLD (2026-08-04, replaced the 1.25×-mean popularity
+    // gate the same day): only the handful of genuinely popular fighters can
+    // kill a meaningful portion of the field — an 18%-owned underdog losing
+    // is the EXPECTED outcome his owners priced in, not a bust. But the right
+    // gate is not a popularity ratio (invented constant, hard cliff, drifts
+    // with pool size); it is the measurement noise of the excess estimate
+    // itself. Ownership projections missed actuals by sd ≈ 3.9 points on the
+    // real 8/1 contest (n=28, mean error ≈ 0), so excess below that is
+    // indistinguishable from projection error. Soft-threshold (lasso-style):
+    //   excess = max(0, own − optimal-rate − EXCESS_NOISE)
+    // On 8/1 this DERIVES the popular-handful: Cepo ~7 effective points,
+    // Grad ~3.7, Medic ~3.6, everyone else (incl. Leka's +3.7 raw, which was
+    // leaking stance credit to Poppeck holders) → 0. Smooth, pool-size
+    // independent, zero invented constants — refit the sd as real contests
+    // accumulate (same pipeline as the planned herding correction).
+    const EXCESS_NOISE = 3.9;
     const _excess = pool.map((p,i2)=>{
       const ar = _appR[p.id]!=null ? 100*_appR[p.id] : null;
-      return ar==null ? 0 : Math.max(0, _ownV[i2] - ar);
+      return ar==null ? 0 : Math.max(0, _ownV[i2] - ar - EXCESS_NOISE);
     });
     _oppExcess = pool.map((p,i2)=>{
       const o=_oppIdx[i2];
@@ -7494,7 +7510,8 @@ async function runUFCContestEV(ctx){
       // on only the single weakest let junk PAIRS survive (swap Prepolec out,
       // the Elliott next to him inherits the exposure).
       // Stance carriers are exempt: a fighter whose opponent holds real excess
-      // ownership (>3 pts over optimal-rate) is a lineup's CLAIM on that
+      // ownership (positive after the EXCESS_NOISE soft-threshold) is a
+      // lineup's CLAIM on that
       // orphaned equity, not a weak slot — "upgrading" him away is what
       // starved the leverage tier's candidate supply (measured: Urbina 19.5%
       // optimal-rate → 9.8% of candidates while his variants fed Musayev).
@@ -7502,7 +7519,7 @@ async function runUFCContestEV(ctx){
       const order = lu.map((p,k2)=>({k2, c:_comp(p)})).sort((a,b)=>a.c-b.c).slice(0,2);
       for(const {k2:wi} of order){
         const p = lu[wi];
-        if(typeof _oppExcess !== 'undefined' && _oppExcess && _oppExcess[_idxOfVe.get(p.id)] > 3) continue;
+        if(typeof _oppExcess !== 'undefined' && _oppExcess && _oppExcess[_idxOfVe.get(p.id)] > 0) continue;
         let made=0;
         for(const q of _byCompDesc){
           if(made>=VARIANTS_PER) break;
@@ -8127,6 +8144,18 @@ async function runUFCContestEV(ctx){
     .map(e=>({e, val:(e._ev+fee)*1.02, round:-1}));
   cands.sort((a,b)=>b.val-a.val);
   let evalCount=0;
+  // ── NOISE-AWARE TIE ALLOCATION: TESTED AND REVERTED (2026-08-04/05) ──────
+  // Two tie-break rules were built, measured on live boards, and removed:
+  //   • least-used fighters — diversity for its own sake; late-build ties
+  //     routed picks into exactly the fighters nobody holds, i.e. the worst
+  //     plays on the board (Elliott, bottom-three sim score, rode it to 28%).
+  //   • highest lineup composite — re-concentrated the chalk studs (Cepo 72%,
+  //     a welded pair at 89%).
+  // Sub-noise EV differences between near-equal plays (the Leka/Klein $0.42
+  // gap) are therefore left to the plain greedy: the model prices them within
+  // its own noise, and the user's judgment — a Min% pin — is the intended
+  // tie-breaker for a conviction read. Caps and co-exposure keep governing
+  // degeneracy.
   while(chosen.length < target && cands.length){
     const top = cands[0];
     if(capBlocked(top.e.lineup)){ cands.shift(); continue; }
@@ -8134,14 +8163,15 @@ async function runUFCContestEV(ctx){
       // Conditional co-exposure: defer a lineup whose pair is already welded past
       // the cap, so a fresher supporting cast takes the slot first (bounded).
       if(_coBlocked(top.e.lineup) && (top._codef||0)<CO_DEFER){ top._codef=(top._codef||0)+1; cands.shift(); cands.push(top); continue; }
-      // Fresh valuation for the current portfolio state — accept.
-      chosen.push(top.e);
-      top.e._mev = top.val;
-      if(!top.e._tots) top.e._tots = totalsOf(top.e);
-      acceptEntry(top.e);
-      top.e.lineup.forEach(p=>{ outputExpCount[p.id]=(outputExpCount[p.id]||0)+1; });
-      _coBump(top.e.lineup);
-      cands.shift();
+      const pick = top;
+      chosen.push(pick.e);
+      pick.e._mev = pick.val;
+      if(!pick.e._tots) pick.e._tots = totalsOf(pick.e);
+      acceptEntry(pick.e);
+      pick.e.lineup.forEach(p=>{ outputExpCount[p.id]=(outputExpCount[p.id]||0)+1; });
+      _coBump(pick.e.lineup);
+      const pi = cands.indexOf(pick); if(pi>=0) cands.splice(pi,1);
+      cands.sort((a,b)=>b.val-a.val);
       if(chosen.length % 8 === 0){ await tick(); if(window._genCancelled) return null; }
     } else {
       const mv = marginalVal(top.e);
