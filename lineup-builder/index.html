@@ -3650,19 +3650,22 @@ function exportSimCSV(){
   // the slate) and the fight's COMBINED rate (rateA+rateB — exact under
   // no-oppose: an optimal never holds both sides). The combined column is
   // the fight-tail identifier: smash fights read 55%+, trash fights <30%.
-  const _fRate = {};
+  const _fRate = {}, _fLabel = {};
   if(ufc){
     (slate.players||[]).forEach(p=>{
-      if(p._optRate==null && !rows.includes(p)) return;
       const opp=(slate.players||[]).find(q=>q!==p && typeof ufcSameFight==='function' && ufcSameFight(p,q));
       _fRate[p.id]=100*((p._optRate||0)+((opp&&opp._optRate)||0));
+      // F# from the slate; if a slate ever lacks fight numbers, fall back to
+      // a stable pair label so the two rows still visibly match.
+      _fLabel[p.id]=(p.fightNum>0)?('F'+p.fightNum)
+        :(opp?[p.name.split(' ').slice(-1)[0],opp.name.split(' ').slice(-1)[0]].sort().join('/'):'');
     });
   }
   const tailV = p => nas ? [p._simWin,p._simT5,p._simT10,p._simCut]
                    : ufc ? [p._optRate!=null?(100*p._optRate).toFixed(1):'', _fRate[p.id]!=null?_fRate[p.id].toFixed(1):'']
                    : nfl ? [nflPosOf(p)||'', p.team||'', p._simCut, p._simBoom]
                    :       [p._simWin,p._simT5,p._simT10,p._simT20,p._simCut];
-  const header=['Name','Salary',nas?'Rating':'ModelScore','SimScore','Mean','Floor(P10)','P25','Median','P75','Ceiling(P90)',...tailH];
+  const header=['Name',...(ufc?['Fight']:[]),'Salary',nas?'Rating':'ModelScore','SimScore','Mean','Floor(P10)','P25','Median','P75','Ceiling(P90)',...tailH];
   // Run stamp first, as a comment row: the seed + the full settings
   // fingerprint of the generation that produced these distributions. Every
   // spreadsheet and CSV reader treats a leading '#' row as data or skips it,
@@ -3673,7 +3676,7 @@ function exportSimCSV(){
   lines.push(header.join(','));
   rows.sort((a,b)=>(parseFloat(b._simP50)||0)-(parseFloat(a._simP50)||0)).forEach(p=>{
     const d=p._simDist;
-    lines.push([p.name,p.salary,p.rating,p._simP50,d.mean,d.p10,d.p25,d.p50,d.p75,d.p90,
+    lines.push([p.name,...(ufc?[_fLabel[p.id]||'']:[]),p.salary,p.rating,p._simP50,d.mean,d.p10,d.p25,d.p50,d.p75,d.p90,
                 ...tailV(p)].map(esc).join(','));
   });
   const csv=lines.join('\n');
