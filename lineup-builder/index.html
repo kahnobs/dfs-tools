@@ -8236,20 +8236,30 @@ async function runUFCContestEV(ctx){
   // per-sim OPTIMAL RATE (Σ=6.0) is the sims' own statement of how much of a
   // winning portfolio each fighter deserves; exposure beyond it needs a
   // REASON the model can price (a leverage stance, a real head-coverage gap).
-  // So: each fighter a pick pushes beyond his optimal share charges up to one
-  // noise-σ on that pick's value — a RESISTANCE, never a floor (nothing lifts
-  // a fighter toward his rate; the user's measured objection to bands was
-  // that floors protect bad plays). Continuous, penalty-only, target-scale
-  // invariant; stance credit rides the head channel so a priced leverage
-  // stance out-bids the resistance exactly where the stance says to.
+  // So: exposure beyond a fighter's optimal share charges ESCALATING noise-σ
+  // — the k-th slot past the sims' own number costs k·σ (smooth quadratic
+  // form: total cost of sitting x slots over is σ·x²/2, marginal cost
+  // σ·(b²−a²)/2 per pick). A flat 1σ toll was measured insufficient (v12
+  // live run: Cepo 46% = 1.7× his 26.6 rate, Gugnon +15.7 over field, while
+  // Leka/Stirling/Oliveira/Medic all ran NEGATIVE leverage — the chalk block
+  // pays one noise unit and keeps loading, because high-P(win) shuffled
+  // clones carry real head margins that a fixed toll never catches up to).
+  // Escalation states the doctrine exactly: every additional slot beyond the
+  // rate demands one more σ of priced evidence. Still a RESISTANCE, never a
+  // floor (nothing lifts a fighter toward his rate; the measured objection
+  // to bands was floors protecting bad plays). Penalty-only, continuous,
+  // target-scale invariant; stance credit rides the head channel so a priced
+  // leverage stance out-bids the resistance exactly where the stance says to.
   const _optSh = (typeof ctx!=='undefined' && ctx && ctx.appearRate) ? ctx.appearRate : null;
   const _overPen = (lineup) => {
     if(!_optSh) return 0;
     let o=0;
     for(const p of lineup){ const sh=_optSh[p.id]; if(sh==null) continue;
-      const cur=(outputExpCount[p.id]||0)/target;
-      const inc=Math.max(0, (cur + 1/target) - Math.max(sh, cur));
-      o += Math.min(1, inc*target);
+      const shSlots = sh*target;
+      const cnt = (outputExpCount[p.id]||0);
+      const a = Math.max(0, cnt - shSlots);
+      const b = Math.max(0, cnt + 1 - shSlots);
+      o += (b*b - a*a)/2;
     }
     return DW_NOISE_SD * o;
   };
