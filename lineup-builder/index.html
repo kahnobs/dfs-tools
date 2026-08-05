@@ -8324,6 +8324,31 @@ async function runUFCContestEV(ctx){
   // priced justification → room to run, still escalating past the LIFTED
   // anchor so even a stance cannot pile without bound.
   const _poolIdxById = {}; pool.forEach((p,i2)=>_poolIdxById[p.id]=i2);
+  // ── BOARD-EARNED STANDS (2026-08-05, user-selected shape) ────────────────
+  // The rate-anchored resistance produced honest but FLAT books (every stand
+  // capped at +5-9 because this slate's orphaned-equity claims are small),
+  // and the user's complaint history says concentration itself was never the
+  // sin — mid-chalk piling, junk riders and board-order inversions were. So
+  // the right to run past the optimal rate is now EARNED BY BOARD RANK:
+  // grace = GRACE_PTS · svalPct⁴ exposure points, where svalPct is the
+  // fighter's slate-relative percentile on the SAME SVal the pool board
+  // sorts by (_simP50 per $1k). pct⁴ concentrates the privilege at the true
+  // top of the board: the #1 play earns the full +16, the 75th-percentile
+  // play ~+5, the median ~+1, the value zone ~0 — so Rebecki-class plays can
+  // run to the mid-30s/low-40s while Luciano-class stays near rate and junk
+  // (already deadweight-charged) earns nothing. Claims (orphaned equity)
+  // stack on top. GRACE_PTS=16 is calibrated to the accepted concentration
+  // range: it puts the #1 board play's escalation start in the low 40s at
+  // typical top rates (25-27%), the band every accepted board actually
+  // lived in — not the 55-62% pile-ups that drew complaints.
+  const GRACE_PTS = 16;
+  const _svalPct = {};
+  {
+    const _sv = pool.filter(p=>p._simP50!=null && p.salary>0)
+                    .map(p=>({id:p.id, v: parseFloat(p._simP50)/((p.salary||1)/1000)}))
+                    .sort((a,b)=>a.v-b.v);
+    _sv.forEach((x,i2)=>{ _svalPct[x.id] = _sv.length>1 ? i2/(_sv.length-1) : 0; });
+  }
   // Relief = THE CLAIMED POINTS THEMSELVES. Two calibrations were measured
   // and rejected: linear-in-β relief let a barely-over-noise claim run
   // (Rodriguez, capturing 3.5 excess points of Medic, hit 34% of the book at
@@ -8339,7 +8364,9 @@ async function runUFCContestEV(ctx){
   const _anchorSlots = (p, sh) => {
     let lift = 0;
     if(_levB>0 && _justPts){ const i2=_poolIdxById[p.id]; if(i2!=null) lift = _justPts[i2]/100; }
-    return (sh + lift)*target;
+    const _pc = _svalPct[p.id];
+    const grace = _pc!=null ? (GRACE_PTS/100)*_pc*_pc*_pc*_pc : 0;
+    return (sh + grace + lift)*target;
   };
   const _overPen = (lineup) => {
     if(!_optSh) return 0;
@@ -8704,16 +8731,25 @@ async function runUFCContestEV(ctx){
   const _swapPen = !_swapAppR ? null : (lineup, counts, N) => {
     let o = 0;
     for(const p of lineup){ const sh = _swapAppR[p.id]; if(sh==null) continue;
-      // Same stance-aware anchor as the greedy's resistance (see _overPen) —
-      // relief equals the claimed orphaned points.
+      // Same anchor as the greedy's resistance (see _anchorSlots): rate +
+      // board-earned grace + claimed orphaned points.
       let lift = 0;
       if(_levB>0 && _justPts){ const i2=_swapPoolIdx[p.id]; if(i2!=null) lift = _justPts[i2]/100; }
-      const over = (counts[p.id]||0) + 1 - (sh+lift)*N;
+      const _pc2 = _swapSvalPct ? _swapSvalPct[p.id] : null;
+      const grace = _pc2!=null ? (16/100)*_pc2*_pc2*_pc2*_pc2 : 0;
+      const over = (counts[p.id]||0) + 1 - (sh+grace+lift)*N;
       if(over > 0) o += Math.min(over, 6);
     }
     return DW_NOISE_SD * o;
   };
   const _swapPoolIdx = {}; pool.forEach((p,i2)=>_swapPoolIdx[p.id]=i2);
+  const _swapSvalPct = {};
+  {
+    const _sv2 = pool.filter(p=>p._simP50!=null && p.salary>0)
+                     .map(p=>({id:p.id, v: parseFloat(p._simP50)/((p.salary||1)/1000)}))
+                     .sort((a,b)=>a.v-b.v);
+    _sv2.forEach((x,i2)=>{ _swapSvalPct[x.id] = _sv2.length>1 ? i2/(_sv2.length-1) : 0; });
+  }
   const capFn = id => { const pct = overrides[id]!=null ? overrides[id] : maxExpPct;
     return pct>=100 ? null : (pct<=0 ? 0 : Math.max(1,Math.ceil(target*pct/100))); };
   if(Object.keys(minOverrides).some(id=>minOverrides[id]>0)){
