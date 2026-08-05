@@ -7949,10 +7949,12 @@ async function runUFCContestEV(ctx){
       const e = ranked[c];
       const idxs = e.lineup.map(p=>idxById.get(p.id)).filter(i=>i!=null);
       const key = idxs.slice().sort((a,b)=>a-b).join('|');
+      // Deadweight for entries added after the initial menu (body variants).
+      if(e._dw==null){ let _d=0; for(const p of e.lineup) _d += (_dwById[p.id]||0); e._dw=_d; }
       // Dups are per ownership scenario: both the analytic product and the
       // empirical field count move with the scenario's Own%.
       e._dupsK = dupsUnder(idxs, key, scenarios, fieldKeyCounts, fields);
-      const bSum=new Float64Array(K), bCnt=new Float64Array(K);
+      const bSum=new Float64Array(K), bCnt=new Float64Array(K), hSum=new Float64Array(K);
       for(let s=0; s<fieldSorted.length; s++){
         const si=simIdx[s]; let t=0;
         for(const i of idxs) t += (scoreArr[i][si]||0);
@@ -7972,16 +7974,83 @@ async function runUFCContestEV(ctx){
         // Leverage stance: head AND mid parts ride the captor's stance
         // multiplier (claimed opponent-excess in this sim); flat cash never.
         const [_pay, _hd, _md] = expPayoutSplit(beating, tied, arr.length, dups, 0, arr, t);
-        bSum[s%K] += (_pay - _hd - _md) + (_hd + _md)*stanceMult(idxs, si); bCnt[s%K]++;
+        const _stM = stanceMult(idxs, si);
+        bSum[s%K] += (_pay - _hd - _md) + (_hd + _md)*_stM; bCnt[s%K]++;
+        hSum[s%K] += _hd*_stM;
       }
-      e._ev = robustAgg(bSum, bCnt) - fee;
+      e._ev  = robustAgg(bSum, bCnt) - fee;
+      // Standalone WIN EQUITY (head only, stance-multiplied, dup-adjusted) —
+      // the same currency the portfolio greedy maximizes. Kept separate from
+      // _ev because flat+mid cash is ~80% of gross EV and MUST NOT pick the
+      // menu (mid is presence money, demoted to the cash channel — see the
+      // marginalVal doctrine note).
+      e._hev = robustAgg(hSum, bCnt);
       if(c>0 && c%400===0){
         if(!quiet) log(`EV: ${c.toLocaleString()}/${ranked.length.toLocaleString()} candidates priced...`);
         await tick(); if(window._genCancelled) return null;
       }
     }
-    return ranked.slice().sort((a,b)=>b._ev-a._ev);
+    // ── FEED ORDER = SELECTION OBJECTIVE (2026-08-05) ──────────────────────
+    // Measured on the real 8/1 slate (m13, two independent seeds): sorting
+    // the candidate menu by TOTAL EV let flat cash (~$1.75 of a ~$2.50 gross,
+    // vs head ~$0.50 + mid ~$0.26) pick the top-1200 the greedy is allowed to
+    // see. The menu became a MIN-CASH list: per-sim optimals carry 1.02
+    // studs≥$9.2k per lineup, the old feed only 0.65 — board #1 Rebecki fed
+    // at 0.66× his optimal rate, Milosevic 0.32×, Rakic 0.26×, while flat
+    // mid-salary chalk fed at 1.5-2.1× and piled to 50-70% of the menu. The
+    // greedy then "chose" chalk because nothing else was on the menu — the
+    // volume-over-finish-equity bias, relocated into candidate admission.
+    // Feed order now matches what selection maximizes: win equity (_hev,
+    // head+mid, stance-riding), flat cash as the same 1% tiebreak the greedy
+    // uses. Continuous, no caps, no slate rules; β re-pricing reorders the
+    // menu too, so stance candidates are ADMITTED, not just re-weighted.
+    return ranked.slice().sort((a,b)=>(b._hev - _dwW*(b._dw||0) + 0.01*b._ev) - (a._hev - _dwW*(a._dw||0) + 0.01*a._ev));
   };
+  // ── VALUE-FRONTIER DEADWEIGHT PRIOR (2026-08-05) ───────────────────────────
+  // The greedy's competing picks are routinely dead ties (measured margins
+  // 0.1-5% of value; per-candidate win-equity pricing noise ±$0.12/run, m13
+  // two-seed join, sd of cross-seed diff $0.167/√2). Inside that silence the
+  // model cannot rank near-equal builds — but the sim board can: the user-
+  // visible failure was junk passengers (bottom of the board's value column)
+  // riding chalk frames to 10-28% exposure while board-preferred plays at the
+  // same price starved. This prior charges each candidate for BOARD POINTS
+  // GIVEN AWAY: a fighter's deadweight = how far his sim composite sits below
+  // the best non-anchor alternative at the same salary or less (one $100 DK
+  // tick of tolerance) — the board's own value frontier, recomputed from live
+  // sims every slate. Anchor-tier fighters (same top-N-by-sim rule as the F4
+  // floor) neither pay nor set the frontier: correctly-priced chalk is policy,
+  // handled by F4, and letting Cepo-class studs set the frontier falsely
+  // condemned every $9k neighbor. Weight is NOT a knob: 1 candidate-sd of
+  // deadweight = 1 sd of measured pricing noise, so the prior decides ties
+  // the EV cannot see and is powerless where the EV has real signal.
+  // Penalty-only (no bonus for stacking board quality — the measured failure
+  // of a quality BONUS was re-concentrated chalk, 72%/89% welds).
+  const DW_NOISE_SD = 0.12;
+  let _dwW = 0; const _dwById = {};
+  {
+    const _scored = pool.filter(p=>p._simP50!=null && p.salary>0);
+    const _anchN  = Math.max(3, Math.ceil(pool.length/5));
+    const _anch   = new Set(_scored.slice().sort((a,b)=>parseFloat(b._simP50)-parseFloat(a._simP50)).slice(0,_anchN).map(p=>p.id));
+    const _rest   = _scored.filter(p=>!_anch.has(p.id));
+    if(_rest.length >= 8){
+      for(const p of _rest){
+        let best = 0;
+        for(const q of _rest){ if(q!==p && q.salary <= p.salary+100){ const v=parseFloat(q._simP50); if(v>best) best=v; } }
+        _dwById[p.id] = Math.max(0, best - parseFloat(p._simP50));
+      }
+      let _s=0,_s2=0,_n=0;
+      for(const e of ranked){ let d=0; for(const p of e.lineup) d += (_dwById[p.id]||0); e._dw = d; _s+=d; _s2+=d*d; _n++; }
+      const _sdD = _n>4 ? Math.sqrt(Math.max(0, _s2/_n - (_s/_n)*(_s/_n))) : 0;
+      _dwW = _sdD > 1e-6 ? DW_NOISE_SD/_sdD : 0;
+      if(_dwW>0){
+        const _worst = _rest.map(p=>({nm:p.name.split(' ').slice(-1)[0], d:_dwById[p.id]||0}))
+                            .filter(x=>x.d>2).sort((a,b)=>b.d-a.d).slice(0,5);
+        log(`Deadweight prior: board's value frontier charges near-ties for points given away (1σ of lineup deadweight = $${DW_NOISE_SD.toFixed(2)}, the measured pricing noise — decides only where EV is silent). Top offenders: ${_worst.map(x=>`${x.nm} −${x.d.toFixed(0)}pts`).join(', ')||'none'}; anchor tier exempt (F4 doctrine).`);
+      }
+    } else {
+      for(const e of ranked) e._dw = 0;
+    }
+  }
   let evList = await priceCandidates(false);
   if(evList===null) return null;
 
@@ -7998,7 +8067,7 @@ async function runUFCContestEV(ctx){
   // from constraints. Also makes the objective submodular, which the lazy
   // greedy formally requires (marginals only shrink as the portfolio grows).
   log(MID_RANK > HEAD_RANK
-    ? `Objective: TOURNAMENT WIN EQUITY — head = top ${HEAD_RANK.toLocaleString()} (0.5%), coverage-credited per outcome; mid = through ${MID_RANK.toLocaleString()} (2%), additive presence money; both dup-adjusted; flat cash is a tiebreak. (Flat curves like double-ups revert to pure cash EV.)`
+    ? `Objective: TOURNAMENT WIN EQUITY — head = top ${HEAD_RANK.toLocaleString()} (0.5%), coverage-credited per outcome, dup-adjusted; mid (through ${MID_RANK.toLocaleString()}, 2%) is presence money and votes with flat cash in the 1% tiebreak — cash never buys a slot. (Flat curves like double-ups revert to pure cash EV.)`
     : `Objective: TOURNAMENT WIN EQUITY — head = top ${HEAD_RANK.toLocaleString()} places, coverage-credited per outcome, dup-adjusted; cash EV is a tiebreak, not a goal. (Flat curves like double-ups revert to pure cash EV.)`);
   // ── Portfolio selection, wrapped so AUTO-EXPOSURE can re-run it with
   // per-pillar caps and compare WHOLE PORTFOLIOS. pillarCap: Map(id→capPct);
@@ -8089,17 +8158,24 @@ async function runUFCContestEV(ctx){
       // a covered scenario earns nothing, an upgrade (rank-40 caliber → rank-1
       // caliber) earns the difference. Weighted max-coverage: submodular, and
       // exactly "one winner per scenario, and when it wins, win the most".
-      // MID tier (0.5%-2%) is ADDITIVE at full weight: presence money that a
-      // multi-entry book legitimately collects several times per world —
-      // own-rank pushdown (j0) and dup pricing keep clones self-limiting.
-      // Leverage stance: head AND mid credit ride the captor multiplier —
-      // extra credit exactly in the sims where a held fighter beat an
-      // over-owned opponent (stanceMult ≡ 1 at β=0).
-      const headGain = (Math.max(0, ownHead - bestHead[s]) + ownMid) * stanceMult(_sIdxs, simIdx[s]);
+      // MID tier (0.5%-2%) DEMOTED TO THE CASH CHANNEL (2026-08-05). It ran
+      // at full weight inside the win-equity channel and was measured (m13,
+      // real 8/1 slate, 3 configs incl. an uncapped menu) to be the engine of
+      // chalk-pile: once a scenario is head-covered, a near-clone of it earns
+      // ~$0 head but still ~$0.26 mid — repetition of the mid-salary chalk
+      // block out-bid every uncovered stud/leverage scenario, welding pairs
+      // to 73-89% while board-quality plays starved. Rank 239-950 is not "a
+      // break or two from winning" — it is presence money, i.e. cash, and
+      // the doctrine above says cash NEVER buys a slot. Mid still counts at
+      // full value in _ev, portfolio eval, the β-sweep judge and reporting;
+      // it just votes through the 1% tiebreak like the rest of the cash.
+      // Leverage stance: head and mid both still ride the captor multiplier.
+      const _stM = stanceMult(_sIdxs, simIdx[s]);
+      const headGain = Math.max(0, ownHead - bestHead[s]) * _stM;
       hSum[s%K] += headGain;
-      bSum[s%K] += flat + headGain - fee; bCnt[s%K]++;
+      bSum[s%K] += flat + ownMid*_stM + headGain - fee; bCnt[s%K]++;
     }
-    // head: new-winning-scenario equity + additive mid presence; cash: full marginal EV
+    // head: new-winning-scenario equity only; cash: full marginal EV (incl. mid)
     return { head: robustAgg(hSum, bCnt), cash: robustAgg(bSum, bCnt) };
   };
   const acceptEntry = e => {
@@ -8140,8 +8216,45 @@ async function runUFCContestEV(ctx){
   // not objectives. Flat payout curves (double-ups) have no head, so this
   // automatically reverts to pure cash EV there — the correct objective for
   // that format.
-  const cands = evList.slice(0, Math.max(target*12, 1200))
-    .map(e=>({e, val:(e._ev+fee)*1.02, round:-1}));
+  // ── FULL MENU (2026-08-05): the top-1200 admission cap is gone. ─────────
+  // Measured (m13, real 8/1 slate, two seeds): ANY EV-ranked cap starves the
+  // scenarios the greedy exists to cover — standalone candidate EV is nearly
+  // flat (±$0.30 run-to-run noise on a $1.40 spread) and composition-biased
+  // toward consistency builds, so the cap admitted 6 mid-salary chalk at
+  // 1.3-2.1× their optimal rate and fed board-#1 (and every stud/leverage
+  // scenario) at 0.3-0.8×. Even re-ordered by win equity the cap only moved
+  // studs/lineup 0.65→0.72 vs supply's 1.02. The greedy's coverage credit is
+  // the designed diversifier; it needs the whole priced supply on the menu.
+  // Perf: initial vals are EXACT empty-portfolio marginals (round:0), so the
+  // lazy greedy touches only candidates whose upper bound reaches the top —
+  // no O(all×sims) sweep. Non-EV paths and flat curves are order-preserved.
+  // ── OVER-SUPPLY RESISTANCE (2026-08-05) ─────────────────────────────────
+  // The deadweight prior answers "who should NOT fill a tie" — this answers
+  // "who should". Measured residual after junk was priced out: the vacated
+  // tie-mass re-piled on the zero-deadweight fighters (Grad/Nikolic 54%,
+  // Gugnon 56%, Rodriguez 34% at 1.9× his optimal rate — two seeds). The
+  // per-sim OPTIMAL RATE (Σ=6.0) is the sims' own statement of how much of a
+  // winning portfolio each fighter deserves; exposure beyond it needs a
+  // REASON the model can price (a leverage stance, a real head-coverage gap).
+  // So: each fighter a pick pushes beyond his optimal share charges up to one
+  // noise-σ on that pick's value — a RESISTANCE, never a floor (nothing lifts
+  // a fighter toward his rate; the user's measured objection to bands was
+  // that floors protect bad plays). Continuous, penalty-only, target-scale
+  // invariant; stance credit rides the head channel so a priced leverage
+  // stance out-bids the resistance exactly where the stance says to.
+  const _optSh = (typeof ctx!=='undefined' && ctx && ctx.appearRate) ? ctx.appearRate : null;
+  const _overPen = (lineup) => {
+    if(!_optSh) return 0;
+    let o=0;
+    for(const p of lineup){ const sh=_optSh[p.id]; if(sh==null) continue;
+      const cur=(outputExpCount[p.id]||0)/target;
+      const inc=Math.max(0, (cur + 1/target) - Math.max(sh, cur));
+      o += Math.min(1, inc*target);
+    }
+    return DW_NOISE_SD * o;
+  };
+  const cands = evList
+    .map(e=>({e, val:(e._hev!=null ? e._hev - _dwW*(e._dw||0) + 0.01*e._ev : (e._ev+fee)*1.02), round:0}));
   cands.sort((a,b)=>b.val-a.val);
   let evalCount=0;
   // ── NOISE-AWARE TIE ALLOCATION: TESTED AND REVERTED (2026-08-04/05) ──────
@@ -8175,7 +8288,7 @@ async function runUFCContestEV(ctx){
       if(chosen.length % 8 === 0){ await tick(); if(window._genCancelled) return null; }
     } else {
       const mv = marginalVal(top.e);
-      top.val = mv.head + 0.01*mv.cash;
+      top.val = mv.head - _dwW*(top.e._dw||0) - _overPen(top.e.lineup) + 0.01*mv.cash;
       top.round = chosen.length;
       // Re-position by new value (portfolio growth only lowers marginals)
       let i=1; while(i<cands.length && cands[i].val>top.val) i++;
@@ -8465,7 +8578,14 @@ async function runUFCContestEV(ctx){
     return l; };
   let finalLineups = chosen.map(decorate);
   const minCands = rest.map(decorate);
-  const sfScore = l => (l._ev!=null ? l._ev : 0);
+  // Rank floor/min insertions in the SELECTION currency (win equity − the
+  // deadweight prior + the 1% cash tiebreak), not raw cash EV — ranking by
+  // _ev alone re-imported the flat-cash menu bias this pass exists to police:
+  // F4's anchor raises were measured pulling junk-passenger frames (Elliott-
+  // class riders) back in through the swap door the greedy had just shut.
+  const sfScore = l => { const e=l._entry;
+    if(e && e._hev!=null) return e._hev - _dwW*(e._dw||0) + 0.01*(e._ev||0);
+    return (l._ev!=null ? l._ev : 0); };
   const capFn = id => { const pct = overrides[id]!=null ? overrides[id] : maxExpPct;
     return pct>=100 ? null : (pct<=0 ? 0 : Math.max(1,Math.ceil(target*pct/100))); };
   if(Object.keys(minOverrides).some(id=>minOverrides[id]>0)){
