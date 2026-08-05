@@ -3643,11 +3643,23 @@ function exportSimCSV(){
   // at all, so it exports the distribution only.
   const sport=slate.sport, nas=sport==='nascar', ufc=sport==='ufc', nfl=sport==='nfl';
   const tailH = nas ? ['SimWin%','SimTop5%','SimTop10%','Usable30+%']
-              : ufc ? []
+              : ufc ? ['OptRate%','FightOptRate%']
               : nfl ? ['Pos','Team','Usable1.5x%','Boom3x%']
               :       ['SimWin%','SimTop5%','SimTop10%','SimTop20%','MadeCut%'];
+  // UFC: fighter-level optimal rate (P(in the per-sim optimal), Σ=600 across
+  // the slate) and the fight's COMBINED rate (rateA+rateB — exact under
+  // no-oppose: an optimal never holds both sides). The combined column is
+  // the fight-tail identifier: smash fights read 55%+, trash fights <30%.
+  const _fRate = {};
+  if(ufc){
+    (slate.players||[]).forEach(p=>{
+      if(p._optRate==null && !rows.includes(p)) return;
+      const opp=(slate.players||[]).find(q=>q!==p && typeof ufcSameFight==='function' && ufcSameFight(p,q));
+      _fRate[p.id]=100*((p._optRate||0)+((opp&&opp._optRate)||0));
+    });
+  }
   const tailV = p => nas ? [p._simWin,p._simT5,p._simT10,p._simCut]
-                   : ufc ? []
+                   : ufc ? [p._optRate!=null?(100*p._optRate).toFixed(1):'', _fRate[p.id]!=null?_fRate[p.id].toFixed(1):'']
                    : nfl ? [nflPosOf(p)||'', p.team||'', p._simCut, p._simBoom]
                    :       [p._simWin,p._simT5,p._simT10,p._simT20,p._simCut];
   const header=['Name','Salary',nas?'Rating':'ModelScore','SimScore','Mean','Floor(P10)','P25','Median','P75','Ceiling(P90)',...tailH];
@@ -6096,6 +6108,14 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   // due: a pick'em main-eventer who is in nearly every optimal WHEN he wins
   // rates ~50%, not the near-zero that composite ranking implied.
   const optAppear = {};
+  // Full-slate optimal rates (curated pools only): the stance system prices
+  // the FIELD's justification, and the field plays the full slate — so a
+  // fighter's price-aware likelihood baseline must come from full-pool
+  // optimals, not the curated ones (hiding Milosevic raised Cepo's curated
+  // rate and silently halved the Urbina captor claim). One extra optimal
+  // pick per generation sim, only when players are hidden.
+  const _curated = fullPool.length > visiblePool.length;
+  const optAppearFull = {}; let genSimsFull = 0;
   // Count sims actually completed — a mid-run cancel breaks the loop, and the
   // old code still divided appearRate by the FULL numSims (deflating every
   // optimal-rate that feeds the alignment servo and ownership cull) and
@@ -6145,6 +6165,10 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
     const key = optimal.map(p=>p.id).sort().join('|');
     const total = optimal.reduce((s,p)=>s+(simScore[p.id]||0),0);
     optimal.forEach(p=>{ optAppear[p.id] = (optAppear[p.id]||0) + 1; });
+    if(_curated){
+      const optF = pickOptimalLineup(simScore, fullPool, salaryCap, groups, noOppose, minSal);
+      if(optF && optF.length){ genSimsFull++; optF.forEach(p=>{ optAppearFull[p.id] = (optAppearFull[p.id]||0) + 1; }); }
+    }
     if(lineupFreq.has(key)){
       const e = lineupFreq.get(key);
       e.count++;
@@ -6327,10 +6351,15 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   // actually voted, or every rate is silently halved.
   const rateDenom = evMode ? Math.max(1, genSims) : Math.max(1, simsDone);
   visiblePool.forEach(p=>{ appearRate[p.id] = (optAppear[p.id]||0) / rateDenom; });
+  let appearRateFull = null;
+  if(_curated && genSimsFull > 0){
+    appearRateFull = {};
+    fullPool.forEach(p=>{ appearRateFull[p.id] = (optAppearFull[p.id]||0) / genSimsFull; });
+  }
   // simScoresById: every visible fighter's per-sim score array (index = sim).
   // Exposed so the selection layer can price a candidate lineup's JOINT
   // distribution (its total across the same sims) instead of summing marginals.
-  return {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate,
+  return {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, appearRateFull,
           totalSims: simsDone, genSims: evMode ? genSims : simsDone, simScoresById: fighterAllScores};
 }
 
@@ -7155,6 +7184,9 @@ function sampleUfcField(pool, N, ownArr, opts){
 // history/preview; returns null on cancel.
 async function runUFCContestEV(ctx){
   const {slate, pool, ranked, simScoresById, totalSims, target, maxExpPct, overrides} = ctx;
+  // Field frame = full slate when the caller provides it (see the note at the
+  // ownership-scenario block): the modeled field ignores the user's curation.
+  const fieldPool = (ctx.fieldPool && ctx.fieldPool.length >= pool.length) ? ctx.fieldPool : pool;
   const genSims = ctx.genSims || totalSims;  // # of generation sims (PGA uses even sims only)
   // Roster shape. Everything below was written for 6-man positionless lineups;
   // NFL passes its 9 named slots through and the field sampler builds legal
@@ -7266,8 +7298,11 @@ async function runUFCContestEV(ctx){
   const _STANCE_NORM = 15;  // excess points at which the stance multiplier reaches 1+β
   const _buildStance = () => {
     if(slate.sport!=='ufc') return;
-    const _ownV = pool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
-    _oppIdx = pool.map(p=>pool.findIndex(q=>q!==p && typeof ufcSameFight==='function' && ufcSameFight(p,q)));
+    // FIELD FRAME: opponents may be hidden (curation) — the stance must still
+    // see them, and excess/deficit baselines price the REAL field's
+    // justification, so rates come from full-slate optimals when available.
+    const _ownV = fieldPool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
+    _oppIdx = fieldPool.map(p=>fieldPool.findIndex(q=>q!==p && typeof ufcSameFight==='function' && ufcSameFight(p,q)));
     // EXCESS ownership only: orphaned equity is the field's MISTAKE dying, not
     // its fair positions. Each fighter's opponent contributes only ownership
     // ABOVE the opponent's price-aware likelihood (optimal-rate — P(in the
@@ -7277,7 +7312,7 @@ async function runUFCContestEV(ctx){
     // vs Todorovic 26.5%/41%) carries ~zero excess either way, so it reverts
     // to the honest auction instead of flipping toward the dog (measured
     // defect of the raw-ownership version: 14%/50% toward the 41% side).
-    const _appR = ctx.appearRate || {};
+    const _appR = ctx.appearRateField || ctx.appearRate || {};
     // NOISE SOFT-THRESHOLD (2026-08-04, replaced the 1.25×-mean popularity
     // gate the same day): only the handful of genuinely popular fighters can
     // kill a meaningful portion of the field — an 18%-owned underdog losing
@@ -7294,11 +7329,11 @@ async function runUFCContestEV(ctx){
     // independent, zero invented constants — refit the sd as real contests
     // accumulate (same pipeline as the planned herding correction).
     const EXCESS_NOISE = 3.9;
-    const _excess = pool.map((p,i2)=>{
+    const _excess = fieldPool.map((p,i2)=>{
       const ar = _appR[p.id]!=null ? 100*_appR[p.id] : null;
       return ar==null ? 0 : Math.max(0, _ownV[i2] - ar - EXCESS_NOISE);
     });
-    _oppExcess = pool.map((p,i2)=>{
+    _oppExcess = fieldPool.map((p,i2)=>{
       const o=_oppIdx[i2];
       return o>=0 ? _excess[o] : 0;
     });
@@ -7312,14 +7347,14 @@ async function runUFCContestEV(ctx){
     // only in his win sims" physics. On this slate it derives the stands the
     // board was refusing to take: Vologdin +2.7, Milosevic +1.5, Musayev
     // +1.3 effective points; proportionally-owned fighters → 0.
-    _selfDeficit = pool.map((p,i2)=>{
+    _selfDeficit = fieldPool.map((p,i2)=>{
       const ar = _appR[p.id]!=null ? 100*_appR[p.id] : null;
       return ar==null ? 0 : Math.max(0, ar - _ownV[i2] - EXCESS_NOISE);
     });
     // Per-fighter priced justification (fraction of the stance cap) for the
     // CREDIT multiplier, and the raw claimed points for the anchor relief.
-    _justFrac = pool.map((p,i2)=> Math.min(2, (_oppExcess[i2] + _selfDeficit[i2])/_STANCE_NORM));
-    _justPts  = pool.map((p,i2)=> _oppExcess[i2] + _selfDeficit[i2]);
+    _justFrac = fieldPool.map((p,i2)=> Math.min(2, (_oppExcess[i2] + _selfDeficit[i2])/_STANCE_NORM));
+    _justPts  = fieldPool.map((p,i2)=> _oppExcess[i2] + _selfDeficit[i2]);
   };
   const setLevBeta = (b) => { _levB = (b>0 && _oppExcess) ? b : 0; };
   // Stance multiplier for a candidate lineup in one sim: 1 + β·(claimed excess
@@ -7402,7 +7437,18 @@ async function runUFCContestEV(ctx){
   // relative ordering intact and let ownership dominate the build.)
   const sigma = 0.55;
   const gaussEV = ()=>{ const u=Math.max(1e-9,Math.random()), v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); };
-  const baseOwn = pool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
+  // ── FIELD FRAME = FULL SLATE (2026-08-05) ────────────────────────────────
+  // The 47,500 real opponents do not see the user's curation: hiding 7
+  // fighters (~90 ownership points the field WILL roster) had the modeled
+  // field built from 21 names — a fictional, stronger field — and priced
+  // stance claims against curated-pool rates (hiding Milosevic raised
+  // Cepo's rate and silently halved Urbina's captor claim; hiding a
+  // fighter killed his OPPONENT's stance lookup outright). Everything
+  // field-side (ownership scenarios, field sampling, dup counts, stance
+  // excess/deficit baselines, score frame) now runs on ctx.fieldPool — the
+  // full slate — while curation keeps restricting OUR candidates only.
+  const baseOwn = fieldPool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
+  const ownById = {}; fieldPool.forEach((p,i)=>{ ownById[p.id]=baseOwn[i]; });
   const ownBudget = baseOwn.reduce((a,b)=>a+b,0);
   // Scenario/field construction is a FUNCTION (not straight-line code) so the
   // F1 best-of-N selection restarts below can draw fresh, independent samples.
@@ -7442,7 +7488,7 @@ async function runUFCContestEV(ctx){
     const src = ranked && ranked.length ? ranked : ctx.ranked;
     if(!(sharpShare>0 && src && src.length)) return;
     const top=src.slice(0, 300);
-    const idxOfP=new Map(pool.map((p,i)=>[p.id,i]));
+    const idxOfP=new Map(fieldPool.map((p,i)=>[p.id,i]));   // field frame — sharp entries score in the same arrays as the sampled field
     const asIdx=top.map(e=>({idxs:e.lineup.map(p=>idxOfP.get(p.id)).filter(x=>x!=null), w:Math.max(1,e.count||1)}))
       .filter(x=>x.idxs.length===_rosterN);
     const totW=asIdx.reduce((s,x)=>s+x.w,0);
@@ -7456,7 +7502,7 @@ async function runUFCContestEV(ctx){
     const flds=[], keyCounts=[];
     let d0=0, d0Name='';
     for(let k=0;k<K;k++){
-      const {field, maxDev, maxName} = sampleUfcField(pool, NF, scen[k], _fieldOpts);
+      const {field, maxDev, maxName} = sampleUfcField(fieldPool, NF, scen[k], _fieldOpts);
       if(!field.length){ log('⚠ Field sampler produced no lineups — check Own% column' + (_fieldOpts?' and that the pool covers every position.':'.')); return null; }
       if(sharpPool){
         const nSharp=Math.floor(field.length*sharpShare);
@@ -7482,7 +7528,7 @@ async function runUFCContestEV(ctx){
 
   // 2) Field score distribution per sampled sim (sorted for rank lookup).
   // Sim s is evaluated against scenario (s mod K)'s field.
-  const scoreArr = pool.map(p=>simScoresById[p.id]||[]);
+  const scoreArr = fieldPool.map(p=>simScoresById[p.id]||[]);
   // Field scorer, reusable so auto-exposure can re-score the same sampled field
   // under a "model wrong about the pillar" world.
   const buildFieldSorted = (arrs, flds) => {
@@ -7513,7 +7559,7 @@ async function runUFCContestEV(ctx){
   // sampled field (the sampler already encodes the salary funneling and
   // chalk clustering) scaled to field size; (b) analytic Π(own)×DUP_K as the
   // floor for candidates too unique to appear in the sample. Take the max.
-  const idxById = new Map(pool.map((p,i)=>[p.id,i]));
+  const idxById = new Map(fieldPool.map((p,i)=>[p.id,i]));
 
   // ── No-oppose screen (UFC) ────────────────────────────────────────────────
   // Belt-and-suspenders: no candidate carrying an opposing pair may reach EV
@@ -8423,7 +8469,7 @@ async function runUFCContestEV(ctx){
   // credit pays): no justification → clamped at rate exactly as before;
   // priced justification → room to run, still escalating past the LIFTED
   // anchor so even a stance cannot pile without bound.
-  const _poolIdxById = {}; pool.forEach((p,i2)=>_poolIdxById[p.id]=i2);
+  const _poolIdxById = {}; fieldPool.forEach((p,i2)=>_poolIdxById[p.id]=i2);
   // ── BOARD-EARNED STANDS (2026-08-05, user-selected shape) ────────────────
   // The rate-anchored resistance produced honest but FLAT books (every stand
   // capped at +5-9 because this slate's orphaned-equity claims are small),
@@ -8842,7 +8888,7 @@ async function runUFCContestEV(ctx){
     }
     return DW_NOISE_SD * o;
   };
-  const _swapPoolIdx = {}; pool.forEach((p,i2)=>_swapPoolIdx[p.id]=i2);
+  const _swapPoolIdx = {}; fieldPool.forEach((p,i2)=>_swapPoolIdx[p.id]=i2);
   const _swapSvalPct = {};
   {
     const _sv2 = pool.filter(p=>p._simP50!=null && p.salary>0)
@@ -8883,7 +8929,7 @@ async function runUFCContestEV(ctx){
     pool.forEach((p,i)=>{
       const fairWin = (p._nPWin!=null) ? p._nPWin*100 : null;   // de-vigged market win %
       if(fairWin==null || fairWin < 5) return;
-      const own = baseOwn[i];                                   // projected field own %
+      const own = ownById[p.id];                                // projected field own %
       const floorPct = own/3;
       const curPct = 100*(cnt[p.id]||0)/NFL;
       const userMin = minOverrides[p.id]||0;
@@ -8977,12 +9023,12 @@ async function runUFCContestEV(ctx){
                      .sort((a,b)=>b.m-a.m).slice(0, tierN);
     const floors = {}, info = [];
     tier.forEach(({p,i})=>{
-      const floorPct = UFC_ANCHOR_F * baseOwn[i];
+      const floorPct = UFC_ANCHOR_F * ownById[p.id];
       const curPct   = 100*(cnt[p.id]||0)/NL;
       const userMin  = minOverrides[p.id]||0;
       if(floorPct > Math.max(curPct, userMin) + 2){
         floors[p.id] = Math.round(floorPct);
-        info.push({p, cur:curPct, own:baseOwn[i], m:meanById[p.id]||0});
+        info.push({p, cur:curPct, own:ownById[p.id], m:meanById[p.id]||0});
       }
     });
     if(info.length){
@@ -9082,6 +9128,37 @@ async function runUFCContestEV(ctx){
   const expRows = pool.map(p=>({p, e:(_expFinal[p.id]||0)}))
     .filter(r=>r.e>0).sort((a,b)=>b.e-a.e).slice(0,6);
   log(`Top exposure: ${expRows.map(r=>`${r.p.name.split(' ').slice(-1)[0]} ${Math.round(r.e/finalLineups.length*100)}%`).join(', ')}`);
+  // ── FIGHT-LEVEL COVERAGE, identification only (2026-08-05) ───────────────
+  // Measured (m19, real slate): conditional regret is FLAT across fights
+  // (~18-26 pts — near-substitutes always exist), so fight coverage is a
+  // PRICE, not a need, and no force pushes toward a rate. But the tails are
+  // real information (user doctrine: smash fights up top, trash fights at
+  // the bottom — the middle says nothing), so every book states its fight
+  // stances: combined optimal rate vs combined book exposure, tails flagged
+  // when the book takes a big structural stance (±15 pts vs the rate at the
+  // tail thirds). A flagged fade is a decision made visible, not an error.
+  if(slate.sport==='ufc' && ctx.appearRate){
+    const _fSeen=new Set(), _fRows=[];
+    const _cntF={}; finalLineups.forEach(l=>l.forEach(p=>{ _cntF[p.id]=(_cntF[p.id]||0)+1; }));
+    for(const p of fieldPool){
+      if(_fSeen.has(p.id)) continue;
+      const opp=fieldPool.find(q=>q!==p && typeof ufcSameFight==='function' && ufcSameFight(p,q));
+      if(opp) _fSeen.add(opp.id); _fSeen.add(p.id);
+      const rateP=(ctx.appearRateField||ctx.appearRate)[p.id]||0, rateO=opp?((ctx.appearRateField||ctx.appearRate)[opp.id]||0):0;
+      const rate=100*(rateP+rateO);
+      const ex=100*(((_cntF[p.id]||0)+(opp?(_cntF[opp.id]||0):0))/Math.max(1,finalLineups.length));
+      const nmF=p.name.split(' ').slice(-1)[0]+(opp?'/'+opp.name.split(' ').slice(-1)[0]:'');
+      _fRows.push({nmF, rate, ex});
+    }
+    _fRows.sort((a,b)=>b.rate-a.rate);
+    const nT=Math.max(1, Math.floor(_fRows.length/3));
+    const tag=(r,i)=>{
+      if(i<nT && r.ex < r.rate-15) return '⚠under';
+      if(i>=_fRows.length-nT && r.ex > r.rate+15) return '⚠over';
+      return '';
+    };
+    log(`Fight coverage (combined optimal rate → book): ${_fRows.map((r,i)=>`${r.nmF} ${Math.round(r.rate)}→${Math.round(r.ex)}%${tag(r,i)}`).join(' · ')}`);
+  }
   // Tightest surviving pair coupling — shows the conditional cap did its job
   // (skill pairs allowed up to 85%; nothing should read as a welded 90%+).
   { const nm={}; pool.forEach(p=>nm[p.id]=p.name.split(' ').slice(-1)[0]);
@@ -10584,7 +10661,7 @@ async function runUFCSimGenInner(){
   if(window._genCancelled){ log('Cancelled.'); document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); return; }
 
   const _evOn = !!(slate._ufcEv && slate._ufcEv.on);
-  const {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, totalSims, genSims, simScoresById} = await runUFCSimsNew(
+  const {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, appearRateFull, totalSims, genSims, simScoresById} = await runUFCSimsNew(
     fullPool, pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal, _evOn
   );
 
@@ -10640,6 +10717,11 @@ async function runUFCSimGenInner(){
   fullPool.forEach(p=>{
     p._simP50 = compositeScoreById[p.id] ?? (medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null);
     p._simDist = distById[p.id] || null;
+    // Optimal rate for the board + Sim CSV: P(fighter in the per-sim optimal).
+    // Visible fighters from the curated pass; hidden fighters from the
+    // full-slate rate pass when the pool is curated (null otherwise).
+    p._optRate = appearRate[p.id] != null ? appearRate[p.id]
+               : (appearRateFull && appearRateFull[p.id] != null ? appearRateFull[p.id] : null);
   });
   // Sim distributions attached — enable the ⬇ Sim CSV export (UFC exports the
   // outcome distribution only; no finish-position columns).
@@ -10672,6 +10754,9 @@ async function runUFCSimGenInner(){
     // UFC needs the coverage, not the polish. PGA/NFL/NASCAR keep repair.
     const out = await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims,
       genSims: genSims || totalSims, target, maxExpPct, overrides, appearRate,
+      // Field frame: the modeled 47.5k opponents play the FULL slate — hidden
+      // fighters carry sims + Own%, and stance baselines use full-slate rates.
+      fieldPool: fullPool, appearRateField: appearRateFull || appearRate,
       oosParity:1, sharpShare:0.15, se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:false, maxSal, minSal});
     if(out === null && window._genCancelled) log('Cancelled.');
     document.getElementById('genBtn').disabled = false;
