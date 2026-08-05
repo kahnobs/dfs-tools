@@ -1864,6 +1864,11 @@ const PGA_STAT_ALIASES = {
   fptsg:['fptsg','f_pts_g'],
   sg_ott:['sg_ott'], sg_app:['sg_app'], sg_arg:['sg_arg'],
   sg_putt:['sg_putt'], sg_t2g:['sg_t2g'], sg_tot:['sg_tot'],
+  // v15.3: putting on THIS venue's green surface (bermuda / bent / poa /
+  // paspalum). The webhook resolves the course's grass and writes whichever of
+  // RRG's four surface stats applies into one stable column, so the builder
+  // never has to know the surface — it just reads sg_putt_surf.
+  putt_surf:['sg_putt_surf','putt_surf'],
   w_ott:['w_ott','w_sg_ott'], w_app:['w_app','w_sg_app'], w_arg:['w_arg','w_sg_arg'],
   w_putt:['w_putt','w_sg_putt'], w_t2g:['w_t2g','w_sg_t2g'], w_tot:['w_tot','w_sg_tot'],
   // measured SG-round count (deepest window) — sample-size half of the sim's
@@ -6568,7 +6573,7 @@ function renderPgaFactorSliders(){
     </div>`;
   }).join('');
   const src=document.getElementById('pgaFactorSrc');
-  if(src) src.textContent = f.src==='auto' ? `auto: ${f.course||'course profile'}` : (f.src==='manual'?'manually adjusted':'defaults — click Auto to load this course\'s profile');
+  if(src) src.textContent = f.src==='auto' ? `auto: ${f.course||'course profile'}${f.basis==='recipe'?' (recipe fallback)':''}` : (f.src==='manual'?'manually adjusted':'defaults — click Auto to load this course\'s profile');
   maybeAutoLoadPgaFactors();
   restorePgaWaveUI();
 }
@@ -6587,20 +6592,46 @@ function restorePgaWaveUI(){
   const l=document.getElementById('pgaWaveLean'); if(l) l.value=w.lean!=null?w.lean:0;
   updatePgaWaveLabels();
 }
-// recipe → axis strengths. Buckets mirror the recipe's stat clusters; SG:T2G
-// splits evenly across drv/app/arg. Scale: base 12 + 3×(recipe weight points
-// mapped to the axis), capped at 85 — one 20-point axis reads ~72, a dead
-// axis stays at a mild 12 so no skill is ever fully switched off.
+// course profile → axis strengths.
+//
+// PREFERRED PATH (webhook v15.2+): j.sim_profile, computed server-side from
+// the course's CORRELATIONS table, one axis at a time. That is the right
+// instrument — see the long note below for why the recipe is not.
+//
+// LEGACY FALLBACK: derive the axes from the model recipe's `weights`. This is
+// what the builder used to do exclusively, and it is structurally wrong in
+// three ways, kept only so an older Apps Script deploy still fills something
+// in rather than leaving every slider at the 25 default:
+//   1. The recipe is a ZERO-SUM 100-point budget. Anchors (w_sg_tot 20 +
+//      COURSE_HISTORY 5) and the scoring cluster map to no axis at all — at
+//      Sedgefield that is 43 of 100 points evaporating — so every axis is
+//      squashed toward the floor. The sim's axes are independent σ values;
+//      they never needed to share a budget.
+//   2. The budget makes axes COMPETE. Approach's points mechanically suppress
+//      putting even at a course whose putting correlations are the most
+//      distinctive stats on the page.
+//   3. w_sg_ott carries 60% of the driving cluster by design (ANCHOR_SHARE),
+//      and there is nowhere to put it but the DISTANCE axis — so accuracy's
+//      own evidence ends up funding the distance slider. Sedgefield ranks
+//      50/53 in driving-distance correlation and 14/53 in accuracy, and this
+//      path produced drv 39 / acc 21. Half-split w_sg_ott to limit the damage.
+// Scale: base 12 + 3×(recipe weight points mapped to the axis), capped at 85.
 function recipeToPgaFactors(j){
+  // v15.2: the webhook now derives the sim axes properly. Trust it when present.
+  const sp=j&&j.sim_profile;
+  if(sp&&['drv','acc','app','arg','putt'].every(k=>isFinite(+sp[k]))){
+    return {drv:+sp.drv,acc:+sp.acc,app:+sp.app,arg:+sp.arg,putt:+sp.putt};
+  }
   const w=j.weights||{};
   const add={drv:0,acc:0,app:0,arg:0,putt:0};
   Object.keys(w).forEach(k=>{
     const v=w[k]||0;
-    if(/^w?_?sg_ott$|driving_distance|total_driving/.test(k)) add.drv+=v;
+    if(/^w?_?sg_ott$/.test(k)){ add.drv+=v/2; add.acc+=v/2; }   // OTT is distance AND accuracy
+    else if(/driving_distance|total_driving/.test(k)) add.drv+=v;
     else if(/driving_accuracy/.test(k)) add.acc+=v;
     else if(/^w?_?sg_app$|^gir$|^sum_approaches_|^approaches_/.test(k)) add.app+=v;
     else if(/^w?_?sg_arg$|scrambling|sand_save/.test(k)) add.arg+=v;
-    else if(/^w?_?sg_putt$|^putts_|greens$|^sg_(slow|medium|fast)_greens$/.test(k)) add.putt+=v;
+    else if(/^w?_?sg_putt($|_)|^putts_|greens$|^sg_(slow|medium|fast)_greens$/.test(k)) add.putt+=v;
     else if(/^w?_?sg_t2g$/.test(k)){ add.drv+=v/3; add.app+=v/3; add.arg+=v/3; }
     // scoring composites (sg_tot, bob, bogey_avoid, implied_win, course
     // history) describe WHO is good, not WHICH skill separates — no axis.
@@ -6618,7 +6649,12 @@ async function fetchPgaFactors(s, name){
   const j=await r.json();
   if(j.ok===false||j.error) throw new Error(j.error||'course lookup failed');
   const prof=recipeToPgaFactors(j);
-  s._pgaFactors=Object.assign({},s._pgaFactors,prof,{src:'auto',course:j.course_name||''});
+  // basis flags which path fired, so "auto: Sedgefield CC" vs "auto: Sedgefield
+  // CC (recipe fallback)" tells you at a glance whether the v15.2 webhook is
+  // actually deployed — a silent fallback here is what produced the inverted
+  // driving-distance/accuracy sliders in the first place.
+  const basis=(j&&j.sim_profile)?'corr':'recipe';
+  s._pgaFactors=Object.assign({},s._pgaFactors,prof,{src:'auto',basis:basis,course:j.course_name||''});
   // ── Course scoring environment (webhook v15+) ──────────────────────────────
   // field_vs_par anchors the sim's DK stroke level; par sets the under-70
   // bonus threshold; birdie rate refines hole scoring; win_scores feed the
@@ -8596,10 +8632,24 @@ async function runUFCContestEV(ctx){
   const sfScore = l => { const e=l._entry;
     if(e && e._hev!=null) return e._hev - _dwW*(e._dw||0) + 0.01*(e._ev||0);
     return (l._ev!=null ? l._ev : 0); };
+  // Same over-supply charge the greedy pays, for the swap passes (F4 floors,
+  // user Min%s) — evaluated against LIVE counts at swap time. Linear (σ per
+  // slot past a fighter's optimal rate, capped at 6 slots per fighter): the
+  // swap passes move a handful of lineups, so a resistance-shaped preference
+  // is enough; the greedy's quadratic escalation stays where volume lives.
+  const _swapAppR = (typeof ctx!=='undefined' && ctx && ctx.appearRate) ? ctx.appearRate : null;
+  const _swapPen = !_swapAppR ? null : (lineup, counts, N) => {
+    let o = 0;
+    for(const p of lineup){ const sh = _swapAppR[p.id]; if(sh==null) continue;
+      const over = (counts[p.id]||0) + 1 - sh*N;
+      if(over > 0) o += Math.min(over, 6);
+    }
+    return DW_NOISE_SD * o;
+  };
   const capFn = id => { const pct = overrides[id]!=null ? overrides[id] : maxExpPct;
     return pct>=100 ? null : (pct<=0 ? 0 : Math.max(1,Math.ceil(target*pct/100))); };
   if(Object.keys(minOverrides).some(id=>minOverrides[id]>0)){
-    finalLineups = enforceMinExposure(finalLineups, minCands, minOverrides, sfScore, log, capFn);
+    finalLineups = enforceMinExposure(finalLineups, minCands, minOverrides, sfScore, log, capFn, {dynPenalty:_swapPen});
   }
 
   // ═══ F2: CHALK-FADE SOFT FLOOR (NASCAR) ══════════════════════════════════
@@ -8647,7 +8697,7 @@ async function runUFCContestEV(ctx){
       // his Max% cap, and it NEVER breaches a cap (a muted-logger trial must
       // not be able to breach silently — that exact combination pushed
       // Bell/Blaney 60%→68% in testing before this guard).
-      const trial  = enforceMinExposure(finalLineups.map(l=>l), minCands, floors, sfScore, ()=>{}, capFn, {hardCaps:true});
+      const trial  = enforceMinExposure(finalLineups.map(l=>l), minCands, floors, sfScore, ()=>{}, capFn, {hardCaps:true, dynPenalty:_swapPen});
       const after  = evalSet(trial);
       const dEv    = after.ev - before.ev;
       const stake  = fee*NFL;
@@ -8781,7 +8831,7 @@ async function runUFCContestEV(ctx){
       const floorsPlusUser = {};
       Object.keys(tgtCount).forEach(id=>{ floorsPlusUser[id] = 100*tgtCount[id]/NLf; });
       const _fRep = {};
-      finalLineups = enforceMinExposure(finalLineups, minCands, floorsPlusUser, sfScore, ()=>{}, floorCapFn, {hardCaps:true, protectMins:true, report:_fRep});
+      finalLineups = enforceMinExposure(finalLineups, minCands, floorsPlusUser, sfScore, ()=>{}, floorCapFn, {hardCaps:true, protectMins:true, report:_fRep, dynPenalty:_swapPen});
       const after  = evalSet(finalLineups);
       const dEv    = after.ev - before.ev;
       const cnt2={}; finalLineups.forEach(l=>l.forEach(p=>{ cnt2[p.id]=(cnt2[p.id]||0)+1; }));
@@ -8911,6 +8961,10 @@ function syncPgaCutUI(){
 }
 const PGA_FACTOR_DEFAULT = 25;  // default Skill Correlation slider value
 const PGA_FACTOR_SCALE = 0.6;   // slider 100 → σ 0.6 strokes/round, week-persistent
+// Putting axis loading: 65% this venue's green surface / 35% generic SG: PUTT.
+// Mirrors PUTT_SURFACE_SHARE in the webhook so the sim's correlation structure
+// agrees with the model score about who putts well this week.
+const PGA_PUTT_SURFACE_W = 0.65;
 
 function pgaGaussFactory(){
   let spare=null;
@@ -9110,7 +9164,23 @@ async function runPgaSims(pool, numSims, log){
     (function(){const L=pctLoad(pool.map(p=>blNaN(p,'app')));         // app
       return new Float64Array(N).map((_,i)=>L[i]*0.8+Lgir[i]*0.2);})(),
     pctLoad(pool.map(p=>blNaN(p,'arg'))),                             // arg
-    pctLoad(pool.map(p=>blNaN(p,'putt'))),                            // putt
+    (function(){                                                      // putt
+      // v15.3: putting loads 65% on THIS venue's green surface, 35% on generic
+      // SG: PUTT. Grain is the one putting effect with a persistent player-level
+      // signature — a bermuda specialist is a different golfer on poa — so when
+      // the putting axis swings, it should lift the guys who putt well on THIS
+      // grass, not the guys who putt well on average.
+      // Guarded: pctLoad leaves missing values at 0 (neutral), so blending a
+      // sparse surface column would quietly shrink every golfer's putting
+      // loading toward zero instead of falling back. Require the column to
+      // cover at least half the field before trusting it.
+      const gen=pctLoad(pool.map(p=>blNaN(p,'putt')));
+      const sv=pool.map(p=>parseFloat(p.putt_surf));
+      const have=sv.filter(v=>!isNaN(v)).length;
+      if(have < 0.5*N) return gen;
+      const srf=pctLoad(sv);
+      return new Float64Array(N).map((_,i)=>srf[i]*PGA_PUTT_SURFACE_W+gen[i]*(1-PGA_PUTT_SURFACE_W));
+    })(),
   ];
   // ── Axis-loading reliability: the SAME field-strength trust lens the model
   // score uses, applied to the correlation loadings. Without it, a weak-field-
@@ -13020,10 +13090,22 @@ function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, 
         .sort((a, b) => b.score - a.score);
       let replaced = 0;
       for(let n = 0; n < stillNeeded; n++){
+        // Exposure-aware swap currency (opts.dynPenalty): a static score let
+        // this pass ship exposure the greedy's own resistance had refused —
+        // insertions ranked blind to live counts stuffed over-rate passengers
+        // back in, and victims picked on raw score systematically evicted
+        // whichever fighter family the run's field sample happened to
+        // under-price. Both sides now pay the same over-supply charge the
+        // greedy pays, against LIVE counts. Inert when the option is absent
+        // (user Min%s outside contest-EV, NASCAR/PGA floor paths unchanged).
+        if(opts && opts.dynPenalty) cands.forEach(c => { c.eff = c.score - opts.dynPenalty(c.l, counts, N); });
+        else cands.forEach(c => { c.eff = c.score; });
+        cands.sort((a, b) => b.eff - a.eff);
         const victims = result
           .map((l, li) => ({ li, l, key: l.map(p=>p.id).sort().join(','), score: scoreFn(l) }))
           .filter(v => !v.l.some(p => p.id === id))
-          .sort((a, b) => a.score - b.score);
+          .map(v => { v.eff = (opts && opts.dynPenalty) ? v.score - opts.dynPenalty(v.l, counts, N) : v.score; return v; })
+          .sort((a, b) => a.eff - b.eff);
         let moved = false;
         for(const v of victims){
           const base = {};
@@ -13074,6 +13156,8 @@ function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, 
 
     let replaced = 0, breachInserts = 0;
     for(let n = 0; n < stillNeeded && withPlayer.length > 0; n++){
+      // Exposure-aware re-rank per insertion (see the protectMins note).
+      if(opts && opts.dynPenalty){ withPlayer.forEach(c => { c.eff = c.score - opts.dynPenalty(c.l, counts, N); }); withPlayer.sort((a, b) => b.eff - a.eff); }
       // Removal victim FIRST — its removal frees exposure, so the incoming
       // lineup's cap check runs against the true post-removal counts.
       // Worst lineup lacking this player whose removal won't break another met
@@ -13082,7 +13166,7 @@ function enforceMinExposure(finalLineups, candidatePool, minOverrides, scoreFn, 
       let safeIdx = -1, safeScore = Infinity;
       result.forEach((l, li) => {
         if(l.some(p => p.id === id)) return;
-        const sc = scoreFn(l);
+        const sc = (opts && opts.dynPenalty) ? scoreFn(l) - opts.dynPenalty(l, counts, N) : scoreFn(l);
         if(sc < worstScore){ worstScore = sc; worstIdx = li; }
         if(!removalBreaksMin(l, id) && sc < safeScore){ safeScore = sc; safeIdx = li; }
       });
