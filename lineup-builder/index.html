@@ -6076,9 +6076,14 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   const ssCDFById = {}, tdCDFById = {};
   fullPool.forEach(p=>{ ssCDFById[p.id]=extractSSCDF(p); tdCDFById[p.id]=extractTDCDF(p); });
 
-  // Per-fighter score tracking for median display
+  // Per-fighter score tracking for median display. FULL pool (2026-08-05):
+  // hidden fighters are part of every sim anyway (their opponents' outcomes
+  // require them) — they are removed from LINEUP SELECTION, not from the
+  // simulation. Retaining their scores costs nothing and keeps their board
+  // stats (_simP50/SVal) current, which the deadweight reference and the
+  // board display both rely on when the user curates the pool.
   const fighterAllScores = {};
-  visiblePool.forEach(p=>{ fighterAllScores[p.id]=[]; });
+  fullPool.forEach(p=>{ fighterAllScores[p.id]=[]; });
 
   // Lineup frequency map: key → {lineup, count, totalScore}
   const lineupFreq = new Map();
@@ -6259,7 +6264,10 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   // redistributes between fighters, it doesn't inflate everyone.
   const FINISH_TILT_W = 0.50;
   const _pItdById = {};
-  visiblePool.forEach(p=>{
+  // Per-fighter stats over the FULL pool (hidden fighters are simmed anyway);
+  // the finish-tilt CENTERING mean below stays visible-only so no visible
+  // fighter's composite moves by a hair when someone gets hidden.
+  fullPool.forEach(p=>{
     const itdV = (p.itd != null && p.itd !== '') ? parseFloat(p.itd) : NaN;
     const wp = (winProb[p.id] != null ? winProb[p.id] : 0.5);
     let v = null;
@@ -6272,10 +6280,10 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
   const _itdVals = visiblePool.map(p=>_pItdById[p.id]);
   const _itdMean = _itdVals.length ? _itdVals.reduce((s,v)=>s+v,0)/_itdVals.length : 0.30;
 
-  visiblePool.forEach(p=>{
-    const arr = fighterAllScores[p.id].slice().sort((a,b)=>a-b);
+  fullPool.forEach(p=>{
+    const arr = (fighterAllScores[p.id]||[]).slice().sort((a,b)=>a-b);
     medianScoreById[p.id] = arr.length>0 ? arr[Math.floor(arr.length*0.5)] : 0;
-    distById[p.id] = buildSimDist(fighterAllScores[p.id], 'ufc');
+    distById[p.id] = buildSimDist(fighterAllScores[p.id]||[], 'ufc');
     if(arr.length > 0){
       const p80 = arr[Math.min(Math.floor(arr.length*0.80), arr.length-1)];
       const p90 = arr[Math.min(Math.floor(arr.length*0.90), arr.length-1)];
@@ -8086,7 +8094,16 @@ async function runUFCContestEV(ctx){
   // the EV cannot see and is powerless where the EV has real signal.
   // Penalty-only (no bonus for stacking board quality — the measured failure
   // of a quality BONUS was re-concentrated chalk, 72%/89% welds).
-  const DW_NOISE_SD = 0.12;
+  //
+  // CONTEST-INVARIANT DOLLARS (2026-08-05): every dollar figure the engine
+  // produces (head equity, candidate EV, payouts) scales linearly with the
+  // payout table, and the payout table scales with the entry fee. The noise
+  // sd and the board-prior price below were measured/declared on the $3
+  // calibration contest — used raw they would be ~6× too aggressive on a
+  // $0.50 PGA GPP and ~7× too timid on a $20 single-entry. All fixed dollar
+  // constants therefore ride the fee.
+  const _feeScale = Math.max(0.02, (fee||3)/3);
+  const DW_NOISE_SD = 0.12 * _feeScale;
   let _dwW = 0; const _dwById = {};
   {
     const _scored = pool.filter(p=>p._simP50!=null && p.salary>0);
@@ -8111,8 +8128,39 @@ async function runUFCContestEV(ctx){
       // the calibration slate), zero at z ≥ −0.5 (Buzukja −0.45 and up),
       // linear between. Annihilation for the red line, ordering for the
       // playable tier.
-      const _svM = _rest.reduce((s,p)=>s+parseFloat(p._simP50)/((p.salary||1)/1000),0)/Math.max(1,_rest.length);
-      const _svSd = Math.sqrt(_rest.reduce((s,p)=>{const v=parseFloat(p._simP50)/((p.salary||1)/1000)-_svM; return s+v*v;},0)/Math.max(1,_rest.length)) || 1;
+      // RED-LINE GATE, TOP-ANCHORED (2026-08-05, second calibration). The
+      // first gate used the pool-relative SVal z-score — and broke the
+      // moment the user CURATED the pool: hiding the five red-line fighters
+      // shifted the whole distribution down, Buzukja's z slid from −0.45
+      // (protected) to ≈−0.8 (shadowed), Todorovic's 14-pt tick shadow
+      // re-engaged, and the board's best remaining value play priced to 12%
+      // under Blachowicz (measured, curated 8/1 pool). A slate-adaptive
+      // gate must anchor to the part of the slate curation never touches:
+      // the TOP of the board. A fighter enters the annihilation regime as
+      // his SVal falls below ~55% of the top-3 mean (full force at 50%) —
+      // on the full 8/1 pool this reproduces the drawn red line exactly
+      // (Elliott/Cowan/Spasic/Tybura/Blachowicz/Prepolec full, Rodriguez
+      // partial at the boundary, Poppeck and up clear), and on the curated
+      // pool it frees Buzukja/Poppeck while keeping Blachowicz/Spasic dead
+      // — the user's exact ordering in both worlds.
+      // Reference = MEDIAN OF THE TOP-5 SVals over the FULL SLATE, hidden
+      // players included (user-suggested hardening, 2026-08-05, both holes
+      // real): (1) a top-3 MEAN is one late line-move away from breaking —
+      // a single SVal freak (big odds move at a stale salary) inflates the
+      // reference and shadows playable value plays; the top-5 median moves
+      // only if the top of the board genuinely moved. (2) Referencing the
+      // VISIBLE pool survives bottom-curation but not top-curation — hiding
+      // a chalk stud to force-fade him (a real pattern) would deflate the
+      // scale; the full slate is the population curation cannot touch.
+      // Hidden players are part of every sim (fights are simulated whole;
+      // hiding removes a fighter from LINEUP SELECTION only) and their board
+      // stats are written fresh each run, so this reference is always
+      // current regardless of curation.
+      const _refPool = ((slate && slate.players) ? slate.players : pool)
+        .filter(p=>p.salary>0 && p._simP50!=null && isFinite(parseFloat(p._simP50)));
+      const _svTop = _refPool.map(p=>parseFloat(p._simP50)/((p.salary||1)/1000)).sort((a,b)=>b-a);
+      const _topN = _svTop.slice(0, Math.min(5, _svTop.length));
+      const _topRef = _topN.length ? _topN[Math.floor((_topN.length-1)/2)] : 1;
       for(const p of _rest){
         let bestStrict = 0, bestTick = 0;
         for(const q of _rest){ if(q===p) continue; const v=parseFloat(q._simP50);
@@ -8122,8 +8170,8 @@ async function runUFCContestEV(ctx){
         const sim = parseFloat(p._simP50);
         const dwStrict = Math.max(0, bestStrict - sim);
         const tickExtra = Math.max(0, bestTick - sim) - dwStrict;
-        const z = (sim/((p.salary||1)/1000) - _svM)/_svSd;
-        const ramp = Math.max(0, Math.min(1, (-0.5 - z)/0.4));
+        const rel = (sim/((p.salary||1)/1000)) / _topRef;
+        const ramp = Math.max(0, Math.min(1, (0.55 - rel)/0.05));
         // Playable tier pays HALF price on strict deficits: ordering without
         // execution. At full price a 7-pt strict deficit (Klein behind Leka,
         // Stirling behind Leka) priced to 2% — annihilation was never the
@@ -8153,7 +8201,7 @@ async function runUFCContestEV(ctx){
       // 0%, board-best value Urbina 26% with real separation; 0.09 → no
       // further red-line gain, order instability). Not model-derived and
       // not pretending to be.
-      const DW_PRIOR_W = 0.05;
+      const DW_PRIOR_W = 0.05 * _feeScale;   // $0.05/pt at the $3 calibration contest, fee-invariant
       _dwW = Math.max(_sdD > 1e-6 ? DW_NOISE_SD/_sdD : 0, DW_PRIOR_W);
       if(_dwW>0){
         const _worst = _rest.map(p=>({nm:p.name.split(' ').slice(-1)[0], d:_dwById[p.id]||0}))
@@ -10382,7 +10430,20 @@ async function runPgaSimGen(){
   // fidelity backtest to justify — flagged, not attempted.
   if(_evOn){
     const _se = !!(slate._ufcEv && slate._ufcEv.se);
-    out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, oosParity:1, sharpShare:0.15, se:_se, dominanceRepair:true, maxSal,
+    // Optimal-rate anchor for PGA/NASCAR/NFL (2026-08-05): the UFC call site
+    // has passed appearRate since the stance work, but this one never did —
+    // so the over-supply resistance and board-earned grace (the whole
+    // anti-amplification fabric) were silently INERT outside UFC. Same
+    // semantics as the UFC rate: P(player in the per-sim optimal), count-
+    // weighted over the generation sims, pivot-pass candidates excluded
+    // (they are synthetic alternatives, not sim outcomes).
+    const _appGen = {};
+    { let _tot = 0;
+      for(const e of ranked){ if(e._pivot) continue; _tot += (e.count||1); }
+      if(_tot > 0) for(const e of ranked){ if(e._pivot) continue;
+        for(const p of e.lineup) _appGen[p.id] = (_appGen[p.id]||0) + (e.count||1)/_tot; }
+    }
+    out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, appearRate:_appGen, oosParity:1, sharpShare:0.15, se:_se, dominanceRepair:true, maxSal,
       // Same floor the per-sim optimizer above now enforces, so repair can't
       // drop a candidate back under it.
       minSal});
@@ -10572,8 +10633,11 @@ async function runUFCSimGenInner(){
     if(flagged.length) log(`⚠ ITD check — sim finish rate vs market: ${flagged.join(', ')} (check finish ladders)`);
   })();
 
-  // SIM column shows composite score (0.6xP80 + 0.4xavg) — ceiling-weighted, no floor double-count
-  pool.forEach(p=>{
+  // SIM column shows composite score (0.6xP80 + 0.4xavg) — ceiling-weighted, no floor double-count.
+  // Written to the FULL pool: hidden fighters are simmed with everyone else
+  // (removed from lineup selection only), so their board stats stay current —
+  // and the deadweight reference reads them when the pool is curated.
+  fullPool.forEach(p=>{
     p._simP50 = compositeScoreById[p.id] ?? (medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null);
     p._simDist = distById[p.id] || null;
   });
