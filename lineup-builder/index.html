@@ -7252,6 +7252,9 @@ async function runUFCContestEV(ctx){
   let _levB = 0;        // active stance strength (set per sweep arm)
   let _oppIdx = null;   // fighter -> pool index of his opponent
   let _oppExcess = null;// fighter -> his OPPONENT's excess ownership (own − optimal-rate, floored at 0)
+  let _selfDeficit = null; // fighter -> his OWN ownership deficit (optimal-rate − own, noise-thresholded)
+  let _justFrac = null; // fighter -> priced stance justification as fraction of the cap (0..2)
+  let _justPts = null;  // fighter -> claimed orphaned points (excess + deficit, noise-thresholded)
   const _STANCE_NORM = 15;  // excess points at which the stance multiplier reaches 1+β
   const _buildStance = () => {
     if(slate.sport!=='ufc') return;
@@ -7291,6 +7294,24 @@ async function runUFCContestEV(ctx){
       const o=_oppIdx[i2];
       return o>=0 ? _excess[o] : 0;
     });
+    // DEFICIT stance — the mirror of the captor (2026-08-05). Excess own is
+    // the field's mistake dying with the over-owned fighter; DEFICIT own
+    // (optimal-rate above ownership by more than the same measured noise) is
+    // the field's mistake in the other direction: it under-holds a fighter
+    // the sims say belongs in winning books, so when he WINS, his holders
+    // split the top band with fewer of the field's entries than a fairly-
+    // owned win would. Same soft threshold, same norm, same β, same "pays
+    // only in his win sims" physics. On this slate it derives the stands the
+    // board was refusing to take: Vologdin +2.7, Milosevic +1.5, Musayev
+    // +1.3 effective points; proportionally-owned fighters → 0.
+    _selfDeficit = pool.map((p,i2)=>{
+      const ar = _appR[p.id]!=null ? 100*_appR[p.id] : null;
+      return ar==null ? 0 : Math.max(0, ar - _ownV[i2] - EXCESS_NOISE);
+    });
+    // Per-fighter priced justification (fraction of the stance cap) for the
+    // CREDIT multiplier, and the raw claimed points for the anchor relief.
+    _justFrac = pool.map((p,i2)=> Math.min(2, (_oppExcess[i2] + _selfDeficit[i2])/_STANCE_NORM));
+    _justPts  = pool.map((p,i2)=> _oppExcess[i2] + _selfDeficit[i2]);
   };
   const setLevBeta = (b) => { _levB = (b>0 && _oppExcess) ? b : 0; };
   // Stance multiplier for a candidate lineup in one sim: 1 + β·(claimed excess
@@ -7302,9 +7323,13 @@ async function runUFCContestEV(ctx){
     if(!(_levB>0)) return 1;
     let ex=0;
     for(const i of idxs){
-      if(_oppExcess[i] > 0){
+      const _selfD = _selfDeficit ? _selfDeficit[i] : 0;
+      if(_oppExcess[i] > 0 || _selfD > 0){
         const o=_oppIdx[i];
-        if((scoreArr[i][si]||0) > (scoreArr[o][si]||0)) ex += _oppExcess[i];
+        // Both stance sides pay only in the held fighter's WIN sims: captor
+        // credit (opponent's excess dies) and deficit credit (the field
+        // under-holds the winner) are the same orphaned-equity event.
+        if(o>=0 && (scoreArr[i][si]||0) > (scoreArr[o][si]||0)) ex += _oppExcess[i] + _selfD;
       }
     }
     return ex>0 ? 1 + _levB*Math.min(2, ex/_STANCE_NORM) : 1;
@@ -8287,11 +8312,40 @@ async function runUFCContestEV(ctx){
   // target-scale invariant; stance credit rides the head channel so a priced
   // leverage stance out-bids the resistance exactly where the stance says to.
   const _optSh = (typeof ctx!=='undefined' && ctx && ctx.appearRate) ? ctx.appearRate : null;
+  // STANCE-AWARE ANCHOR (2026-08-05): the resistance must not bill a fighter
+  // for the overweight the stance itself priced — v12.2 charged Urbina
+  // escalating σ for exceeding his rate while the captor stance was paying
+  // him to do exactly that, and the net effect was a book pinned flat at
+  // optimal rates with no stands anywhere (live board: every fighter within
+  // ±7 of field own, the strongest justified plays capped at +6-7). A
+  // fighter's anchor now lifts in proportion to his priced justification
+  // (opponent-excess + own-deficit, β-scaled, the same units the stance
+  // credit pays): no justification → clamped at rate exactly as before;
+  // priced justification → room to run, still escalating past the LIFTED
+  // anchor so even a stance cannot pile without bound.
+  const _poolIdxById = {}; pool.forEach((p,i2)=>_poolIdxById[p.id]=i2);
+  // Relief = THE CLAIMED POINTS THEMSELVES. Two calibrations were measured
+  // and rejected: linear-in-β relief let a barely-over-noise claim run
+  // (Rodriguez, capturing 3.5 excess points of Medic, hit 34% of the book at
+  // β=3 while Urbina's 7.2-point claim sat at 20%), and a quadratic shape
+  // still put Rodriguez at +11 over field — the biggest stand on the board
+  // on the WRONG fighter. The correct unit needs no shape parameter at all:
+  // a stance may overweight its holder by AT MOST the orphaned equity it
+  // claims — Cepo's 7.2 dead points buy Urbina up to +7.2 exposure points
+  // over his rate, Medic's 3.5 buy Rodriguez +3.5, a noise-adjacent claim
+  // buys nothing. You cannot collect more than died. β keeps scaling the
+  // per-sim CREDIT (how hard the auction leans inside the permitted room),
+  // the claim itself sets the room.
+  const _anchorSlots = (p, sh) => {
+    let lift = 0;
+    if(_levB>0 && _justPts){ const i2=_poolIdxById[p.id]; if(i2!=null) lift = _justPts[i2]/100; }
+    return (sh + lift)*target;
+  };
   const _overPen = (lineup) => {
     if(!_optSh) return 0;
     let o=0;
     for(const p of lineup){ const sh=_optSh[p.id]; if(sh==null) continue;
-      const shSlots = sh*target;
+      const shSlots = _anchorSlots(p, sh);
       const cnt = (outputExpCount[p.id]||0);
       const a = Math.max(0, cnt - shSlots);
       const b = Math.max(0, cnt + 1 - shSlots);
@@ -8477,8 +8531,17 @@ async function runUFCContestEV(ctx){
     // and stacked claims (Urbina+Rodriguez both winning) reach the 2× cap.
     // The allowance rule still prices every step. Manual slider maps 0-100 →
     // β 0-1.5 on the same scale.
+    // Auto ceiling stays 1.5 (measured 2026-08-05): a β=3 arm was built and
+    // rejected — the EV-tolerance judge cannot see stance distortion (arms
+    // differ <$10 by construction), so the ceiling is the safety, and at 3
+    // the linear credit inflated NOISE-ADJACENT claims into the board's
+    // biggest stands (Rodriguez/Vologdin +11 over field on 2.7-3.5-point
+    // claims, both seeds). With the anchor no longer billing stances for
+    // their own overweight (see _anchorSlots), 1.5 delivers claim-sized
+    // stands. The SLIDER now spans to β=3: manual conviction beyond what
+    // the claims justify is the user's call, priced and logged per arm.
     const BETAS = _levAuto ? [0, 0.75, 1.5]
-                           : [ _levStr*1.5, _levStr*1.5, _levStr*1.5 ];
+                           : [ _levStr*3, _levStr*3, _levStr*3 ];
     let selCtx = null, kept = 0, keptQ = null;
     const results = [];
     for(let r=0; r<RESTARTS; r++){
@@ -8641,11 +8704,16 @@ async function runUFCContestEV(ctx){
   const _swapPen = !_swapAppR ? null : (lineup, counts, N) => {
     let o = 0;
     for(const p of lineup){ const sh = _swapAppR[p.id]; if(sh==null) continue;
-      const over = (counts[p.id]||0) + 1 - sh*N;
+      // Same stance-aware anchor as the greedy's resistance (see _overPen) —
+      // relief equals the claimed orphaned points.
+      let lift = 0;
+      if(_levB>0 && _justPts){ const i2=_swapPoolIdx[p.id]; if(i2!=null) lift = _justPts[i2]/100; }
+      const over = (counts[p.id]||0) + 1 - (sh+lift)*N;
       if(over > 0) o += Math.min(over, 6);
     }
     return DW_NOISE_SD * o;
   };
+  const _swapPoolIdx = {}; pool.forEach((p,i2)=>_swapPoolIdx[p.id]=i2);
   const capFn = id => { const pct = overrides[id]!=null ? overrides[id] : maxExpPct;
     return pct>=100 ? null : (pct<=0 ? 0 : Math.max(1,Math.ceil(target*pct/100))); };
   if(Object.keys(minOverrides).some(id=>minOverrides[id]>0)){
