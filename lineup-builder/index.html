@@ -1580,9 +1580,23 @@ const SPORT_CFG = {
           slots:['QB','RB','RB','WR','WR','WR','TE','FLEX','DST'],
           flex:['RB','WR','TE'], size:9},
 };
-// Roster size for the active sport (6-man positionless everywhere except NFL).
-const rosterSize = (slate) => (SPORT_CFG[slate?.sport]?.size) || MAX;
+// DK NFL SHOWDOWN (Captain Mode) is a different game from Classic:
+//   • 6 players from ONE game: 1 CPT + 5 FLEX
+//   • ANY position fills any slot (kickers included — Classic has no K)
+//   • the CPT costs 1.5× salary and scores 1.5× points
+//   • DK requires at least one player from EACH team
+//   • the salary CSV lists every player TWICE — once at his FLEX id/price and
+//     once at his CPT id/price — so ingestion collapses those pairs.
+const SHOWDOWN_SLOTS = ['CPT','FLEX','FLEX','FLEX','FLEX','FLEX'];
+const isShowdown = (slate) => !!(slate && slate.showdown);
+// Roster size for the active sport (6-man positionless everywhere except NFL
+// Classic; Showdown is 6 again, but positional rules are replaced by CPT rules).
+const rosterSize = (slate) => isShowdown(slate) ? 6 : ((SPORT_CFG[slate?.sport]?.size) || MAX);
 const isNfl = (slate) => slate?.sport === 'nfl';
+const isNflClassic = (slate) => slate?.sport === 'nfl' && !isShowdown(slate);
+// Captain salary/score multiplier.
+const CPT_MULT = 1.5;
+const cptSalaryOf = (p) => Number.isFinite(p?.cptSalary) ? p.cptSalary : Math.round((p?.salary||0) * CPT_MULT);
 
 // ===== NFL CORE A ===== (extracted verbatim for node tests — see test-nfl-sim.js)
 // ── NFL positional feasibility ────────────────────────────────────────────────
@@ -1592,8 +1606,59 @@ const isNfl = (slate) => slate?.sport === 'nfl';
 function nflPosOf(p){
   const raw = String(p?.position||'').toUpperCase().replace(/[^A-Z]/g,'');
   if(/^(DST|DEF|D)$/.test(raw)) return 'DST';
-  if(/^(QB|RB|WR|TE)$/.test(raw)) return raw;
+  if(/^(QB|RB|WR|TE|K|PK)$/.test(raw)) return raw === 'PK' ? 'K' : raw;
   return null;
+}
+
+// ── Showdown roster rules ─────────────────────────────────────────────────────
+// Any position, any slot; the only structural rules are 6 distinct players and
+// DK's both-teams requirement. Feasibility is therefore about TEAMS, not
+// positions — a 6-man set drawn entirely from one side is illegal.
+function sdTeams(slate, ids){
+  const t = new Set();
+  for(const id of ids||[]) { const tm = String(playerById(slate,id)?.team||'').toUpperCase(); if(tm) t.add(tm); }
+  return t;
+}
+function sdFeasible(slate, ids){
+  const n = (ids||[]).length;
+  if(n > 6) return false;
+  // With k slots left, a one-team set can still be saved iff a slot remains.
+  const teams = sdTeams(slate, ids);
+  if(teams.size >= 2) return true;
+  return n < 6;                       // still room to add the other team
+}
+function sdComplete(slate, ids){
+  return (ids||[]).length === 6 && sdTeams(slate, ids).size >= 2;
+}
+// Which of a complete 6 is the captain? Whoever the user pinned, else the
+// highest-salaried (a sane default that also maximizes the multiplier's value).
+function sdCaptainId(slate, ids){
+  if(!ids || !ids.length) return null;
+  const pinned = slate && slate.sdCaptain;
+  if(pinned && ids.includes(pinned)) return pinned;
+  let best = null, bestSal = -1;
+  for(const id of ids){
+    const s = playerById(slate,id)?.salary || 0;
+    if(s > bestSal){ bestSal = s; best = id; }
+  }
+  return best;
+}
+// Slot order for display/export: CPT first, then the 5 FLEX.
+function sdAssignSlots(slate, ids){
+  const cpt = sdCaptainId(slate, ids);
+  const rest = (ids||[]).filter(id => id !== cpt);
+  return [cpt, ...rest];
+}
+// Salary of a showdown roster, charging the captain 1.5×.
+function sdSalary(slate, ids){
+  const cpt = sdCaptainId(slate, ids);
+  let s = 0;
+  for(const id of ids||[]){
+    const p = playerById(slate,id);
+    if(!p) continue;
+    s += (id === cpt) ? cptSalaryOf(p) : (p.salary||0);
+  }
+  return s;
 }
 function nflCounts(slate, ids){
   const c = {QB:0,RB:0,WR:0,TE:0,DST:0,UNK:0};
@@ -1672,6 +1737,61 @@ function applyNflStats(p, row, headers){
     const v = get(/^(pos|position|roster\s*position)$/i);
     if(v) p.position = v.toUpperCase();
   }
+}
+
+// ── Showdown CSV collapse ─────────────────────────────────────────────────────
+// A DK Showdown salary file lists every player TWICE: once at his FLEX price
+// and once at his CPT price (exactly 1.5×), with DIFFERENT player IDs. Left
+// as-is that's 132 "players" for a 66-man slate, every one of them duplicated
+// in the pool and exportable into the wrong slot.
+//
+// Detect the pattern structurally (pairs of same name+team+position whose
+// salaries are in a 1.5 ratio) rather than trusting the filename, then collapse
+// each pair into ONE player carrying both ids and both prices. Returns
+// {players, showdown} — showdown false leaves the list untouched.
+function collapseShowdownRows(players){
+  if(!players || players.length < 4) return { players, showdown:false };
+  const key = p => [String(p.name||'').trim().toLowerCase(),
+                    String(p.team||'').trim().toUpperCase(),
+                    String(p.position||'').trim().toUpperCase()].join('|');
+  const groups = new Map();
+  for(const p of players){
+    const k = key(p);
+    if(!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(p);
+  }
+  // Count how many groups look like a genuine CPT/FLEX pair.
+  let pairs = 0, singles = 0;
+  for(const g of groups.values()){
+    if(g.length === 2){
+      const a = g[0].salary||0, b = g[1].salary||0;
+      const lo = Math.min(a,b), hi = Math.max(a,b);
+      if(lo > 0 && Math.abs(hi/lo - 1.5) < 0.02) { pairs++; continue; }
+    }
+    singles++;
+  }
+  // Require a clear majority of paired rows — a Classic slate with one
+  // coincidental duplicate name must not trip this.
+  if(pairs < 4 || pairs < singles) return { players, showdown:false };
+
+  const out = [];
+  for(const g of groups.values()){
+    if(g.length === 2){
+      const [lo, hi] = g[0].salary <= g[1].salary ? [g[0], g[1]] : [g[1], g[0]];
+      const merged = Object.assign({}, lo);
+      merged.cptId = hi.id;
+      merged.cptSalary = hi.salary;
+      out.push(merged);
+    } else {
+      // Unpaired row (rare) — keep it, deriving the captain price.
+      for(const p of g){
+        const m = Object.assign({}, p);
+        if(m.cptSalary == null) m.cptSalary = Math.round((m.salary||0) * 1.5);
+        out.push(m);
+      }
+    }
+  }
+  return { players: out, showdown:true };
 }
 // ===== /NFL CORE A =====
 
@@ -3018,8 +3138,9 @@ function renderPool(){
   // NFL: "full" is per-position — a 4th WR is unusable even with slots open.
   // Count the current roster ONCE here rather than per row: nflCounts does a
   // linear playerById lookup per id, and renderPool runs on every keystroke.
-  const _nflCur = isNfl(slate) ? nflCounts(slate, current) : null;
+  const _nflCur = isNflClassic(slate) ? nflCounts(slate, current) : null;
   const _nflFullFor = (p) => {
+    if(isShowdown(slate)) return !canAddPlayer(slate, p.id);
     const pos = nflPosOf(p);
     if(!pos) return true;                       // no position → can't be slotted
     const c = {..._nflCur}; c[pos]++;
@@ -3029,7 +3150,7 @@ function renderPool(){
   const _grpIdx = buildGroupIndex(slate);
   list.innerHTML=players.map((p,i)=>{
     const isSelected=current.includes(p.id),isHidden=hidden.includes(p.id);
-    const isFull=!isSelected&&(isNfl(slate)
+    const isFull=!isSelected&&((isNfl(slate)||isShowdown(slate))
       ? _nflFullFor(p)
       : current.length>=rosterSize(slate));
     const cantAfford=!isSelected&&p.salary>rem;
@@ -3207,6 +3328,12 @@ function canAddPlayer(slate, id){
   const cur=slate.currentLineup||[];
   if(cur.includes(id)) return false;
   const p=playerById(slate,id);
+  if(isShowdown(slate)){
+    if(cur.length>=6) return false;
+    // Charge the captain 1.5× when testing the cap.
+    if(sdSalary(slate,[...cur,id])>SALARY_CAP) return false;
+    return sdFeasible(slate,[...cur,id]);
+  }
   const used=cur.reduce((s,i)=>s+(playerById(slate,i)?.salary||0),0);
   if(used+(p?.salary||0)>SALARY_CAP) return false;
   if(isNfl(slate)){
@@ -3214,6 +3341,17 @@ function canAddPlayer(slate, id){
     return nflFeasible(nflCounts(slate,[...cur,id]));
   }
   return cur.length<MAX;
+}
+// Pin/unpin the captain from the lineup panel.
+function setShowdownCaptain(id){
+  const slate=activeSlate(); if(!slate||!isShowdown(slate)) return;
+  slate.sdCaptain = (slate.sdCaptain===id) ? null : id;
+  // Pinning a pricier captain can bust the cap — undo if so.
+  if(sdSalary(slate, slate.currentLineup||[])>SALARY_CAP){
+    slate.sdCaptain = null;
+    showToast('That captain would exceed the salary cap.','err');
+  }
+  save(); renderAll();
 }
 function togglePlayer(id){
   const slate=activeSlate();if(!slate)return;
@@ -3233,6 +3371,48 @@ function renderLineup(){
   const slots=document.getElementById('lineupSlots');
   const size=rosterSize(slate);
   const rows=[];
+  if(isShowdown(slate)){
+    const ordered=sdAssignSlots(slate,current).filter(Boolean);
+    const cpt=sdCaptainId(slate,current);
+    for(let i=0;i<6;i++){
+      const id=ordered[i];
+      const isCpt=(i===0);
+      const tag=`<div class="slot-num"><span class="slot-pos-tag" style="${isCpt?'color:var(--accent)':''}">${isCpt?'CPT':'FLEX'}</span></div>`;
+      if(id){
+        const p=playerById(slate,id);
+        const sal=isCpt?cptSalaryOf(p):(p?.salary||0);
+        const star=isCpt?'':`<button class="remove-btn" style="margin-left:4px;color:var(--accent);border-color:rgba(245,197,24,.4)" title="Make captain (1.5× points and salary)" onclick="setShowdownCaptain('${id}')">★</button>`;
+        rows.push(`<div class="slot filled">${tag}<div class="slot-name">${p?.name||id}${isCpt?' <span style="font-size:9px;color:var(--accent)">1.5×</span>':''}</div><div class="slot-sal">${fmt(sal)}</div>${star}<button class="remove-btn" style="margin-left:4px" onclick="togglePlayer('${id}')">−</button></div>`);
+      } else {
+        rows.push(`<div class="slot">${tag}<div class="slot-empty">${isCpt?'Captain':'Flex'} slot</div></div>`);
+      }
+    }
+    slots.innerHTML=rows.join('');
+    const sel=current.map(id=>playerById(slate,id)).filter(Boolean);
+    const has=sel.length>0;
+    const hasProj=slate.columnMapping?.proj!=null,hasRtg=slate.columnMapping?.rating!=null;
+    const pills=[];
+    if(hasProj){
+      // Project the captain at 1.5× so the total reflects the real lineup.
+      const cptP=playerById(slate,cpt);
+      const tot=sel.reduce((s,p)=>s+(parseFloat(p.proj)||0)*(p===cptP?CPT_MULT:1),0);
+      pills.push(`<div class="total-pill${has?' lit':''}"><div class="total-label">Total Proj</div><div class="total-value${has?' lit':''}">${has?tot.toFixed(2):'—'}</div></div>`);
+    }
+    if(hasRtg)pills.push(`<div class="total-pill${has?' lit':''}"><div class="total-label">Total Rtg</div><div class="total-value${has?' lit':''}">${has?sel.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0).toFixed(1):'—'}</div></div>`);
+    document.getElementById('lineupTotals').innerHTML=pills.join('');
+    const used=sdSalary(slate,current);
+    const remSal=SALARY_CAP-used,slotsLeft=6-sel.length,pct=Math.min((used/SALARY_CAP)*100,100);
+    document.getElementById('salUsed').textContent=fmt(used)+' used';
+    const remEl=document.getElementById('salRem');remEl.textContent=remSal>=0?fmt(remSal)+' remaining':fmt(Math.abs(remSal))+' OVER';remEl.className='sal-rem'+(remSal<0?' over':'');
+    const avgEl=document.getElementById('salAvg');
+    if(slotsLeft>0&&slotsLeft<6){avgEl.style.display='block';avgEl.innerHTML=`<span>${fmt(Math.floor(remSal/slotsLeft))}</span> avg / slot (${slotsLeft} left)`;}else avgEl.style.display='none';
+    const bar=document.getElementById('barFill');bar.style.width=pct+'%';bar.className='bar-fill'+(pct>100?' over':pct>90?' warn':'');
+    const teams=sdTeams(slate,current);
+    const ok=sdComplete(slate,current)&&used<=SALARY_CAP;
+    document.getElementById('saveBtn').disabled=!ok;
+    if(sel.length===6&&teams.size<2) showToast('DK requires at least one player from each team.','err');
+    return;
+  }
   if(isNfl(slate)){
     // Named slots. A complete 9 gets a true slot assignment; a partial roster
     // shows players under their base position with leftovers in FLEX.
@@ -3290,7 +3470,8 @@ function clearLineup(){const slate=activeSlate();if(!slate)return;slate.currentL
 function saveLineup(){
   const slate=activeSlate();if(!slate)return;
   const current=slate.currentLineup||[];
-  if(isNfl(slate)){ if(!nflComplete(nflCounts(slate,current))) return; }
+  if(isShowdown(slate)){ if(!sdComplete(slate,current) || sdSalary(slate,current)>SALARY_CAP) return; }
+  else if(isNfl(slate)){ if(!nflComplete(nflCounts(slate,current))) return; }
   else if(current.length!==rosterSize(slate)) return;
   const key=lineupKey(current);
   slate.savedLineups=slate.savedLineups||[];
@@ -3617,8 +3798,19 @@ function exportCSV(){
   const pos=cfg.pos;
   // NFL: DK's upload template is positional — header is the slot list and each
   // row must be in slot order (QB,RB,RB,WR,WR,WR,TE,FLEX,DST).
-  const header=(cfg.slots||Array(rosterSize(slate)).fill(pos)).join(',');
-  const rowIds=l=>isNfl(slate)?nflAssignSlots(slate,l):l;
+  // SHOWDOWN: header is CPT,FLEX×5 and the captain must be exported under his
+  // CAPTAIN player id — his FLEX id in that slot is rejected by DK.
+  const header=(isShowdown(slate)?SHOWDOWN_SLOTS:(cfg.slots||Array(rosterSize(slate)).fill(pos))).join(',');
+  const rowIds=l=>{
+    if(isShowdown(slate)){
+      const ord=sdAssignSlots(slate,l);
+      return ord.map((id,i)=>{
+        const p=playerById(slate,id);
+        return (i===0 && p && p.cptId) ? p.cptId : id;
+      });
+    }
+    return isNfl(slate)?nflAssignSlots(slate,l):l;
+  };
   const csv=[header,...(slate.savedLineups||[]).map(l=>rowIds(l).join(','))].join('\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download=slate.name.replace(/\s+/g,'_').toLowerCase()+'_lineups.csv';a.click();
 }
@@ -13679,7 +13871,7 @@ function buildNflSimInputs(pool){
 
   // Salary-implied fallback mean DK points, by position. Rough but only used
   // for players the market didn't price (backups, deep bench).
-  const FALLBACK_K = { QB:2.55, RB:2.35, WR:2.25, TE:2.05, DST:1.6 };
+  const FALLBACK_K = { QB:2.55, RB:2.35, WR:2.25, TE:2.05, DST:1.6, K:1.7 };
 
   const entries = pool.map(p => {
     const pos = nflPosOf(p);
@@ -13771,9 +13963,29 @@ function mkTeamEnv(ti, score, oppScore, gauss){
   return { score, oppScore, implied: ti.implied, ratio, yardF, passF, rushF };
 }
 
+// DK kicker scoring: XP 1, FG 0-39 3, 40-49 4, 50+ 5. Kickers only exist in
+// Showdown (Classic has no K slot). A kicker's points are almost purely a
+// function of how much his offense scores — drives that stall become FGs,
+// drives that finish become XPs — so we model straight off the team's sampled
+// score rather than inventing a prop for him.
+function dkKickerScore(teamScore, gauss){
+  // ~55% of a team's points come via TDs (each worth an XP), the rest via FGs.
+  const tds = Math.max(0, Math.round(teamScore * 0.55 / 7 + gauss() * 0.6));
+  const fgPoints = Math.max(0, teamScore - tds * 7);
+  const fgs = Math.max(0, Math.round(fgPoints / 3));
+  let pts = 0;
+  for(let i=0;i<fgs;i++){
+    const r = Math.random();
+    pts += r < 0.45 ? 3 : r < 0.80 ? 4 : 5;   // distance mix
+  }
+  pts += tds;                                   // extra points (misses are rare)
+  return pts;
+}
+
 // One player-sim given their team's environment → DK points.
 function simNflPlayer(e, te, gauss){
   if(!te) te = { ratio:1, yardF:1, passF:1, rushF:1, score:22, oppScore:22 };
+  if(e.pos === 'K') return dkKickerScore(te.score, gauss);
   if(e.pos === 'DST'){
     const pa = te.oppScore;
     // Turnovers/sacks tilt with how badly the opponent is playing: a team held
@@ -13821,6 +14033,64 @@ function simNflPlayer(e, te, gauss){
   const fumLost = (Math.random() < 0.028) ? 1 : 0;
 
   return dkNflScore({ passYds, passTD, int: ints, rushYds, rushTD, recYds, recTD, rec, fumLost });
+}
+
+// ── Showdown per-sim optimizer ───────────────────────────────────────────────
+// 6 players from one game: 1 CPT (1.5× points, 1.5× salary) + 5 FLEX, at least
+// one player from each team. No positional structure at all, so the whole
+// problem is "who to captain" — and because the multiplier is worth most on the
+// highest scorer, we try each plausible captain and greedily fill around him.
+// cands: [{i, sal, cptSal, score, team}]
+function sdOptimalForSim(cands, salaryCap, minSal){
+  if(!cands || cands.length < 6) return null;
+  const teams = [...new Set(cands.map(c=>c.team).filter(Boolean))];
+  if(teams.length < 2) return null;          // DK requires both sides
+  const byScore = cands.slice().sort((a,b)=>b.score-a.score);
+  // Only the better scorers are worth the captain slot; cap the search so this
+  // stays cheap inside a multi-thousand-sim loop.
+  const capPool = byScore.slice(0, Math.min(byScore.length, 14));
+  let best = null;
+  for(const cpt of capPool){
+    const cptCost = Number.isFinite(cpt.cptSal) ? cpt.cptSal : Math.round(cpt.sal*1.5);
+    if(cptCost > salaryCap) continue;
+    let sal = cptCost, total = cpt.score*1.5;
+    const pick = [cpt]; const used = new Set([cpt.i]);
+    const teamSet = new Set([cpt.team]);
+    for(const c of byScore){
+      if(pick.length >= 6) break;
+      if(used.has(c.i)) continue;
+      if(sal + c.sal > salaryCap) continue;
+      // Reserve room for the both-teams rule on the last slot.
+      if(pick.length === 5 && teamSet.size < 2 && c.team === cpt.team) continue;
+      pick.push(c); used.add(c.i); sal += c.sal; total += c.score; teamSet.add(c.team);
+    }
+    if(pick.length < 6 || teamSet.size < 2) continue;
+    if(minSal && sal < minSal){
+      // Spend up: swap in the biggest score gain that still fits.
+      let guard=0;
+      while(sal < minSal && guard++ < 20){
+        let up=null;
+        for(let k=1;k<pick.length;k++){
+          for(const c of byScore){
+            if(used.has(c.i) || c.sal <= pick[k].sal) continue;
+            if(sal - pick[k].sal + c.sal > salaryCap) continue;
+            const t=new Set(pick.filter((_,j)=>j!==k).map(x=>x.team)); t.add(c.team);
+            if(t.size<2) continue;
+            const gain=c.score-pick[k].score;
+            if(!up || gain>up.gain) up={k,c,gain};
+          }
+        }
+        if(!up) break;
+        used.delete(pick[up.k].i); used.add(up.c.i);
+        sal += up.c.sal - pick[up.k].sal; total += up.gain;
+        pick[up.k] = up.c;
+      }
+    }
+    if(!best || total > best.total) best = { total, idxs: pick.map(c=>c.i), cpt: cpt.i };
+  }
+  if(!best) return null;
+  // Captain first — the caller relies on that ordering for export.
+  return { idxs: best.idxs, cptIdx: best.cpt };
 }
 
 // ── NFL stacking rules ────────────────────────────────────────────────────────
@@ -14118,25 +14388,53 @@ async function runNflSimGen(){
   }
   const done=()=>{ document.getElementById('genBtn').disabled=false; cancelBtn?.remove(); };
 
-  // Preconditions: positions are structural (no position = no legal roster).
-  const posOk=pool.filter(p=>nflPosOf(p)).length;
-  if(posOk < 9){
-    alert('NFL sims need a Position column (QB/RB/WR/TE/DST) mapped — only '+posOk+' players have one.');
-    done(); return;
-  }
-  const need={QB:1,RB:2,WR:3,TE:1,DST:1}, have={QB:0,RB:0,WR:0,TE:0,DST:0};
-  pool.forEach(p=>{const k=nflPosOf(p); if(k) have[k]++;});
-  const short=Object.entries(need).filter(([k,n])=>have[k]<n);
-  const skill=have.RB+have.WR+have.TE;
-  if(short.length || skill<7){
-    alert('Not enough players to fill a roster: need at least '+
-      Object.entries(need).map(([k,n])=>`${n} ${k}`).join(', ')+' and 7 total RB/WR/TE'+
-      ` — pool has ${Object.entries(have).map(([k,v])=>k+':'+v).join(' ')}.`);
-    done(); return;
-  }
+  // Preconditions differ by format: Showdown has no positional structure, only
+  // "6 from one game, both teams represented".
+  const SD = isShowdown(slate);
   if(!pool.some(p=>p.team)){
     alert('NFL sims need a Team column to build game environments (QB↔WR correlation comes from it).');
     done(); return;
+  }
+  if(SD){
+    const teams=[...new Set(pool.map(p=>String(p.team||'').toUpperCase()).filter(Boolean))];
+    if(pool.length < 6 || teams.length < 2){
+      alert('Showdown needs at least 6 players covering BOTH teams — pool has '+pool.length+' players across '+teams.length+' team(s).');
+      done(); return;
+    }
+  } else {
+    const posOk=pool.filter(p=>nflPosOf(p)).length;
+    if(posOk < 9){
+      alert('NFL sims need a Position column (QB/RB/WR/TE/DST) mapped — only '+posOk+' players have one.');
+      done(); return;
+    }
+    const need={QB:1,RB:2,WR:3,TE:1,DST:1}, have={QB:0,RB:0,WR:0,TE:0,DST:0};
+    pool.forEach(p=>{const k=nflPosOf(p); if(k) have[k]++;});
+    const short=Object.entries(need).filter(([k,n])=>have[k]<n);
+    const skill=have.RB+have.WR+have.TE;
+    if(short.length || skill<7){
+      alert('Not enough players to fill a roster: need at least '+
+        Object.entries(need).map(([k,n])=>`${n} ${k}`).join(', ')+' and 7 total RB/WR/TE'+
+        ` — pool has ${Object.entries(have).map(([k,v])=>k+':'+v).join(' ')}.`);
+      done(); return;
+    }
+  }
+
+  // Honesty check: with no props, no projections and flat pricing there is
+  // NOTHING to tell players apart, and the "optimal" lineups would be an
+  // artifact of the RNG. Say so plainly rather than emitting confident noise.
+  {
+    const withProps = pool.filter(p=>parseOuCell(p.pass_yds_ou)||parseOuCell(p.rush_yds_ou)||
+      parseOuCell(p.rec_yds_ou)||parseOuCell(p.rec_ou)||amProb(p.atd)).length;
+    const withProj  = pool.filter(p=>parseFloat(p.proj)>0).length;
+    const sals      = new Set(pool.map(p=>p.salary||0));
+    if(!withProps && !withProj){
+      const flat = sals.size <= 2;
+      log(`⚠ No player props and no projections in this pool${flat?', and every salary is identical':''}.`);
+      log('   The sim can only fall back to position priors, so players at the same position are interchangeable —');
+      log('   the lineups below are essentially random. Add a Proj column (or pull props) before trusting them.');
+    } else if(!withProps){
+      log(`Note: no market props — ${withProj}/${pool.length} players are driven by the Proj column.`);
+    }
   }
 
   // Contest EV prices lineups against the payout curve + a modeled field; it
@@ -14213,6 +14511,9 @@ async function runNflSimGen(){
   }
 
   // Candidates: the ex-post optimal roster of each (even) sim.
+  // Showdown also records WHICH player the sim wanted as captain, keyed by the
+  // lineup — the 1.5× makes that choice most of the lineup's edge.
+  const _cptByKey = {};
   log('Computing per-sim optimal lineups…');
   const cands=pool.map((p,i)=>({i, pos:nflPosOf(p), sal:p.salary||0, score:0,
     team:p.team||'', opp:p.opp||''}));
@@ -14225,10 +14526,18 @@ async function runNflSimGen(){
     if(e){ e.count++; e.totalScore+=t; }
     else rankedMap.set(key,{lineup:idxs.map(i=>pool[i]),count:1,totalScore:t});
   };
+  if(SD){ cands.forEach((c,i)=>{ const p=pool[i]; c.cptSal=cptSalaryOf(p); c.team=String(p.team||'').toUpperCase(); }); }
   let ruleMisses=0;
   for(let s=0;s<simsDone;s+=2){
     for(let i=0;i<cands.length;i++) cands[i].score=poolScores[i][s];
-    const lu=nflOptimalForSim(cands, maxSal, minSal, stackRules);
+    let lu;
+    if(SD){
+      const r=sdOptimalForSim(cands, maxSal, minSal);
+      lu = r ? r.idxs : null;
+      if(r) _cptByKey[r.idxs.slice().sort((a,b)=>a-b).join('|')] = pool[r.cptIdx].id;
+    } else {
+      lu = nflOptimalForSim(cands, maxSal, minSal, stackRules);
+    }
     if(!lu) ruleMisses++;
     addCand(lu);
     if(s>0&&s%100===0){
@@ -14247,7 +14556,7 @@ async function runNflSimGen(){
   }
   if(ruleMisses) log(`  ⚠ ${ruleMisses.toLocaleString()} sim(s) had no rule-compliant roster — those sims contributed no candidate.`);
   // Never ship a lineup that violates the rules the user set.
-  {
+  if(!SD){
     const before=ranked.length;
     for(let i=ranked.length-1;i>=0;i--) if(!nflStackOk(ranked[i].lineup, stackRules)) ranked.splice(i,1);
     if(ranked.length<before) log(`  (${before-ranked.length} candidate(s) dropped by the stack-rule check)`);
@@ -14268,8 +14577,21 @@ async function runNflSimGen(){
     if(out===null){ if(window._genCancelled) log('Cancelled.'); done(); return; }
   }
 
+  // Showdown: carry the sim's preferred captain onto each saved lineup so the
+  // export puts the right player in the CPT slot at his captain id.
+  if(SD && out && out.length){
+    const cptCount={};
+    out.forEach(l=>{
+      const key=l.map(p=>pool.indexOf(p)).sort((a,b)=>a-b).join('|');
+      const cid=_cptByKey[key];
+      if(cid){ l._sdCaptain=cid; const nm=(pool.find(p=>p.id===cid)||{}).name||cid; cptCount[nm]=(cptCount[nm]||0)+1; }
+    });
+    const top=Object.entries(cptCount).sort((a,b)=>b[1]-a[1]).slice(0,6);
+    if(top.length) log('Captains: '+top.map(([n,c])=>`${n} ×${c}`).join(', '));
+  }
+
   // Stack readout — the thing an NFL player actually wants to see.
-  if(out && out.length){
+  if(!SD && out && out.length){
     const stackCount={};
     const TM=p=>String(p.team||'').toUpperCase().replace(/[^A-Z]/g,'');
     out.forEach(l=>{
@@ -17022,7 +17344,20 @@ function createSlate(){
     }
   }
 
+  // NFL Showdown: collapse the duplicated CPT/FLEX rows into one player each.
+  let _showdown = false;
+  if(sport==='nfl'){
+    const col = collapseShowdownRows(players);
+    if(col.showdown){
+      _showdown = true;
+      players.length = 0;
+      players.push(...col.players);
+      console.log(`[showdown] collapsed to ${players.length} players (CPT/FLEX pairs merged)`);
+    }
+  }
+
   const slate={id:uid(),name,sport,columnMapping:{...colMapping},players,savedLineups:[],currentLineup:[],hiddenIds:[],groups:[],sheetTab:parsedCSV._fromSheet?name:null};
+  if(_showdown) slate.showdown = true;
   // NASCAR: pre-select track type from the rating column headers — the console
   // writes fastlap's track-type rating with the type in the name ("Super
   // speedway Rating", "Road Course Rating"…). Auto-selecting prevents simming
