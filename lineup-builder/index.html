@@ -3863,24 +3863,27 @@ function exportSimCSV(){
       // a stable pair label so the two rows still visibly match.
       _fLabel[p.id]=(p.fightNum>0)?('F'+p.fightNum)
         :(opp?[p.name.split(' ').slice(-1)[0],opp.name.split(' ').slice(-1)[0]].sort().join('/'):'');
-      // LEVERAGE YIELD (2026-08-04 session — same math as the engine's stance
-      // builder): the orphaned ownership points this fighter CLAIMS by winning.
-      //   own deficit = max(0, OptRate% − Own% − 3.9)      field under-holds him
-      //   opp excess  = max(0, OppOwn% − OppOptRate% − 3.9) chalk that dies with
-      //                                                     the opponent's loss
-      //   LevYield = deficit + excess
-      // 3.9 = measured ownership-projection noise (sd, real 8/1 contest), so a
-      // proportionally-owned fight reads 0 instead of noise. Blank when the
-      // slate has no ownership mapped (nothing to measure against).
+      // LEVERAGE YIELD (2026-08-04 session — same inputs as the engine's stance
+      // builder, SIGNED for the export): orphaned ownership points this fighter
+      // claims by winning, minus the points he FORFEITS if he's the chalk side.
+      //   self net = OptRate% − Own%        (+ = field under-holds him)
+      //   opp net  = OppOwn% − OppOptRate%  (+ = opponent is dying chalk)
+      // Each component is soft-thresholded toward 0 by 3.9 points (measured
+      // ownership-projection noise, real 8/1 contest) so proportionally-owned
+      // fights read 0; the two sides of a fight mirror exactly (A = −B).
+      // Positive = leverage spot, negative = chalk tax. The ENGINE still uses
+      // the positive-only claims — this signed form is a reading aid only.
+      // Blank when the slate has no ownership mapped (nothing to measure).
       const EXCESS_NOISE=3.9;
+      const soft=x=>Math.sign(x)*Math.max(0, Math.abs(x)-EXCESS_NOISE);
       const ownOf=q=>{ const v=parseFloat(q&&q.own); return Number.isFinite(v)?v:null; };
       const own=ownOf(p), oppOwn=ownOf(opp);
       const ar=p._optRate!=null?100*p._optRate:null;
       const oppAr=(opp&&opp._optRate!=null)?100*opp._optRate:null;
       if(ar!=null && own!=null){
-        const deficit=Math.max(0, ar-own-EXCESS_NOISE);
-        const excess=(oppAr!=null&&oppOwn!=null)?Math.max(0, oppOwn-oppAr-EXCESS_NOISE):0;
-        _levY[p.id]=(deficit+excess).toFixed(1);
+        const selfNet=soft(ar-own);
+        const oppNet=(oppAr!=null&&oppOwn!=null)?soft(oppOwn-oppAr):0;
+        _levY[p.id]=(selfNet+oppNet).toFixed(1);
       }
     });
   }
@@ -3890,7 +3893,7 @@ function exportSimCSV(){
                    :       [p._simWin,p._simT5,p._simT10,p._simT20,p._simCut];
   // ModelScore is a PGA metric (NASCAR's twin 'Rating' was equally unused) —
   // exporting it blank on UFC/NASCAR just made readers wonder what was broken.
-  const header=['Name',...(ufc?['Fight']:[]),'Salary',...((ufc||nas)?[]:['ModelScore']),'SimScore','Mean','Floor(P10)','P25','Median','P75','Ceiling(P90)',...tailH];
+  const header=['Name',...(ufc?['Fight']:[]),'Salary','Own%',...((ufc||nas)?[]:['ModelScore']),'SimScore','Mean','Floor(P10)','P25','Median','P75','Ceiling(P90)',...tailH];
   // Run stamp first, as a comment row: the seed + the full settings
   // fingerprint of the generation that produced these distributions. Every
   // spreadsheet and CSV reader treats a leading '#' row as data or skips it,
@@ -3901,7 +3904,8 @@ function exportSimCSV(){
   lines.push(header.join(','));
   rows.sort((a,b)=>(parseFloat(b._simP50)||0)-(parseFloat(a._simP50)||0)).forEach(p=>{
     const d=p._simDist;
-    lines.push([p.name,...(ufc?[_fLabel[p.id]||'']:[]),p.salary,...((ufc||nas)?[]:[p.rating]),p._simP50,d.mean,d.p10,d.p25,d.p50,d.p75,d.p90,
+    const _ownOut=Number.isFinite(parseFloat(p.own))?parseFloat(p.own):'';
+    lines.push([p.name,...(ufc?[_fLabel[p.id]||'']:[]),p.salary,_ownOut,...((ufc||nas)?[]:[p.rating]),p._simP50,d.mean,d.p10,d.p25,d.p50,d.p75,d.p90,
                 ...tailV(p)].map(esc).join(','));
   });
   const csv=lines.join('\n');
