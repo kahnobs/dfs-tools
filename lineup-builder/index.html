@@ -1912,7 +1912,23 @@ function ladderRungs(p, pref){
 // L8/L50 are the tails (hot right now / historical class). Weights renormalize over
 // whichever windows are present, so a missing window doesn't deflate the score —
 // old 3-window sheets still blend fine.
-const PGA_MODEL_WEIGHTS = { l8:0.10, l12:0.15, l24:0.30, l36:0.30, l50:0.15 };
+//
+// v2026-08-17 (Matt, BMW week): recent form up-weighted, two layers.
+//   BASE: 10/15/30/30/15 → 15/22/30/23/10. Recent (L8+L12) 25%→37%, old
+//     (L36+L50) 45%→33%, L24 stays the spine. In elite no-cut fields the
+//     long-run baselines bunch together, so recent divergence carries
+//     relatively more separating signal than it does tour-wide.
+//   TRAJECTORY TILT (in blendPgaModel): a player whose recent windows score
+//     far ABOVE his old windows — the breakout staircase (Brennan 8/17:
+//     L8 62 → L50 33) — gets up to PGA_TRAJ_MAX_SHIFT more weight moved
+//     from old windows to recent, saturating at a PGA_TRAJ_FULL_GAP
+//     score-point gap. POSITIVE gaps only: a rookie's old windows describe
+//     a player who no longer exists, but an established player's slump
+//     usually regresses back to baseline (the long-run-class result), so
+//     decliners keep the base blend. Flat profiles are untouched.
+const PGA_MODEL_WEIGHTS = { l8:0.15, l12:0.22, l24:0.30, l36:0.23, l50:0.10 };
+const PGA_TRAJ_FULL_GAP  = 20;   // recent-vs-old score gap where the tilt saturates
+const PGA_TRAJ_MAX_SHIFT = 0.12; // max blend weight moved old → recent
 
 // Locate the L8/L12/L24/L36/L50 columns by header. Matches forms like "L12", "L 12",
 // "L12 Model", "Model L12", "L12 Score", "Last 24" — but NOT words that merely end
@@ -1926,16 +1942,33 @@ function findPgaModelCols(headers){
 
 // Weighted blend of whatever window values a row has. Renormalizes over the
 // present windows. Returns null if the row has none of them.
+// v2026-08-17: applies the trajectory tilt (see PGA_MODEL_WEIGHTS note) —
+// weight slides old→recent for steeply IMPROVING profiles, proportionally to
+// each window's base weight, before the same renormalizing blend as before.
 function blendPgaModel(row, idx){
-  let wSum = 0, acc = 0;
+  const vals = {};
   for(const k of ['l8','l12','l24','l36','l50']){
     const i = idx[k];
     if(i == null || i < 0) continue;
     const v = parseFloat(row[i]);
-    if(isNaN(v)) continue;
-    acc  += v * PGA_MODEL_WEIGHTS[k];
-    wSum += PGA_MODEL_WEIGHTS[k];
+    if(!isNaN(v)) vals[k] = v;
   }
+  const keys = Object.keys(vals);
+  if(!keys.length) return null;
+  const w = Object.assign({}, PGA_MODEL_WEIGHTS);
+  const rKeys = ['l8','l12'].filter(k => k in vals), oKeys = ['l36','l50'].filter(k => k in vals);
+  if(rKeys.length && oKeys.length){
+    const avg = ks => ks.reduce((s,k)=>s+vals[k],0)/ks.length;
+    const gap = avg(rKeys) - avg(oKeys);
+    if(gap > 0){
+      const t  = Math.min(1, gap/PGA_TRAJ_FULL_GAP) * PGA_TRAJ_MAX_SHIFT;
+      const oW = oKeys.reduce((s,k)=>s+w[k],0), rW = rKeys.reduce((s,k)=>s+w[k],0);
+      oKeys.forEach(k => { w[k] -= t * w[k]/oW; });
+      rKeys.forEach(k => { w[k] += t * w[k]/rW; });
+    }
+  }
+  let wSum = 0, acc = 0;
+  keys.forEach(k => { acc += vals[k] * w[k]; wSum += w[k]; });
   return wSum ? Math.round((acc / wSum) * 100) / 100 : null;
 }
 
