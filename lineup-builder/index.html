@@ -9949,7 +9949,18 @@ async function runPgaSims(pool, numSims, log){
   const bobP =pctOf(pool.map(p=>parseFloat(p.bob)));
   const bavP =pctOf(pool.map(p=>parseFloat(p.bogey_avoid)));
   const p5P  =pctOf(pool.map(p=>parseFloat(p.sg_par_5)));
-  const styleB  =pool.map((p,i)=>(bobP[i]-0.5)*1.6);          // ±0.8 birdies/round
+  // Birdie style is a 50/50 blend of the season BoB percentile and the odds-
+  // implied skill percentile (calibrated mu; lower mu = stronger, so rank on
+  // −mu). Rationale: finish odds carry birdie information — a golfer the
+  // market rates 2× as likely to top-20 makes more birdies getting there —
+  // but the static ±0.8 season-stat spread was ~5× stronger than the odds
+  // channel (0.48 birdies/stroke on xp), so a stale/small-sample BoB stat
+  // could give a golfer market-level finishes with season-stat-level scoring
+  // composition (the Alex Fitzpatrick BMW '26 case: best finish odds of his
+  // salary tier, worst SimScore). The blend keeps residual style at half
+  // weight and pulls composition toward the market's read of current form.
+  const skillP =pctOf(pool.map((p,i)=>-mu[i]));               // 1 = strongest by odds+model
+  const styleB  =pool.map((p,i)=>((0.5*bobP[i]+0.5*skillP[i])-0.5)*1.6); // ±0.8 birdies/round
   const dblShare=pool.map((p,i)=>0.16-(bavP[i]-0.5)*0.10);     // 0.11–0.21
   const eagleP  =pool.map((p,i)=>Math.max(0.015,0.055+(p5P[i]-0.5)*0.05));
 
