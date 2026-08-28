@@ -7327,7 +7327,20 @@ function sampleUfcField(pool, N, ownArr, opts){
   // every line below is inert for them — same field they always drew.
   const _hasPairs = oppIdx.some(i=>i>=0);
   let hedgeLever = _hasPairs ? FIELD_HEDGE_RATE : 0;
-  const CAP=(opts&&opts.cap)||50000, FLOOR=(opts&&opts.floor)||47000; // field lineups overwhelmingly spend $47k+
+  const CAP=(opts&&opts.cap)||50000;
+  let FLOOR=(opts&&opts.floor)||47000; // field lineups overwhelmingly spend $47k+
+  // FLOOR REACHABILITY CLAMP (2026-08-28): the empirical salary floors are
+  // fitted on full slates. A pool that structurally cannot spend that much
+  // (all-cheap slate, or a curated pool handed in as the field frame) made
+  // every draw fail `sal<FLOOR` and returned an EMPTY field — the "field
+  // sampler produced no lineups" abort. If even the SIZE most expensive
+  // players can't reach the floor, degrade it to ~the best the pool can
+  // spend instead of rejecting everything; the re-weighting loop still fits
+  // Own% marginals as usual.
+  { const _dear = salaries.slice().sort((a,b)=>b-a);
+    let _maxSpend = 0; for(let k=0;k<SIZE;k++) _maxSpend += (_dear[k]||0);
+    _maxSpend = Math.min(_maxSpend, CAP);
+    if(_maxSpend < FLOOR) FLOOR = Math.max(0, Math.floor(_maxSpend*0.85)); }
   const cheap = salaries.slice().sort((a,b)=>a-b);
   const cheapPrefix=[0]; cheap.forEach((s,i)=>cheapPrefix.push(cheapPrefix[i]+s));
 
@@ -7871,7 +7884,7 @@ async function runUFCContestEV(ctx){
     let d0=0, d0Name='';
     for(let k=0;k<K;k++){
       const {field, maxDev, maxName} = sampleUfcField(fieldPool, NF, scen[k], _fieldOpts);
-      if(!field.length){ log('⚠ Field sampler produced no lineups — check Own% column' + (_fieldOpts?' and that the pool covers every position.':'.')); return null; }
+      if(!field.length){ log('⚠ Field sampler produced no lineups — check the Own% column, that the field pool can fill a legal roster under the salary cap/floor' + (_fieldOpts?', and that it covers every position.':'.')); return null; }
       if(sharpPool){
         const nSharp=Math.floor(field.length*sharpShare);
         for(let j=0;j<nSharp;j++){
@@ -7998,11 +8011,12 @@ async function runUFCContestEV(ctx){
       // orphaned equity, not a weak slot — "upgrading" him away is what
       // starved the leverage tier's candidate supply (measured: Urbina 19.5%
       // optimal-rate → 9.8% of candidates while his variants fed Musayev).
-      const _idxOfVe = new Map(pool.map((p2,i2)=>[p2.id,i2]));
       const order = lu.map((p,k2)=>({k2, c:_comp(p)})).sort((a,b)=>a.c-b.c).slice(0,2);
       for(const {k2:wi} of order){
         const p = lu[wi];
-        if(typeof _oppExcess !== 'undefined' && _oppExcess && _oppExcess[_idxOfVe.get(p.id)] > 0) continue;
+        // FIELD-FRAME FIX (2026-08-28): _oppExcess is fieldPool-indexed —
+        // a pool-frame lookup here read the wrong fighter under curation.
+        if(typeof _oppExcess !== 'undefined' && _oppExcess && _oppExcess[idxById.get(p.id)] > 0) continue;
         let made=0;
         for(const q of _byCompDesc){
           if(made>=VARIANTS_PER) break;
@@ -8081,9 +8095,18 @@ async function runUFCContestEV(ctx){
         repIdx=[]; for(let k=0;k<n;k++) repIdx.push(avail[Math.floor(k*stride)]);
       }
     }
-    const meanIdx = new Float64Array(pool.length);
-    for(let i=0;i<pool.length;i++){ const a=scoreArr[i]; let s=0; for(const si of repIdx) s+=(a[si]||0); meanIdx[i]=s/Math.max(1,repIdx.length); }
-    const salIdx = pool.map(p=>p.salary||0);
+    // FIELD-FRAME FIX (2026-08-28): the lineup indices below come from
+    // idxById, which is built on fieldPool. When the caller passes a
+    // full-slate fieldPool (curation active), pool-frame arrays here read
+    // the WRONG player silently. Build every per-index array in the
+    // fieldPool frame; the upgrade menu (byMeanDesc) is restricted to the
+    // curated pool's ids so repair can never swap a hidden player IN.
+    const meanIdx = new Float64Array(fieldPool.length);
+    for(let i=0;i<fieldPool.length;i++){ const a=scoreArr[i]; let s=0; for(const si of repIdx) s+=(a[si]||0); meanIdx[i]=s/Math.max(1,repIdx.length); }
+    const salIdx = fieldPool.map(p=>p.salary||0);
+    const _repEligIdx = [];
+    { const _repPoolIds = new Set(pool.map(p=>p.id));
+      fieldPool.forEach((p,i)=>{ if(_repPoolIds.has(p.id)) _repEligIdx.push(i); }); }
     // TRUE-dominance margin. The old 0.18σ margin sat inside Monte-Carlo noise
     // for same-price golfers with equal market odds: a 1-2pt realized-mean gap
     // between two market-identical plays (Keith Mitchell 38.2 vs Poston 36.8)
@@ -8094,15 +8117,15 @@ async function runUFCContestEV(ctx){
     // large relative to the field's spread AND consistent across simulated
     // tournaments — not one lucky mean. Equal-odds golfers now keep their
     // near-equal candidate shares; only truly better plays separate.
-    let mu0=0,n0=0; for(let i=0;i<pool.length;i++){ mu0+=meanIdx[i]; n0++; }
+    let mu0=0,n0=0; for(const i of _repEligIdx){ mu0+=meanIdx[i]; n0++; }
     mu0/=Math.max(1,n0);
-    let v0=0; for(let i=0;i<pool.length;i++){ const d=meanIdx[i]-mu0; v0+=d*d; }
+    let v0=0; for(const i of _repEligIdx){ const d=meanIdx[i]-mu0; v0+=d*d; }
     const sd=Math.sqrt(v0/Math.max(1,n0));
     const MARGIN=0.5*sd;
     const DOM_CONSIST=0.60;      // upgrade must beat the incumbent in ≥60% of sims
     const _beatsCache=new Map();
     const beatsEnough=(q,pI)=>{
-      const key=q*pool.length+pI;
+      const key=q*fieldPool.length+pI;
       let r=_beatsCache.get(key);
       if(r===undefined){
         const aq=scoreArr[q], ap=scoreArr[pI]; let w=0,n2=0;
@@ -8112,7 +8135,7 @@ async function runUFCContestEV(ctx){
       }
       return r;
     };
-    const byMeanDesc=[...Array(pool.length).keys()].sort((a,b)=>meanIdx[b]-meanIdx[a]);
+    const byMeanDesc=_repEligIdx.slice().sort((a,b)=>meanIdx[b]-meanIdx[a]);
     // No-oppose guard (UFC only). Repair swaps in the best-mean affordable
     // player with NO opposition check — candidates arrive oppose-clean from
     // pickOptimalLineup, then repair jams a cheap high-mean fighter into
@@ -8143,7 +8166,7 @@ async function runUFCContestEV(ctx){
     const _repRules = ctx.stackRules || null;
     const _repCounts = (arr) => {
       const c={QB:0,RB:0,WR:0,TE:0,DST:0,UNK:0};
-      for(const i of arr){ const k=nflPosOf(pool[i]); c[k||'UNK']++; }
+      for(const i of arr){ const k=nflPosOf(fieldPool[i]); c[k||'UNK']++; }
       return c;
     };
     const seen=new Map();
@@ -8168,7 +8191,7 @@ async function runUFCContestEV(ctx){
         const used=idxs.reduce((s,i)=>s+salIdx[i],0);
         const leftover=capSal-used;
         const curC=_repPosMode?_repCounts(idxs):null;
-        const _grpWasOk = _repGroups.length ? checkGroupRules(idxs.map(i=>pool[i]), _repGroups) : false;
+        const _grpWasOk = _repGroups.length ? checkGroupRules(idxs.map(i=>fieldPool[i]), _repGroups) : false;
         // find the slot with the largest available upgrade gain
         let bestGain=MARGIN, bestSlot=-1, bestUp=-1;
         for(const pI of idxs){
@@ -8179,20 +8202,20 @@ async function runUFCContestEV(ctx){
             if(salIdx[q]>budget) continue;
             // Salary FLOOR, not just the cap — see minSalC above.
             if(minSalC && (used - salIdx[pI] + salIdx[q]) < minSalC) continue;
-            if(_repNoOpp && idxs.some(i=>i!==pI && _repOpposes(pool[q], pool[i]))) continue; // never swap in a teammate's opponent
+            if(_repNoOpp && idxs.some(i=>i!==pI && _repOpposes(fieldPool[q], fieldPool[i]))) continue; // never swap in a teammate's opponent
             if(_repPosMode){
-              const outP=nflPosOf(pool[pI])||'UNK', inP=nflPosOf(pool[q])||'UNK';
+              const outP=nflPosOf(fieldPool[pI])||'UNK', inP=nflPosOf(fieldPool[q])||'UNK';
               if(outP!==inP){
                 const c={...curC}; c[outP]--; c[inP]++;
                 if(!nflComplete(c)) continue;   // would break the roster
               }
               // ...and never let an "upgrade" break the stack the user asked for.
               if(_repRules && (_repRules.stackN||_repRules.bringBack||_repRules.noRbVsDst)){
-                const after=idxs.map(i=>i===pI?pool[q]:pool[i]);
+                const after=idxs.map(i=>i===pI?fieldPool[q]:fieldPool[i]);
                 if(!nflStackOk(after,_repRules)) continue;
               }
             }
-            if(_grpWasOk && !checkGroupRules(idxs.map(i=>i===pI?pool[q]:pool[i]), _repGroups)) continue;
+            if(_grpWasOk && !checkGroupRules(idxs.map(i=>i===pI?fieldPool[q]:fieldPool[i]), _repGroups)) continue;
             if(!beatsEnough(q,pI)) continue; // mean gap alone ≠ dominance — must beat him sim by sim
             bestGain=meanIdx[q]-meanIdx[pI]; bestSlot=pI; bestUp=q; break;
           }
@@ -8205,7 +8228,7 @@ async function runUFCContestEV(ctx){
       const key=idxs.slice().sort((a,b)=>a-b).join('|');
       const rep=seen.get(key);
       if(rep){ rep.count+=(e.count||1); continue; } // merge duplicates created by repair
-      const ne={lineup:idxs.map(i=>pool[i]), count:e.count||1, totalScore:e.totalScore||0};
+      const ne={lineup:idxs.map(i=>fieldPool[i]), count:e.count||1, totalScore:e.totalScore||0};
       seen.set(key, ne); repaired.push(ne);
     }
     // replace the candidate list in place (repaired already dedup'd by key)
@@ -9165,15 +9188,18 @@ async function runUFCContestEV(ctx){
     const pillars = pool.filter(p => p._simCut!=null && p._simCut<99 &&
       (sel.expCount[p.id]||0) >= pillarBar*target);
     if(pillars.length){
-      const meanIdxAll = pool.map((p,i)=>{ const a=scoreArr[i]; let s2=0; for(const si of simIdx) s2+=(a[si]||0); return s2/Math.max(1,simIdx.length); });
+      // FIELD-FRAME FIX (2026-08-28): scoreArr and idxById are fieldPool-
+      // indexed — build meanIdxAll in that frame; the regression still runs
+      // over the curated pool's players only.
+      const meanIdxAll = fieldPool.map((p,i)=>{ const a=scoreArr[i]; let s2=0; for(const si of simIdx) s2+=(a[si]||0); return s2/Math.max(1,simIdx.length); });
       let sx=0,sy=0,sxx=0,sxy=0; const nP=pool.length;
-      pool.forEach((p,i)=>{ const x=p.salary||0, y=meanIdxAll[i]; sx+=x; sy+=y; sxx+=x*x; sxy+=x*y; });
+      pool.forEach(p=>{ const x=p.salary||0, y=meanIdxAll[idxById.get(p.id)]||0; sx+=x; sy+=y; sxx+=x*x; sxy+=x*y; });
       const beta=(nP*sxy-sx*sy)/Math.max(1e-9,(nP*sxx-sx*sx)), alpha=(sy-beta*sx)/nP;
       const excess={};
       pillars.forEach(p=>{ const i=idxById.get(p.id); excess[i]=Math.max(0, meanIdxAll[i]-(alpha+beta*(p.salary||0))); });
       const scoreArrW = scoreArr.map((a,i)=>{
         if(excess[i]==null || !(excess[i]>0)) return a;
-        const made=Math.max(0.05,(pool[i]._simCut||50)/100);
+        const made=Math.max(0.05,(fieldPool[i]._simCut||50)/100);
         const shift=excess[i]/made;             // his edge lives in the made-cut sims
         const b=new Float64Array(a.length);
         for(let s2=0;s2<a.length;s2++) b[s2] = a[s2]>=40 ? Math.max(40, a[s2]-shift) : a[s2];
@@ -9212,7 +9238,9 @@ async function runUFCContestEV(ctx){
   // slot carries honest SIM POINTS (the saved panel and its sort read this
   // field as points; stuffing dollars in it showed "SIM 2.4" nonsense).
   const meanById = {};
-  pool.forEach((p,i)=>{ const a=scoreArr[i]; let s2=0; for(const si of simIdx) s2+=(a[si]||0); meanById[p.id]=s2/Math.max(1,simIdx.length); });
+  // FIELD-FRAME FIX (2026-08-28): scoreArr is fieldPool-indexed — look each
+  // pool player up by id instead of assuming the frames match.
+  pool.forEach(p=>{ const a=scoreArr[idxById.get(p.id)]||[]; let s2=0; for(const si of simIdx) s2+=(a[si]||0); meanById[p.id]=s2/Math.max(1,simIdx.length); });
   const decorate = e => { const l=[...e.lineup];
     l._entry = e;    // back-pointer for whole-portfolio EV evaluation (F2 chalk floor)
     l._ev = e._ev;
@@ -10900,6 +10928,10 @@ async function runPgaSimGen(){
         for(const p of e.lineup) _appGen[p.id] = (_appGen[p.id]||0) + (e.count||1)/_tot; }
     }
     out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, appearRate:_appGen, oosParity:1, sharpShare:0.15, se:_se, dominanceRepair:true, maxSal,
+      // Field frame = full slate (same doctrine as UFC/NASCAR): the modeled
+      // opponents roster hidden golfers too — simScoresById is already keyed
+      // for the whole simPool, so the field sampler always has real scores.
+      fieldPool: simPool,
       // Same floor the per-sim optimizer above now enforces, so repair can't
       // drop a candidate back under it.
       minSal});
@@ -13200,12 +13232,22 @@ async function runNascarSimGen(){
     }
     log(`${rankedNas.length.toLocaleString()} unique ex-post optimal lineups from ${Math.ceil(simsDone2/2).toLocaleString()} generation sims (EV priced on the held-out half).`);
     if(chaosSims) log(`Chaos candidates: ${chaosCands.toLocaleString()} disjoint runner-up builds from ${chaosSims.toLocaleString()} high-attrition sims (${CHAOS_MIN_INC}+ cars out).`);
+    // FIELD FRAME = FULL SLATE (fix 2026-08-28): sim scores are keyed for the
+    // WHOLE field, not just the curated pool. The 50k real opponents don't see
+    // the user's curation — hiding the front half of a superspeedway field
+    // (back-stack build) previously handed the field sampler a cheap-only
+    // pool that couldn't reach the $49,200 salary floor, so it produced zero
+    // lineups and the run aborted. The modeled field now always builds from
+    // fullField (hidden drivers keep their real sims + Own%), while curation
+    // keeps restricting OUR candidate lineups only — same doctrine as UFC.
     const simScoresByIdNas = {};
-    evPool.forEach((p,i)=>{ simScoresByIdNas[p.id]=evScores[i]; });
+    fullField.forEach((p,i)=>{ simScoresByIdNas[p.id] = simScoreArrays[i] || new Array(simsDone2).fill(0); });
+    evPool.forEach((p,i)=>{ if(!simScoresByIdNas[p.id]) simScoresByIdNas[p.id]=evScores[i]; });
     // Full EV-engine parity with the UFC/PGA paths: out-of-sample pricing,
     // sharp field share, dominance repair, real salary cap.
     const out = await runUFCContestEV({slate, pool: evPool, ranked: rankedNas, simScoresById: simScoresByIdNas,
       totalSims: simsDone2, genSims: Math.ceil(simsDone2/2), target, maxExpPct, overrides,
+      fieldPool: fullField,
       oosParity:1, sharpShare:0.15, se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:true, maxSal, minSal});
     if(out===null && window._genCancelled) log('Cancelled.');
     done(); return;
@@ -14762,6 +14804,9 @@ async function runNflSimGen(){
     const _se = !!(slate._ufcEv && slate._ufcEv.se);
     out = await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone,
       genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, oosParity:1,
+      // Field frame = full slate (same doctrine as UFC/NASCAR/PGA): the modeled
+      // field rosters hidden players too — simScoresById covers all of simPool.
+      fieldPool: simPool,
       sharpShare:0.15, se:_se, dominanceRepair:true, maxSal, stackRules});
     if(out===null && window._genCancelled) log('Cancelled.');
   } else {
@@ -16077,6 +16122,93 @@ async function runAutoGen(){
     const enforcedLineups = enforceMinExposure(finalLineups, allCandidateLineups, minOverrides, scoreFnAutoGen, log, pgaMaxCap);
 
     const final = enforcedLineups;
+
+    // ── MAX% CAP TOP-UP + TRUE-UP (2026-08-28) ───────────────────────────────
+    // Two related defects on small/curated pools, both measured on a back-half
+    // superspeedway build (15 visible drivers, Max% 70, 10 asked):
+    // (1) TOP-UP. The diversity greedy selects only from its gauntlet-culled
+    //     survivor pool (~40 lineups). Once the chalk block hit its count caps,
+    //     every SURVIVOR held a capped driver and the greedy quit at 7 of 10 —
+    //     while the full candidate set (800+) still held cap-clean lineups.
+    //     Refill from the FULL valid candidate set before giving up.
+    // (2) TRUE-UP. Caps are counts against the REQUESTED target: 70% of 10 = 7
+    //     lineups. Deliver only 7 total and a driver in all 7 is at 100% of the
+    //     actual output while "under" his count cap. Re-enforce the PERCENTAGE
+    //     against what is actually delivered, swapping over-cap lineups for the
+    //     best cap-clean candidates; if a cap is genuinely infeasible (every
+    //     candidate holds the driver), say so loudly instead of shipping the
+    //     breach silently.
+    {
+      const keyOfL = l => l.map(p=>p.id).sort().join('|');
+      const capPctOf = id => overrides[id]!=null ? overrides[id] : maxExpPct;
+      const candsByScore = allCandidateLineups.slice().sort((a,b)=>scoreFnAutoGen(b)-scoreFnAutoGen(a));
+      const usedKeys = new Set(final.map(keyOfL));
+      const countsNow = () => { const c={}; final.forEach(l=>l.forEach(p=>{ c[p.id]=(c[p.id]||0)+1; })); return c; };
+      // (1) Top-up toward the requested target, caps checked against target.
+      if(final.length < target){
+        let cnt = countsNow();
+        for(const c of candsByScore){
+          if(final.length >= target) break;
+          const k = keyOfL(c); if(usedKeys.has(k)) continue;
+          const bad = c.some(p=>{ const pct=capPctOf(p.id); if(pct>=100) return false;
+            const cap = pct<=0 ? 0 : Math.max(1, Math.ceil(pct/100*target));
+            return (cnt[p.id]||0) + 1 > cap; });
+          if(bad) continue;
+          final.push(c); usedKeys.add(k);
+          c.forEach(p=>{ cnt[p.id]=(cnt[p.id]||0)+1; });
+        }
+      }
+      // (2) True-up: enforce the percentage against the DELIVERED count.
+      const capInfeasible = new Set();
+      let guard = 0;
+      while(guard++ < 300){
+        const N = final.length; if(!N) break;
+        const cnt = countsNow();
+        let worst=null, worstEx=0;
+        for(const id in cnt){
+          const pct = capPctOf(id);
+          if(pct>=100 || capInfeasible.has(id)) continue;
+          const cap = pct<=0 ? 0 : Math.ceil(pct/100*N);
+          const ex = cnt[id]-cap;
+          if(ex>worstEx){ worstEx=ex; worst=id; }
+        }
+        if(!worst) break;
+        // Swap OUT the lowest-scoring lineup holding the offender — but never
+        // one whose removal would drop a Min%-pinned player below his target
+        // (same N-relative convention enforceMinExposure uses).
+        const minTargetOf = id => Math.ceil((minOverrides[id]||0)/100*N);
+        let li=-1, liScore=Infinity;
+        final.forEach((l,i)=>{
+          if(!l.some(p=>p.id===worst)) return;
+          if(l.some(p=>(minOverrides[p.id]||0)>0 && (cnt[p.id]||0) <= minTargetOf(p.id) && p.id!==worst)) return;
+          const s=scoreFnAutoGen(l); if(s<liScore){ liScore=s; li=i; }
+        });
+        let rep=null;
+        if(li>=0){
+          // Counts as they would stand with the outgoing lineup removed.
+          const cntM = {...cnt}; final[li].forEach(p=>{ cntM[p.id]=(cntM[p.id]||0)-1; });
+          for(const c of candsByScore){
+            if(c.some(p=>p.id===worst)) continue;
+            const k=keyOfL(c); if(usedKeys.has(k)) continue;
+            const bad = c.some(p=>{ const pct=capPctOf(p.id); if(pct>=100) return false;
+              const cap = pct<=0 ? 0 : Math.ceil(pct/100*N);
+              return (cntM[p.id]||0) + 1 > cap; });
+            if(bad) continue;
+            rep=c; break;
+          }
+        }
+        if(rep){
+          usedKeys.delete(keyOfL(final[li])); usedKeys.add(keyOfL(rep));
+          final[li]=rep;
+        } else {
+          capInfeasible.add(worst);
+        }
+      }
+      if(capInfeasible.size){
+        const names=[...capInfeasible].map(id=>(pool.find(p=>p.id===id)||{}).name||id).join(', ');
+        log(`⚠ Max% cap UNREACHABLE for: ${names} — every cap-clean candidate lineup is exhausted (pool too small or too curated). Their share of the delivered set exceeds the cap; unhide players, loosen rules, or lower the lineup count to make the cap feasible.`);
+      }
+    }
 
     // Keep intent tags as the source of truth for display/filtering.
     // _archetypeTag = the archetype this lineup was BUILT for (not inferred from composition).
