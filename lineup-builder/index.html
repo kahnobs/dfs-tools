@@ -5560,6 +5560,11 @@ function renderGroupRulesSummary(){
     if(nRb) nRb.checked = !!slate._nflNoRbVsDst;
     const rbC = document.getElementById('nflStackRbCounts');
     if(rbC) rbC.checked = !!slate._nflStackRbCounts;
+    // The Contest EV block is one shared DOM node that restoreContestEvUI
+    // relocates into the active sport's section — every other sport called it
+    // here; NFL never did, so the block stayed parked (invisible) in the UFC
+    // section and Contest EV Mode looked missing on NFL slates.
+    restoreContestEvUI(slate);
   }
 
   const pgaSection = document.getElementById('pgaSection');
