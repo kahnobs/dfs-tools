@@ -171,6 +171,7 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .sdash-game-name .muted{color:var(--muted);font-weight:400;font-size:10px;}
 .sdash-game-imp{flex:1;display:flex;gap:12px;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);}
 .sdash-game-imp b{color:var(--green);font-size:12px;}
+.sdash-autolean{margin:-2px 0 5px 122px;font-size:10px;opacity:.72;letter-spacing:.02em;cursor:help;}
 .sdash-cap-note{margin:2px 0 6px;padding:5px 8px;border-radius:4px;font-size:10px;line-height:1.4;color:var(--accent);background:rgba(255,176,32,.10);border:1px solid rgba(255,176,32,.35);}
 .sdash-game-imp .hot b{color:var(--accent);}
 .sdash-game-imp i,.sdash-val i,.sdash-pshare i,.sdash-pmean i,.sdash-stat-tot i{font-style:normal;color:var(--muted);font-size:9px;margin-left:4px;opacity:.8;}
@@ -976,7 +977,6 @@ html { overscroll-behavior-y: contain; }
       <input type="text" id="searchInput" placeholder="Search…" oninput="renderPool()">
       <div class="sort-btns" id="sortBtns"></div>
       <!-- Showdown only: Players / Captain segmented control (filled by renderPool). -->
-      <div class="sd-view-toggle" id="sdViewToggle" style="display:none;"></div>
       <button class="show-hidden-btn" id="showHiddenBtn" onclick="toggleShowHidden()">👁 Hidden</button>
       <button class="show-hidden-btn" id="unhideAllBtn" onclick="unhideAll()" style="display:none;">✕ Unhide All</button>
       <button class="show-hidden-btn" id="resetMaxExpBtn" onclick="resetMaxExposures()" style="display:none;" title="Clear all MAX% overrides back to default (100)">↺ Reset Max</button>
@@ -1013,7 +1013,8 @@ html { overscroll-behavior-y: contain; }
     <!-- NFL: game-environment tiles (O/U, spread, implied totals) — one per game -->
     <div id="nflGameTiles" class="nfl-game-tiles" style="display:none;"></div>
     <!-- Showdown only: one-line description of the active pool view + bulk actions. -->
-    <div class="sd-pool-subrow" id="sdPoolSub" style="display:none;"></div>
+    <!-- Showdown: Players / Captain toggle + the view's subtitle and pool actions, on one bar above the column headers -->
+    <div class="sd-pool-subrow" id="sdPoolSub" style="display:none;"><div class="sd-view-toggle" id="sdViewToggle"></div><div id="sdPoolSubBody" style="display:contents;"></div></div>
     <div class="col-headers" id="colHeaders"></div>
     <div id="groupEditBanner" style="display:none;flex-shrink:0;"></div>
     <div class="driver-list" id="driverList"></div>
@@ -2083,6 +2084,48 @@ function amProb(s){
   return ml<0 ? (-ml)/((-ml)+100) : 100/(ml+100);
 }
 // Header-name reads for the odds puller's NFL columns (+ DK CSV fallbacks).
+// ── NFL prop card (name hover) ────────────────────────────────────────────
+// The pool shows only ATD; the rest of the market — yardage, receptions, the
+// combo line, pass TDs, plus any DST lines — is one hover away, the same way
+// the UFC pool surfaces finish-round odds.
+// A function, not a const: renderPool runs during script load, before a
+// top-level const this far down would be initialised (TDZ).
+function NFL_PROP_FIELDS_LIST(){ return [
+  {k:'pass_yds_ou', l:'Pass yds'}, {k:'pass_td_ou', l:'Pass TD'},
+  {k:'rush_yds_ou', l:'Rush yds'}, {k:'rec_yds_ou', l:'Rec yds'},
+  {k:'rec_ou', l:'Receptions'},    {k:'rush_rec_ou', l:'Rush+Rec'},
+  {k:'dst_sacks_ou', l:'Sacks'},   {k:'dst_int_ou', l:'INT'},
+  {k:'dst_to_ou', l:'Turnovers'},  {k:'dst_pts_ou', l:'DST pts'},
+]; }
+function nflHasProps(p){
+  if(!p) return false;
+  return NFL_PROP_FIELDS_LIST().some(f => p[f.k] != null && p[f.k] !== '') || (p.atd != null && p.atd !== '');
+}
+function nflPropsTooltip(p){
+  const esc2 = v => String(v).replace(/</g,'&lt;');
+  // "227.5 (+100)" → line big, price small; bare values pass through.
+  const cell = (l, v) => {
+    const ou = parseOuCell(v);
+    const line = ou ? (ou.line%1===0 ? ou.line : ou.line.toFixed(1)) : esc2(v);
+    const price = ou ? ` <span style="font-weight:400;color:var(--muted);font-size:9px;">${esc2(String(v).replace(/^[\d.]+\s*/,''))}</span>` : '';
+    return `<div class="odds-tip-cell"><span class="odds-tip-k">${l}</span><span class="odds-tip-v">${line}${price}</span></div>`;
+  };
+  const rows = NFL_PROP_FIELDS_LIST().filter(f => p[f.k] != null && p[f.k] !== '').map(f => cell(f.l, p[f.k]));
+  if(p.atd != null && p.atd !== ''){
+    const pr = amProb(p.atd);
+    rows.push(`<div class="odds-tip-cell"><span class="odds-tip-k">Anytime TD</span><span class="odds-tip-v">${esc2(p.atd)}${pr!=null?` <span style="font-weight:400;color:var(--muted);font-size:9px;">${Math.round(pr*100)}%</span>`:''}</span></div>`);
+  }
+  const own = [];
+  if(isShowdown(activeSlate())){
+    if(p.cptOwn != null) own.push(`CPT own ${(+p.cptOwn).toFixed(1)}%`);
+    if(p.own != null) own.push(`FLEX own ${(+p.own).toFixed(1)}%`);
+  }
+  if(!rows.length) return `<div class="odds-tip-empty">No props pulled for this player</div>`;
+  return `<div class="odds-tip-sec">${esc2(p.name)} · market props</div>
+    <div class="odds-tip-grid">${rows.join('')}</div>
+    ${own.length?`<div class="odds-tip-sec" style="margin-top:8px;">${own.join(' · ')}</div>`:''}`;
+}
+
 function applyNflStats(p, row, headers){
   const idx = (rx)=>headers.findIndex(h=>rx.test((h||'').trim()));
   const get = (rx)=>{ const i=idx(rx); return i>=0?(row[i]||'').trim():null; };
@@ -3260,11 +3303,10 @@ function slateFieldsBase(slate){
     // Game-level numbers (O/U, spread, team totals) live in the game tiles
     // above the pool (renderNflGameTiles) — the pool is player-level only:
     // the market's prop lines, then the sim columns once a sim has run.
-    const anyOu = k => ps.some(p=>parseOuCell(p[k]));
-    if(anyOu('pass_yds_ou')) f.push({key:'pass_yds_ou', label:'PaYd', cls:'col-r', prop:true});
-    if(anyOu('rush_yds_ou')) f.push({key:'rush_yds_ou', label:'RuYd', cls:'col-r', prop:true});
-    if(anyOu('rec_yds_ou'))  f.push({key:'rec_yds_ou',  label:'ReYd', cls:'col-r', prop:true});
-    if(anyOu('rec_ou'))      f.push({key:'rec_ou',      label:'Rec',  cls:'col-r', prop:true});
+    // Only ATD gets a column — nearly every priced player has one and it is
+    // the single most decision-relevant line. The yardage / reception props
+    // live in the name-hover card (nflPropsTooltip) so the pool stays scannable:
+    // projection, value, ownership, sim score, ATD.
     if(ps.some(p=>amProb(p.atd)!=null)) f.push({key:'atd', label:'ATD', cls:'col-r', prop:true});
     if(ps.some(p=>p._simP50!=null)){
       f.push({key:'_simP50', label:'Sim', cls:'col-r'});
@@ -3878,17 +3920,20 @@ function renderPool(){
   // "no players match" return below.
   const _vt=document.getElementById('sdViewToggle');
   const _sub=document.getElementById('sdPoolSub');
-  if(_vt && _sub){
+  const _subBody=document.getElementById('sdPoolSubBody');
+  if(_vt && _sub && _subBody){
     if(SDpool){
       const _q=(document.getElementById('searchInput')?.value||'').trim();
       const _vis=players.filter(p=>!hidden.includes(p.id));
       const _n=m=>_vis.filter(p=>m==='cpt'?sdCptEligible(slate,p.id):sdFlexEligible(slate,p.id)).length;
       const _btn=(m,lbl,tip)=>`<button class="sd-vt-btn${m==='cpt'?' sd-vt-cpt':''}${sdView===m?' active':''}" data-view="${m}" onclick="sdSetPoolView('${m}')" title="${tip}">${lbl}<span class="sd-vt-n">(${_n(m)}/${_vis.length} in pool${_q?', filtered':''})</span></button>`;
-      _vt.style.display='flex';
+      // The toggle sits on the bar directly above the list (with the view's
+      // subtitle and All on/off) rather than in the crowded panel header —
+      // it changes what the list shows, so it belongs next to the list.
       _vt.innerHTML=_btn('flex','Players','The main pool: base salary, editable projection')
                    +_btn('cpt','Captain','The same players at 1.5× salary and points');
       _sub.style.display='flex';
-      _sub.innerHTML=`<span class="sd-pool-sub">${SDcpt
+      _subBody.innerHTML=`<span class="sd-pool-sub">${SDcpt
         ? '1.5× points · 1.5× salary — who the sim may captain; click a row to pin him as your captain'
         : 'base price — who may fill the five FLEX slots'}</span>
         <div class="sd-pool-actions">
@@ -3896,8 +3941,8 @@ function renderPool(){
           <button onclick="sdSetPoolAll('${sdView}',false)" title="Empty this pool${_q?' (filtered rows only)':''}">All off</button>
         </div>`;
     } else {
-      _vt.style.display='none'; _vt.innerHTML='';
-      _sub.style.display='none'; _sub.innerHTML='';
+      _vt.innerHTML='';
+      _sub.style.display='none'; _subBody.innerHTML='';
     }
   }
   const list=document.getElementById('driverList');
@@ -4111,7 +4156,10 @@ function renderPool(){
       : `driver-row${isSelected?' selected':''}${dimmed?' dimmed':''}${isHidden?' is-hidden':''}${poolOff?' sd-pool-off':''}${mode==='cpt'&&isSelected?' sd-cpt-row':''}`;
 
     // UFC name-hover odds tooltip (desktop only, when extended odds are loaded)
-    const hasOddsTip = slate.sport==='ufc' && !mobile && (
+    // NFL: hover the name for the full prop card (pass/rush/rec yards, receptions,
+    // rush+rec, pass TDs, ATD, and DST lines when present).
+    const hasNflTip = slate.sport==='nfl' && !mobile && nflHasProps(p);
+    const hasOddsTip = hasNflTip || slate.sport==='ufc' && !mobile && (
       p.finish_r1!=null||p.finish_r2!=null||p.finish_r3!=null||p.finish_r4!=null||
       p.finish_r5!=null||p.decision!=null||p.ss_ou!=null||p.td_ou!=null
     );
@@ -15281,6 +15329,158 @@ const NFL_PA_SD = 8.32;   // sd of a team's sampled score: √(10.4² + 13.0²)/
 // hold anything the Sim tab's sliders can legitimately ask for — a team CAN be
 // implied at 45+ — while still catching a garbage total from a mis-parsed sheet.
 const NFL_IMPLIED_MIN = 6, NFL_IMPLIED_MAX = 52;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GAME SCRIPT — market-anchored pass/rush tilt
+// ═══════════════════════════════════════════════════════════════════════════
+// Every prop line this sim is built on ALREADY prices the expected script at
+// the Vegas number: a 3.5-point favourite's rushing line is high and his
+// receivers' lines are low precisely because the book expects him to lead.
+// So the tilt must be driven by the DEVIATION from the market baseline, not by
+// the absolute margin. `m0 = baseImplied − oppBaseImplied` is that baseline;
+// `d = margin − m0` is the deviation in points, positive when the team is doing
+// BETTER than the market expected (leading more / trailing less). At d = 0 every
+// factor is exactly 1, so an untouched slate reproduces the posted lines.
+//
+// CALIBRATION. Published league-wide pass rates: ~57% of plays overall, ~67%
+// when trailing, ~48-50% when leading by 7+, with team-season extremes running
+// 40-83%. Those are IN-STATE rates — a game that ends +7 did not spend all four
+// quarters at +7, it drifted there, so only a fraction of its snaps were played
+// in the leading state. Taking the FULL-GAME response as roughly HALF the
+// in-state gap (57% → 67% trailing is +10 points of pass rate in-state, ≈ +5
+// points of pass rate over the whole game) lands on the numbers below, per 7
+// points of margin deviation:
+//   trailing more than expected: pass volume +5.5%, rush volume −7.0%
+//   leading  more than expected: pass volume −4.5%, rush volume +6.5%
+// The asymmetry is deliberate: a leading team also runs FEWER total plays
+// (clock burn, kneel-downs), so its rush gain is smaller than the trailer's
+// pass gain, and the trailer's rush loss is bigger than the leader's pass loss.
+//
+// PLAY VOLUME (`volF`, applied to pass AND rush): trailing teams go no-huddle
+// and spike the ball, leaders bleed clock — ±1.2% / ±1.0% per 7 points.
+// But `volF` is NOT applied at full strength anywhere in this app, because both
+// places that use it already carry a points→production scaling term that
+// empirically contains part of the same effect: per sim, `yardF` scales all
+// yardage by the realized score ratio (≈ ±14% per 7 points of scoring on a
+// 22-point implied total); on the dashboard, `f = implied/baseImplied` does the
+// same for expected values. Those coefficients were fit against realized
+// points-vs-yards behaviour, which already includes the pace response, so
+// applying the published pace number on top double-counts it. `volShare` (0.5)
+// is the share judged INCREMENTAL: the net volume tilt actually applied is
+// ±0.6% / ±0.5% per 7 points on top of yardF's ±14%. It is deliberately small;
+// the script signal lives in the pass/rush SPLIT, not in the play count.
+const NFL_SCRIPT = {
+  // per 7 points of margin deviation; coefficients carry their own sign
+  trail: { pass:  0.055, rush: -0.070, vol:  0.012 },  // d < 0 (behind the market script)
+  lead:  { pass: -0.045, rush:  0.065, vol: -0.010 },  // d > 0 (ahead of it)
+  volShare: 0.5,          // incremental share of the pace effect (see above)
+  passMin: 0.78, passMax: 1.30,
+  rushMin: 0.70, rushMax: 1.35,
+  volMin:  0.92, volMax:  1.06,
+};
+// d = (realized or expected margin) − market baseline margin, in points.
+// Returns multiplicative factors on the team's pass / rush production plus the
+// play-volume factor that rides on both. Continuous, and exactly 1 at d = 0.
+function scriptTilt(d){
+  if(!Number.isFinite(d)) d = 0;
+  const u = Math.abs(d) / 7;                      // magnitude in 7-point units
+  const s = d < 0 ? NFL_SCRIPT.trail : NFL_SCRIPT.lead;
+  const cl = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  return {
+    d,
+    passF: cl(1 + s.pass * u, NFL_SCRIPT.passMin, NFL_SCRIPT.passMax),
+    rushF: cl(1 + s.rush * u, NFL_SCRIPT.rushMin, NFL_SCRIPT.rushMax),
+    volF:  cl(1 + s.vol  * u * NFL_SCRIPT.volShare, NFL_SCRIPT.volMin, NFL_SCRIPT.volMax),
+  };
+}
+// The market baseline margin and the ADJUSTED expected margin for one team.
+// `teamInfo` is the map out of buildNflSimInputs; the opponent's numbers come
+// from it when both sides of the game are in the pool, and from the team's own
+// `oppImplied` (a sheet column) otherwise.
+function nflScriptMargins(ti, teamInfo){
+  if(!ti) return { m0: 0, mAdj: 0, d: 0 };
+  const base = Number.isFinite(ti.baseImplied) ? ti.baseImplied : ti.implied;
+  const oppTi = (teamInfo && ti.opp) ? teamInfo.get(ti.opp) : null;
+  const oppBase = oppTi ? (Number.isFinite(oppTi.baseImplied) ? oppTi.baseImplied : oppTi.implied)
+                        : (Number.isFinite(ti.oppImplied) ? ti.oppImplied : base);
+  const oppAdj  = oppTi ? oppTi.implied : oppBase;
+  const m0 = base - oppBase, mAdj = (Number.isFinite(ti.implied) ? ti.implied : base) - oppAdj;
+  return { m0, mAdj, d: mAdj - m0 };
+}
+// The EXPECTED-VALUE half of the script model: the tilt implied by how far the
+// user has moved the spread off the market. The per-sim half is measured
+// against `mAdj` (the adjusted expectation), so the two layers add up exactly
+// once and never double-count — see mkTeamEnv.
+// ── yardF mean normalization ────────────────────────────────────────────────
+// `yardF` is the sim's points→yards link: (0.55 + 0.45·ratio)·lognormal, with
+// ratio = sampled score / implied. It was biased ABOVE 1 in two separate ways,
+// and every yardage number in the sim inherited the product:
+//   1. the lognormal was `exp(g·0.16)` with no −σ²/2, i.e. mean exp(σ²/2) =
+//      1.0129. Every other lognormal in this file (lnT for the team pie at
+//      σ 0.22, ln for the per-player idiosyncratic draws at σ 0.34/0.36/0.12)
+//      already carried the correction; this one did not.
+//   2. E[ratio] > 1 even though E[score] = implied, because `score` is
+//      truncated at zero and `ratio` is then clamped into [0.25, 2.6]. The
+//      truncation is the big one on a low-implied team.
+// Both are fixed by dividing by the expectation of the whole clamped
+// expression. That expectation is computed NUMERICALLY per team rather than
+// approximated, because the two clamps ([0.25, 2.6] on the ratio, [0.45, 1.95]
+// on the result) make the closed form wrong exactly where it matters — a
+// 17-point implied total puts the zero-truncation inside 2.1σ. The integration
+// is the same 41-node ±4σ grid the DST tier table uses, taken jointly over the
+// score draw and the lognormal draw (1,681 nodes, once per team per input
+// build, memoized on the teamInfo object as `ti.yardNorm`).
+//
+// There is a THIRD bias, which only normalizing yardF on its own does not
+// remove: yardF and the script factors are correlated. A team that outscores
+// its implied total both gains yards (yardF up) and runs more (rushF up), so
+// E[yardF·rushF] > E[yardF]·E[rushF] and the sim's rushing means came out ~1.5%
+// over the posted lines even with E[yardF] = 1. Since the consumers always use
+// the PRODUCT, the products are what get normalized: this returns
+//   yn = E[yardF_raw],  cp = E[yardF_raw·passF]/yn,  cr = E[yardF_raw·rushF]/yn
+// and mkTeamEnv divides yardF by yn (so the places that use yardF ALONE — the
+// reception-count blend, the unpriced fallback — still see a mean-1 factor) and
+// the script factors by cp / cr (so every pass × yardF and rush × yardF product
+// also means 1). The script model's SHAPE is untouched; only its level is
+// pinned, which is the whole point of anchoring to the market.
+//
+// The integration replicates simNflGames exactly: game total
+// T = max(13, total + 10.4·z1), margin deviation d = 13·z2 (the reference
+// margin cancels — d is centred by construction), score = max(0, (T + ref +
+// 13·z2)/2) with ref = 2·implied − total, and the lognormal on the third grid.
+// 41³ nodes, a few milliseconds, memoized on the teamInfo object.
+const NFL_YARDF_SIG = 0.16;
+function nflYardNorms(implied, total){
+  const imp = Number.isFinite(implied) && implied > 0 ? implied : 22;
+  const tot = Number.isFinite(total) && total > 0 ? total : imp * 2;
+  const ref = 2 * imp - tot;                       // this team's expected margin
+  const c = NFL_YARDF_SIG * NFL_YARDF_SIG / 2;
+  const L = _NFL_PA_Z.map(z => Math.exp(z * NFL_YARDF_SIG - c));
+  let yn = 0, sp = 0, sr = 0;
+  for(let a = 0; a < _NFL_PA_Z.length; a++){
+    const T = Math.max(13, tot + _NFL_PA_Z[a] * 10.4);
+    for(let b = 0; b < _NFL_PA_Z.length; b++){
+      const d = _NFL_PA_Z[b] * 13.0;
+      const score = Math.max(0, (T + ref + d) / 2);
+      const ratio = Math.max(0.25, Math.min(2.6, score / Math.max(9, imp)));
+      const bse = 0.55 + 0.45 * ratio;
+      let y = 0;
+      for(let j = 0; j < L.length; j++) y += _NFL_PA_W[j] * Math.max(0.45, Math.min(1.95, bse * L[j]));
+      const sc = scriptTilt(d), w = _NFL_PA_W[a] * _NFL_PA_W[b];
+      yn += w * y;
+      sp += w * y * sc.passF * sc.volF;
+      sr += w * y * sc.rushF * sc.volF;
+    }
+  }
+  if(!(yn > 0)) return { yn: 1, cp: 1, cr: 1 };
+  return { yn, cp: (sp / yn) || 1, cr: (sr / yn) || 1, imp, tot };
+}
+function nflScriptFor(ti, teamInfo){
+  const m = nflScriptMargins(ti, teamInfo);
+  const t = scriptTilt(m.d);
+  const passNet = t.passF * t.volF, rushNet = t.rushF * t.volF;
+  return Object.assign({}, m, t, { passNet, rushNet, autoLean: passNet - 1 });
+}
 const _NFL_PA_Z = [], _NFL_PA_W = [];
 {
   let wsum = 0;
@@ -15476,6 +15676,10 @@ function buildNflSimInputs(pool){
     if(names.length === 2 && (_dash && _dash.teams && names.some(t => _dash.teams[t] && Number.isFinite(_dash.teams[t].implied)))){
       g.total = g.teams[names[0]].implied + g.teams[names[1]].implied;
     }
+    // The (possibly adjusted) game total, on each side, so mkTeamEnv's yardF
+    // normalizer can integrate over the same score distribution simNflGames
+    // will actually sample from.
+    for(const t of names) g.teams[t]._gtotal = g.total;
   }
 
   // Players the market didn't price are NOT projected off salary any more.
@@ -15670,19 +15874,35 @@ function nflAdjShares(T, statKey, adj){
   return { shares: out, over, fixed, restBase };
 }
 // Adjusted team totals: production scales with implied points, then tilts
-// pass ↔ rush by the lean.
-function nflAdjTeamTotals(T, ti, adj){
+// pass ↔ rush by the AUTO game-script response to the adjusted spread, and only
+// then by the user's manual lean.
+//
+// The auto layer exists because the Spread slider used to be script-blind: it
+// scaled both teams proportionally by implied points and never moved the
+// pass/rush split, so "make SEA a 10-point favourite" produced no script
+// response at all in the displayed expectations. `nflScriptFor` measures how
+// far the adjusted margin sits from the MARKET baseline margin and tilts by
+// that deviation only — the market part is already inside the prop lines.
+// The manual lean stays a pure user offset multiplied on top; `autoLean` is
+// surfaced next to the lean slider so the two are never confused.
+// Touchdowns are deliberately left alone: they already scale with implied
+// points through `f`, and the rush/receive split of a score is a much weaker
+// script effect than the yardage split.
+function nflAdjTeamTotals(T, ti, adj, teamInfo){
   const a = adj && adj.teams && adj.teams[T.team] || {};
   const baseImp = ti && Number.isFinite(ti.baseImplied) ? ti.baseImplied : (ti && ti.implied) || 22;
   const imp = Number.isFinite(a.implied) ? a.implied : baseImp;
   const f = baseImp > 0 ? imp / baseImp : 1;
   const lean = Math.max(-NFL_LEAN_MAX, Math.min(NFL_LEAN_MAX, a.lean || 0));
+  const sc = nflScriptFor(ti, teamInfo);
+  const aP = sc.passNet, aR = sc.rushNet;
   return {
     f, lean, imp, baseImp,
-    recYds:  T.base.recYds  * f * (1 + lean),
-    rec:     T.base.rec     * f * (1 + lean * 0.8),
-    passYds: T.base.passYds * f * (1 + lean),
-    rushYds: T.base.rushYds * f * (1 - lean),
+    script: sc, autoLean: sc.autoLean, autoPassF: aP, autoRushF: aR, scriptD: sc.d,
+    recYds:  T.base.recYds  * f * aP * (1 + lean),
+    rec:     T.base.rec     * f * aP * (1 + lean * 0.8),
+    passYds: T.base.passYds * f * aP * (1 + lean),
+    rushYds: T.base.rushYds * f * aR * (1 - lean),
     td:      T.base.td      * f,
   };
 }
@@ -15693,6 +15913,15 @@ function nflApplySimDash(pool, entries, teamInfo, adj){
   if(!adj) return;
   const anyTeamAdj = t => { const a = adj.teams && adj.teams[t]; return !!(a && (Number.isFinite(a.implied) || a.lean)); };
   const touched = new Set(Object.keys(adj.teams||{}).filter(anyTeamAdj));
+  // Moving one team's implied total moves the MARGIN, and a margin deviation is
+  // a script event for BOTH sides. The opponent may carry no adjustment of its
+  // own and would otherwise sit at its market means while the sim tilted it —
+  // so pull it in whenever the deviation is more than rounding. An untouched
+  // slate still has an empty `touched` set, i.e. is bit-identical to before.
+  for(const t of Array.from(touched)){
+    const ti = teamInfo.get(t); if(!ti || !ti.opp || touched.has(ti.opp)) continue;
+    if(Math.abs(nflScriptMargins(teamInfo.get(ti.opp), teamInfo).d) >= 0.05) touched.add(ti.opp);
+  }
   const model = nflShareModel(null, pool, entries);
   for(const [id, a] of Object.entries(adj.players||{})){
     if(!a) continue;
@@ -15703,7 +15932,7 @@ function nflApplySimDash(pool, entries, teamInfo, adj){
   }
   for(const t of touched){
     const T = model[t]; if(!T) continue;
-    const tot = nflAdjTeamTotals(T, teamInfo.get(t), adj);
+    const tot = nflAdjTeamTotals(T, teamInfo.get(t), adj, teamInfo);
     const sh = {}; for(const st of NFL_SHARE_STATS) sh[st.key] = nflAdjShares(T, st.key, adj).shares;
     for(const pl of T.players){
       if(pl.skip) continue;
@@ -15988,8 +16217,9 @@ function renderSimDash(){
     for(const t of [A, B].filter(Boolean)){
       const T = model[t]; if(!T) continue;
       const ti = cur.teamInfo.get(t);
-      const tot = nflAdjTeamTotals(T, ti, adj);
+      const tot = nflAdjTeamTotals(T, ti, adj, cur.teamInfo);
       const lean = Math.round((adj.teams[t]?.lean || 0) * 100);
+      const autoLeanPct = Math.round(tot.autoLean * 1000) / 10;
       const teamPlayersAdj = T.players.some(pl => adj.players[pl.p.id] && NFL_SHARE_STATS.some(st => Number.isFinite(adj.players[pl.p.id][st.key])));
       const tid = `sdTeam_${t}`;
       const isOpen = open[tid] !== false;
@@ -16005,6 +16235,17 @@ function renderSimDash(){
       // this panel: one read-only line saying what the sim thinks it will do.
       // Sliders can come later — right now the point is that a DST quoting 12
       // points is visible before it turns up as a captain.
+      html += `<div class="sdash-row">
+            <div class="sdash-lbl" title="Tilt production toward the pass (right) or the run (left)">Run ◂ lean ▸ Pass</div>
+            ${rng('sdL_'+t, lean, -30, 30, 1, `simDashSet('team/${t}/lean',this.value)`, 'lean', '%')}
+            <div class="sdash-val ${lean?'hot':''}">${lean>0?'+':''}${lean}%</div>
+          </div>`;
+      // The spread's own script response, stated out loud. It is NOT part of the
+      // slider (which stays a pure manual offset) — it is what the adjusted
+      // margin already did to this team's pass/rush split before the slider ran.
+      if(Math.abs(autoLeanPct) >= 0.1){
+        html += `<div class="sdash-autolean muted" id="sdAuto_${t}" title="Game script from the adjusted spread: ${t}'s expected margin is ${tot.scriptD>0?'+':''}${(Math.round(tot.scriptD*10)/10)} points off the market baseline, which tilts pass production ×${tot.autoPassF.toFixed(3)} and rush ×${tot.autoRushF.toFixed(3)}. The lean slider above is an offset on top of this.">auto ${autoLeanPct>0?'+':''}${autoLeanPct}% pass (spread)</div>`;
+      }
       {
         const di = cur.entries.findIndex(en => en.pos === 'DST' && en.team === t);
         if(di >= 0){
@@ -16014,17 +16255,19 @@ function renderSimDash(){
                        : (cur.teamInfo.get(t) ? cur.teamInfo.get(t).oppImplied : null);
           const x = nflDstExpect(de, oppImp);
           const src = (de.dstProps && de.dstProps.length) ? de.dstProps.join(' + ') : 'league avg';
-          html += `<div class="sdash-row" title="Team defense: expected sacks / interceptions / fumble recoveries and the resulting mean DK score against ${oppT||'the opponent'}'s ${oppImp!=null?fmt1(oppImp):'?'}-point implied total. Source: ${src}.">
-            <div class="sdash-lbl">DST</div>
-            <div class="sdash-team-meta" style="flex:1">${x.sacks.toFixed(1)} sk · ${x.ints.toFixed(1)} int · ${x.fumRec.toFixed(1)} fr · <b>${x.pts.toFixed(1)}</b> DK <span class="muted">(${src})</span></div>
+          // Laid out like a stat row (name · number · detail), not in the
+          // slider grid — the grid's 118px label column left a gap and pushed
+          // the detail off the right edge.
+          html += `<div class="sdash-stat sdash-dst" title="Team defense: expected sacks / interceptions / fumble recoveries and the resulting mean DK score against ${oppT||'the opponent'}'s ${oppImp!=null?fmt1(oppImp):'?'}-point implied total. Source: ${src}.">
+            <div class="sdash-stat-hdr" style="cursor:default;">
+              <span class="sdash-caret" style="visibility:hidden">▸</span>
+              <span class="sdash-stat-name">Defense</span>
+              <span class="sdash-stat-tot">${x.pts.toFixed(1)} DK</span>
+              <span class="sdash-stat-top">${x.sacks.toFixed(1)} sk · ${x.ints.toFixed(1)} int · ${x.fumRec.toFixed(1)} fr · ${src}</span>
+            </div>
           </div>`;
         }
       }
-      html += `<div class="sdash-row">
-            <div class="sdash-lbl" title="Tilt production toward the pass (right) or the run (left)">Run ◂ lean ▸ Pass</div>
-            ${rng('sdL_'+t, lean, -30, 30, 1, `simDashSet('team/${t}/lean',this.value)`, 'lean', '%')}
-            <div class="sdash-val ${lean?'hot':''}">${lean>0?'+':''}${lean}%</div>
-          </div>`;
       for(const st of NFL_SHARE_STATS){
         const teamTot = tot[st.key], baseTot = T.base[st.key];
         if(!(baseTot > 0)) continue;
@@ -16087,7 +16330,8 @@ function simNflGames(games, gauss){
     if(!b){
       const ti = g.teams[a];
       const sc = Math.max(0, ti.implied + gauss() * 7.6);
-      env[a] = mkTeamEnv(ti, sc, Math.max(0, T - sc), gauss);
+      const oppImp = Number.isFinite(ti.oppImplied) ? ti.oppImplied : Math.max(0, g.total - ti.implied);
+      env[a] = mkTeamEnv(ti, sc, Math.max(0, T - sc), gauss, ti.implied - oppImp);
       continue;
     }
     const tiA = g.teams[a], tiB = g.teams[b];
@@ -16095,21 +16339,53 @@ function simNflGames(games, gauss){
     const M = meanMargin + gauss() * 13.0;
     let scA = (T + M) / 2, scB = (T - M) / 2;
     scA = Math.max(0, scA); scB = Math.max(0, scB);
-    env[a] = mkTeamEnv(tiA, scA, scB, gauss);
-    env[b] = mkTeamEnv(tiB, scB, scA, gauss);
+    // `meanMargin` is the ADJUSTED expected margin, and it is the reference the
+    // per-sim tilt is measured against — see mkTeamEnv for why it is that and
+    // not the market baseline.
+    env[a] = mkTeamEnv(tiA, scA, scB, gauss, meanMargin);
+    env[b] = mkTeamEnv(tiB, scB, scA, gauss, -meanMargin);
   }
   return env;
 }
-function mkTeamEnv(ti, score, oppScore, gauss){
+function mkTeamEnv(ti, score, oppScore, gauss, refMargin){
   const ratio = Math.max(0.25, Math.min(2.6, score / Math.max(9, ti.implied)));
   // Yards track points, but loosely — blunt the ratio and add its own noise.
+  // MEAN-NORMALIZED (see nflYardNorm): the noise carries the −σ²/2 correction
+  // every other lognormal in this file already carried, and the whole
+  // expression is divided by its own expectation under this team's scoring
+  // distribution, so E[yardF] = 1 and the prop lines survive the sim.
+  const nz = (ti._yNorm && ti._yNorm.imp === ti.implied) ? ti._yNorm
+           : (ti._yNorm = nflYardNorms(ti.implied, ti._gtotal));
   const yardF = Math.max(0.45, Math.min(1.95,
-    (0.55 + 0.45 * ratio) * Math.exp(gauss() * 0.16)));
-  // Game script: trailing teams throw, leading teams run out the clock.
-  const deficit = oppScore - score;
-  const passF = Math.max(0.84, Math.min(1.28, 1 + 0.052 * (deficit / 7)));
-  const rushF = Math.max(0.76, Math.min(1.34, 1 - 0.065 * (deficit / 7)));
-  return { score, oppScore, implied: ti.implied, ratio, yardF, passF, rushF };
+    (0.55 + 0.45 * ratio) * Math.exp(gauss() * NFL_YARDF_SIG - NFL_YARDF_SIG * NFL_YARDF_SIG / 2))) / nz.yn;
+  // GAME SCRIPT, per sim. This used to tilt off the ABSOLUTE realized margin,
+  // which double-counted the market: the prop lines the entry means come from
+  // already price the script at the posted spread, so a 3.5-point favourite was
+  // handed a systematic run lean on top of lines that had already priced it.
+  // Now the tilt is the deviation from the EXPECTED margin.
+  //
+  // WHICH expectation, and why the two layers do not double-count:
+  //   • nflAdjTeamTotals (dashboard) tilts the MEANS by (adjusted expected
+  //     margin − market baseline margin). That is the whole effect of the user
+  //     moving the spread, and it is already baked into `e.*` before a single
+  //     sim runs — including the team totals that feed nflDrawTeamPie.
+  //   • This layer tilts each SIM by (realized margin − adjusted expected
+  //     margin), i.e. the part of the margin the dashboard could not know.
+  // `refMargin` is the adjusted expectation, which is exactly the mean of the
+  // sampled margin in simNflGames, so E[d] = 0 and E[tilt] ≈ 1 under the
+  // adjusted game — the per-sim layer redistributes across sims without moving
+  // the mean the dashboard is showing. On an untouched slate the adjusted
+  // expectation IS the market baseline, so this reduces to tilt(realized − m0)
+  // and the posted lines come back out of the sim unchanged.
+  const ref = Number.isFinite(refMargin) ? refMargin
+            : (ti.implied - (Number.isFinite(ti.oppImplied) ? ti.oppImplied : ti.implied));
+  const sc = scriptTilt((score - oppScore) - ref);
+  // volF rides on BOTH pass and rush (it is a play-count effect, not a split
+  // one), so it is folded into the factors the consumers already multiply by.
+  // `cp` / `cr` divide out E[yardF·passF] / E[yardF·rushF] — see nflYardNorms.
+  const passF = sc.passF * sc.volF / nz.cp, rushF = sc.rushF * sc.volF / nz.cr;
+  return { score, oppScore, implied: ti.implied, ratio, yardF, passF, rushF,
+           volF: sc.volF, scriptD: sc.d, passTilt: sc.passF, rushTilt: sc.rushF };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -16948,6 +17224,18 @@ async function runNflSimGen(){
       const tms=Object.entries(a.teams||{}).map(([t,v])=>`${t}${Number.isFinite(v.implied)?' '+v.implied+'pts':''}${v.lean?' lean '+(v.lean>0?'+':'')+Math.round(v.lean*100)+'%':''}`).filter(x=>x.length>3);
       const pls=Object.keys(a.players||{}).filter(id=>NFL_SHARE_STATS.some(st=>Number.isFinite((a.players[id]||{})[st.key]))).length;
       log(`⚙ Sim dashboard: ${_nA} adjustment${_nA>1?'s':''} vs Vegas${tms.length?' — '+tms.join(', '):''}${pls?` · ${pls} player share${pls>1?'s':''}`:''}. (Sim tab → Reset all to go back to market.)`);
+      // The spread's own script response — the part of the pass/rush tilt the
+      // user did NOT dial in by hand. Worth its own line: it moves means.
+      try {
+        const _inp = buildNflSimInputs(pool);
+        const _sl = [];
+        _inp.teamInfo.forEach((ti, t) => {
+          const s = nflScriptFor(ti, _inp.teamInfo);
+          if(Math.abs(s.autoLean) >= 0.001)
+            _sl.push(`${t} ${s.autoLean>0?'+':''}${(s.autoLean*100).toFixed(1)}% pass / ${s.rushNet>1?'+':''}${((s.rushNet-1)*100).toFixed(1)}% rush (margin ${s.d>0?'+':''}${(Math.round(s.d*10)/10)} vs market)`);
+        });
+        if(_sl.length) log(`⚙ Game script (auto, from the adjusted spread): ${_sl.join(' · ')}.`);
+      } catch(e){}
     }
     slate._simDashDirty=false;
     // Stamp the history entry this run is about to produce with the exact
@@ -21674,6 +21962,9 @@ function showOddsTooltip(el, p) {
   // Non-numeric values pass through untouched.
   const amOdds = v => { const n = parseFloat(v); return isNaN(n) ? v : (n > 0 ? '+' + n : '' + n); };
 
+  if(nflHasProps(p) && !has(p.finish_r1) && !has(p.ss_ou)){
+    body.innerHTML = nflPropsTooltip(p);
+  } else {
   const rounds = [
     {k:'finish_r1',l:'R1'},{k:'finish_r2',l:'R2'},{k:'finish_r3',l:'R3'},
     {k:'finish_r4',l:'R4'},{k:'finish_r5',l:'R5'},{k:'decision',l:'Dec'},
@@ -21700,6 +21991,7 @@ function showOddsTooltip(el, p) {
       ).join('') + `</div>`;
     }
     body.innerHTML = h;
+  }
   }
 
   // Position: prefer above the name, flip below if near top of viewport.
