@@ -19,6 +19,7 @@
     --text: #f0f0ee;
     --muted: #7a7d85;
     --accent: #c8f05a;
+    --blue: #5b9cf6;
     --red: #ff5f5f;
     --amber: #f5a623;
     --radius: 10px;
@@ -104,9 +105,41 @@
 
 
 
-  .divider { display: flex; align-items: center; gap: 12px; margin: 16px 0 4px; }
-  .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
-  .divider span { font-size: 11px; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+  /* ── FIGHTS (UFC) ── */
+  .fight-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px; }
+  .fight-card.v-root { border-left: 3px solid var(--accent); }
+  .fight-card.v-lean { border-left: 3px solid rgba(200,240,90,0.45); }
+  .fight-card.v-bust { border-left: 3px solid var(--red); }
+  .fight-card.v-both { border-left: 3px solid var(--blue); }
+  .fight-card.v-neutral { border-left: 3px solid var(--border2); }
+  .fight-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .fight-no { font-family: var(--mono); font-size: 11px; color: var(--muted); background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; white-space: nowrap; }
+  .fight-sweat { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .fight-grid { display: grid; grid-template-columns: 1fr 28px 1fr; gap: 10px; align-items: stretch; }
+  .fight-vs { display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .fighter { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; min-width: 0; }
+  .fighter.side-root { border-color: rgba(200,240,90,0.35); background: rgba(200,240,90,0.05); }
+  .fighter.side-fade { border-color: rgba(255,95,95,0.25); }
+  .fighter-name { font-weight: 600; font-size: 14px; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fighter-sub { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 8px; }
+  .fstat { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--mono); font-size: 12px; padding: 1px 0; gap: 8px; }
+  .fstat b { font-weight: 500; }
+  .fstat .k { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .own-mini { height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; margin: 6px 0 2px; position: relative; }
+  .own-mini i { display: block; height: 4px; border-radius: 2px; }
+  .verdict { margin-top: 11px; font-size: 13px; line-height: 1.5; }
+  .verdict .tag { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 7px; border-radius: 4px; margin-right: 8px; white-space: nowrap; }
+  .t-root { background: rgba(200,240,90,0.16); color: var(--accent); }
+  .t-lean { background: rgba(200,240,90,0.09); color: var(--accent); }
+  .t-bust { background: rgba(255,95,95,0.16); color: var(--red); }
+  .t-both { background: rgba(91,156,246,0.16); color: var(--blue); }
+  .t-neutral { background: rgba(255,255,255,0.06); color: var(--muted); }
+  .fight-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .fight-src { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .mini-select { background: var(--bg); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); font-family: var(--font); font-size: 12px; padding: 5px 8px; outline: none; max-width: 260px; }
+  .mini-input { background: var(--bg); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); font-family: var(--mono); font-size: 12px; padding: 5px 8px; outline: none; }
+  .hint { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 13px; color: var(--muted); line-height: 1.6; margin-top: 12px; }
+  .hint b { color: var(--text); font-weight: 500; }
 
   .sport-btn { background: transparent; color: var(--muted); border: 1px solid var(--border2); border-radius: var(--radius-sm); font-family: var(--mono); font-size: 12px; padding: 5px 14px; cursor: pointer; transition: all 0.1s; }
   .sport-btn:hover { color: var(--text); border-color: var(--border2); }
@@ -198,6 +231,14 @@
   /* Top combos table */
   #top-combo-results { overflow-x: auto; }
 
+  /* Fights — stack the two corners */
+  .fight-grid { grid-template-columns: 1fr; gap: 8px; }
+  .fight-vs { height: 14px; }
+  .fight-card { padding: 12px 12px; }
+  .fighter-name { font-size: 13px; white-space: normal; }
+  .fight-sweat { margin-left: 0; }
+  .mini-select { max-width: 100%; width: 100%; }
+
   /* Misc */
   .legend { font-size: 10px; }
   .step-label { font-size: 12px; }
@@ -246,11 +287,19 @@
           <button id="sport-golf" onclick="setSport('golf')" class="sport-btn active">Golf</button>
           <button id="sport-nascar" onclick="setSport('nascar')" class="sport-btn">NASCAR</button>
           <button id="sport-ufc" onclick="setSport('ufc')" class="sport-btn">UFC</button>
+          <button id="sport-nfl" onclick="setSport('nfl')" class="sport-btn">NFL</button>
+          <button id="sport-sd" onclick="setSport('sd')" class="sport-btn">NFL Showdown</button>
         </div>
       </div>
       <input type="file" id="file-input" accept=".csv" style="display:none">
     </div>
     <div id="file-status"></div>
+    <div class="hint" id="first-run-hint">
+      <b>New here?</b> On DraftKings open the contest &rarr; <b>Export Standings</b> (a .zip), unzip it, and drop the
+      <b>.csv</b> above. Then pick your username and hit Analyze &mdash; you&rsquo;ll get duplicate counts, ownership,
+      leverage and, for UFC slates, a fight-by-fight sweat sheet. Sport is detected automatically; override it with the
+      buttons if it guesses wrong.
+    </div>
   </div>
 
   <div id="username-row" style="display:none;">
@@ -269,13 +318,15 @@
 
   <div id="results">
     <div class="metric-grid" id="metrics-row"></div>
-    <div class="tab-bar">
-      <div class="tab active" onclick="switchTab('duplicates',this)">Lineup Duplicates</div>
-      <div class="tab" onclick="switchTab('ownership',this)">Ownership</div>
-      <div class="tab" onclick="switchTab('leverage',this)">Leverage</div>
-      <div class="tab" onclick="switchTab('combosearch',this)">Combo Search</div>
-      <div class="tab" onclick="switchTab('h2h',this)">Head to Head</div>
+    <div class="tab-bar" id="tab-bar">
+      <div class="tab" data-tab="fights" id="tab-fights" style="display:none;" onclick="switchTab('fights',this)">Fights</div>
+      <div class="tab active" data-tab="duplicates" onclick="switchTab('duplicates',this)">Lineup Duplicates</div>
+      <div class="tab" data-tab="ownership" onclick="switchTab('ownership',this)">Ownership</div>
+      <div class="tab" data-tab="leverage" onclick="switchTab('leverage',this)">Leverage</div>
+      <div class="tab" data-tab="combosearch" onclick="switchTab('combosearch',this)">Combo Search</div>
+      <div class="tab" data-tab="h2h" onclick="switchTab('h2h',this)">Head to Head</div>
     </div>
+    <div id="panel-fights" class="panel"></div>
     <div id="panel-duplicates" class="panel active"></div>
     <div id="panel-ownership" class="panel"></div>
     <div id="panel-leverage" class="panel"></div>
@@ -287,11 +338,21 @@
 
 <script>
 let parsedData=[], myEntries=[], fieldEntries=[], fieldOwnership={}, myOwnership={}, enriched=[];
-let currentSport='golf'; // golf | nascar | ufc
+let currentSport='golf'; // golf | nascar | ufc | nfl (classic) | sd (nfl showdown)
 let currentSort={col:'dupes',dir:'desc'};
 let uniquePlayers=[];
 let allUsernames=[];
 let selectedUsername='';
+// Sidecar table (DK exports "Player / Roster Position / %Drafted / FPTS" beside
+// the standings). Keyed by player name; absent for exports taken pre-lock.
+let sidecar={};
+let contestMeta={hasSidecar:false,live:false,scored:false,fingerprint:'',rows:0};
+const lineupCache=new Map(),keyCache=new Map();
+
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+function hash32(s){let h=5381;for(let i=0;i<s.length;i++)h=((h<<5)+h+s.charCodeAt(i))|0;return (h>>>0).toString(36);}
+function lsGet(k){try{return localStorage.getItem(k);}catch(e){return null;}}
+function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
 
 document.getElementById('file-input').addEventListener('change',e=>{if(e.target.files[0])loadCSV(e.target.files[0]);});
 // Prevent browser navigation if file dropped outside the zone
@@ -302,100 +363,298 @@ dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag');}
 dz.addEventListener('dragleave',()=>dz.classList.remove('drag'));
 dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag');if(e.dataTransfer.files[0])loadCSV(e.dataTransfer.files[0]);});
 
-function parseCSVLine(line){
-  const r=[];let cur='',inQ=false;
-  for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'){inQ=!inQ;}else if(c===','&&!inQ){r.push(cur);cur='';}else{cur+=c;}}
-  r.push(cur);return r.map(s=>s.trim().replace(/^"|"$/g,''));
+// Full-text CSV tokenizer: handles quoted commas (usernames like "smith, j"),
+// escaped "" inside quotes, CRLF, and quoted newlines. A double-quote only
+// opens a quoted field at the start of a field, so a stray " mid-value is data.
+function parseCSVText(text){
+  const rows=[];let row=[],cur='',inQ=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(inQ){
+      if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else inQ=false; }
+      else cur+=c;
+    }else if(c==='"'&&cur===''){ inQ=true; }
+    else if(c===','){ row.push(cur);cur=''; }
+    else if(c==='\n'){ row.push(cur);rows.push(row);row=[];cur=''; }
+    else if(c!=='\r'){ cur+=c; }
+  }
+  if(cur!==''||row.length){row.push(cur);rows.push(row);}
+  return rows;
 }
 
 function loadCSV(file){
   const status=document.getElementById('file-status');
-  status.textContent='Parsing...';
+  status.textContent='Parsing…';
   const reader=new FileReader();
   reader.onload=ev=>{
-    try{
-      const text=ev.target.result.replace(/^\uFEFF/,'');
-      const lines=text.split('\n').filter(l=>l.trim());
-      const headers=parseCSVLine(lines[0]);
-      const niIdx=headers.findIndex(h=>h.toLowerCase().includes('entryname'));
-      const luIdx=headers.findIndex(h=>h.toLowerCase()==='lineup');
-      if(niIdx===-1||luIdx===-1){status.textContent='Error: missing EntryName or Lineup columns.';return;}
-      const rows=[];
-      for(let i=1;i<lines.length;i++){
-        const cols=parseCSVLine(lines[i]);
-        if(cols.length>Math.max(niIdx,luIdx)){
-          const name=cols[niIdx]?.trim(),lineup=cols[luIdx]?.trim();
-          if(name&&lineup)rows.push({name,lineup});
-        }
-      }
-      parsedData=rows;
-      // Auto-detect sport from lineup prefix
-      if(rows.length>0){
-        const sampleLineup=rows[0].lineup||'';
-        if(sampleLineup.startsWith('D '))setSport('nascar');
-        else if(sampleLineup.startsWith('F '))setSport('ufc');
-        else setSport('golf');
-      }
-      // Extract unique base usernames (strip entry suffix)
-      const unameSet=new Set();
-      for(const r of rows)unameSet.add(r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim());
-      allUsernames=[...unameSet].sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()));
-      selectedUsername='';
-      document.getElementById('username-search').value='';
-      document.getElementById('selected-user-display').style.display='none';
-      const abtn=document.getElementById('analyze-btn');
-      abtn.style.opacity='0.4';abtn.style.cursor='default';
-      status.textContent='✓ Loaded '+rows.length.toLocaleString()+' entries · '+allUsernames.length.toLocaleString()+' contestants from '+file.name;
-      document.getElementById('username-row').style.display='block';
-      document.getElementById('results').style.display='none';
-    }catch(err){status.textContent='Error: '+err.message;}
+    try{ ingestCSV(String(ev.target.result),file.name); }
+    catch(err){ status.textContent='Error: '+err.message; console.error(err); }
   };
+  reader.onerror=()=>{status.textContent='Error: could not read that file.';};
   reader.readAsText(file);
 }
 
-function setSport(sport){
+// Sport detection votes across a sample of lineups rather than trusting row 0 —
+// one malformed first row used to mis-detect the whole contest.
+function detectSport(rows){
+  const votes={};
+  const n=Math.min(rows.length,60);
+  for(let i=0;i<n;i++){
+    const L=rows[i].lineup||'';
+    const v=L.startsWith('CPT ')?'sd'
+      :/^(QB|RB|WR|TE|DST|FLEX)\s/.test(L)?'nfl'
+      :L.startsWith('D ')?'nascar'
+      :L.startsWith('F ')?'ufc':'golf';
+    votes[v]=(votes[v]||0)+1;
+  }
+  return Object.entries(votes).sort((a,b)=>b[1]-a[1])[0][0];
+}
+
+function ingestCSV(raw,fileName){
+  const status=document.getElementById('file-status');
+  const text=raw.replace(/^﻿/,'');
+  const table=parseCSVText(text);
+  if(!table.length){status.textContent='Error: the file is empty.';return;}
+  const H=table[0].map(h=>String(h||'').trim().toLowerCase().replace(/[^a-z%]/g,''));
+  const niIdx=H.findIndex(h=>h.indexOf('entryname')>=0);
+  const luIdx=H.indexOf('lineup');
+  if(niIdx===-1||luIdx===-1){
+    status.textContent='Error: no EntryName / Lineup columns — is this a DraftKings standings export?';
+    return;
+  }
+  const rkIdx=H.indexOf('rank'),ptIdx=H.indexOf('points'),trIdx=H.indexOf('timeremaining'),eiIdx=H.indexOf('entryid');
+  // Sidecar columns live to the right of an empty spacer column.
+  const plIdx=H.indexOf('player'),rpIdx=H.indexOf('rosterposition'),
+        dfIdx=H.findIndex(h=>h.indexOf('drafted')>=0),fpIdx=H.indexOf('fpts');
+
+  const rows=[];const sc={};
+  let live=false,scored=false,blank=0;
+  const maxIdx=Math.max(niIdx,luIdx);
+  for(let i=1;i<table.length;i++){
+    const c=table[i];
+    if(c.length>maxIdx){
+      const name=(c[niIdx]||'').trim(),lineup=(c[luIdx]||'').trim();
+      // DK lists entries that were never filled in — they carry a name and a
+      // rank but an empty Lineup. They are real entries in the field, they just
+      // cannot contribute ownership, so count them and analyse the rest.
+      if(name&&!lineup)blank++;
+      if(name&&lineup){
+        const tr=trIdx>=0?parseFloat(c[trIdx]):NaN;
+        const pts=ptIdx>=0?parseFloat(c[ptIdx]):NaN;
+        const rk=rkIdx>=0?parseInt(c[rkIdx],10):NaN;
+        if(isFinite(tr)&&tr>0)live=true;
+        if(isFinite(pts)&&pts!==0)scored=true;
+        rows.push({name,lineup,
+          rank:isFinite(rk)?rk:null,
+          points:isFinite(pts)?pts:null,
+          timeRemaining:isFinite(tr)?tr:null,
+          entryId:eiIdx>=0?(c[eiIdx]||'').trim():''});
+      }
+    }
+    if(plIdx>=0&&c.length>plIdx){
+      const pn=(c[plIdx]||'').trim();
+      if(pn){
+        const pos=rpIdx>=0?(c[rpIdx]||'').trim():'';
+        const dr=dfIdx>=0?parseFloat(String(c[dfIdx]||'').replace(/[%\s]/g,'')):NaN;
+        const fp=fpIdx>=0?parseFloat(c[fpIdx]):NaN;
+        const prev=sc[pn];
+        if(!prev){
+          sc[pn]={pos,drafted:isFinite(dr)?dr:null,fpts:isFinite(fp)?fp:null};
+        }else{
+          // Showdown lists a player twice (CPT + FLEX). Sum the draft rates and
+          // keep the un-multiplied (FLEX) FPTS as the player's real score.
+          if(isFinite(dr))prev.drafted=(prev.drafted||0)+dr;
+          if(isFinite(fp))prev.fpts=prev.fpts==null?fp:Math.min(prev.fpts,fp);
+          if(pos&&/flex/i.test(pos))prev.pos=pos;
+        }
+      }
+    }
+  }
+  if(!rows.length){status.textContent='Error: no entry rows found (EntryName + Lineup were both empty).';return;}
+
+  parsedData=rows;
+  sidecar=sc;
+  lineupCache.clear();keyCache.clear();
+  contestMeta={
+    hasSidecar:Object.keys(sc).length>0,
+    live:live,scored:scored,
+    rows:rows.length,blank:blank,
+    fingerprint:hash32(rows.length+'|'+rows[0].lineup+'|'+rows[rows.length-1].lineup+'|'+rows[0].name)
+  };
+  fightsChosenSlateId=null;fightsInitialised=false;fightsManualOpen=false;
+  setSport(detectSport(rows),{silent:true});
+
+  const unameSet=new Set();
+  for(const r of rows)unameSet.add(baseName(r.name));
+  allUsernames=[...unameSet].sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()));
+
+  selectedUsername='';
+  document.getElementById('username-search').value='';
+  document.getElementById('selected-user-display').style.display='none';
+  setAnalyzeEnabled(false);
+  document.getElementById('username-row').style.display='block';
+  document.getElementById('results').style.display='none';
+  const hint=document.getElementById('first-run-hint');if(hint)hint.style.display='none';
+
+  const bits=['✓ Loaded '+(rows.length+blank).toLocaleString()+' entries',
+    allUsernames.length.toLocaleString()+' contestants',
+    SPORT_LABELS[currentSport]];
+  if(blank)bits.splice(1,0,blank.toLocaleString()+' with no lineup (skipped)');
+  if(contestMeta.hasSidecar)bits.push(Object.keys(sc).length+' players w/ DK ownership');
+  if(live)bits.push('LIVE');
+  status.textContent=bits.join(' · ')+' — '+fileName;
+
+  // Remember who you are per contest, so a reload doesn't cost you the search.
+  const remembered=lsGet('dk_analyzer_user_'+contestMeta.fingerprint);
+  if(remembered&&allUsernames.indexOf(remembered)>=0){
+    selectUsername(remembered);
+    runAnalysis();
+  }else{
+    try{document.getElementById('username-search').focus();}catch(e){}
+  }
+}
+
+function baseName(n){return String(n).replace(/\s*\(\d+\/\d+\)\s*$/,'').trim();}
+function setAnalyzeEnabled(on){
+  const b=document.getElementById('analyze-btn');
+  if(!b)return;
+  b.style.opacity=on?'1':'0.4';
+  b.style.cursor=on?'pointer':'default';
+  b.disabled=!on;
+}
+
+const SPORT_LABELS={golf:'Golf',nascar:'NASCAR',ufc:'UFC',nfl:'NFL Classic',sd:'NFL Showdown'};
+function setSport(sport,opts){
+  const changed=sport!==currentSport;
   currentSport=sport;
-  ['golf','nascar','ufc'].forEach(s=>{
+  ['golf','nascar','ufc','nfl','sd'].forEach(s=>{
     const btn=document.getElementById('sport-'+s);
     if(btn)btn.classList.toggle('active',s===sport);
   });
   const lbl=document.getElementById('sport-label');
-  if(lbl)lbl.textContent=sport==='golf'?'Golf':sport==='nascar'?'NASCAR':'UFC';
+  if(lbl)lbl.textContent=SPORT_LABELS[sport]||sport;
+  if(!changed)return;
+  // A manual override changes how every lineup tokenizes — drop the caches and
+  // re-derive everything that was computed under the old assumption.
+  lineupCache.clear();keyCache.clear();
+  fightsChosenSlateId=null;
+  if(parsedData.length&&selectedUsername&&!(opts&&opts.silent)&&
+     document.getElementById('results').style.display==='block'){
+    runAnalysis();
+  }
 }
 
-function extractPlayers(lineup){
-  // Golf=G, NASCAR=D, UFC=F
+// ── Lineup parsing ────────────────────────────────────────────────────────────
+// DK's Lineup column is slot-prefixed text. Single-letter slots for the old
+// sports (G/D/F); multi-letter for NFL:
+//   Classic : "QB Josh Allen RB Saquon Barkley … FLEX Jahmyr Gibbs DST Bills"
+//   Showdown: "CPT Haynes King FLEX Cardinals  FLEX Carson Beck …"
+// Names contain spaces (and DSTs carry a trailing double space in DK's export),
+// so the tokenizer captures up to the NEXT slot token rather than splitting.
+const SLOT_TOKENS={golf:['G'],nascar:['D'],ufc:['F'],
+  nfl:['QB','RB','WR','TE','FLEX','DST'],sd:['CPT','FLEX']};
+function extractSlotted(lineup){
+  const toks=SLOT_TOKENS[currentSport]||['G'];
+  const alt=toks.join('|');
+  const re=new RegExp('\\b('+alt+')\\s+(.+?)(?=\\s+(?:'+alt+')\\s|\\s*$)','g');
+  const out=[];let m;
+  while((m=re.exec(String(lineup)))!==null){
+    const name=m[2].trim();
+    if(name)out.push({slot:m[1],name});
+  }
+  return out;
+}
+function extractPlayersUncached(lineup){
+  if(currentSport==='nfl'||currentSport==='sd')return extractSlotted(lineup).map(x=>x.name);
+  // Legacy single-letter path — byte-identical behavior for golf/nascar/ufc.
   const pfx=currentSport==='nascar'?'D':currentSport==='ufc'?'F':'G';
-  return lineup.split(' '+pfx+' ').map(p=>p.replace(new RegExp('^'+pfx+' '),'').trim()).filter(p=>p);
+  return String(lineup).split(' '+pfx+' ').map(p=>p.replace(new RegExp('^'+pfx+' '),'').trim()).filter(p=>p);
+}
+// Memoised. A 100k-entry contest re-tokenises the same few thousand distinct
+// lineup strings across ownership, dupes, combo search and H2H; without the
+// cache extractPlayers was the hot spot. Cleared whenever the sport (and so
+// the tokenizer) changes.
+const CACHE_CAP=300000;
+function extractPlayers(lineup){
+  let v=lineupCache.get(lineup);
+  if(v===undefined){
+    v=extractPlayersUncached(lineup);
+    if(lineupCache.size<CACHE_CAP)lineupCache.set(lineup,v);
+  }
+  return v;
 }
 
-function computeOwnership(entries){
+// Canonical identity of a lineup, for duplicate counting.
+//   Showdown: the captain IS part of the identity — same 6 players with a
+//     different CPT is a different lineup (scores differently).
+//   Classic: slot assignment is NOT identity — the same 9 players with the
+//     FLEX label on a different WR score identically, so raw-string equality
+//     undercounts dupes. Sort the names.
+//   Legacy sports keep raw-string equality exactly as before.
+function lineupKeyOf(lineup){
+  let k=keyCache.get(lineup);
+  if(k===undefined){
+    k=lineupKeyOfUncached(lineup);
+    if(keyCache.size<CACHE_CAP)keyCache.set(lineup,k);
+  }
+  return k;
+}
+function lineupKeyOfUncached(lineup){
+  if(currentSport==='sd'){
+    const sl=extractSlotted(lineup);
+    const cpt=sl.find(x=>x.slot==='CPT');
+    const rest=sl.filter(x=>x!==cpt).map(x=>x.name).sort();
+    return 'CPT:'+(cpt?cpt.name:'?')+'|'+rest.join('|');
+  }
+  if(currentSport==='nfl')return extractPlayers(lineup).slice().sort().join('|');
+  return lineup;
+}
+// The showdown captain of a lineup (null elsewhere).
+function captainOf(lineup){
+  if(currentSport!=='sd')return null;
+  const c=extractSlotted(lineup).find(x=>x.slot==='CPT');
+  return c?c.name:null;
+}
+
+// `denom` overrides the divisor. DK's own %Drafted divides by EVERY entry in
+// the contest, including the ones nobody filled in, so the contest-wide view
+// passes totalEntries() to reproduce it exactly. Field/your ownership keep the
+// submitted-lineup denominator — for leverage you care what share of the
+// lineups actually in play hold a player.
+function computeOwnership(entries,denom){
   if(!entries.length)return{};
   const counts={};
   for(const r of entries)for(const p of extractPlayers(r.lineup))counts[p]=(counts[p]||0)+1;
+  const n=denom||entries.length;
   const res={};
-  for(const[p,c]of Object.entries(counts))res[p]=(c/entries.length)*100;
+  for(const[p,c]of Object.entries(counts))res[p]=(c/n)*100;
   return res;
 }
+// Every entry DK counts in the contest, lineup or not.
+function totalEntries(){return parsedData.length+(contestMeta.blank||0);}
 
 function runAnalysis(){
   if(!selectedUsername||!parsedData.length)return;
   const username=selectedUsername;
-  myEntries=parsedData.filter(r=>r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim()===username);
-  fieldEntries=parsedData.filter(r=>r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim()!==username);
+  myEntries=parsedData.filter(r=>baseName(r.name)===username);
+  fieldEntries=parsedData.filter(r=>baseName(r.name)!==username);
   if(!myEntries.length){alert('No entries found for that username.');return;}
+  lsSet('dk_analyzer_user_'+contestMeta.fingerprint,username);
 
+  // Duplicate counting uses the CANONICAL key (captain-aware for Showdown,
+  // slot-order-insensitive for NFL Classic; raw string for the legacy sports).
   const flc={};
-  for(const r of fieldEntries)flc[r.lineup]=(flc[r.lineup]||0)+1;
+  for(const r of fieldEntries){const k=lineupKeyOf(r.lineup);flc[k]=(flc[k]||0)+1;}
 
   fieldOwnership=computeOwnership(fieldEntries);
   myOwnership=computeOwnership(myEntries);
 
   enriched=myEntries.map(r=>({
     ...r,
-    dupes:flc[r.lineup]||0,
-    entryNum:parseInt(r.name.match(/\((\d+)\//)?.[1]||'0'),
-    players:extractPlayers(r.lineup)
+    dupes:flc[lineupKeyOf(r.lineup)]||0,
+    entryNum:parseInt((r.name.match(/\((\d+)\//)||[])[1]||'0',10),
+    players:extractPlayers(r.lineup),
+    cpt:captainOf(r.lineup)
   })).sort((a,b)=>a.entryNum-b.entryNum);
 
   const ps=new Set();
@@ -405,12 +664,31 @@ function runAnalysis(){
   const avgD=(enriched.reduce((s,r)=>s+r.dupes,0)/enriched.length).toFixed(1);
   const uq=enriched.filter(r=>r.dupes===0).length;
 
-  document.getElementById('metrics-row').innerHTML=`
-    <div class="metric"><div class="metric-label">Your entries</div><div class="metric-value">${myEntries.length}</div></div>
-    <div class="metric"><div class="metric-label">Field size</div><div class="metric-value">${parsedData.length.toLocaleString()}</div></div>
-    <div class="metric"><div class="metric-label">Avg dupes</div><div class="metric-value">${avgD}</div></div>
-    <div class="metric"><div class="metric-label">Unique lineups</div><div class="metric-value">${uq}</div></div>`;
+  // Points / Rank are in the CSV — surface them once the contest has scored.
+  const ranked=enriched.filter(r=>r.rank!=null);
+  const scoredRows=enriched.filter(r=>r.points!=null);
+  const tiles=[
+    ['Your entries',myEntries.length],
+    ['Field size',totalEntries().toLocaleString()],
+    ['Avg dupes',avgD],
+    ['Unique lineups',uq]
+  ];
+  if(scoredRows.length&&contestMeta.scored){
+    const best=ranked.length?Math.min.apply(null,ranked.map(r=>r.rank)):null;
+    const bestPts=Math.max.apply(null,scoredRows.map(r=>r.points));
+    tiles.push(['Best rank',best!=null?'#'+best.toLocaleString():'—']);
+    tiles.push(['Best score',bestPts.toFixed(1)]);
+    tiles.push(['Median score',median(scoredRows.map(r=>r.points)).toFixed(1)]);
+    tiles.push(['Top 1% of field',ranked.filter(r=>r.rank<=Math.max(1,Math.round(totalEntries()*0.01))).length]);
+  }
+  document.getElementById('metrics-row').innerHTML=tiles.map(function(t){
+    return '<div class="metric"><div class="metric-label">'+esc(t[0])+'</div><div class="metric-value">'+esc(t[1])+'</div></div>';
+  }).join('');
 
+  resolveFights();
+  updateTabVisibility();
+
+  renderFights();
   renderDuplicates();
   renderOwnership();
   renderLeverage();
@@ -420,119 +698,851 @@ function runAnalysis(){
   document.getElementById('results').style.display='block';
 }
 
+function median(a){
+  const b=a.slice().sort(function(x,y){return x-y;});
+  if(!b.length)return 0;
+  const m=b.length>>1;
+  return b.length%2?b[m]:(b[m-1]+b[m])/2;
+}
+
+// The Fights tab only exists for UFC, and only once pairings resolve. It becomes
+// the landing tab in that case — it is the thing you actually watch the card on.
+function updateTabVisibility(){
+  const t=document.getElementById('tab-fights');
+  const show=currentSport==='ufc'&&fightsState.source!=='off';
+  t.style.display=show?'':'none';
+  const active=document.querySelector('.tab.active');
+  if(!show){
+    if(active&&active.id==='tab-fights')activateTab('duplicates');
+    return;
+  }
+  if(!active||active.id==='tab-fights'||!fightsInitialised){
+    fightsInitialised=true;
+    activateTab('fights');
+  }
+}
+function activateTab(name){
+  const el=document.querySelector('.tab[data-tab="'+name+'"]');
+  if(el)switchTab(name,el);
+}
+
 /* ── DUPLICATES ── */
+function dupeBadge(d){
+  return d===0?'<span class="badge b-green">unique</span>'
+    :d<=5?'<span class="badge b-green">'+d+'</span>'
+    :d<=20?'<span class="badge b-amber">'+d+'</span>'
+    :'<span class="badge b-red">'+d+'</span>';
+}
+function entryLabel(name){
+  const m=name.match(/\(\d+\/\d+\)/);
+  return baseName(name)+(m?' '+m[0]:'');
+}
 function renderDuplicates(){
+  const showScore=contestMeta.scored&&enriched.some(r=>r.points!=null);
   const sorted=[...enriched].sort((a,b)=>{
     const v=currentSort.dir==='desc'?-1:1;
-    return currentSort.col==='dupes'?v*(a.dupes-b.dupes):v*(a.entryNum-b.entryNum);
+    if(currentSort.col==='dupes')return v*(a.dupes-b.dupes);
+    if(currentSort.col==='points')return v*((a.points||0)-(b.points||0));
+    if(currentSort.col==='rank')return v*((b.rank==null?Infinity:b.rank)-(a.rank==null?Infinity:a.rank));
+    return v*(a.entryNum-b.entryNum);
   });
   const rows=sorted.map(r=>{
-    let badge=r.dupes===0?'<span class="badge b-green">unique</span>':
-      r.dupes<=5?`<span class="badge b-green">${r.dupes}</span>`:
-      r.dupes<=20?`<span class="badge b-amber">${r.dupes}</span>`:
-      `<span class="badge b-red">${r.dupes}</span>`;
-    const lbl=r.name.replace(/ \(\d+\/\d+\)/,'')+' '+(r.name.match(/\(\d+\/\d+\)/)?.[0]||'');
-    return `<tr><td style="font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap;">${lbl}</td><td>${badge}</td><td style="color:var(--muted);font-size:12px;">${r.players.join(' · ')}</td></tr>`;
+    const badge=dupeBadge(r.dupes);
+    // Showdown: the captain is the lineup's identity — show him first, starred.
+    const playersTxt=r.cpt
+      ? '<span style="color:var(--accent);font-weight:600;">★ '+esc(r.cpt)+'</span> · '+r.players.filter(p=>p!==r.cpt).map(esc).join(' · ')
+      : r.players.map(esc).join(' · ');
+    const live=r.timeRemaining!=null&&r.timeRemaining>0
+      ? ' <span class="badge b-amber" style="font-size:9px;padding:1px 5px;">live</span>':'';
+    const scoreCells=showScore
+      ? '<td style="font-family:var(--mono);font-size:12px;text-align:right;white-space:nowrap;">'+(r.rank!=null?'#'+r.rank.toLocaleString():'—')+'</td>'
+        +'<td style="font-family:var(--mono);font-size:12px;text-align:right;color:var(--accent);white-space:nowrap;">'+(r.points!=null?r.points.toFixed(1):'—')+live+'</td>'
+      : '';
+    return '<tr><td style="font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap;">'+esc(entryLabel(r.name))+'</td>'
+      +'<td>'+badge+'</td>'+scoreCells
+      +'<td style="color:var(--muted);font-size:12px;">'+playersTxt+'</td></tr>';
   }).join('');
-  const eS=currentSort.col==='entry'?(currentSort.dir==='desc'?'↓':'↑'):'';
-  const dS=currentSort.col==='dupes'?(currentSort.dir==='desc'?'↓':'↑'):'';
-  document.getElementById('panel-duplicates').innerHTML=`
-    <div class="card" style="overflow-x:auto;">
-      <table><thead><tr>
-        <th class="sortable" onclick="sortDupes('entry')">Entry ${eS}</th>
-        <th class="sortable" onclick="sortDupes('dupes')">Dupes ${dS}</th>
-        <th>Lineup</th>
-      </tr></thead><tbody>${rows}</tbody></table>
-    </div>
-    <p class="legend">Green ≤5 · Amber 6–20 · Red 21+</p>`;
+  const ar=c=>currentSort.col===c?(currentSort.dir==='desc'?' ↓':' ↑'):'';
+  const scoreHead=showScore
+    ? '<th class="sortable" style="text-align:right;" onclick="sortDupes(\'rank\')">Rank'+ar('rank')+'</th>'
+      +'<th class="sortable" style="text-align:right;" onclick="sortDupes(\'points\')">Points'+ar('points')+'</th>'
+    : '';
+  let standing='';
+  if(showScore){
+    const rk=enriched.filter(r=>r.rank!=null).map(r=>r.rank).sort((x,y)=>x-y);
+    const n=totalEntries()||1;
+    const pctile=r=>(100*(1-(r-1)/n));
+    const buckets=[['Top 1%',0.01],['Top 5%',0.05],['Top 10%',0.10],['Top 25%',0.25]];
+    const chips=buckets.map(([lbl,f])=>{
+      const cut=Math.max(1,Math.round(n*f));
+      const c=rk.filter(r=>r<=cut).length;
+      return '<span class="badge '+(c>0?'b-green':'b-gray')+'" style="margin-right:6px;">'+lbl+': '+c+'</span>';
+    }).join('');
+    standing='<div class="card"><div class="card-title">Current standing'+(contestMeta.live?' <span class="badge b-amber">contest is live</span>':'')+'</div>'
+      +'<div style="font-size:13px;line-height:1.8;">'+chips
+      +'<span style="color:var(--muted);font-family:var(--mono);font-size:12px;margin-left:6px;">best #'+(rk.length?rk[0].toLocaleString():'—')
+      +' of '+n.toLocaleString()+' ('+(rk.length?pctile(rk[0]).toFixed(1):'—')+'th pct) · median entry #'
+      +(rk.length?rk[Math.floor(rk.length/2)].toLocaleString():'—')+'</span></div>'
+      +'<p class="legend">No payout table is in the standings export, so these are percentile bands rather than a cash line.</p></div>';
+  }
+  document.getElementById('panel-duplicates').innerHTML=standing+
+    '<div class="card" style="overflow-x:auto;">'
+    +'<table><thead><tr>'
+    +'<th class="sortable" onclick="sortDupes(\'entry\')">Entry'+ar('entry')+'</th>'
+    +'<th class="sortable" onclick="sortDupes(\'dupes\')">Dupes'+ar('dupes')+'</th>'
+    +scoreHead
+    +'<th>Lineup</th>'
+    +'</tr></thead><tbody>'+rows+'</tbody></table></div>'
+    +'<p class="legend">Dupes = other contestants holding the identical lineup. Green ≤5 · Amber 6–20 · Red 21+</p>';
 }
 
 function sortDupes(col){
-  currentSort.col===col?(currentSort.dir=currentSort.dir==='desc'?'asc':'desc'):(currentSort.col=col,currentSort.dir='desc');
+  if(currentSort.col===col)currentSort.dir=currentSort.dir==='desc'?'asc':'desc';
+  else{currentSort.col=col;currentSort.dir='desc';}
   renderDuplicates();
 }
 
 /* ── OWNERSHIP ── */
+function sidecarOf(name){return contestMeta.hasSidecar?(sidecar[name]||null):null;}
+function fptsCell(name){
+  const sc=sidecarOf(name);
+  if(!sc||sc.fpts==null)return '<td style="font-family:var(--mono);font-size:12px;text-align:right;color:var(--muted);">—</td>';
+  return '<td style="font-family:var(--mono);font-size:12px;text-align:right;color:'+(sc.fpts>0?'var(--text)':'var(--muted)')+';">'+sc.fpts.toFixed(1)+'</td>';
+}
+
 function renderOwnership(){
   // Contest ownership — every entry in the contest, including yours
-  const poolOwnership=computeOwnership(parsedData);
+  const poolOwnership=computeOwnership(parsedData,totalEntries());
+  const isSD=currentSport==='sd';
+  // Showdown: CPT rate is its own number — "49% drafted, but only 12% captain"
+  // is the whole leverage story in this format.
+  const cptCounts={};
+  if(isSD)for(const r of parsedData){const c=captainOf(r.lineup);if(c)cptCounts[c]=(cptCounts[c]||0)+1;}
+  const n=totalEntries()||1;
+  const showDK=contestMeta.hasSidecar;
+  const showFpts=contestMeta.hasSidecar&&contestMeta.scored;
   const rows=Object.keys(poolOwnership)
-    .map(p=>({player:p,field:poolOwnership[p]||0}))
+    .map(p=>{
+      const sc=sidecarOf(p);
+      return {player:p,field:poolOwnership[p]||0,cpt:isSD?100*(cptCounts[p]||0)/n:null,
+              dk:sc&&sc.drafted!=null?sc.drafted:null,fpts:sc?sc.fpts:null};
+    })
     .filter(r=>r.field>0)
     .sort((a,b)=>b.field-a.field);
 
-  const maxAll=Math.max(...rows.map(r=>r.field),1);
+  const maxAll=Math.max.apply(null,rows.map(r=>r.field).concat([1]));
+  // Cross-check: our count from the Lineup column should reproduce DK's %Drafted.
+  const withDk=rows.filter(r=>r.dk!=null);
+  const worst=withDk.reduce((m,r)=>Math.max(m,Math.abs(r.dk-r.field)),0);
 
   const trs=rows.map(r=>{
     const fw=Math.round(r.field/maxAll*100);
-    return `<tr>
-      <td style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${r.player}</td>
-      <td><div class="bar-cell"><div class="bar-bg"><div class="bar-fill bar-field" style="width:${fw}%"></div></div><span class="pct-num">${r.field.toFixed(1)}%</span></div></td>
-    </tr>`;
+    const cptCell=isSD?'<td style="font-family:var(--mono);font-size:12px;text-align:right;color:'+(r.cpt>=5?'var(--accent)':'var(--muted)')+';">'+r.cpt.toFixed(1)+'%</td>':'';
+    let dkCell='';
+    if(showDK){
+      const d=r.dk==null?null:r.dk-r.field;
+      const col=d==null?'var(--muted)':Math.abs(d)>1.5?'var(--amber)':'var(--muted)';
+      dkCell='<td style="font-family:var(--mono);font-size:12px;text-align:right;color:'+col+';">'+(r.dk==null?'—':r.dk.toFixed(1)+'%')+'</td>';
+    }
+    return '<tr>'
+      +'<td style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(r.player)+'</td>'
+      +'<td><div class="bar-cell"><div class="bar-bg"><div class="bar-fill bar-field" style="width:'+fw+'%"></div></div><span class="pct-num">'+r.field.toFixed(1)+'%</span></div></td>'
+      +dkCell+cptCell
+      +(showFpts?fptsCell(r.player):'')
+      +'</tr>';
   }).join('');
 
-  document.getElementById('panel-ownership').innerHTML=`
-    <div class="card">
-      <table class="own-table">
-        <colgroup>
-          <col style="width:34%">
-          <col style="width:66%">
-        </colgroup>
-        <thead><tr>
-          <th>Player</th>
-          <th>Contest own%</th>
-        </tr></thead>
-        <tbody>${trs}</tbody>
-      </table>
-    </div>
-    <p class="legend">Contest ownership — every player's ownership across all entries (including yours), sorted highest → lowest. Your exposure and leverage live on the Leverage tab.</p>`;
+  const barW=isSD?(showDK?40:56):(showDK?52:66);
+  document.getElementById('panel-ownership').innerHTML=
+    '<div class="card"><table class="own-table"><colgroup>'
+    +'<col style="width:'+(isSD?'26%':'30%')+'">'
+    +'<col style="width:'+barW+'%">'
+    +(showDK?'<col style="width:12%">':'')
+    +(isSD?'<col style="width:12%">':'')
+    +(showFpts?'<col style="width:12%">':'')
+    +'</colgroup><thead><tr>'
+    +'<th>Player</th><th>Contest own%</th>'
+    +(showDK?'<th style="text-align:right;">DK %Drafted</th>':'')
+    +(isSD?'<th style="text-align:right;">CPT%</th>':'')
+    +(showFpts?'<th style="text-align:right;">FPTS</th>':'')
+    +'</tr></thead><tbody>'+trs+'</tbody></table></div>'
+    +'<p class="legend">'+(isSD
+      ?'Contest ownership + captain rate. A player drafted everywhere but rarely captained is the classic Showdown leverage spot — captaining him is cheap differentiation.'
+      :'Contest ownership — every player&#39;s ownership across all entries (including yours), sorted highest → lowest. Your exposure and leverage live on the Leverage tab.')
+    +(contestMeta.blank?' Percentages divide by all '+totalEntries().toLocaleString()+' contest entries (including the '
+      +contestMeta.blank.toLocaleString()+' with no lineup submitted), which is how DraftKings counts them.':'')
+    +(showDK?' <br>DK %Drafted is DraftKings&#39; own number from the sidecar table; largest disagreement with our count is '+worst.toFixed(2)+' pts'+(worst>0.6?' — worth a look.':'.'):'')
+    +'</p>';
 }
 
 /* ── LEVERAGE ── */
 function renderLeverage(){
+  const showFpts=contestMeta.hasSidecar&&contestMeta.scored;
   const all=new Set([...Object.keys(fieldOwnership),...Object.keys(myOwnership)]);
   const pl=[...all].map(p=>({player:p,field:fieldOwnership[p]||0,mine:myOwnership[p]||0,diff:(myOwnership[p]||0)-(fieldOwnership[p]||0)}));
   const over=pl.filter(p=>p.diff>0).sort((a,b)=>b.diff-a.diff).slice(0,10);
   const under=pl.filter(p=>p.diff<0).sort((a,b)=>a.diff-b.diff).slice(0,10);
   const row=(p,t)=>{
     const d=(p.diff>0?'+':'')+p.diff.toFixed(1)+'%';
-    const badge=t==='over'?`<span class="badge b-green">${d}</span>`:`<span class="badge b-red">${d}</span>`;
-    return `<tr><td style="font-weight:500;">${p.player}</td><td style="font-family:var(--mono);font-size:11px;color:var(--muted);">${p.field.toFixed(1)}%</td><td style="font-family:var(--mono);font-size:11px;">${p.mine.toFixed(1)}%</td><td>${badge}</td></tr>`;
+    const badge=t==='over'?'<span class="badge b-green">'+d+'</span>':'<span class="badge b-red">'+d+'</span>';
+    return '<tr><td style="font-weight:500;">'+esc(p.player)+'</td>'
+      +'<td style="font-family:var(--mono);font-size:11px;color:var(--muted);">'+p.field.toFixed(1)+'%</td>'
+      +'<td style="font-family:var(--mono);font-size:11px;">'+p.mine.toFixed(1)+'%</td>'
+      +'<td>'+badge+'</td>'
+      +(showFpts?fptsCell(p.player):'')+'</tr>';
   };
   // Full list — every player you actually used, sorted by leverage (overweight → underweight)
   const mine=pl.filter(p=>p.mine>0).sort((a,b)=>b.diff-a.diff);
   const fullRows=mine.map(p=>{
     const ds=(p.diff>0?'+':'')+p.diff.toFixed(1)+'%';
     const dc=p.diff>0.05?'diff-pos':p.diff<-0.05?'diff-neg':'diff-neu';
-    return `<tr>
-      <td style="font-weight:500;">${p.player}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:var(--muted);">${p.field.toFixed(1)}%</td>
-      <td style="font-family:var(--mono);font-size:11px;">${p.mine.toFixed(1)}%</td>
-      <td class="${dc}">${ds}</td>
-    </tr>`;
+    return '<tr><td style="font-weight:500;">'+esc(p.player)+'</td>'
+      +'<td style="font-family:var(--mono);font-size:11px;color:var(--muted);">'+p.field.toFixed(1)+'%</td>'
+      +'<td style="font-family:var(--mono);font-size:11px;">'+p.mine.toFixed(1)+'%</td>'
+      +'<td class="'+dc+'">'+ds+'</td>'
+      +(showFpts?fptsCell(p.player):'')+'</tr>';
   }).join('');
 
-  document.getElementById('panel-leverage').innerHTML=`
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-      <div class="card">
-        <div class="card-title" style="color:var(--accent);">↑ Root for — overweight</div>
-        <table><thead><tr><th>Player</th><th>Field</th><th>Yours</th><th>Edge</th></tr></thead>
-        <tbody>${over.map(p=>row(p,'over')).join('')}</tbody></table>
-      </div>
-      <div class="card">
-        <div class="card-title" style="color:var(--red);">↓ Fade spots — underweight</div>
-        <table><thead><tr><th>Player</th><th>Field</th><th>Yours</th><th>Diff</th></tr></thead>
-        <tbody>${under.map(p=>row(p,'under')).join('')}</tbody></table>
-      </div>
-    </div>
-    <div class="card" style="margin-top:12px;">
-      <div class="card-title">Your players — leverage vs field</div>
-      <table>
-        <thead><tr><th>Player</th><th>Field</th><th>Yours</th><th style="text-align:right;">Diff</th></tr></thead>
-        <tbody>${fullRows}</tbody>
-      </table>
-    </div>
-    <p class="legend">Every player in your pool, sorted overweight → underweight. Diff = your exposure minus field ownership.</p>`;
+  // Showdown: exposure alone hides the format's real leverage. A player you and
+  // the field both roster 60% of the time is neutral — unless you captain him
+  // 30% and the field captains him 8%.
+  let cptBlock='';
+  if(currentSport==='sd'){
+    const cnt=(entries)=>{const o={};for(const r of entries){const c=captainOf(r.lineup);if(c)o[c]=(o[c]||0)+1;}return o;};
+    const fc=cnt(fieldEntries),mc=cnt(myEntries);
+    const fN=fieldEntries.length||1,mN=myEntries.length||1;
+    const names=new Set([...Object.keys(fc),...Object.keys(mc)]);
+    const cr=[...names].map(p=>({player:p,field:100*(fc[p]||0)/fN,mine:100*(mc[p]||0)/mN}))
+      .map(r=>({...r,diff:r.mine-r.field}))
+      .filter(r=>r.mine>0||r.field>=1)
+      .sort((a,b)=>b.diff-a.diff);
+    cptBlock='<div class="card" style="margin-top:12px;"><div class="card-title">Captain leverage — CPT rate vs field</div>'
+      +'<table><thead><tr><th>Player</th><th>Field CPT%</th><th>Your CPT%</th><th style="text-align:right;">Diff</th>'
+      +(showFpts?'<th style="text-align:right;">FPTS</th>':'')+'</tr></thead><tbody>'
+      +cr.map(p=>{
+        const ds=(p.diff>0?'+':'')+p.diff.toFixed(1)+'%';
+        const dc=p.diff>0.05?'diff-pos':p.diff<-0.05?'diff-neg':'diff-neu';
+        return '<tr><td style="font-weight:500;">'+esc(p.player)+'</td>'
+          +'<td style="font-family:var(--mono);font-size:11px;color:var(--muted);">'+p.field.toFixed(1)+'%</td>'
+          +'<td style="font-family:var(--mono);font-size:11px;">'+p.mine.toFixed(1)+'%</td>'
+          +'<td class="'+dc+'">'+ds+'</td>'+(showFpts?fptsCell(p.player):'')+'</tr>';
+      }).join('')+'</tbody></table></div>';
+  }
+
+  const fh=showFpts?'<th style="text-align:right;">FPTS</th>':'';
+  document.getElementById('panel-leverage').innerHTML=
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">'
+    +'<div class="card"><div class="card-title" style="color:var(--accent);">↑ Root for — overweight</div>'
+    +'<table><thead><tr><th>Player</th><th>Field</th><th>Yours</th><th>Edge</th>'+fh+'</tr></thead>'
+    +'<tbody>'+over.map(p=>row(p,'over')).join('')+'</tbody></table></div>'
+    +'<div class="card"><div class="card-title" style="color:var(--red);">↓ Fade spots — underweight</div>'
+    +'<table><thead><tr><th>Player</th><th>Field</th><th>Yours</th><th>Diff</th>'+fh+'</tr></thead>'
+    +'<tbody>'+under.map(p=>row(p,'under')).join('')+'</tbody></table></div></div>'
+    +cptBlock
+    +'<div class="card" style="margin-top:12px;"><div class="card-title">Your players — leverage vs field</div>'
+    +'<table><thead><tr><th>Player</th><th>Field</th><th>Yours</th><th style="text-align:right;">Diff</th>'+fh+'</tr></thead>'
+    +'<tbody>'+fullRows+'</tbody></table></div>'
+    +'<p class="legend">Every player in your pool, sorted overweight → underweight. Diff = your exposure minus field ownership.'
+    +(showFpts?' FPTS is the player&#39;s actual score from the standings export — read the top rows to see whether your leverage spots paid.':'')+'</p>';
+}
+
+/* ── FIGHTS (UFC) ─────────────────────────────────────────────────────────────
+   A UFC card is 10–13 bouts and each of your lineups holds 6 fighters, so
+   player-level leverage buries the thing you actually need on fight night:
+   for THIS bout, do I want A, do I want B, or do I need the whole fight to
+   blow up? This tab answers that per bout, in bout order.
+
+   Pairings + odds come from the Lineup Builder's slate store (same origin, so
+   the same localStorage). Fall back to a manual pairing editor, persisted per
+   fighter-set so it survives a reload.
+─────────────────────────────────────────────────────────────────────────────*/
+const BUILDER_KEY='dfs_builder_v2';
+let fightsState={source:'off',pairs:[],candidates:[],fighters:[],unmatched:[],fingerprint:''};
+let fightsSortMode='bout';
+let fightsChosenSlateId=null;
+let fightsManualOpen=false;
+let fightsInitialised=false;
+
+function normName(x){
+  return String(x||'').normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .toLowerCase().replace(/[^a-z ]/g,' ').replace(/\s+/g,' ').trim();
+}
+// "Manon Fiorot" -> "fiorot|m" — survives nickname/initial differences between
+// the odds feed and DK's spelling.
+function lastFirstKey(x){
+  const parts=normName(x).split(' ').filter(Boolean);
+  if(parts.length<2)return '';
+  return parts[parts.length-1]+'|'+parts[0][0];
+}
+function mlToProbRaw(ml){
+  if(ml===null||ml===undefined||ml==='')return null;
+  const v=parseFloat(String(ml).replace(/[−–—]/g,'-').replace(/\+/g,'').replace(/[^0-9.\-]/g,''));
+  if(!isFinite(v)||v===0)return null;
+  return v<0?(-v)/((-v)+100):100/(v+100);
+}
+// Two-way market: scale both implied probabilities so the bout sums to 100%.
+function devig(pa,pb){
+  if(pa!=null&&pb!=null&&pa+pb>0)return[pa/(pa+pb),pb/(pa+pb)];
+  if(pa!=null)return[pa,1-pa];
+  if(pb!=null)return[1-pb,pb];
+  return[null,null];
+}
+
+function contestFighterList(){
+  const s=new Set();
+  for(const r of parsedData)for(const p of extractPlayers(r.lineup))s.add(p);
+  return [...s].sort();
+}
+
+function readBuilderSlates(){
+  try{
+    const raw=lsGet(BUILDER_KEY);
+    if(!raw)return[];
+    const arr=JSON.parse(raw);
+    if(!Array.isArray(arr))return[];
+    return arr.filter(s=>s&&String(s.sport||'').toLowerCase()==='ufc'&&Array.isArray(s.players)&&s.players.length);
+  }catch(e){return[];}
+}
+
+// Three-tier name match: exact → case/diacritic-insensitive → last name + first
+// initial (only when that key is unambiguous inside the slate).
+function matchSlate(slate,fighters){
+  const byExact=new Map(),byNorm=new Map(),byLF=new Map(),lfCount={};
+  for(const pl of slate.players){
+    if(!pl||!pl.name)continue;
+    if(!byExact.has(pl.name))byExact.set(pl.name,pl);
+    const n=normName(pl.name);if(!byNorm.has(n))byNorm.set(n,pl);
+    const lf=lastFirstKey(pl.name);
+    if(lf){lfCount[lf]=(lfCount[lf]||0)+1;if(!byLF.has(lf))byLF.set(lf,pl);}
+  }
+  const map={};let matched=0;
+  for(const f of fighters){
+    let pl=byExact.get(f)||byNorm.get(normName(f));
+    if(!pl){const lf=lastFirstKey(f);if(lf&&lfCount[lf]===1)pl=byLF.get(lf);}
+    if(pl){map[f]=pl;matched++;}
+  }
+  return {slate:slate,map:map,matched:matched,total:fighters.length,score:fighters.length?matched/fighters.length:0};
+}
+
+// Group fighters into bouts. fightNum is authoritative (1 = first bout of the
+// night); anyone without one is paired off their `opp` field and appended.
+function buildPairs(entries){
+  const byNum={},rest=[];
+  entries.forEach(e=>{ if(e.fightNum>0){(byNum[e.fightNum]=byNum[e.fightNum]||[]).push(e);} else rest.push(e); });
+  let next=Math.max.apply(null,[0].concat(Object.keys(byNum).map(Number)))+1;
+  const used=new Set();
+  rest.forEach(e=>{
+    if(used.has(e.name))return;
+    used.add(e.name);
+    const o=rest.find(x=>x.name!==e.name&&!used.has(x.name)&&
+      (normName(x.name)===normName(e.opp||'')||normName(x.opp||'')===normName(e.name)));
+    const n=next++;
+    byNum[n]=[e];
+    if(o){byNum[n].push(o);used.add(o.name);}
+  });
+  return Object.keys(byNum).map(Number).sort((x,y)=>x-y).map(n=>{
+    const g=byNum[n];
+    return {fightNum:n,a:g[0]||null,b:g[1]||null,orphans:g.slice(2)};
+  });
+}
+
+// ── Auto-pairing ─────────────────────────────────────────────────────────────
+// With no builder slate we can still recover the card from the contest itself.
+// DK permits both corners of a bout in one lineup, but essentially nobody does
+// it, so opponents co-appear far less often than their ownership implies. Score
+// every pair by lift = observed co-rostering / expected-if-independent, then
+// take the greedy minimum-lift perfect matching. In a finished contest the
+// sidecar FPTS corroborates it: exactly one corner collects the win bonus.
+function inferFightPairs(fighters){
+  const N=parsedData.length;
+  if(fighters.length<4||N<150)return null;
+  const idx={};fighters.forEach((f,i)=>idx[f]=i);
+  const n=fighters.length;
+  const solo=new Float64Array(n);
+  const co=new Float64Array(n*n);
+  for(const r of parsedData){
+    const ps=extractPlayers(r.lineup);
+    const ids=[];
+    for(const p of ps){const i=idx[p];if(i!==undefined)ids.push(i);}
+    for(let a=0;a<ids.length;a++){
+      solo[ids[a]]++;
+      for(let b=a+1;b<ids.length;b++){
+        co[ids[a]*n+ids[b]]++;co[ids[b]*n+ids[a]]++;
+      }
+    }
+  }
+  // lift[a][b] — low means "they are never rostered together", i.e. opponents
+  const lift=new Float64Array(n*n).fill(9);
+  for(let a=0;a<n;a++)for(let b=a+1;b<n;b++){
+    const exp=solo[a]*solo[b]/N;
+    const v=exp>0?co[a*n+b]/exp:9;
+    lift[a*n+b]=v;lift[b*n+a]=v;
+  }
+  const cands=[];
+  for(let a=0;a<n;a++)for(let b=a+1;b<n;b++)cands.push([lift[a*n+b],a,b]);
+  cands.sort((x,y)=>x[0]-y[0]);
+
+  const taken=new Uint8Array(n),chosen=[];
+  for(const [l,a,b] of cands){
+    if(taken[a]||taken[b])continue;
+    taken[a]=taken[b]=1;chosen.push({a:a,b:b,lift:l});
+  }
+  // The runner-up lift for either corner: a wide gap means the match is forced.
+  const bestOther=(x,partner)=>{
+    let m=9;
+    for(let y=0;y<n;y++)if(y!==x&&y!==partner)m=Math.min(m,lift[x*n+y]);
+    return m;
+  };
+  const diag=chosen.map(c=>{
+    const margin=Math.min(bestOther(c.a,c.b),bestOther(c.b,c.a))/Math.max(c.lift,1e-9);
+    const fa=sidecarOf(fighters[c.a]),fb=sidecarOf(fighters[c.b]);
+    const gap=(fa&&fa.fpts!=null&&fb&&fb.fpts!=null)?Math.abs(fa.fpts-fb.fpts):null;
+    let score=(c.lift<0.15?2:c.lift<0.35?1:0)+(margin>=3?2:margin>=1.8?1:0)+(gap!=null&&gap>=25?1:0);
+    return {a:fighters[c.a],b:fighters[c.b],lift:c.lift,margin:margin,fptsGap:gap,
+            score:score,conf:score>=4?'high':score>=2?'medium':'low',
+            own:100*(solo[c.a]+solo[c.b])/N};
+  });
+  const unpaired=fighters.filter((f,i)=>!taken[i]);
+  // Bout order is NOT recoverable from a standings export. Ownership is the
+  // best proxy we have — the main event is normally the chalkiest bout — so
+  // order by combined ownership ascending and say plainly that it is a guess.
+  diag.sort((x,y)=>x.own-y.own);
+  diag.forEach((d,i)=>d.fightNum=i+1);
+  const entries=[];
+  diag.forEach(d=>{
+    entries.push({name:d.a,opp:d.b,fightNum:d.fightNum,ml:''});
+    entries.push({name:d.b,opp:d.a,fightNum:d.fightNum,ml:''});
+  });
+  const lo=diag.filter(d=>d.conf==='low').length;
+  return {entries:entries,diag:diag,unpaired:unpaired,
+          overall:lo?'low':(diag.filter(d=>d.conf==='medium').length>diag.length/2?'medium':'high')};
+}
+
+function manualKey(fp){return 'dk_analyzer_fights_'+fp;}
+function loadManual(fp){
+  try{const raw=lsGet(manualKey(fp));if(!raw)return null;const a=JSON.parse(raw);return Array.isArray(a)&&a.length?a:null;}
+  catch(e){return null;}
+}
+
+function resolveFights(){
+  fightsState={source:'off',pairs:[],candidates:[],fighters:[],unmatched:[],fingerprint:''};
+  if(currentSport!=='ufc')return false;
+  const fighters=contestFighterList();
+  if(fighters.length<2)return false;
+  const fp=hash32(fighters.map(normName).sort().join('|'));
+  fightsState.fighters=fighters;
+  fightsState.fingerprint=fp;
+
+  const manual=loadManual(fp);
+  if(manual){
+    const known=new Set(fighters);
+    fightsState.pairs=buildPairs(manual.filter(e=>known.has(e.name)));
+    fightsState.source='manual';
+    return true;
+  }
+
+  const cands=readBuilderSlates().map(sl=>matchSlate(sl,fighters)).sort((x,y)=>y.score-x.score);
+  fightsState.candidates=cands;
+  let best=null;
+  if(fightsChosenSlateId)best=cands.find(c=>String(c.slate.id)===String(fightsChosenSlateId))||null;
+  if(!best)best=cands[0]||null;
+  if(best&&best.score>=0.8){
+    fightsChosenSlateId=best.slate.id;
+    const entries=fighters.filter(f=>best.map[f]).map(f=>{
+      const pl=best.map[f];
+      return {name:f,fightNum:parseInt(pl.fightNum||pl.start||0,10)||0,ml:pl.ml,opp:pl.opp};
+    });
+    fightsState.pairs=buildPairs(entries);
+    fightsState.source='builder';
+    fightsState.slate=best.slate;
+    fightsState.score=best.score;
+    fightsState.unmatched=fighters.filter(f=>!best.map[f]);
+    return true;
+  }
+  // Nothing in the builder store: recover the card from the contest itself and
+  // present it as a proposal for the user to confirm, never as fact.
+  const inf=inferFightPairs(fighters);
+  if(inf&&inf.diag.length){
+    fightsState.pairs=buildPairs(inf.entries);
+    fightsState.inferred=inf;
+    fightsState.source='inferred';
+    return true;
+  }
+  fightsState.source='none';
+  return false;
+}
+
+const LEV_MEANINGFUL=2.0;   // pts of exposure — below this you are "at the field"
+const LEV_STRONG=5.0;       // pts, or a 1.5x ratio, before we call it a root
+
+function sideStats(e){
+  if(!e)return null;
+  const field=fieldOwnership[e.name]||0;
+  const mine=myOwnership[e.name]||0;
+  const sc=sidecarOf(e.name);
+  return {
+    name:e.name,field:field,mine:mine,diff:mine-field,
+    ratio:field>0?mine/field:(mine>0?Infinity:null),
+    ml:e.ml==null||e.ml===''?null:e.ml,
+    fpts:sc?sc.fpts:null
+  };
+}
+
+function fightRow(pair){
+  let A=sideStats(pair.a),B=sideStats(pair.b);
+  const pr=devig(A?mlToProbRaw(A.ml):null,B?mlToProbRaw(B.ml):null);
+  if(A){A.win=pr[0];A.swing=A.win==null?null:A.diff*A.win;}
+  if(B){B.win=pr[1];B.swing=B.win==null?null:B.diff*B.win;}
+  // Left corner = the favourite (falling back to the chalkier fighter), so the
+  // card reads the same way every render regardless of pairing-source order.
+  if(A&&B){
+    const flip=(A.win!=null&&B.win!=null&&B.win!==A.win)?B.win>A.win:B.field>A.field;
+    if(flip){const t=A;A=B;B=t;}
+  }else if(!A&&B){A=B;B=null;}
+  const dA=A?A.diff:0,dB=B?B.diff:0;
+  const sweat=Math.max(Math.abs(dA),Math.abs(dB));
+  const best=(!B)?A:(!A)?B:(dA>=dB?A:B);
+  const other=best===A?B:A;
+
+  // Result inference (clearly a heuristic — see the legend). Only fires when the
+  // sidecar carries FPTS and one corner is decisively ahead; DK's MMA win bonus
+  // is 30–90 pts, so a 25+ gap is a win, and anything tighter we refuse to call.
+  let status=null;
+  if(contestMeta.hasSidecar&&A&&B&&(A.fpts!=null||B.fpts!=null)){
+    const fa=A.fpts||0,fb=B.fpts||0;
+    if(fa>0||fb>0){
+      const gap=Math.abs(fa-fb);
+      status=gap>=25?{done:true,winner:fa>fb?A.name:B.name}:{done:true,winner:null};
+    }
+  }
+
+  let cls,tag,text;
+  const bothOver=A&&B&&dA>LEV_MEANINGFUL&&dB>LEV_MEANINGFUL;
+  const bothUnder=A&&B&&dA<-LEV_MEANINGFUL&&dB<-LEV_MEANINGFUL;
+  const flat=Math.abs(dA)<=LEV_MEANINGFUL&&Math.abs(dB)<=LEV_MEANINGFUL;
+  const pct=v=>v.toFixed(0)+'%';
+  const rx=side=>side.ratio==null?'':' ('+(side.ratio===Infinity?'∞':side.ratio.toFixed(1))+'×)';
+
+  if(flat){
+    cls='neutral';tag='Neutral';
+    text='You&rsquo;re at the field on both sides — this bout barely moves you either way.';
+  }else if(bothOver){
+    cls='both';tag='Overweight the fight';
+    text='You&rsquo;re over the field on <b>both</b> corners ('+esc(A.name)+' '+pct(A.mine)+' vs '+pct(A.field)+', '
+      +esc(B.name)+' '+pct(B.mine)+' vs '+pct(B.field)+') — you gain on any decisive result, most on <b>'+esc(best.name)+'</b>.';
+  }else if(bothUnder){
+    cls='bust';tag='Need a bust';
+    const chalk=(A.field>=B.field)?A:B;
+    text='<b>Need this fight to BUST</b> — you&rsquo;re under the field on both corners ('+esc(A.name)+' '+pct(A.mine)
+      +' vs field '+pct(A.field)+', '+esc(B.name)+' '+pct(B.mine)+' vs field '+pct(B.field)+'). ';
+    if(best.mine>0){
+      text+='Least-bad outcome: <b>'+esc(best.name)+'</b> wins — you at least hold '+pct(best.mine)+' there'
+        +(best.win!=null&&best.win<0.5?' and he&rsquo;s the dog, so the field loses its chalk':'')+'.';
+    }else{
+      text+='You&rsquo;re on neither, so root for the chalk — <b>'+esc(chalk.name)+'</b> at '+pct(chalk.field)+' field — to lose.';
+    }
+  }else{
+    const strong=Math.abs(best.diff)>=LEV_STRONG||(best.ratio!=null&&best.ratio!==Infinity&&best.ratio>=1.5)||best.ratio===Infinity;
+    if(best.diff>0){
+      cls=strong?'root':'lean';
+      tag=strong?'Root for '+best.name:'Slight lean '+best.name;
+      text='<b>'+(strong?'Root for ':'Slight lean ')+esc(best.name)+'</b> — you&rsquo;re '+pct(best.mine)
+        +' vs field '+pct(best.field)+rx(best)+'.';
+      if(other)text+=' You&rsquo;re '+pct(other.mine)+' on '+esc(other.name)+' (field '+pct(other.field)+').';
+      if(best.win!=null)text+=' He&rsquo;s '+(best.win>=0.5?'the favourite':'the underdog')+' at '+pct(best.win*100)+'.';
+    }else{
+      // Best available side is still under the field: it is a fade, not a root.
+      cls='bust';tag='Fade — '+(other?other.name:best.name);
+      text='You&rsquo;re under the field on <b>'+esc(other?other.name:best.name)+'</b> ('
+        +pct((other||best).mine)+' vs '+pct((other||best).field)+') — you need him to lose. '
+        +'<b>'+esc(best.name)+'</b> winning is your outcome.';
+    }
+  }
+
+  // Bucket for the summary strip.
+  // Without a moneyline we still want the fav/dog split — the field's own
+  // ownership is a serviceable stand-in for who the market likes.
+  let bucket;
+  const isDog=best.win!=null
+    ? best.win<0.5
+    : (other?best.field<other.field:false);
+  if(cls==='neutral')bucket='neutral';
+  else if(cls==='bust')bucket='bust';
+  else bucket=isDog?'dog':'fav';
+
+  // On a finished contest the verdict is retrospective — say whether the bout
+  // actually broke your way, which is the whole "how did my leverage do" read.
+  let outcome=null;
+  if(status&&status.winner&&cls!=='neutral'){
+    outcome=status.winner===best.name?'went your way':'went against you';
+  }
+  return {pair:pair,A:A,B:B,best:best,other:other,sweat:sweat,cls:cls,tag:tag,text:text,
+          bucket:bucket,status:status,outcome:outcome};
+}
+
+function renderFights(){
+  const el=document.getElementById('panel-fights');
+  if(!el)return;
+  if(currentSport!=='ufc'){el.innerHTML='';return;}
+
+  if(fightsState.source==='none'||fightsManualOpen){
+    el.innerHTML=renderFightSourceBar()+renderProposalTable()+renderManualEditor();
+    return;
+  }
+  if(!fightsState.pairs.length){
+    el.innerHTML=renderFightSourceBar()+'<div class="card"><p class="step-label">No bouts could be built from that pairing data.</p></div>';
+    return;
+  }
+
+  const rows=fightsState.pairs.map(fightRow);
+  const ordered=fightsSortMode==='sweat'?rows.slice().sort((x,y)=>y.sweat-x.sweat):rows;
+
+  const count=b=>rows.filter(r=>r.bucket===b).length;
+  const strip=
+    '<div class="metric-grid" style="margin-bottom:14px;">'
+    +'<div class="metric"><div class="metric-label">Overweight the fav</div><div class="metric-value">'+count('fav')+'</div></div>'
+    +'<div class="metric"><div class="metric-label">Overweight the dog</div><div class="metric-value">'+count('dog')+'</div></div>'
+    +'<div class="metric"><div class="metric-label" style="color:var(--red);">Bust / fade needed</div><div class="metric-value" style="color:var(--red);">'+count('bust')+'</div></div>'
+    +'<div class="metric"><div class="metric-label">Neutral</div><div class="metric-value" style="color:var(--muted);">'+count('neutral')+'</div></div>'
+    +'</div>';
+
+  const toolbar=
+    '<div class="fight-toolbar">'
+    +'<span style="font-size:11px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.05em;">Sort</span>'
+    +'<button class="sport-btn'+(fightsSortMode==='bout'?' active':'')+'" onclick="setFightSort(\'bout\')">Bout order</button>'
+    +'<button class="sport-btn'+(fightsSortMode==='sweat'?' active':'')+'" onclick="setFightSort(\'sweat\')">Biggest sweat</button>'
+    +'</div>';
+
+  el.innerHTML=renderFightSourceBar()+renderProposalTable()+strip+toolbar+ordered.map(fightCard).join('')
+    +'<p class="legend">Leverage = your exposure − field ownership (field excludes your own entries). Ratio is yours ÷ field. '
+    +'Win% is de-vigged from the moneyline so the bout sums to 100%. Swing = leverage × win% — what that corner is worth to you '
+    +'in expectation. Sweat = the bigger absolute leverage in the bout.'
+    +(contestMeta.hasSidecar?' Result badges are inferred from the sidecar FPTS column (25+ point gap ⇒ winner) — a heuristic, not DK data.':'')
+    +(rows.some(r=>r.A&&r.A.win==null)?' No moneylines available for this card, so win% and swing are blank and “favourite” is read off field ownership.':'')
+    +'</p>';
+}
+
+function fightCard(r){
+  const A=r.A,B=r.B;
+  // One bar scale for the whole bout so the two corners are visually comparable.
+  const cap=Math.max(1,A?A.field:0,A?A.mine:0,B?B.field:0,B?B.mine:0);
+  const rootName=(r.cls==='root'||r.cls==='lean'||r.cls==='both')?r.best.name:null;
+  const doneBadge=r.status
+    ? '<span class="badge b-gray">'
+      +(r.status.winner?'done · '+esc(r.status.winner)+' won':'scored · winner unclear')+'</span>'
+    : '';
+  const outcomeBadge=r.outcome
+    ? '<span class="badge '+(r.outcome==='went your way'?'b-green':'b-red')+'">'+r.outcome+'</span>'
+    : '';
+  return '<div class="fight-card v-'+r.cls+'">'
+    +'<div class="fight-head">'
+    +'<span class="fight-no">Fight '+r.pair.fightNum+'</span>'
+    +'<span class="verdict"><span class="tag t-'+r.cls+'">'+esc(r.tag)+'</span></span>'
+    +doneBadge+outcomeBadge
+    +'<span class="fight-sweat">sweat '+r.sweat.toFixed(1)+' pts</span>'
+    +'</div>'
+    +'<div class="fight-grid">'
+    +fighterBlock(A,rootName,r,cap)
+    +'<div class="fight-vs">vs</div>'
+    +fighterBlock(B,rootName,r,cap)
+    +'</div>'
+    +'<div class="verdict">'+r.text+'</div>'
+    +'</div>';
+}
+
+function fighterBlock(S,rootName,r,cap){
+  if(!S)return '<div class="fighter" style="opacity:0.5;"><div class="fighter-name">— no opponent —</div>'
+    +'<div class="fighter-sub">unpaired on this card</div></div>';
+  const isRoot=rootName&&S.name===rootName;
+  const isFade=(r.cls==='bust')&&r.other&&S.name===r.other.name;
+  const dstr=(S.diff>0?'+':'')+S.diff.toFixed(1);
+  const dcol=S.diff>0.5?'var(--accent)':S.diff<-0.5?'var(--red)':'var(--muted)';
+  const rstr=S.ratio==null?'—':(S.ratio===Infinity?'∞':S.ratio.toFixed(2)+'×');
+  return '<div class="fighter'+(isRoot?' side-root':'')+(isFade?' side-fade':'')+'">'
+    +'<div class="fighter-name">'+(isRoot?'★ ':'')+esc(S.name)+'</div>'
+    +'<div class="fighter-sub">'+[
+        S.ml!=null?esc(S.ml)+' ML':'',
+        S.win!=null?(S.win*100).toFixed(0)+'% win':'',
+        S.fpts?S.fpts.toFixed(1)+' FPTS':''
+      ].filter(Boolean).join(' · ')+'&nbsp;</div>'
+    +'<div class="fstat"><span class="k">Field</span><b>'+S.field.toFixed(1)+'%</b></div>'
+    +'<div class="own-mini"><i style="width:'+Math.round(S.field/cap*100)+'%;background:rgba(255,255,255,0.32);"></i></div>'
+    +'<div class="fstat"><span class="k">You</span><b style="color:var(--accent);">'+S.mine.toFixed(1)+'%</b></div>'
+    +'<div class="own-mini"><i style="width:'+Math.round(S.mine/cap*100)+'%;background:var(--accent);"></i></div>'
+    +'<div class="fstat" style="margin-top:6px;"><span class="k">Leverage</span>'
+      +'<b style="color:'+dcol+';">'+dstr+' pts <span style="color:var(--muted);font-size:11px;">'+rstr+'</span></b></div>'
+    +'<div class="fstat"><span class="k">Swing</span><b style="color:'+(S.swing==null?'var(--muted)':dcol)+';">'
+      +(S.swing==null?'—':(S.swing>0?'+':'')+S.swing.toFixed(1))+'</b></div>'
+    +'</div>';
+}
+
+function setFightSort(m){fightsSortMode=m;renderFights();}
+
+function renderFightSourceBar(){
+  let inner='';
+  if(fightsState.source==='builder'){
+    const opts=fightsState.candidates.map(c=>
+      '<option value="'+esc(c.slate.id)+'"'+(String(c.slate.id)===String(fightsChosenSlateId)?' selected':'')+'>'
+      +esc(c.slate.name||'Untitled slate')+' — '+Math.round(c.score*100)+'% matched</option>').join('');
+    inner='<span>Pairings &amp; odds from Lineup Builder slate '
+      +'<b style="color:var(--text);">'+esc((fightsState.slate&&fightsState.slate.name)||'')+'</b> '
+      +'('+Math.round((fightsState.score||0)*100)+'% of fighters matched)</span>'
+      +(fightsState.candidates.length>1
+        ?'<select class="mini-select" onchange="chooseFightSlate(this.value)">'+opts+'</select>':'')
+      +(fightsState.unmatched.length
+        ?'<span class="badge b-amber">'+fightsState.unmatched.length+' unmatched: '+esc(fightsState.unmatched.slice(0,4).join(', '))+'</span>':'')
+      +'<button class="btn-ghost" onclick="toggleManualEditor()">'+(fightsManualOpen?'Close editor':'Edit pairings')+'</button>';
+  }else if(fightsState.source==='manual'){
+    inner='<span>Using <b style="color:var(--text);">your manual pairings</b> for this card.</span>'
+      +'<button class="btn-ghost" onclick="toggleManualEditor()">'+(fightsManualOpen?'Close editor':'Edit pairings')+'</button>'
+      +'<button class="btn-ghost" onclick="clearManualFights()">Clear &amp; re-detect</button>';
+  }else if(fightsState.source==='inferred'){
+    const inf=fightsState.inferred;
+    const cc={high:'b-green',medium:'b-amber',low:'b-red'}[inf.overall];
+    inner='<span><b style="color:var(--amber);">Proposed pairings</b> — no matching UFC slate in the Lineup Builder, '
+      +'so these '+inf.diag.length+' bouts were inferred from the contest itself. '
+      +'Check them before you trust the verdicts.</span>'
+      +'<span class="badge '+cc+'">'+inf.overall+' confidence</span>'
+      +'<button class="btn" style="padding:6px 14px;font-size:12px;" onclick="confirmInferred()">Confirm pairings</button>'
+      +'<button class="btn-ghost" onclick="toggleManualEditor()">'+(fightsManualOpen?'Close editor':'Edit pairings')+'</button>';
+  }else{
+    const n=fightsState.candidates.length;
+    inner='<span style="color:var(--amber);">No matching UFC slate in the Lineup Builder'
+      +(n?' (best match '+Math.round((fightsState.candidates[0].score||0)*100)+'% — under the 80% bar)':'')
+      +'. Pair the bouts below and it&rsquo;ll be remembered for this card.</span>';
+  }
+  return '<div class="card" style="padding:12px 14px;"><div class="fight-src">'+inner+'</div></div>';
+}
+
+// The evidence behind an inferred card, shown rather than hidden: the user is
+// being asked to confirm it, so they get the numbers the guess was made from.
+function renderProposalTable(){
+  const inf=fightsState.inferred;
+  if(fightsState.source!=='inferred'||!inf)return '';
+  const cls={high:'b-green',medium:'b-amber',low:'b-red'};
+  const rows=inf.diag.map(d=>
+    '<tr><td style="font-family:var(--mono);font-size:11px;color:var(--muted);">'+d.fightNum+'</td>'
+    +'<td style="font-weight:500;">'+esc(d.a)+' <span style="color:var(--muted);font-weight:400;">vs</span> '+esc(d.b)+'</td>'
+    +'<td><span class="badge '+cls[d.conf]+'">'+d.conf+'</span></td>'
+    +'<td style="font-family:var(--mono);font-size:12px;text-align:right;">'+d.lift.toFixed(3)+'</td>'
+    +'<td style="font-family:var(--mono);font-size:12px;text-align:right;">'+(d.margin>=9?'9+':d.margin.toFixed(1))+'×</td>'
+    +'<td style="font-family:var(--mono);font-size:12px;text-align:right;color:'+(d.fptsGap!=null&&d.fptsGap>=25?'var(--accent)':'var(--muted)')+';">'
+      +(d.fptsGap==null?'—':d.fptsGap.toFixed(1))+'</td></tr>').join('');
+  return '<details class="card" style="margin-bottom:12px;"'+(fightsManualOpen?'':' open')+'>'
+    +'<summary style="cursor:pointer;font-size:12px;font-weight:500;color:var(--muted);text-transform:uppercase;'
+    +'letter-spacing:0.06em;font-family:var(--mono);">How these '+inf.diag.length+' bouts were inferred</summary>'
+    +'<p class="step-label" style="margin-top:12px;">Opponents almost never appear in the same lineup. '
+    +'<b>Co-roster</b> is how often this pair actually shared a lineup versus how often their ownership says they should '
+    +'(lower = more certainly opponents); <b>margin</b> is how much clearer this pairing is than each fighter&rsquo;s next-best '
+    +'candidate; <b>FPTS gap</b> is the scoring split, which in a finished contest should show one winner per bout. '
+    +'Bout order is a guess — ownership ascending, chalkiest bout last — so fix it in the editor if you know the running order.</p>'
+    +'<div style="overflow-x:auto;"><table><thead><tr><th>#</th><th>Bout</th><th>Confidence</th>'
+    +'<th style="text-align:right;">Co-roster</th><th style="text-align:right;">Margin</th>'
+    +'<th style="text-align:right;">FPTS gap</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+    +(inf.unpaired.length?'<p class="legend" style="color:var(--amber);">Unpaired: '+esc(inf.unpaired.join(', '))+'</p>':'')
+    +'</details>';
+}
+
+function confirmInferred(){
+  const inf=fightsState.inferred;
+  if(!inf)return;
+  lsSet(manualKey(fightsState.fingerprint),JSON.stringify(inf.entries));
+  fightsManualOpen=false;
+  resolveFights();updateTabVisibility();renderFights();
+}
+
+function chooseFightSlate(id){fightsChosenSlateId=id;resolveFights();renderFights();}
+function toggleManualEditor(){fightsManualOpen=!fightsManualOpen;renderFights();}
+function clearManualFights(){
+  try{localStorage.removeItem(manualKey(fightsState.fingerprint));}catch(e){}
+  fightsManualOpen=false;fightsChosenSlateId=null;
+  resolveFights();updateTabVisibility();renderFights();
+}
+
+function renderManualEditor(){
+  const fighters=fightsState.fighters||[];
+  // Seed from whatever we already have so editing is a correction, not re-entry.
+  const seed={};
+  fightsState.pairs.forEach(p=>{
+    [[p.a,p.b],[p.b,p.a]].forEach(([x,y])=>{
+      if(x)seed[x.name]={opp:y?y.name:'',fightNum:p.fightNum,ml:x.ml||''};
+    });
+  });
+  const rows=fighters.map((f,i)=>{
+    const sd=seed[f]||{opp:'',fightNum:'',ml:''};
+    const opts='<option value="">— none —</option>'+fighters.filter(o=>o!==f)
+      .map(o=>'<option value="'+esc(o)+'"'+(o===sd.opp?' selected':'')+'>'+esc(o)+'</option>').join('');
+    return '<tr>'
+      +'<td style="font-weight:500;white-space:nowrap;">'+esc(f)+'</td>'
+      +'<td><select class="mini-select" id="mf-opp-'+i+'" style="width:100%;">'+opts+'</select></td>'
+      +'<td><input class="mini-input" id="mf-num-'+i+'" type="number" min="1" step="1" style="width:70px;" value="'+esc(sd.fightNum||'')+'"></td>'
+      +'<td><input class="mini-input" id="mf-ml-'+i+'" type="text" placeholder="-150" style="width:80px;" value="'+esc(sd.ml||'')+'"></td>'
+      +'</tr>';
+  }).join('');
+  return '<div class="card">'
+    +'<div class="card-title">Manual fight pairings</div>'
+    +'<p class="step-label">Pick each fighter&rsquo;s opponent and the bout number (1 = first fight of the night, main event last). '
+    +'Moneylines are optional — add them and you get de-vigged win probabilities and expected swing. '
+    +'Saved in this browser against this fighter set, so it survives a reload.</p>'
+    +'<p class="legend" style="margin:0 0 12px;">Tip: build the slate once in the '
+    +'<a href="../lineup-builder/" style="color:var(--accent);">Lineup Builder</a> and this fills itself in — '
+    +'it reads the builder&rsquo;s slates straight out of shared browser storage. '
+    +'A DKSalaries.csv is no help here: DraftKings&rsquo; MMA salary file has no opponent column '
+    +'(Game Info carries the event, not an &ldquo;A vs B&rdquo; pairing).</p>'
+    +'<div style="overflow-x:auto;max-height:520px;overflow-y:auto;">'
+    +'<table id="mf-table"><thead><tr><th>Fighter</th><th>Opponent</th><th>Fight #</th><th>ML</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+    +'<div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">'
+    +'<button class="btn" onclick="saveManualFights()">Save pairings</button>'
+    +'<button class="btn-ghost" onclick="autoNumberManual()">Auto-number by order</button>'
+    +'<span id="mf-status" style="font-size:12px;font-family:var(--mono);color:var(--muted);"></span>'
+    +'</div></div>';
+}
+
+// Fill blank bout numbers from the order pairs first appear in the list.
+function autoNumberManual(){
+  const fighters=fightsState.fighters||[];
+  const seen={};let n=1;
+  fighters.forEach((f,i)=>{
+    if(seen[f])return;
+    const opp=document.getElementById('mf-opp-'+i).value;
+    const numEl=document.getElementById('mf-num-'+i);
+    if(!numEl.value)numEl.value=n;
+    seen[f]=numEl.value;
+    if(opp){
+      const j=fighters.indexOf(opp);
+      if(j>=0){const o=document.getElementById('mf-num-'+j);if(!o.value)o.value=numEl.value;seen[opp]=numEl.value;}
+    }
+    n=Math.max(n,parseInt(numEl.value,10)||n)+1;
+  });
+}
+
+function saveManualFights(){
+  const fighters=fightsState.fighters||[];
+  const entries=[];
+  fighters.forEach((f,i)=>{
+    const opp=document.getElementById('mf-opp-'+i).value||'';
+    const num=parseInt(document.getElementById('mf-num-'+i).value,10)||0;
+    const ml=(document.getElementById('mf-ml-'+i).value||'').trim();
+    if(opp||num||ml)entries.push({name:f,opp:opp,fightNum:num,ml:ml});
+  });
+  // Mirror: setting A's opponent implies B's, and both share a bout number.
+  const byName={};entries.forEach(e=>byName[e.name]=e);
+  entries.forEach(e=>{
+    if(!e.opp)return;
+    const o=byName[e.opp];
+    if(o){
+      if(!o.opp)o.opp=e.name;
+      if(e.fightNum&&!o.fightNum)o.fightNum=e.fightNum;
+      if(!e.fightNum&&o.fightNum)e.fightNum=o.fightNum;
+    }
+  });
+  if(!entries.length){
+    document.getElementById('mf-status').textContent='Nothing to save — set at least one pairing.';
+    return;
+  }
+  lsSet(manualKey(fightsState.fingerprint),JSON.stringify(entries));
+  fightsManualOpen=false;
+  resolveFights();updateTabVisibility();renderFights();
 }
 
 /* ── USERNAME SEARCH ── */
@@ -542,14 +1552,16 @@ function onUsernameSearch(){
   if(q.length<1){dd.style.display='none';return;}
   const matches=allUsernames.filter(u=>u.toLowerCase().includes(q)).slice(0,50);
   if(!matches.length){dd.style.display='none';return;}
-  dd.innerHTML=matches.map(u=>`<div class="dd-item" onclick="selectUsername('${u.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')"><span style="font-family:var(--mono);font-size:13px;">${highlightMatch(u,q)}</span></div>`).join('');
+  dd.innerHTML=matches.map((u,i)=>'<div class="dd-item" data-name="'+esc(u)+'" onclick="selectUsername(this.dataset.name)">'
+    +'<span style="font-family:var(--mono);font-size:13px;">'+highlightMatch(u,q)+'</span></div>').join('');
   dd.style.display='block';
 }
 
 function highlightMatch(str,q){
   const idx=str.toLowerCase().indexOf(q);
-  if(idx===-1)return str;
-  return str.slice(0,idx)+'<mark style="background:rgba(200,240,90,0.3);color:var(--text);border-radius:2px;">'+str.slice(idx,idx+q.length)+'</mark>'+str.slice(idx+q.length);
+  if(idx===-1)return esc(str);
+  return esc(str.slice(0,idx))+'<mark style="background:rgba(200,240,90,0.3);color:var(--text);border-radius:2px;">'
+    +esc(str.slice(idx,idx+q.length))+'</mark>'+esc(str.slice(idx+q.length));
 }
 
 function selectUsername(name){
@@ -557,17 +1569,20 @@ function selectUsername(name){
   document.getElementById('username-search').value=name;
   document.getElementById('username-dropdown').style.display='none';
   const disp=document.getElementById('selected-user-display');
-  const entries=parsedData.filter(r=>r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim()===name);
-  disp.textContent='✓ '+name+' — '+entries.length+' entr'+(entries.length===1?'y':'ies')+' found';
+  const entries=parsedData.filter(r=>baseName(r.name)===name);
+  disp.textContent='✓ '+name+' — '+entries.length+' entr'+(entries.length===1?'y':'ies')+' found · press Enter to analyze';
   disp.style.display='block';
-  const abtn=document.getElementById('analyze-btn');
-  abtn.style.opacity='1';abtn.style.cursor='pointer';
+  setAnalyzeEnabled(true);
 }
 
 function onUsernameKey(e){
   const dd=document.getElementById('username-dropdown');
-  const items=dd.querySelectorAll('.dd-item');
-  if(!items.length)return;
+  const items=dd.style.display==='none'?[]:dd.querySelectorAll('.dd-item');
+  if(!items.length){
+    // Nothing to pick from: Enter on an already-chosen user just runs it.
+    if(e.key==='Enter'&&selectedUsername){e.preventDefault();runAnalysis();}
+    return;
+  }
   const active=dd.querySelector('.dd-item.active');
   if(e.key==='ArrowDown'){
     e.preventDefault();
@@ -608,7 +1623,7 @@ function renderComboSearch(){
   const allFieldPlayers=new Set();
   for(const r of parsedData)for(const p of extractPlayers(r.lineup))allFieldPlayers.add(p);
   const playerList=[...allFieldPlayers].sort();
-  const options=playerList.map(p=>`<option value="${p}">${p}</option>`).join('');
+  const options=playerList.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');
   const slots=Array.from({length:6},(_,i)=>`
     <div style="flex:1;min-width:160px;">
       <label style="font-size:10px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:4px;">Player ${i+1}${i>=2?' (optional)':''}</label>
@@ -684,7 +1699,7 @@ function runTopCombos(){
       const diff=enriched.length>0?((myCount/enriched.length*100)-(count/fieldTotal*100)):null;
       const diffStr=diff===null?'—':(diff>0?'+':'')+diff.toFixed(1)+'%';
       const diffCls=diff===null?'diff-neu':diff>2?'diff-pos':diff<-2?'diff-neg':'diff-neu';
-      const playersDisplay=players.join(' · ');
+      const playersDisplay=players.map(esc).join(' · ');
       return `<tr>
         <td style="font-family:var(--mono);font-size:11px;color:var(--muted);width:28px;text-align:center;">${rank+1}</td>
         <td style="font-weight:500;">${playersDisplay}</td>
@@ -741,32 +1756,36 @@ function searchCombos(){
 
   const fieldMatches=fieldEntries.filter(r=>selected.every(p=>extractPlayers(r.lineup).includes(p)));
   const myMatches=enriched.filter(r=>selected.every(p=>r.players.includes(p)));
-  const fieldPct=(fieldMatches.length/fieldEntries.length*100).toFixed(2);
+  const fieldPct=fieldEntries.length?(fieldMatches.length/fieldEntries.length*100).toFixed(2):'0.00';
   const myPct=enriched.length>0?(myMatches.length/enriched.length*100).toFixed(1):'0.0';
 
   const myRows=myMatches.map(r=>{
-    const lbl=r.name.replace(/ \(\d+\/\d+\)/,'')+' '+(r.name.match(/\(\d+\/\d+\)/)?.[0]||'');
-    const b=r.dupes===0?'<span class="badge b-green">unique</span>':r.dupes<=5?`<span class="badge b-green">${r.dupes}</span>`:r.dupes<=20?`<span class="badge b-amber">${r.dupes}</span>`:`<span class="badge b-red">${r.dupes}</span>`;
-    return `<tr><td style="font-family:var(--mono);font-size:11px;color:var(--muted);">${lbl}</td><td>${b}</td><td style="font-size:12px;color:var(--muted);">${r.players.join(' · ')}</td></tr>`;
+    const lbl=entryLabel(r.name);
+    const b=dupeBadge(r.dupes);
+    return `<tr><td style="font-family:var(--mono);font-size:11px;color:var(--muted);">${esc(lbl)}</td><td>${b}</td><td style="font-size:12px;color:var(--muted);">${r.players.map(esc).join(' · ')}</td></tr>`;
   }).join('');
 
   // Build per-user breakdown from all field matches
   const userCounts={};
   for(const r of fieldMatches){
-    const uname=r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim();
+    const uname=baseName(r.name);
     userCounts[uname]=(userCounts[uname]||0)+1;
   }
   // Also include selected user even if 0 (they're in fieldEntries exclusion — add from myMatches)
   if(selectedUsername&&!userCounts[selectedUsername])userCounts[selectedUsername]=0;
   if(selectedUsername&&myMatches.length)userCounts[selectedUsername]=myMatches.length;
 
+  // One pass for entry counts instead of a full scan of parsedData per user —
+  // the old version was O(users × entries) and stalled on big contests.
+  const entryCountByUser={};
+  for(const r of parsedData){const u=baseName(r.name);entryCountByUser[u]=(entryCountByUser[u]||0)+1;}
   const sortedUsers=Object.entries(userCounts).sort((a,b)=>b[1]-a[1]);
   const userRows=sortedUsers.map(([uname,cnt])=>{
     const isMe=uname===selectedUsername;
-    const totalEntries=parsedData.filter(r=>r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim()===uname).length;
+    const totalEntries=entryCountByUser[uname]||0;
     const expPct=totalEntries>0?(cnt/totalEntries*100).toFixed(1)+'%':'—';
     return `<tr style="${isMe?'background:rgba(200,240,90,0.06);':''}">
-      <td style="font-family:var(--mono);font-size:12px;color:${isMe?'var(--accent)':'var(--text)'};font-weight:${isMe?'500':'400'};">${uname}${isMe?' ★':''}</td>
+      <td style="font-family:var(--mono);font-size:12px;color:${isMe?'var(--accent)':'var(--text)'};font-weight:${isMe?'500':'400'};">${esc(uname)}${isMe?' ★':''}</td>
       <td style="font-family:var(--mono);font-size:13px;font-weight:500;text-align:right;">${cnt}</td>
       <td style="font-family:var(--mono);font-size:12px;color:var(--muted);text-align:right;">${expPct}</td>
     </tr>`;
@@ -775,7 +1794,7 @@ function searchCombos(){
   document.getElementById('combo-results').innerHTML=`
     <div class="card" style="margin-top:12px;">
       <div style="font-size:12px;font-family:var(--mono);color:var(--muted);margin-bottom:14px;">
-        Results for: <span style="color:var(--text);">${selected.join(' + ')}</span>
+        Results for: <span style="color:var(--text);">${selected.map(esc).join(' + ')}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
         <div class="metric"><div class="metric-label">Field entries</div><div class="metric-value">${fieldMatches.length.toLocaleString()}</div></div>
@@ -834,12 +1853,8 @@ function onH2HSearch(idx){
   if(q.length<1){dd.style.display='none';return;}
   const matches=allUsernames.filter(u=>u.toLowerCase().includes(q)).slice(0,50);
   if(!matches.length){dd.style.display='none';return;}
-  dd.innerHTML=matches.map(u=>{
-    const idx2=u.toLowerCase().indexOf(q);
-    const hi=u.slice(0,idx2)+'<mark style="background:rgba(200,240,90,0.3);color:var(--text);border-radius:2px;">'+u.slice(idx2,idx2+q.length)+'</mark>'+u.slice(idx2+q.length);
-    const esc=u.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-    return '<div class="dd-item" onclick="selectH2HUser('+idx+',\''+esc+'\')">'+hi+'</div>';
-  }).join('');
+  dd.innerHTML=matches.map(u=>'<div class="dd-item" data-name="'+esc(u)+'" onclick="selectH2HUser('+idx+',this.dataset.name)">'
+    +highlightMatch(u,q)+'</div>').join('');
   dd.style.display='block';
 }
 
@@ -847,7 +1862,7 @@ function selectH2HUser(idx,name){
   h2hSelected[idx]=name;
   document.getElementById('h2h-search-'+idx).value=name;
   document.getElementById('h2h-dd-'+idx).style.display='none';
-  const entries=parsedData.filter(r=>r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim()===name);
+  const entries=parsedData.filter(r=>baseName(r.name)===name);
   document.getElementById('h2h-sel-'+idx).textContent='\u2713 '+entries.length+' entr'+(entries.length===1?'y':'ies');
 }
 
@@ -864,7 +1879,6 @@ function onH2HKey(e,idx){
 
 // Colour palette for up to 4 users
 const H2H_COLORS=['#c8f05a','#5b9cf6','#f5a623','#ff5f5f'];
-const H2H_DIM=['rgba(200,240,90,0.15)','rgba(91,156,246,0.15)','rgba(245,166,35,0.15)','rgba(255,95,95,0.15)'];
 
 function runH2H(){
   const users=[];
@@ -874,16 +1888,18 @@ function runH2H(){
   // Build entry sets per user
   const userEntries=users.map(u=>({
     name:u,
-    entries:parsedData.filter(r=>r.name.replace(/\s*\(\d+\/\d+\)$/,'').trim()===u),
+    entries:parsedData.filter(r=>baseName(r.name)===u),
     players:[]
   }));
   userEntries.forEach(u=>{
-    u.entries.forEach(r=>u.players.push({lineup:r.lineup,players:extractPlayers(r.lineup),name:r.name}));
+    u.entries.forEach(r=>u.players.push({lineup:r.lineup,key:lineupKeyOf(r.lineup),players:extractPlayers(r.lineup),name:r.name}));
   });
 
-  // Field lineup lookup for dupe counts
+  // Field lineup lookup for dupe counts. Keyed on the CANONICAL lineup so NFL
+  // Classic slot shuffles and Showdown captain swaps count correctly (the raw
+  // string undercounted dupes and hid genuinely shared lineups).
   const fieldLineCounts={};
-  fieldEntries.forEach(r=>fieldLineCounts[r.lineup]=(fieldLineCounts[r.lineup]||0)+1);
+  fieldEntries.forEach(r=>{const k=lineupKeyOf(r.lineup);fieldLineCounts[k]=(fieldLineCounts[k]||0)+1;});
 
   // Ownership per user
   const userOwn=userEntries.map(u=>computeOwnership(u.entries));
@@ -891,9 +1907,9 @@ function runH2H(){
   // Summary cards
   const summaryCards=users.map((u,i)=>`
     <div class="metric" style="border-left:3px solid ${H2H_COLORS[i]};">
-      <div class="metric-label" style="color:${H2H_COLORS[i]};">${u}</div>
+      <div class="metric-label" style="color:${H2H_COLORS[i]};">${esc(u)}</div>
       <div style="font-size:18px;font-weight:500;font-family:var(--mono);color:var(--text);margin-top:2px;">${userEntries[i].entries.length} entries</div>
-      <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:2px;">${new Set(userEntries[i].entries.map(r=>r.lineup)).size} unique lineups</div>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:2px;">${new Set(userEntries[i].players.map(r=>r.key)).size} unique lineups</div>
     </div>`).join('');
 
   // Shared lineups between each pair
@@ -901,30 +1917,30 @@ function runH2H(){
   for(let i=0;i<users.length;i++){
     for(let j=i+1;j<users.length;j++){
       const linesI=new Map();
-      userEntries[i].players.forEach(r=>linesI.set(r.lineup,(linesI.get(r.lineup)||[]).concat(r.name)));
-      const linesJ=new Set(userEntries[j].players.map(r=>r.lineup));
+      userEntries[i].players.forEach(r=>{if(!linesI.has(r.key))linesI.set(r.key,r.lineup);});
+      const linesJ=new Set(userEntries[j].players.map(r=>r.key));
       const shared=[];
-      linesI.forEach((names,lineup)=>{if(linesJ.has(lineup))shared.push({lineup,names});});
+      linesI.forEach((lineup,key)=>{if(linesJ.has(key))shared.push({lineup,key});});
 
       if(shared.length===0){
         sharedSections+=`
           <div style="margin-bottom:16px;">
             <div style="font-size:13px;font-weight:500;margin-bottom:8px;">
-              <span style="color:${H2H_COLORS[i]};">${users[i]}</span>
+              <span style="color:${H2H_COLORS[i]};">${esc(users[i])}</span>
               <span style="color:var(--muted);margin:0 8px;">vs</span>
-              <span style="color:${H2H_COLORS[j]};">${users[j]}</span>
+              <span style="color:${H2H_COLORS[j]};">${esc(users[j])}</span>
               <span class="badge b-gray" style="margin-left:10px;">0 shared lineups</span>
             </div>
             <p style="font-size:12px;color:var(--muted);">No lineups in common.</p>
           </div>`;
       } else {
-        const rows=shared.map(({lineup,names})=>{
-          const dupes=fieldLineCounts[lineup]||0;
+        const rows=shared.map(({lineup,key})=>{
+          const dupes=fieldLineCounts[key]||0;
           const badge=dupes===0?'<span class="badge b-green">unique</span>':dupes<=5?`<span class="badge b-green">${dupes}</span>`:dupes<=20?`<span class="badge b-amber">${dupes}</span>`:`<span class="badge b-red">${dupes}</span>`;
-          const players=extractPlayers(lineup).join(' · ');
+          const players=extractPlayers(lineup).map(esc).join(' · ');
           // How many entries each user has with this lineup
-          const cntI=userEntries[i].players.filter(r=>r.lineup===lineup).length;
-          const cntJ=userEntries[j].players.filter(r=>r.lineup===lineup).length;
+          const cntI=userEntries[i].players.filter(r=>r.key===key).length;
+          const cntJ=userEntries[j].players.filter(r=>r.key===key).length;
           return `<tr>
             <td style="font-size:12px;color:var(--muted);">${players}</td>
             <td style="text-align:center;font-family:var(--mono);font-size:12px;color:${H2H_COLORS[i]};">${cntI}</td>
@@ -935,17 +1951,17 @@ function runH2H(){
         sharedSections+=`
           <div style="margin-bottom:20px;">
             <div style="font-size:13px;font-weight:500;margin-bottom:10px;">
-              <span style="color:${H2H_COLORS[i]};">${users[i]}</span>
+              <span style="color:${H2H_COLORS[i]};">${esc(users[i])}</span>
               <span style="color:var(--muted);margin:0 8px;">vs</span>
-              <span style="color:${H2H_COLORS[j]};">${users[j]}</span>
+              <span style="color:${H2H_COLORS[j]};">${esc(users[j])}</span>
               <span class="badge b-amber" style="margin-left:10px;">${shared.length} shared lineup${shared.length!==1?'s':''}</span>
             </div>
             <div style="overflow-x:auto;">
               <table>
                 <thead><tr>
                   <th>Lineup</th>
-                  <th style="text-align:center;color:${H2H_COLORS[i]};">${users[i]}</th>
-                  <th style="text-align:center;color:${H2H_COLORS[j]};">${users[j]}</th>
+                  <th style="text-align:center;color:${H2H_COLORS[i]};">${esc(users[i])}</th>
+                  <th style="text-align:center;color:${H2H_COLORS[j]};">${esc(users[j])}</th>
                   <th style="text-align:center;">Field dupes</th>
                 </tr></thead>
                 <tbody>${rows}</tbody>
@@ -966,10 +1982,10 @@ function runH2H(){
     field:fieldOwnership[p]||0
   })).sort((a,b)=>Math.max(...b.vals)-Math.max(...a.vals));
 
-  const ownHeaders=users.map((u,i)=>`<th style="text-align:right;color:${H2H_COLORS[i]};">${u}</th>`).join('');
+  const ownHeaders=users.map((u,i)=>`<th style="text-align:right;color:${H2H_COLORS[i]};">${esc(u)}</th>`).join('');
   const ownTableRows=ownRows.map(({p,vals,field})=>{
     const cells=vals.map((v,i)=>`<td style="text-align:right;font-family:var(--mono);font-size:12px;color:${v>0?H2H_COLORS[i]:'var(--muted)'};">${v.toFixed(1)}%</td>`).join('');
-    return `<tr><td style="font-weight:500;">${p}</td><td style="text-align:right;font-family:var(--mono);font-size:12px;color:var(--muted);">${field.toFixed(1)}%</td>${cells}</tr>`;
+    return `<tr><td style="font-weight:500;">${esc(p)}</td><td style="text-align:right;font-family:var(--mono);font-size:12px;color:var(--muted);">${field.toFixed(1)}%</td>${cells}</tr>`;
   }).join('');
 
   document.getElementById('h2h-results').innerHTML=`
