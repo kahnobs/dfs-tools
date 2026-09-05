@@ -6,9 +6,59 @@
 <title>DFS // Lineup Builder 2.0</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0a0a0f;--surface:#13131a;--surface2:#1c1c28;--border:#2a2a3a;--accent:#f5c518;--accent2:#e8421a;--green:#22c55e;--red:#ef4444;--blue:#3b82f6;--purple:#a855f7;--text:#e8e8f0;--muted:#6b6b85;}
+/* ── DESIGN TOKENS ────────────────────────────────────────────────────────
+   The palette is unchanged except for --muted, which is lifted from #6b6b85
+   to #8585a3: the old value measured 3.8:1 against --bg and 3.1:1 against
+   --surface2, and it carries most of the app's secondary text (column
+   headers, stat labels, every "was X" note), so it was the one colour
+   genuinely failing WCAG AA. #8585a3 measures 5.5:1 on --bg and 4.7:1 on
+   --surface2, which is the lightest it can be while still reading clearly as
+   secondary next to --text.
+   Everything below --muted is additive: a spacing / radius / type / elevation
+   scale plus semantic aliases, so a component can say --s3 or --surface-2
+   instead of restating a magic number. Four variables (--panel, --border2,
+   --accent-dim, --amber) were already being REFERENCED by markup written
+   later and had never been declared — an undefined var in a `background`
+   shorthand computes to transparent, which is why the DK Entries and Update
+   Pool modals rendered as floating text over the live app. */
+:root{
+  --bg:#0a0a0f;--surface:#13131a;--surface2:#1c1c28;--border:#2a2a3a;
+  --accent:#f5c518;--accent2:#e8421a;--green:#22c55e;--red:#ef4444;--blue:#3b82f6;--purple:#a855f7;
+  --text:#e8e8f0;--muted:#8585a3;
+  /* Semantic surfaces: the panel ground, a raised card, a control well. */
+  --surface-1:#13131a;--surface-2:#1c1c28;--surface-3:#232331;
+  --panel:#15151d;
+  --border-soft:#23232f;--border-strong:#3a3a52;--border2:#3a3a52;
+  --text-dim:#b4b4c8;
+  --accent-dim:rgba(245,197,24,.08);--accent-soft:rgba(245,197,24,.14);
+  --accent-line:rgba(245,197,24,.35);--amber:#f5c518;
+  /* Spacing */
+  --s1:4px;--s2:6px;--s3:8px;--s4:12px;--s5:16px;--s6:24px;
+  /* Radii */
+  --r1:4px;--r2:6px;--r3:8px;--r4:12px;
+  /* Type scale */
+  --t1:10px;--t2:11px;--t3:12px;--t4:13px;--t5:15px;--t6:18px;
+  /* Elevation */
+  --e1:0 1px 2px rgba(0,0,0,.35);
+  --e2:0 4px 16px rgba(0,0,0,.45);
+  --e3:0 14px 40px rgba(0,0,0,.62);
+  /* Motion — one duration and one easing for every hover/active transition. */
+  --dur:140ms;--dur-fast:120ms;--dur-slow:160ms;--ease:cubic-bezier(.2,.6,.3,1);
+  --focus:0 0 0 2px rgba(245,197,24,.6);
+  --mono:'DM Mono',ui-monospace,monospace;--sans:'DM Sans',system-ui,sans-serif;
+}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;}
+/* One gold focus ring for every control, drawn as a ring rather than an
+   outline so it follows the border-radius and never nudges layout. */
+:focus-visible{outline:none;box-shadow:var(--focus);border-radius:var(--r1);}
+button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible,
+a:focus-visible,[tabindex]:focus-visible{outline:none;box-shadow:var(--focus);}
+/* Respect the OS setting: nothing here is load-bearing motion. */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;
+    transition-duration:.01ms!important;scroll-behavior:auto!important;}
+}
 .checkered{height:5px;background:repeating-linear-gradient(90deg,#fff 0,#fff 10px,#111 10px,#111 20px);opacity:.12;}
 
 /* TOP BAR */
@@ -125,6 +175,11 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .ngt-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-family:'DM Mono',monospace;white-space:nowrap;}
 .ngt-team{font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--text);}
 .ngt-team.fav{color:var(--accent);}
+.ngt-team{padding:0 3px;border-radius:3px;cursor:pointer;}
+.ngt-team:hover{background:rgba(255,255,255,.08);}
+.ngt-team.on{background:var(--accent);color:#000 !important;}
+.ngt-time{color:var(--text);opacity:.85;}
+.ngt-home{font-size:9px;color:var(--muted);margin-right:2px;}
 .ngt-imp{font-size:13px;font-weight:600;color:var(--green);}
 .ngt-imp.adj{color:var(--accent);}
 .ngt-side{display:flex;align-items:baseline;gap:5px;}
@@ -287,7 +342,12 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .bar-fill{height:100%;border-radius:4px;background:var(--green);transition:width .3s,background .3s;}
 .bar-fill.warn{background:var(--accent);}.bar-fill.over{background:var(--red);}
 .action-btns{display:flex;gap:6px;}
-.btn{flex:1;padding:7px 8px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:none;transition:all .15s;font-family:'DM Sans',sans-serif;}
+/* .btn is the shared button base. The `flex:1` that used to live here belonged
+   to the Clear / Save Lineup pair specifically, and moving it onto that
+   container is what lets every other button in the app adopt .btn without
+   being stretched to fill its row. */
+.action-btns>.btn{flex:1;}
+.btn{padding:7px 8px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:none;transition:all .15s;font-family:'DM Sans',sans-serif;}
 .btn-save{background:var(--accent);color:#000;}
 .btn-save:hover{background:#ffd640;}
 .btn-save:disabled{background:var(--surface2);color:var(--muted);cursor:not-allowed;}
@@ -934,6 +994,269 @@ html { overscroll-behavior-y: contain; }
 .hb-ev-pend span{font-size:10px;}
 .hb-ev-go{margin-left:6px;background:var(--surface);border:1px solid var(--border);color:var(--accent);border-radius:4px;font-size:9px;padding:2px 6px;cursor:pointer;font-family:inherit;}
 .hb-ev-go:hover{border-color:var(--accent);}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   COMPONENT LAYER
+   Everything below is additive and lives at the end of the sheet on purpose:
+   it re-expresses treatments the app had already invented ad hoc (a card, a
+   primary button, a small-caps section label) as one named component each, so
+   a new surface can reach for the component instead of inventing a fourth
+   shade of panel. Nothing here renames or removes an existing class — the
+   older rules still apply, these refine them.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Buttons ──────────────────────────────────────────────────────────────
+   Four intents (default / primary / ghost / danger) and two sizes. The base
+   .btn already existed for the builder's Clear + Save pair; these are the
+   variants every other button row in the app now shares. */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);
+  line-height:1.35;white-space:nowrap;border:1px solid transparent;
+  transition:background var(--dur) var(--ease),border-color var(--dur) var(--ease),
+    color var(--dur) var(--ease),box-shadow var(--dur) var(--ease);}
+.btn:disabled{opacity:.45;cursor:not-allowed;}
+.btn-sm{padding:4px 9px;font-size:var(--t1);border-radius:var(--r1);}
+.btn-md{padding:7px 14px;font-size:var(--t3);border-radius:var(--r2);}
+.btn-default{background:var(--surface-2);border-color:var(--border);color:var(--text-dim);}
+.btn-default:hover:not(:disabled){border-color:var(--border-strong);color:var(--text);background:var(--surface-3);}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#0a0a0f;font-weight:700;}
+.btn-primary:hover:not(:disabled){background:#ffd640;border-color:#ffd640;box-shadow:var(--e1);}
+.btn-primary:active:not(:disabled){background:#e0b400;}
+.btn-primary:disabled{background:var(--surface-2);border-color:var(--border);color:var(--muted);}
+.btn-ghost{background:none;border-color:var(--border);color:var(--muted);}
+.btn-ghost:hover:not(:disabled){border-color:var(--accent-line);color:var(--accent);background:var(--accent-dim);}
+.btn-ghost.on,.btn-ghost[aria-pressed=true]{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);}
+.btn-danger{background:rgba(239,68,68,.10);border-color:rgba(239,68,68,.32);color:var(--red);}
+.btn-danger:hover:not(:disabled){background:rgba(239,68,68,.20);border-color:var(--red);}
+.btn:active:not(:disabled){transform:translateY(.5px);}
+/* A ghost that turns red on hover — for a destructive action sitting in a row
+   of neutral ones (Clear lineup, Clear All), which should not shout until
+   the pointer is actually on it. */
+.btn-ghost-danger:hover:not(:disabled),.btn-clear.btn-ghost:hover:not(:disabled){
+  border-color:var(--red);color:var(--red);background:rgba(239,68,68,.10);}
+/* The two big coloured primaries the generator owns keep their purple, but
+   pick up the same disabled/hover contract as .btn-primary. */
+.btn-generate,.btn-add-selected{transition:background var(--dur) var(--ease),box-shadow var(--dur) var(--ease);}
+.btn-generate:disabled,.btn-add-selected:disabled{opacity:.5;}
+
+/* ── Card ─────────────────────────────────────────────────────────────────
+   The one panel treatment: raised surface, soft border, 8px radius, and a
+   1px top highlight that reads as a light source without costing a shadow.
+   Applied to the settings blocks, saved cards, preview cards, game tiles and
+   the EV card, all of which had each grown their own near-miss version. */
+.card,.autogen-section,.saved-lineup,.preview-lineup-card,.group-card,.sdash-game,.hb-ev,.ngt{
+  background:var(--surface-2);
+  border:1px solid var(--border-soft);
+  border-radius:var(--r3);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.035);
+  transition:border-color var(--dur) var(--ease),background var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+/* The saved / preview cards and the game tiles are interactive, so they get a
+   hover lift; the static settings blocks deliberately do not. */
+.saved-lineup:hover,.preview-lineup-card:hover,.ngt:hover{
+  border-color:var(--border-strong);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),var(--e1);}
+.ngt:hover{border-color:var(--muted);}  /* tiles are click targets — stronger lift than the passive cards above */
+.ngt.on{border-color:var(--accent);background:var(--accent-dim);}
+.ngt.adj{border-color:var(--accent-line);}
+.saved-lineup.dup{border-color:var(--red);background:rgba(239,68,68,.07);}
+
+/* ── Section headers ──────────────────────────────────────────────────────
+   The "SETTINGS" / "NFL SIMULATION" label, made one thing: mono, uppercase,
+   tracked, muted. .section-title and .exp-title were Bebas at two sizes with
+   two different letter-spacings; unifying them is what makes the right panel
+   read as one column of sections rather than three stacked designs. */
+.section-title,.autogen-section-title,.exp-title,.section-hdr{
+  font-family:var(--mono);font-size:var(--t1);font-weight:500;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--muted);}
+.autogen-section-title{margin-bottom:var(--s3);}
+.section-title{margin-bottom:var(--s2);}
+.exp-title{margin-bottom:var(--s2);}
+
+/* ── Tabs ─────────────────────────────────────────────────────────────────
+   A 2px underline that is always present (transparent when inactive) so the
+   active state is a colour change, not a layout change, and a faint wash on
+   hover so the target reads as clickable before it is clicked. */
+.tab{position:relative;font-family:var(--sans);font-size:var(--t2);font-weight:600;
+  letter-spacing:.02em;text-transform:none;padding:10px 6px;
+  transition:color var(--dur) var(--ease),background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);}
+.tab:hover{color:var(--text);background:rgba(255,255,255,.03);}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);background:var(--accent-dim);}
+
+/* ── Form controls ────────────────────────────────────────────────────────
+   One inset control well, one focus treatment. Range inputs keep the three
+   accent colours the app already assigns by meaning (gold = generic, blue =
+   lean, purple = correlation) but share a track height and thumb. */
+input[type=text],input[type=number],select,textarea,
+.form-input,.setting-select,.setting-num,.rule-select,.rule-num,.mapper-select,.hb-ev-sel{
+  transition:border-color var(--dur) var(--ease),background var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);}
+input[type=text]:hover,input[type=number]:hover,select:hover,textarea:hover{border-color:var(--border-strong);}
+input[type=text]:focus,input[type=number]:focus,select:focus,textarea:focus,
+.form-input:focus,.setting-select:focus,.setting-num:focus{border-color:var(--accent);box-shadow:var(--focus);}
+input[type=range]{height:16px;cursor:pointer;}
+input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);}
+
+/* ── Modals ───────────────────────────────────────────────────────────────
+   One rhythm for every modal: 24px gutter, a title block, a scrolling body,
+   a footer that sits on a hairline. The overlay blurs what is behind it so a
+   dense app screen does not compete with the dialog for attention, and both
+   fade rather than appearing, which is the only motion in the file that the
+   eye is actually meant to notice. */
+.modal-overlay{background:rgba(6,6,10,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  animation:modalIn var(--dur-slow) var(--ease);}
+.modal{background:var(--panel);border:1px solid var(--border-soft);border-radius:var(--r4);
+  box-shadow:var(--e3);animation:modalPop var(--dur-slow) var(--ease);}
+@keyframes modalIn{from{opacity:0}to{opacity:1}}
+@keyframes modalPop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.modal-title{letter-spacing:1.6px;}
+.modal-footer{border-top:1px solid var(--border-soft);padding-top:var(--s4);}
+.btn-modal{transition:background var(--dur) var(--ease),border-color var(--dur) var(--ease),color var(--dur) var(--ease);}
+/* The two hand-rolled modals (Update Pool, DK Entries) are plain divs with
+   inline styles rather than .modal, so they are matched by id and given the
+   same ground, blur and entrance. */
+#updatePoolModal,#dkEntriesModal{backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
+#updatePoolModal>div,#dkEntriesModal>div{box-shadow:var(--e3)!important;
+  border-color:var(--border-soft)!important;border-radius:var(--r4)!important;
+  animation:modalPop var(--dur-slow) var(--ease);}
+
+/* ── Pool density ─────────────────────────────────────────────────────────
+   Hover only, no zebra: at 30-80 rows a stripe fights the ownership and
+   exposure colour coding for the eye. The row keeps its 5px padding but gains
+   a fixed 26px minimum so a row with an inline Proj input is the same height
+   as one without, and column headers get a touch more weight and tracking so
+   the header band reads as a band. */
+.driver-row{min-height:26px;padding:4px 7px;border:1px solid transparent;border-radius:var(--r1);
+  transition:background var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);}
+.driver-row:hover{background:var(--surface-2);border-color:var(--border-soft);}
+.driver-row.selected{background:var(--accent-dim);border-color:var(--accent-line);}
+.col-headers{font-weight:500;letter-spacing:.09em;color:var(--muted);
+  background:rgba(255,255,255,.012);}
+.pool-col-hdr{transition:color var(--dur-fast) var(--ease);}
+/* Numbers are right-aligned mono wherever they are numbers. */
+.cell-sal,.cell-exp,.cell-mono{font-variant-numeric:tabular-nums;}
+.cell-sal{text-align:right;}
+
+/* ── Right-panel gutters ──────────────────────────────────────────────────
+   Every section in the right column was on its own inset — 10px here, 12px
+   there, 10/12 on the panels. One 12px gutter, one 16px gap between blocks. */
+.autogen-panel,.exposure-panel,.groups-panel,.current-lineup,.saved-panel{padding:var(--s4);}
+.autogen-panel,.groups-panel{gap:var(--s4);}
+.exposure-panel{gap:var(--s5);}
+.autogen-section{padding:var(--s4);}
+
+/* ── Exposure bars ────────────────────────────────────────────────────────
+   Slightly taller track and a wider count column so the % never abuts the
+   bar; the bar fill keeps its meaning-coded colour. */
+.exp-driver-row{background:var(--surface-1);border-color:var(--border-soft);
+  border-radius:var(--r2);transition:border-color var(--dur-fast) var(--ease),background var(--dur-fast) var(--ease);}
+.exp-driver-row:hover{border-color:var(--border-strong);background:var(--surface-2);}
+.exp-bar-track,.combo-bar-track{background:var(--surface-3);}
+.exp-bar-track{height:5px;border-radius:3px;}
+.exp-ct,.exp-pct{font-variant-numeric:tabular-nums;}
+.combo-row{background:var(--surface-1);border-color:var(--border-soft);border-radius:var(--r2);}
+
+/* ── Preview modal ────────────────────────────────────────────────────────
+   Card spacing and a stats row that lines up: the stat chips get tabular
+   figures and a consistent 10px gap so Proj / Sim / EV / Own read as columns
+   down the stack of cards instead of drifting with name length. */
+.preview-lineup-card{padding:var(--s3) 10px;margin-bottom:var(--s2);}
+.preview-lineup-stats{gap:10px;align-items:baseline;}
+.preview-stat,.saved-stat{font-variant-numeric:tabular-nums;}
+.preview-lineup-names,.saved-names{color:var(--text-dim);}
+
+/* ── Empty & pending states ───────────────────────────────────────────────
+   "Ready to generate.", "No lineups saved yet", "No groups defined yet" were
+   three different treatments of the same idea. One quiet treatment: dashed
+   hairline, centred muted text, no italics (italic mono read as an error). */
+.gen-log{background:var(--surface-1);border:1px dashed var(--border-soft);
+  border-radius:var(--r2);color:var(--muted);padding:var(--s3) 10px;line-height:1.6;}
+.gen-log:not(:empty){font-variant-numeric:tabular-nums;}
+.empty-saved,.no-data{font-style:normal;color:var(--muted);
+  border:1px dashed var(--border-soft);border-radius:var(--r3);
+  padding:var(--s5) var(--s4);background:rgba(255,255,255,.012);}
+
+/* ── Toast ────────────────────────────────────────────────────────────────
+   Fades in place; it must not push the Save button around, so only opacity
+   moves and the box keeps its height. */
+.toast{transition:opacity var(--dur-slow) var(--ease);border-radius:var(--r2);}
+
+/* ── Misc interactive polish ──────────────────────────────────────────────
+   One transition duration for the small controls that already had four. */
+.slate-tab,.btn-new-slate,.sort-btn,.show-hidden-btn,.btn-export,.btn-generate,
+.btn-add-selected,.btn-select-all,.saved-load,.lu-det-btn,.sdash-btn,.mix-btn,
+.nascar-track-btn,.group-del-btn,.btn-add-group,.btn-edit-players,.topbar-dropdown-item{
+  transition:background var(--dur) var(--ease),border-color var(--dur) var(--ease),
+    color var(--dur) var(--ease),box-shadow var(--dur) var(--ease);}
+.sort-btn,.show-hidden-btn{font-variant-numeric:tabular-nums;}
+.sort-btn:hover,.show-hidden-btn:hover{background:var(--surface-3);}
+.btn-generate:hover:not(:disabled),.btn-add-selected:hover:not(:disabled){box-shadow:var(--e1);}
+.slate-tab:hover{background:var(--surface-3);}
+.slate-tab.active{background:var(--accent-soft);}
+.saved-lineup,.exp-driver-row,.combo-row,.gpm-row{transition-duration:var(--dur-fast);}
+/* The dup pulse scales a card, which shifts everything under it. Fade the
+   border instead — same "this one is a duplicate" signal, no reflow. */
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+
+/* ── Segmented control (Optimize / Simulate) ──────────────────────────────
+   switchGenMode writes the active background inline, so the class layer only
+   supplies the well, the radius and the hover — the inline value still wins
+   for the active pill and the mode logic is untouched. */
+.seg-ctl{background:var(--surface-3)!important;border:1px solid var(--border-soft);
+  border-radius:var(--r3)!important;padding:3px!important;}
+.seg-ctl>button{border-radius:var(--r2)!important;letter-spacing:.02em;
+  transition:background var(--dur) var(--ease),color var(--dur) var(--ease);}
+.seg-ctl>button:hover{color:var(--text);}
+
+/* ── Alignment fixes ──────────────────────────────────────────────────────
+   The slot position tag was 32px wide, one pixel short of "FLEX" in DM Mono
+   at 9px, so the label and the player name ran together on every flex slot.
+   36px clears it and keeps CPT/QB/RB/WR/TE/DST on the same left edge. */
+/* .slot-num is a 12px well built for the digits 1-9; when the slot carries a
+   position TAG instead ("CPT", "FLEX", "DST") the 32px span overflowed that
+   well and printed on top of the player's name. Widen the well itself for the
+   tag case only, so numbered slates keep their tight left rail. */
+.slot-pos-tag{width:38px;}
+.slot-num:has(>.slot-pos-tag){width:38px;}
+.slot{border-radius:var(--r2);transition:border-color var(--dur-fast) var(--ease),background var(--dur-fast) var(--ease);}
+.slot.filled{border-color:var(--accent-line);background:var(--accent-dim);}
+.total-pill{border-radius:var(--r2);border-color:var(--border-soft);}
+.total-value,.sal-used,.sal-rem,.saved-sal,.saved-count{font-variant-numeric:tabular-nums;}
+
+/* The Group Rules summary was the only empty state still set in italics. */
+#groupRulesSummary{font-style:normal!important;color:var(--muted);}
+
+/* ── DK Entries + Update Pool modal internals ─────────────────────────────
+   The contest table is the densest thing in the app that is not the pool, so
+   it gets the same rules: a mono small-caps header, a hairline between rows,
+   a hover, and its numbers in tabular figures. */
+#dkEntriesModal th{font-family:var(--mono);font-size:var(--t1);font-weight:500;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--muted);}
+#dkEntriesModal td{border-top:1px solid var(--border-soft);}
+#dkEntriesModal tbody tr{transition:background var(--dur-fast) var(--ease);}
+#dkEntriesModal tbody tr:hover{background:rgba(255,255,255,.025);}
+#dkEntriesDrop,#updatePoolDropZone{background:rgba(255,255,255,.012);border-radius:var(--r3)!important;
+  transition:border-color var(--dur) var(--ease),background var(--dur) var(--ease);}
+#dkEntriesDrop:hover,#updatePoolDropZone:hover{border-color:var(--accent-line)!important;background:var(--accent-dim);}
+
+/* ── History cards ────────────────────────────────────────────────────────
+   Same card as everywhere else, with the gold hover the old inline handlers
+   were doing in JavaScript. */
+.hist-card:hover{border-color:var(--accent-line);background:var(--surface-3);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05),var(--e1);}
+
+/* ── Sim-dashboard controls ───────────────────────────────────────────────
+   Fold the dashboard's own button shapes into the ghost treatment so the Sim
+   tab's chrome matches the rest of the right panel. */
+.sdash-btn{border-radius:var(--r2);transition:background var(--dur) var(--ease),
+  border-color var(--dur) var(--ease),color var(--dur) var(--ease);}
+.sdash-btn:hover:not(:disabled){border-color:var(--accent-line);color:var(--accent);background:var(--accent-dim);}
+.sdash-mini:hover{background:var(--accent-dim);}
+.sdash-val,.sdash-pshare,.sdash-pmean,.sdash-stat-tot,.sdash-game-imp{font-variant-numeric:tabular-nums;}
+.sdash-range{height:16px;}
+.lu-det-btn:hover,.saved-load:hover{background:var(--accent-dim);}
+.lu-det-pcts,.lu-det-tbl,.lu-det-axis{font-variant-numeric:tabular-nums;}
 </style>
 </head>
 <body>
@@ -988,6 +1311,8 @@ html { overscroll-behavior-y: contain; }
       <button class="show-hidden-btn" id="unhideAllBtn" onclick="unhideAll()" style="display:none;">✕ Unhide All</button>
       <button class="show-hidden-btn" id="resetMaxExpBtn" onclick="resetMaxExposures()" style="display:none;" title="Clear all MAX% overrides back to default (100)">↺ Reset Max</button>
       <button class="show-hidden-btn" id="updatePoolBtn" onclick="openUpdatePoolModal()" title="Re-upload CSV to refresh projections, ownership, salary, tee times">↺ Update</button>
+      <button class="show-hidden-btn" id="dkCsvBtn" onclick="document.getElementById('dkCsvFile').click()" title="Upload a DraftKings DKSalaries.csv or DKEntries.csv: attaches game times, home/away and positions to your players, and loads your contest entries for the DK Entries fill" style="display:none;border-color:rgba(83,180,255,.35);color:#53b4ff;">⬆ DK CSV</button>
+      <input type="file" id="dkCsvFile" accept=".csv" style="display:none" onchange="handleDkCsvFile(this.files[0]);this.value='';">
       <button class="show-hidden-btn" id="refreshSheetBtn" onclick="refreshFromSheet()" title="Re-fetch latest data from Google Sheet" style="display:none;border-color:rgba(52,168,83,0.3);color:#34a853;">↺ Refresh</button>
       <button class="show-hidden-btn" id="simCsvBtn" onclick="exportSimCSV()" title="Export each player's simulated outcome distribution (mean, floor/ceiling, finish rates) to CSV" style="display:none;border-color:rgba(34,197,94,0.35);color:var(--green);">⬇ Sim CSV</button>
     </div>
@@ -1012,7 +1337,33 @@ html { overscroll-behavior-y: contain; }
           <div style="font-size:10px;color:var(--muted);margin-bottom:10px;">Only mapped columns will be updated. Unmapped columns keep their current values. Name + Salary are required to match players.</div>
           <div id="updatePoolMapperRows" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px;"></div>
           <div id="updatePoolPreview" style="font-size:10px;color:var(--muted);margin-bottom:12px;"></div>
-          <button id="updatePoolApplyBtn" onclick="applyPoolUpdate()" style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:8px 18px;font-size:12px;font-weight:600;cursor:pointer;width:100%;">Apply Update</button>
+          <button class="btn btn-md btn-primary" id="updatePoolApplyBtn" onclick="applyPoolUpdate()" style="width:100%;">Apply Update</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- DK ENTRIES — fill DraftKings' entries file from the saved lineups -->
+    <div id="dkEntriesModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9000;align-items:center;justify-content:center;backdrop-filter:blur(2px);">
+      <div style="background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:24px;width:min(760px,96vw);max-height:90vh;overflow-y:auto;position:relative;box-shadow:0 8px 32px rgba(0,0,0,.6)">
+        <button onclick="closeDkEntriesModal()" style="position:absolute;top:12px;right:14px;background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;">✕</button>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">↥ Fill DK Entries</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:14px;">Drop the <b>DKEntries.csv</b> DraftKings gives you for this draft group, choose how each contest should be filled, and download it back with your saved lineups in the slot columns. Only the entries you fill are written — DK leaves everything else untouched.</div>
+        <div id="dkEntriesDrop" style="border:1.5px dashed var(--border);border-radius:8px;padding:24px;text-align:center;cursor:pointer;transition:border-color .15s;margin-bottom:12px;"
+          onclick="document.getElementById('dkEntriesFile').click()"
+          ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+          ondragleave="this.style.borderColor='var(--border)'"
+          ondrop="event.preventDefault();this.style.borderColor='var(--border)';handleDkEntriesFile(event.dataTransfer.files[0])">
+          <div style="font-size:13px;color:var(--muted);">Drop DKEntries.csv here or click to browse</div>
+          <input type="file" id="dkEntriesFile" accept=".csv" style="display:none" onchange="handleDkEntriesFile(this.files[0])">
+          <div style="margin-top:12px;" onclick="event.stopPropagation()">
+            <textarea id="dkEntriesPasteBox" placeholder="…or paste the file's contents here" style="width:100%;height:60px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:11px;font-family:'DM Mono',monospace;outline:none;resize:vertical;"></textarea>
+            <button class="btn btn-sm btn-default" onclick="dkEntriesPaste()" style="margin-top:6px;">Use pasted text</button>
+          </div>
+        </div>
+        <div id="dkEntriesStatus" style="font-size:11px;color:var(--muted);margin-bottom:10px;min-height:16px;"></div>
+        <div id="dkEntriesBody"></div>
+        <div id="dkEntriesFooter" style="display:none;margin-top:14px;">
+          <button class="btn btn-md btn-primary" id="dkEntriesExportBtn" onclick="exportDkEntriesCsv()" style="width:100%;">Download filled entries</button>
         </div>
       </div>
     </div>
@@ -1063,8 +1414,8 @@ html { overscroll-behavior-y: contain; }
           <div class="hb-ev-body" id="hbEvBody"></div>
         </div>
         <div class="action-btns">
-          <button class="btn btn-clear" onclick="clearLineup()">Clear</button>
-          <button class="btn btn-save" id="saveBtn" onclick="saveLineup()" disabled>Save Lineup</button>
+          <button class="btn btn-md btn-ghost btn-clear" onclick="clearLineup()">Clear</button>
+          <button class="btn btn-md btn-primary btn-save" id="saveBtn" onclick="saveLineup()" disabled>Save Lineup</button>
         </div>
         <div class="toast" id="toast"></div>
       </div>
@@ -1074,7 +1425,9 @@ html { overscroll-behavior-y: contain; }
             <div class="section-title" style="margin-bottom:2px">Saved Lineups</div>
             <div class="saved-count" id="savedCount">0 saved</div>
           </div>
-          <div style="display:flex;gap:6px;align-items:center;">
+          <!-- Five controls no longer fit on one line in a 470px panel, so the
+               row wraps right-aligned instead of clipping Export CSV. -->
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
             <div style="display:flex;align-items:center;gap:0;">
               <select id="savedSortMetric" onchange="applySavedSort();const _m=this.value,_b=document.getElementById('savedSortDir');if(_b)_b.style.visibility=_m==='saved'?'hidden':'visible';"
                 style="background:var(--surface2);border:1px solid var(--border);border-right:none;color:var(--muted);padding:4px 7px;border-radius:5px 0 0 5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;outline:none;">
@@ -1091,8 +1444,10 @@ html { overscroll-behavior-y: contain; }
               <button id="savedSortDir" onclick="toggleSavedSortDir()"
                 style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 7px;border-radius:0 5px 5px 0;font-size:11px;font-family:'DM Mono',monospace;cursor:pointer;line-height:1;min-width:26px;text-align:center;">↓</button>
             </div>
-            <button onclick="toggleSavedFilter()" id="savedFilterBtn" title="Remove saved lineups by projection, sim score, ownership, win%, rating…" style="background:none;border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;display:none;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="if(!this._on){this.style.borderColor='var(--border)';this.style.color='var(--muted)'}">Filter</button>
-            <button onclick="clearSavedLineups()" id="clearSavedBtn" style="background:none;border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;display:none;" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">Clear All</button>
+            <button class="btn btn-sm btn-ghost" onclick="toggleSavedFilter()" id="savedFilterBtn" title="Remove saved lineups by projection, sim score, ownership, win%, rating…" style="display:none;">Filter</button>
+            <button class="btn btn-sm btn-ghost btn-ghost-danger" onclick="clearSavedLineups()" id="clearSavedBtn" style="display:none;">Clear All</button>
+            <!-- DK Entries: fill DraftKings' own entries file from these lineups. NFL only. -->
+            <button class="btn btn-sm btn-ghost" onclick="openDkEntriesModal()" id="dkEntriesBtn" title="Fill a DraftKings DKEntries.csv from your saved lineups and download it ready to upload" style="display:none;">DK Entries</button>
             <button class="btn-export" id="exportBtn" onclick="exportCSV()" disabled>Export CSV</button>
           </div>
         </div>
@@ -1104,8 +1459,8 @@ html { overscroll-behavior-y: contain; }
           <div id="savedFilterRows"></div>
           <div style="display:flex;gap:7px;align-items:center;margin-top:8px;flex-wrap:wrap;">
             <div id="savedFilterCount" style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;flex:1;"></div>
-            <button onclick="clearSavedFilter()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:4px 9px;border-radius:5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;">Reset</button>
-            <button id="savedFilterApply" onclick="applySavedFilterDelete()" disabled style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);color:var(--red);padding:4px 11px;border-radius:5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;">Remove matching</button>
+            <button class="btn btn-sm btn-ghost" onclick="clearSavedFilter()">Reset</button>
+            <button class="btn btn-sm btn-danger" id="savedFilterApply" onclick="applySavedFilterDelete()" disabled>Remove matching</button>
           </div>
         </div>
         <div class="saved-list" id="savedList"></div>
@@ -1120,7 +1475,7 @@ html { overscroll-behavior-y: contain; }
             <div class="section-title" style="margin-bottom:2px;">Lineup Set History</div>
             <div style="font-size:10px;color:var(--muted);">Last 10 generated sets. Click to preview any set.</div>
           </div>
-          <button onclick="clearLineupHistory()" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--red);padding:4px 10px;border-radius:4px;font-size:10px;font-family:'DM Mono',monospace;cursor:pointer;">Clear All</button>
+          <button class="btn btn-sm btn-danger" onclick="clearLineupHistory()">Clear All</button>
         </div>
         <div style="overflow-y:auto;flex:1;padding:8px 10px;" id="historyList"></div>
       </div>
@@ -1139,7 +1494,7 @@ html { overscroll-behavior-y: contain; }
             <div class="section-title" style="margin-bottom:2px;">Edit Projections</div>
             <div style="font-size:10px;color:var(--muted);">Changes persist until manually reset. Use ↺ to reset individual players.</div>
           </div>
-          <button onclick="resetAllProj()" id="resetAllProjBtn" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--red);padding:4px 10px;border-radius:4px;font-size:10px;font-family:'DM Mono',monospace;cursor:pointer;">↺ Reset All</button>
+          <button class="btn btn-sm btn-danger" onclick="resetAllProj()" id="resetAllProjBtn">↺ Reset All</button>
         </div>
         <div style="overflow-y:auto;flex:1;padding:6px 10px;" id="projEditList"></div>
       </div>
@@ -1163,7 +1518,7 @@ html { overscroll-behavior-y: contain; }
       <div class="autogen-panel">
 
         <!-- Mode sub-tabs -->
-        <div style="display:flex;gap:2px;margin-bottom:12px;background:var(--surface2);border-radius:8px;padding:3px;">
+        <div class="seg-ctl" style="display:flex;gap:2px;margin-bottom:12px;background:var(--surface2);border-radius:8px;padding:3px;">
           <button id="modeTabOptimize" onclick="switchGenMode('optimize',true)"
             style="flex:1;padding:6px 0;font-size:11px;font-weight:600;border:none;border-radius:6px;cursor:pointer;background:var(--surface);color:var(--text);font-family:'DM Sans',sans-serif;">
             ⚡ Optimize
@@ -1327,6 +1682,15 @@ html { overscroll-behavior-y: contain; }
               </select>
             </div>
             <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-top:4px;">Teammates split ONE pie: each sim draws the team's receiving/rushing yards and touchdowns, then splits them among the players around their market shares. A 150-yard game for the WR1 is yardage his teammates did not get, so stacks and anti-stacks price correctly. Higher = shares swing more (Off = every player drawn independently, the old behavior).</div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+              <span class="setting-label" style="flex:none;">Game-stack correlation</span>
+              <select id="nflPaceCorr" class="form-input" style="width:110px;padding:3px 6px;font-size:11px;"
+                onchange="const _s=activeSlate();if(_s){_s._nflPaceCorr=this.value;save();}">
+                <option value="off">Off</option>
+                <option value="normal">Normal</option>
+              </select>
+            </div>
+            <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-top:4px;">Both offenses in a game share one pace/environment factor, so a shootout lifts BOTH sides' yardage and receptions and a slog holds both down. This is what makes a bring-back (your QB's stack plus a receiver from the other team) price as the mildly positive play it really is instead of a coin flip. Means are unchanged — only the joint distribution moves. Off = each team's volume derived from its own score only, the old behavior.</div>
 
             <div class="autogen-section-title" style="margin-top:10px;">Stacking</div>
             <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">Correlation is already in the sim — these rules force it into the lineups you actually submit. "QB + N" requires N pass catchers (WR/TE) from the QB's own team; "bring-back" requires a skill player from the opposing team, the play that wins shootouts.</div>
@@ -2110,6 +2474,19 @@ function NFL_PROP_FIELDS_LIST(){ return [
   {k:'dst_sacks_ou', l:'Sacks'},   {k:'dst_int_ou', l:'INT'},
   {k:'dst_to_ou', l:'Turnovers'},  {k:'dst_pts_ou', l:'DST pts'},
 ]; }
+// "NE@SEA 09/09/2026 08:20PM ET" / "1:00 PM" / "2026-09-14T17:00:00" →
+// {mins: minutes since midnight (as written, no TZ conversion), label: "8:20 PM", date}
+function nflParseKickoff(v){
+  const str = String(v||'').trim(); if(!str) return null;
+  let m = str.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);
+  let h, mi;
+  if(m){ h = parseInt(m[1],10)%12 + (/P/i.test(m[3])?12:0); mi = parseInt(m[2],10); }
+  else { m = str.match(/(?:T|\s|^)(\d{1,2}):(\d{2})(?::\d{2})?(?!\s*[AP]M)/i); if(!m) return null; h = parseInt(m[1],10); mi = parseInt(m[2],10); }
+  if(!Number.isFinite(h)||!Number.isFinite(mi)) return null;
+  const h12 = h%12===0 ? 12 : h%12;
+  const dm = str.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/) || str.match(/(\d{4})-(\d{2})-(\d{2})/);
+  return { mins: h*60+mi, label: `${h12}:${String(mi).padStart(2,'0')} ${h>=12?'PM':'AM'}`, date: dm ? dm[0] : null };
+}
 function nflHasProps(p){
   if(!p) return false;
   return NFL_PROP_FIELDS_LIST().some(f => p[f.k] != null && p[f.k] !== '') || (p.atd != null && p.atd !== '');
@@ -2154,6 +2531,18 @@ function applyNflStats(p, row, headers){
   p.spread      = num(/^spread$/i);
   p.tm_tot      = num(/^tm\s*tot(al)?$/i);
   p.opp_tot     = num(/^opp\s*tot(al)?$/i);
+  // Kickoff. DK's salary file carries "Game Info" ("NE@SEA 09/09/2026 08:20PM
+  // ET"); a sheet may instead have "Game Time" / "Kickoff" / "Start". Keep the
+  // raw cell and a parsed {mins, label} so tiles can show and sort by it.
+  { const gi = get(/^(game\s*info|game\s*time|kickoff|start(\s*time)?|time)$/i);
+    if(gi){ p.game_info = gi; const k = nflParseKickoff(gi); if(k){ p.kick_mins = k.mins; p.kick_label = k.label; p.kick_date = k.date||null; }
+      // "NO@DET …" is away@home. Fill opponent when the sheet has none and
+      // remember which side is home (tiles show it; the sim may use it later).
+      const m = gi.match(/^\s*([A-Z]{2,4})@([A-Z]{2,4})\b/i);
+      if(m){ const away=m[1].toUpperCase(), home=m[2].toUpperCase(); const t=String(p.team||'').toUpperCase().replace(/[^A-Z]/g,'');
+        if(t===home){ p.home=true;  if(!p.opp) p.opp=away; }
+        else if(t===away){ p.home=false; if(!p.opp) p.opp=home; } }
+    } }
   // Position fallback: DK salary CSVs carry "Position"; the mapper handles it,
   // but header-scan too so sheet imports without an explicit mapping work.
   if(!p.position){
@@ -3024,7 +3413,9 @@ function renderHistory(){
            ${set.adj?`<button onclick="event.stopPropagation();restoreHistoryInputs('${set.id}')" style="background:none;border:1px solid var(--border);color:var(--muted);font-size:9px;padding:1px 6px;border-radius:4px;cursor:pointer;font-family:'DM Sans',sans-serif;" title="Copy this run's sim adjustments back onto the dashboard">↺ Restore inputs</button>`:''}
          </div>`
       : '';
-    return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:border-color .15s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'" onclick="previewHistorySet('${set.id}')">
+    // The card treatment and its hover now come from .card / .hist-card, so the
+    // two inline handlers that used to paint the border by hand are gone.
+    return `<div class="card hist-card" style="padding:10px 12px;margin-bottom:8px;cursor:pointer;" onclick="previewHistorySet('${set.id}')">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
         <div style="font-size:12px;font-weight:600;color:var(--accent);">${set.label}</div>
         <button onclick="event.stopPropagation();deleteHistorySet('${set.id}')" style="background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;padding:0;" title="Delete this set">✕</button>
@@ -3457,6 +3848,12 @@ function renderTopBar() {
     const _sl = activeSlate();
     _refreshBtn.style.display = (_sl && _sl.sheetTab) ? 'inline-flex' : 'none';
   }
+  // Every sport has a DKEntries export, so the upload button is offered
+  // whenever a slate is open. What the file is USED for differs: NFL also folds
+  // the sidecar player table into the pool (game times, home/away, positions),
+  // while golf/UFC/NASCAR only take the contest entries out of it — see
+  // handleDkCsvFile.
+  { const _dk=document.getElementById('dkCsvBtn'); const _sl=activeSlate(); if(_dk) _dk.style.display=_sl?'inline-flex':'none'; }
   const tabs=document.getElementById('slateTabs');
   tabs.innerHTML=slates.map(s=>{
     const cfg=SPORT_CFG[s.sport]||SPORT_CFG.nascar;
@@ -3770,12 +4167,15 @@ function nflGameEnvs(slate){
     if(ti.spread==null && Number.isFinite(p.spread)) ti.spread=p.spread;
     if(ti.implied==null && Number.isFinite(p.tm_tot)) ti.implied=p.tm_tot;
     if(ti.oppImplied==null && Number.isFinite(p.opp_tot)) ti.oppImplied=p.opp_tot;
+    if(ti.kickMins==null && Number.isFinite(p.kick_mins)){ ti.kickMins=p.kick_mins; ti.kickLabel=p.kick_label; ti.kickDate=p.kick_date||null; }
+    if(ti.home==null && typeof p.home==='boolean') ti.home=p.home;
   }
   const games=new Map();
   for(const ti of teams.values()){
     const key=ti.opp?[ti.team,ti.opp].sort().join('@'):ti.team;
-    if(!games.has(key)) games.set(key,{key,teams:[]});
-    games.get(key).teams.push(ti);
+    if(!games.has(key)) games.set(key,{key,teams:[],kickMins:null,kickLabel:null,kickDate:null});
+    const g=games.get(key); g.teams.push(ti);
+    if(g.kickMins==null && ti.kickMins!=null){ g.kickMins=ti.kickMins; g.kickLabel=ti.kickLabel; g.kickDate=ti.kickDate; }
   }
   return [...games.values()];
 }
@@ -3809,9 +4209,21 @@ function renderNflGameTiles(slate){
     return (a && a.base!=null && Math.abs(a.implied-a.base)>=0.05) ? a : null;
   };
   const activeKey=slate._gameFilter||null;
-  // Highest total first — the shootouts are what a DFS eye scans for.
+  const activeTeam=slate._teamFilter||null;
+  // Kickoff window first when the sheet carries game times (that is how a
+  // main slate is read: 1pm games, then the late window, then primetime), and
+  // highest total first inside a window — the shootouts are what a DFS eye
+  // scans for.
   const gameTotal=g=>{ const [x,y]=g.teams; return x.total??(y&&y.total)??((x.implied!=null&&y&&y.implied!=null)?x.implied+y.implied:0); };
-  const tiles=games.slice().sort((g1,g2)=>gameTotal(g2)-gameTotal(g1)).map(g=>{
+  const anyKick=games.some(g=>g.kickMins!=null);
+  const dateKey=g=>{ const d=g.kickDate||''; const m=d.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/); return m?`${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`:d; };
+  const tiles=games.slice().sort((g1,g2)=>{
+    if(anyKick){
+      const d1=dateKey(g1), d2=dateKey(g2); if(d1!==d2) return d1<d2?-1:1;
+      const k1=g1.kickMins??1e9, k2=g2.kickMins??1e9; if(k1!==k2) return k1-k2;
+    }
+    return gameTotal(g2)-gameTotal(g1);
+  }).map(g=>{
     // Order: away/home is unknown from a salary sheet, so favorite on the left.
     const [a,b]=g.teams.length===2
       ? g.teams.slice().sort((x,y)=>(x.spread??0)-(y.spread??0))
@@ -3826,22 +4238,29 @@ function renderNflGameTiles(slate){
     const gAdj=!!(aA||aB);
     const shownA=aA?aA.implied:impA, shownB=aB?aB.implied:impB;
     const adjTotal=gAdj&&shownA!=null&&shownB!=null ? shownA+shownB : null;
-    const imp=(v,ad)=>`<span class="ngt-imp${ad?' adj':''}" title="${ad?`Adjusted on the Sim tab (Vegas ${fmt1(ad.base)})`:'Implied team total'}">${fmt1(v)}</span>`;
+    // An adjusted side prints "27.3 · was 24" so the market number is never
+    // more than a glance away from the one the sim is actually using.
+    const imp=(v,ad)=>`<span class="ngt-imp${ad?' adj':''}" title="${ad?`Adjusted on the Sim tab (Vegas ${fmt1(ad.base)})`:'Implied team total'}">${fmt1(v)}${ad?`<span class="ngt-was"> · was ${fmt1(ad.base)}</span>`:''}</span>`;
     const isOn=activeKey===g.key;
-    const tip=`${a.team} vs ${b.team} — ${gAdj?'adjusted on the Sim tab (Vegas: '+fmt1(impA)+' / '+fmt1(impB)+', O/U '+fmt1(total)+')':'from the odds sheet'}. Click to ${isOn?'show all games':'show only this game\'s players'}.`;
+    const tip=`${a.team} vs ${b.team}${g.kickLabel?' · '+g.kickLabel:''} — ${gAdj?'adjusted on the Sim tab (Vegas: '+fmt1(impA)+' / '+fmt1(impB)+', O/U '+fmt1(total)+')':'from the odds sheet'}. Click the game to show only its players; click a team to show only that team.`;
+    // Team abbreviations are their own click targets (filter to one team);
+    // anywhere else on the tile filters to the game.
+    const homeOf=t=>{ const ti=g.teams.find(x=>x.team===t); return ti&&ti.home===true; };
+    const teamBtn=(t,isFav)=>`<span class="ngt-team${isFav?' fav':''}${activeTeam===t?' on':''}" onclick="event.stopPropagation();toggleTeamFilter('${t}')" title="Show only ${t} players${homeOf(t)?' (home)':''}">${homeOf(t)?'<span class="ngt-home" title="home">⌂</span>':''}${t}</span>`;
+    const timeTxt=g.kickLabel?`<span class="ngt-time" title="Kickoff${g.kickDate?' '+g.kickDate:''}">${g.kickLabel}</span>`:'';
     return `<div class="ngt${isOn?' on':''}${gAdj?' adj':''}" data-gkey="${g.key}" onclick="toggleGameFilter('${g.key}')" title="${tip}">
       ${gAdj?'<span class="ngt-chip">⚙ adjusted</span>':''}
       <div class="ngt-row">
-        <span class="ngt-side"><span class="ngt-team${fav===a.team?' fav':''}">${a.team}</span>${imp(shownA,aA)}</span>
+        <span class="ngt-side">${teamBtn(a.team,fav===a.team)}${imp(shownA,aA)}</span>
         <span class="ngt-dash">–</span>
-        <span class="ngt-side">${imp(shownB,aB)}<span class="ngt-team${fav===b.team?' fav':''}">${b.team}</span></span>
+        <span class="ngt-side">${imp(shownB,aB)}${teamBtn(b.team,fav===b.team)}</span>
       </div>
-      <div class="ngt-row ngt-sub"><span><b>${sprTxt}</b></span><span>O/U <b${adjTotal!=null?' style="color:var(--accent)"':''}>${fmt1(adjTotal!=null?adjTotal:total)}</b></span></div>
+      <div class="ngt-row ngt-sub"><span><b>${sprTxt}</b></span>${timeTxt}<span>O/U <b${adjTotal!=null?' style="color:var(--accent)"':''}>${fmt1(adjTotal!=null?adjTotal:total)}</b></span></div>
     </div>`;
   }).join('');
   const noEnv=games.every(g=>g.teams.every(t=>t.total==null&&t.implied==null));
   el.innerHTML=tiles
-    +(activeKey?`<button class="ngt-clear" onclick="toggleGameFilter(null)" title="Show every game's players">✕ All games</button>`:'')
+    +((activeKey||activeTeam)?`<button class="ngt-clear" onclick="toggleGameFilter(null)" title="Show every player">✕ ${activeTeam?activeTeam+' only':'All games'}</button>`:'')
     +(noEnv?`<div class="ngt-note">No O/U / spread on this sheet — run the odds puller for real game environments (the sim falls back to a 44.5 total).</div>`:'');
   el.style.display='flex';
 }
@@ -3850,10 +4269,19 @@ function renderNflGameTiles(slate){
 function toggleGameFilter(key){
   const slate=activeSlate(); if(!slate) return;
   slate._gameFilter = (key && slate._gameFilter!==key) ? key : null;
+  slate._teamFilter = null;                       // game and team filters are exclusive
+  save(); renderPool();
+}
+function toggleTeamFilter(team){
+  const slate=activeSlate(); if(!slate) return;
+  slate._teamFilter = (team && slate._teamFilter!==team) ? team : null;
+  slate._gameFilter = null;
   save(); renderPool();
 }
 function gameFilterTeams(slate){
-  const k=slate&&slate._gameFilter; if(!k) return null;
+  if(!slate) return null;
+  if(slate._teamFilter) return new Set([slate._teamFilter]);
+  const k=slate._gameFilter; if(!k) return null;
   const g=nflGameEnvs(slate).find(x=>x.key===k);
   if(!g){ slate._gameFilter=null; return null; }
   const set=new Set(g.teams.map(t=>t.team));
@@ -4661,6 +5089,11 @@ function renderSaved(){
   if(clearBtn) clearBtn.style.display=lineups.length>0?'':'none';
   const filtBtn=document.getElementById('savedFilterBtn');
   if(filtBtn) filtBtn.style.display=lineups.length>0?'':'none';
+  // DK exports an entries file for every one of these sports — NFL's is
+  // positional, the rest are N identical slots — so the button is offered
+  // wherever there is at least one saved lineup to put in it.
+  const dkBtn=document.getElementById('dkEntriesBtn');
+  if(dkBtn) dkBtn.style.display=(lineups.length>0)?'':'none';
   if(!lineups.length){
     const fp=document.getElementById('savedFilterPanel');
     if(fp) fp.style.display='none';
@@ -4815,6 +5248,838 @@ function exportCSV(){
   };
   const csv=[header,...(slate.savedLineups||[]).map(l=>rowIds(l).join(','))].join('\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download=slate.name.replace(/\s+/g,'_').toLowerCase()+'_lineups.csv';a.click();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DK ENTRIES — fill a DraftKings entries file from the saved lineups
+// ═══════════════════════════════════════════════════════════════════════════
+// Export CSV above writes a bare "here are my lineups" file that the user then
+// pastes into each contest by hand. DK also accepts its OWN entries export
+// back with the slot columns filled in, which is the only way to place 224
+// entries across 8 contests without 224 manual pastes. That file looks like
+//   Entry ID,Contest Name,Contest ID,Entry Fee,<slot columns…>,,Instructions
+// and DK's own note in it says only the rows you are CHANGING need to be
+// present — which is why a "Skip" plan simply omits a contest's rows.
+//
+// The slot columns are the format tell: CPT,FLEX×5 is showdown, the
+// QB,RB,RB,WR,WR,WR,TE,FLEX,DST block is classic. Everything to the right of
+// the blank column (the "Instructions" text and DK's sidecar player table,
+// which `extractDkPlayerTable` reads) is ignored here.
+const DK_ENTRY_FIXED = ['Entry ID','Contest Name','Contest ID','Entry Fee'];
+// A slot cell may come back as "Name (12345)" or as the bare id; both are
+// accepted on upload, and we always WRITE the bare id (DK's own instructions
+// say either works, and the bare id can't be broken by a comma in a name).
+function dkCellId(v){
+  const s=String(v==null?'':v).replace(/^"|"$/g,'').trim();
+  if(!s) return null;
+  const m=s.match(/\((\d+)\)\s*$/);
+  if(m) return m[1];
+  return /^\d+$/.test(s) ? s : null;
+}
+// "[20 Entry Max]" / "150 Entry Max" / "[Single Entry]" → 20 / 150 / 1.
+// null when the contest name does not advertise a cap (large-field GPPs
+// usually don't), which the planner treats as "many entries allowed".
+function dkParseMaxEntries(name){
+  const s=String(name||'');
+  if(/single[\s-]*entry/i.test(s)) return 1;
+  const m=s.match(/(\d[\d,]*)\s*entry\s*max/i);
+  if(m){ const n=parseInt(m[1].replace(/,/g,''),10); return Number.isFinite(n)?n:null; }
+  return null;
+}
+function dkFieldLabel(c){
+  if(c.maxEntries===1) return 'single entry';
+  if(c.maxEntries) return c.maxEntries+'-max';
+  return 'multi-entry';
+}
+// The slot header is the only reliable tell of which DK game a file belongs
+// to, and there are three shapes:
+//   • 'showdown' — a CPT column is present (NFL Captain Mode).
+//   • 'flat'     — N IDENTICAL single-token slots (NASCAR "D,D,D,D,D,D",
+//                  PGA "G,G,G,G,G,G", UFC "F,F,F,F,F,F"). These sports have no
+//                  positions at all, so DK repeats one letter N times. The
+//                  letter itself is not worth matching on — DK has changed it
+//                  before and it differs per sport — so the RULE is "every slot
+//                  is the same short token"; the roster-size check against the
+//                  slate is what actually proves the file belongs here.
+//   • 'classic'  — anything else, i.e. a genuine positional block (NFL's
+//                  QB,RB,RB,WR,WR,WR,TE,FLEX,DST).
+function dkSlotFormat(slots){
+  const s=(slots||[]).map(x=>String(x==null?'':x).trim());
+  if(!s.length) return 'classic';
+  if(s.some(x=>/^cpt$/i.test(x))) return 'showdown';
+  const uniq=new Set(s.map(x=>x.toUpperCase()));
+  if(uniq.size===1 && /^[A-Z]{1,4}$/i.test(s[0])) return 'flat';
+  return 'classic';
+}
+// The format the ACTIVE slate can accept. NFL is the only sport with a
+// positional template, so everything else is positionless 'flat'.
+function dkSlateFormat(slate){
+  if(isShowdown(slate)) return 'showdown';
+  if(isNfl(slate)) return 'classic';
+  return 'flat';
+}
+// Parse a DKEntries.csv into {slots, contests[]}. Rows whose Entry ID is
+// numeric are entries; every other row (the sidecar player table, DK's
+// instruction lines) is skipped, so the same file that feeds Update Pool can
+// be dropped here.
+function parseDkEntries(text){
+  const lines=String(text||'').split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length) return null;
+  const hdr=parseCsvLine(lines[0]).map(h=>h.replace(/^"|"$/g,'').trim());
+  if(!/^entry\s*id$/i.test(hdr[0]||'')) return null;
+  // The slot block runs from column 4 to the first blank / "Instructions"
+  // column — everything past that belongs to the sidecar.
+  let end=hdr.length;
+  for(let i=4;i<hdr.length;i++){ if(!hdr[i]||/^instructions$/i.test(hdr[i])){ end=i; break; } }
+  const slots=hdr.slice(4,end).filter(s=>s);
+  if(!slots.length) return null;
+  const format=dkSlotFormat(slots);
+  const byId={}, order=[];
+  for(let i=1;i<lines.length;i++){
+    const r=parseCsvLine(lines[i]);
+    const eid=String(r[0]||'').replace(/^"|"$/g,'').trim();
+    if(!/^\d+$/.test(eid)) continue;
+    const cid=String(r[2]||'').replace(/^"|"$/g,'').trim();
+    const name=String(r[1]||'').replace(/^"|"$/g,'').trim();
+    if(!byId[cid]){
+      const c={contestId:cid, name, fee:String(r[3]||'').replace(/^"|"$/g,'').trim(),
+               entries:[], count:0, format, maxEntries:dkParseMaxEntries(name), fieldLabel:''};
+      c.fieldLabel=dkFieldLabel(c);
+      byId[cid]=c; order.push(cid);
+    }
+    byId[cid].entries.push({entryId:eid, existing:slots.map((_,k)=>dkCellId(r[4+k]))});
+    byId[cid].count++;
+  }
+  const contests=order.map(cid=>byId[cid]);
+  if(!contests.length) return null;
+  return {slots, contests};
+}
+
+// Default plan per contest. A single-entry or small-max contest wants ONE
+// lineup (your best); a 20-max wants twenty different ones; a 150-max wants
+// every lineup you have and then the best one again for whatever is left.
+// Contests that never advertise a cap (the big Millionaires) are judged by how
+// many entries you actually hold in them — five entries in a $100 Milly is a
+// "put your best lineup in" spot, not a distribution spot.
+function dkDefaultPlan(c){
+  const m=(c.maxEntries!=null)?c.maxEntries:c.count;
+  const bal=dkDefaultBalancePlan(c);
+  if(m<=5) return Object.assign({mode:'best'}, bal);
+  if(m<=20) return Object.assign({mode:'dist', overflow:'cycle'}, bal);
+  return Object.assign({mode:'distfill', overflow:'cycle'}, bal);
+}
+// Balance mode's own per-contest default, carried on the SAME plan object under
+// its own keys so switching modes back and forth never loses either choice.
+// A single-entry contest (or a two/three-entry one) is not a portfolio spot —
+// you put your best lineup in it and it stays out of the balancing arithmetic.
+function dkDefaultBalancePlan(c){
+  const m=(c.maxEntries!=null)?c.maxEntries:c.count;
+  const tiny=(c.maxEntries===1)||m<=3||c.count<=3;
+  return {bmode:tiny?'best':'include', boverflow:'blank'};
+}
+const DK_PLAN_MODES=[
+  ['skip',    'Skip'],
+  ['best',    'Best lineup → all entries'],
+  ['dist',    'Distribute lineups'],
+  ['distfill','Distribute, then fill remaining with best'],
+  ['one',     'Specific lineup #'],
+];
+// Balance mode has three, not five: a contest either takes part in the dollar
+// balancing, gets the one best lineup, or is left alone.
+const DK_BAL_MODES=[
+  ['include','Include in balance'],
+  ['best',   'Best lineup → all'],
+  ['skip',   'Skip'],
+];
+function dkEntriesMode(st){ return (st && st.mode==='balance') ? 'balance' : 'manual'; }
+// Entry fee as a number. DK writes "$3", "$0.25", "$1,000"; a cell we cannot
+// read is worth 0, which keeps it out of the balance arithmetic instead of
+// poisoning every exposure with NaN.
+function dkFeeVal(fee){
+  const v=parseFloat(String(fee==null?'':fee).replace(/[^0-9.]/g,''));
+  return Number.isFinite(v)?v:0;
+}
+function dkMoney(v){
+  const n=Math.round((+v||0)*100)/100;
+  return '$'+n.toFixed(2);
+}
+// Every saved lineup, priced and validated once, in SAVED order. The planner
+// ranks a copy of this; the "Specific lineup #" mode indexes it directly so
+// the number the user types is the "Lineup #N" printed on the saved card.
+function dkLineupList(slate){
+  const SD=isShowdown(slate);
+  const NFL=isNfl(slate);
+  // Never hardcode 9 or 6 here: the positionless sports are 6-man today but the
+  // roster size is a per-sport config value, and a UFC/PGA/NASCAR lineup is
+  // "complete" purely by count.
+  const RS=rosterSize(slate);
+  const meta=slate._lineupMeta||{};
+  return (slate.savedLineups||[]).map((l,i)=>{
+    const key=lineupKey(l);
+    const m=meta[key]||{};
+    const cptId=SD?sdLineupCaptain(slate,l):null;
+    const players=(SD?sdAssignSlots(slate,l):l).map(id=>playerById(slate,id)).filter(Boolean);
+    const sal=SD?sdSalary(slate,l):players.reduce((s,p)=>s+(p.salary||0),0);
+    const proj=players.reduce((s,p)=>s+(parseFloat(p.proj)||0)*(SD&&p.id===cptId?CPT_MULT:1),0);
+    const rawSim=m.simWinAvg;
+    const sim=(rawSim!=null&&rawSim!==''&&!isNaN(parseFloat(rawSim)))?parseFloat(rawSim):null;
+    let evPct=(m.evPct!=null&&!isNaN(parseFloat(m.evPct)))?parseFloat(m.evPct):null;
+    // A hand-built lineup has no stored EV. The builder's live pricing is the
+    // same arithmetic against the same cached field, so fall back to it rather
+    // than dropping the lineup to the bottom of an EV ranking.
+    // The hand builder's live pricing is NFL-only (it reads the NFL field
+    // cache), so the other sports simply keep evPct null and fall through to
+    // the Sim/Proj tiebreaks rather than throwing.
+    if(evPct==null && NFL && typeof hbPriceLineup==='function'){
+      try{ const r=hbPriceLineup(players,cptId); if(r&&r.evPct!=null&&isFinite(r.evPct)) evPct=r.evPct; }catch(e){}
+    }
+    const complete=SD ? (players.length===RS && l.length===RS)
+                : NFL ? (players.length===RS && typeof nflComplete==='function' && nflComplete(nflCounts(slate,l)))
+                      : (players.length===RS && new Set(l).size===RS);
+    return {idx:i, num:i+1, ids:l, key, players, cptId, sal, proj, sim, evPct,
+            complete, overCap:sal>SALARY_CAP, usable:complete && sal<=SALARY_CAP};
+  });
+}
+function dkRankLineups(list, rankBy){
+  const nn=v=>(v==null||isNaN(v))?-Infinity:v;
+  const arr=[...list];
+  if(rankBy==='sim')      arr.sort((a,b)=>nn(b.sim)-nn(a.sim) || b.proj-a.proj || a.idx-b.idx);
+  else if(rankBy==='proj')arr.sort((a,b)=>b.proj-a.proj || a.idx-b.idx);
+  else                    arr.sort((a,b)=>nn(b.evPct)-nn(a.evPct) || b.proj-a.proj || a.idx-b.idx);
+  return arr;
+}
+function dkEntriesState(slate){ return slate && slate._dkEntries || null; }
+
+// ── Balance $ exposure ──────────────────────────────────────────────────────
+// The manual plans above answer "how do I spread N lineups over this contest".
+// This answers a different question the multi-entry player actually asks:
+// every lineup I built is one I am happy to run, so make each of them carry the
+// SAME number of dollars across all the contests I am entering. The single-
+// entry spots are handled separately (best lineup) and deliberately stay out of
+// the arithmetic — they are not part of the portfolio being balanced.
+//
+// Greedy, most expensive contest first, is the right order: a $3 entry is a
+// bigger lump than a $0.25 one, so placing the lumps first leaves the small
+// change free to level whatever the big ones could not. Within a contest each
+// slot goes to the CHEAPEST-so-far lineup that is not already in that contest
+// (DK forbids the same lineup twice in one contest), and equal exposures break
+// by rank — the better lineups collect the extra dollars.
+//
+// Worked example (the user's own): 40 lineups, $3/20-max, $1/20-max,
+// $0.50/150-max, $0.25/20-max. $3 → lineups 1-20. $1 → 21-40 (1-20 already
+// carry $3). $0.50 → 21-40 first, then 1-20, 110 slots left blank. $0.25 →
+// 21-40 again. Result: 20 lineups at $3.50 and 20 at $1.75, which is exactly
+// what the hand method produces.
+function dkBalanceAssign(ranked, contests, opts){
+  opts=opts||{};
+  const plan=opts.plan||{}, cap=(opts.cap>0?opts.cap:Infinity), MAXIT=(opts.maxIter!=null?opts.maxIter:2000);
+  const rankIdx=new Map(); ranked.forEach((l,i)=>rankIdx.set(l.key,i));
+  const exp=new Map();     // lineup key → dollars carried in the balanced contests
+  const used=new Map();    // lineup key → entries held anywhere (the global cap)
+  const bal=new Map();     // lineup key → entries held in BALANCED contests
+  const assign=[]; const warnings=[];
+  let blanks=0, skipped=0, capBlocked=0;
+  const useOf=k=>used.get(k)||0;
+  const incl=[], bestC=[];
+  for(const c of contests){
+    const bm=(plan[c.contestId]||{}).bmode||dkDefaultBalancePlan(c).bmode;
+    if(bm==='skip'){ skipped+=c.count; continue; }
+    (bm==='best'?bestC:incl).push(c);
+  }
+  // The best-lineup contests run first so the global max-per-lineup cap is
+  // spent on them before the balancing starts — they are the entries the user
+  // has already decided on.
+  for(const c of bestC){
+    for(const e of c.entries){
+      const l=ranked.find(x=>useOf(x.key)<cap);
+      if(!l){ blanks++; capBlocked++; continue; }
+      used.set(l.key,useOf(l.key)+1);
+      assign.push({entryId:e.entryId, contestId:c.contestId, lineup:l, fee:0, bal:false});
+    }
+  }
+  // Descending entry fee; a tie goes to the contest with more entries, because
+  // the wider one has more freedom to level things once the narrow one is set.
+  incl.sort((a,b)=>dkFeeVal(b.fee)-dkFeeVal(a.fee) || b.count-a.count);
+  const inCon=new Map();   // contestId → Map(lineup key → entries in that contest)
+  for(const c of incl){
+    const fee=dkFeeVal(c.fee);
+    const here=new Map(); inCon.set(c.contestId, here);
+    const pickLowest=()=>{
+      let best=null, bestE=Infinity, bestR=Infinity;
+      for(const l of ranked){
+        if(here.has(l.key)) continue;
+        if(useOf(l.key)>=cap) continue;
+        const ex=exp.get(l.key)||0, ri=rankIdx.get(l.key);
+        if(ex<bestE-1e-9 || (Math.abs(ex-bestE)<1e-9 && ri<bestR)){ best=l; bestE=ex; bestR=ri; }
+      }
+      return best;
+    };
+    let overflowed=false;
+    for(const e of c.entries){
+      let l=pickLowest();
+      if(!l && ((plan[c.contestId]||{}).boverflow||'blank')==='cycle'){
+        // More entry slots than lineups. Cycling clears the one-per-contest
+        // ledger and starts a second pass, i.e. double-entering lineups; the
+        // default instead stops, because the user only wants as many entries
+        // as he has distinct lineups.
+        here.clear(); overflowed=true; l=pickLowest();
+      }
+      if(!l){
+        blanks++;
+        if(ranked.some(x=>useOf(x.key)>=cap)) capBlocked++;
+        continue;
+      }
+      here.set(l.key,(here.get(l.key)||0)+1);
+      used.set(l.key,useOf(l.key)+1);
+      bal.set(l.key,(bal.get(l.key)||0)+1);
+      exp.set(l.key,(exp.get(l.key)||0)+fee);
+      assign.push({entryId:e.entryId, contestId:c.contestId, lineup:l, fee, bal:true});
+    }
+    if(overflowed) warnings.push(`${c.name}: more entries than lineups — lineups were re-used to fill it.`);
+  }
+
+  // ── Improvement pass ──────────────────────────────────────────────────────
+  // The greedy pass is optimal when the fees divide evenly and merely good
+  // otherwise (a $5 lump can strand a lineup above everyone else with no small
+  // change left to fix it). Two cheap local moves close most of that gap:
+  // MOVE one entry from the richest lineup to the poorest when the poorest is
+  // not already in that contest, and SWAP two entries between two contests.
+  // Both are accepted only when they strictly shrink max−min, so the final
+  // spread can never be worse than the greedy result and the loop cannot cycle.
+  const keys=[...bal.keys()];
+  if(keys.length>1){
+    const byKey=new Map();   // lineup key → its balanced assignments
+    assign.forEach(a=>{ if(a.bal){ if(!byKey.has(a.lineup.key)) byKey.set(a.lineup.key,[]); byKey.get(a.lineup.key).push(a); } });
+    const stats=()=>{
+      let mx=-Infinity, mn=Infinity, ss=0;
+      for(const k of keys){ const v=exp.get(k)||0; if(v>mx)mx=v; if(v<mn)mn=v; ss+=v*v; }
+      return {mx,mn,sp:mx-mn,ss};
+    };
+    const scoreWith=(deltas)=>{
+      let mx=-Infinity, mn=Infinity, ss=0;
+      for(const k of keys){
+        let v=exp.get(k)||0;
+        for(const d of deltas) if(d[0]===k) v+=d[1];
+        if(v>mx)mx=v; if(v<mn)mn=v; ss+=v*v;
+      }
+      return {sp:mx-mn, ss};
+    };
+    let cur=stats();
+    // Strictly max−min, and strictly DOWN: a move that merely shuffles dollars
+    // between two lineups without narrowing the band is not an improvement (it
+    // would, for instance, break the user's clean 20-at-$3.50 / 20-at-$1.75
+    // split into a smear that is no more balanced), and a strict decrease also
+    // guarantees the loop cannot cycle.
+    const better=s=>s.sp<cur.sp-1e-9;
+    const hold=(cid,k)=>((inCon.get(cid)||new Map()).get(k)||0);
+    const move=(a,k)=>{                       // reassign entry `a` to lineup k
+      const from=a.lineup.key, cid=a.contestId, m=inCon.get(cid);
+      m.set(from,(m.get(from)||0)-1); if(m.get(from)<=0) m.delete(from);
+      m.set(k,(m.get(k)||0)+1);
+      exp.set(from,(exp.get(from)||0)-a.fee); exp.set(k,(exp.get(k)||0)+a.fee);
+      used.set(from,useOf(from)-1); used.set(k,useOf(k)+1);
+      bal.set(from,(bal.get(from)||0)-1); bal.set(k,(bal.get(k)||0)+1);
+      byKey.get(from).splice(byKey.get(from).indexOf(a),1);
+      if(!byKey.has(k)) byKey.set(k,[]); byKey.get(k).push(a);
+      a.lineup=ranked.find(l=>l.key===k)||a.lineup;
+    };
+    for(let it=0; it<MAXIT; it++){
+      if(cur.sp<=1e-9) break;
+      let did=false;
+      const hi=keys.filter(k=>Math.abs((exp.get(k)||0)-cur.mx)<1e-9);
+      const lo=keys.filter(k=>Math.abs((exp.get(k)||0)-cur.mn)<1e-9);
+      // (1) a plain transfer off the top onto the bottom
+      for(const A of hi){
+        if((bal.get(A)||0)<=1) continue;     // never empty a lineup out of the portfolio
+        for(const a of (byKey.get(A)||[]).slice()){
+          for(const B of lo){
+            if(A===B || hold(a.contestId,B) || useOf(B)>=cap) continue;
+            const s=scoreWith([[A,-a.fee],[B,a.fee]]);
+            if(better(s)){ move(a,B); cur=stats(); did=true; break; }
+          }
+          if(did) break;
+        }
+        if(did) break;
+      }
+      // (2) swap two entries between two different contests
+      if(!did){
+        outer:
+        for(const A of hi){
+          for(const a of (byKey.get(A)||[])){
+            for(const B of lo){
+              if(A===B) continue;
+              for(const b of (byKey.get(B)||[])){
+                if(b.contestId===a.contestId) continue;
+                if(hold(b.contestId,A) || hold(a.contestId,B)) continue;
+                const d=a.fee-b.fee; if(Math.abs(d)<1e-9) continue;
+                const s=scoreWith([[A,-d],[B,d]]);
+                if(better(s)){ move(a,B); move(b,A); cur=stats(); did=true; break outer; }
+              }
+            }
+          }
+        }
+      }
+      if(!did) break;
+    }
+  }
+  // The summary the preview quotes: one row per lineup that carries money,
+  // richest first, plus the distinct-dollar buckets ("20 at $3.50, 20 at $1.75").
+  const byCon={}; contests.forEach(c=>byCon[c.contestId]=c);
+  const perLineup=new Map();
+  assign.forEach(a=>{
+    if(!a.bal) return;
+    if(!perLineup.has(a.lineup.key)) perLineup.set(a.lineup.key,{lineup:a.lineup, amount:0, cons:new Map()});
+    const r=perLineup.get(a.lineup.key);
+    r.amount+=a.fee;
+    r.cons.set(a.contestId,(r.cons.get(a.contestId)||0)+1);
+  });
+  const rows=[...perLineup.values()].map(r=>({
+    num:r.lineup.num, key:r.lineup.key, amount:Math.round(r.amount*100)/100,
+    contests:[...r.cons.entries()].map(([cid,n])=>({contestId:cid, name:(byCon[cid]||{}).name||cid, fee:(byCon[cid]||{}).fee||'', n}))
+  })).sort((a,b)=>b.amount-a.amount || a.num-b.num);
+  const amts=rows.map(r=>r.amount);
+  const buckets={};
+  amts.forEach(v=>{ const k=v.toFixed(2); buckets[k]=(buckets[k]||0)+1; });
+  const balance={
+    rows, buckets,
+    min:amts.length?Math.min(...amts):0,
+    max:amts.length?Math.max(...amts):0,
+    spread:amts.length?Math.round((Math.max(...amts)-Math.min(...amts))*100)/100:0,
+    used:rows.length, poolSize:ranked.length,
+    totalSpend:Math.round(amts.reduce((s,v)=>s+v,0)*100)/100,
+    included:incl.map(c=>c.contestId), bestOnly:bestC.map(c=>c.contestId),
+  };
+  return {assign, blanks, skipped, capBlocked, warnings, used, exposure:exp, balance};
+}
+// The whole plan resolved into concrete per-entry assignments, plus the
+// numbers the preview quotes. Pure — the modal calls it on every keystroke.
+function dkComputeAssign(slate){
+  const st=dkEntriesState(slate); if(!st) return null;
+  const SD=isShowdown(slate);
+  const slateFmt=dkSlateFormat(slate);
+  const fileFmt=(st.contests[0]||{}).format||'classic';
+  const warnings=[];
+  // A 'flat' file only fits a positionless slate whose roster is exactly as
+  // long as the file's slot block — a 6-golfer file cannot fill a 5-driver
+  // slate even though both parse as 'flat'.
+  const slotN=(st.slots||[]).length;
+  const sizeMismatch=(slateFmt==='flat' && fileFmt==='flat' && slotN!==rosterSize(slate));
+  const all=dkLineupList(slate);
+  const bad=all.filter(l=>!l.usable);
+  let pool=all.filter(l=>l.usable);
+  if(bad.length){
+    const over=bad.filter(l=>l.overCap).length, inc=bad.length-over;
+    warnings.push(`${bad.length} saved lineup${bad.length===1?'':'s'} skipped as unusable` +
+      (over?` (${over} over the $${(SALARY_CAP/1000)}k cap)`:'') + (inc?`${over?',':''} (${inc} incomplete)`:'') + '.');
+  }
+  // "Use only lineups matching the Saved filter" reuses the filter panel's own
+  // matcher, so the set is exactly the set that panel is counting.
+  if(st.useFilter && slate._savedFilter && typeof savedFilterMatches==='function'){
+    const keys=new Set(savedFilterMatches(_savedEntriesCache||[], slate._savedFilter).map(e=>lineupKey(e.lineup)));
+    const cut=pool.filter(l=>keys.has(l.key));
+    if(cut.length) pool=cut;
+    else warnings.push('The Saved filter matches no usable lineup — using all of them instead.');
+  }
+  const ranked=dkRankLineups(pool, st.rankBy||'ev');
+  const cap=(st.maxPer!=null && st.maxPer!=='' && +st.maxPer>0) ? +st.maxPer : Infinity;
+  const used=new Map();
+  const useOf=l=>used.get(l.key)||0;
+  const take=l=>{ used.set(l.key, useOf(l)+1); return l; };
+  const bestAvail=()=>ranked.find(l=>useOf(l)<cap)||null;
+  const assign=[];        // {entryId, contestId, lineup}
+  let blanks=0, skipped=0, capBlocked=0;
+  const fmtMismatch=(fileFmt!==slateFmt) || sizeMismatch;
+  const mode=dkEntriesMode(st);
+  let balance=null;
+  // Balance mode replaces the per-contest plans wholesale, so it takes the
+  // contests the file can actually fill and hands the whole set to one planner
+  // (the assignment is global — a contest's choices depend on every other
+  // contest's). Everything after this block is shared with the manual path.
+  if(mode==='balance'){
+    const live=[];
+    for(const c of st.contests){
+      if(fmtMismatch || c.format!==slateFmt){ skipped+=c.count; continue; }
+      live.push(c);
+    }
+    if(!ranked.length) live.forEach(c=>{ blanks+=c.count; });
+    else{
+      const b=dkBalanceAssign(ranked, live, {plan:st.plan||{}, cap});
+      b.assign.forEach(a=>assign.push(a));
+      blanks+=b.blanks; skipped+=b.skipped; capBlocked+=b.capBlocked;
+      b.warnings.forEach(w=>warnings.push(w));
+      b.used.forEach((n,k)=>{ if(n>0) used.set(k,n); });
+      balance=b.balance;
+    }
+  }
+  for(const c of (mode==='balance'?[]:st.contests)){
+    const plan=(st.plan||{})[c.contestId]||dkDefaultPlan(c);
+    if(plan.mode==='skip' || fmtMismatch || c.format!==slateFmt){ skipped+=c.count; continue; }
+    if(!ranked.length){ blanks+=c.count; continue; }
+    if(plan.mode==='one'){
+      const n=parseInt(plan.num,10);
+      const l=all.find(x=>x.num===n && x.usable);
+      if(!l){ blanks+=c.count; warnings.push(`${c.name}: lineup #${plan.num||'?'} is not a usable saved lineup.`); continue; }
+      for(const e of c.entries){
+        if(useOf(l)>=cap){ blanks++; capBlocked++; continue; }
+        assign.push({entryId:e.entryId, contestId:c.contestId, lineup:take(l)});
+      }
+      continue;
+    }
+    if(plan.mode==='best'){
+      for(const e of c.entries){
+        const l=bestAvail();
+        if(!l){ blanks++; capBlocked++; continue; }
+        assign.push({entryId:e.entryId, contestId:c.contestId, lineup:take(l)});
+      }
+      continue;
+    }
+    // dist / distfill: walk the ranked list once, one distinct lineup per
+    // entry. What happens when the entries outnumber the lineups is the
+    // difference between the two modes (and the overflow select).
+    let p=0;
+    for(const e of c.entries){
+      let l=null;
+      while(p<ranked.length && !l){ const cand=ranked[p++]; if(useOf(cand)<cap) l=cand; }
+      if(!l){
+        if(plan.mode==='distfill'){ l=bestAvail(); }
+        else if((plan.overflow||'cycle')==='cycle'){ p=0; while(p<ranked.length && !l){ const cand=ranked[p++]; if(useOf(cand)<cap) l=cand; } }
+      }
+      if(!l){ blanks++; capBlocked++; continue; }
+      assign.push({entryId:e.entryId, contestId:c.contestId, lineup:take(l)});
+    }
+  }
+  if(sizeMismatch) warnings.push(`This entries file has ${slotN} roster slot${slotN===1?'':'s'} (${st.slots.join('/')}) but a "${slate.name}" lineup is ${rosterSize(slate)} — nothing can be filled.`);
+  else if(fmtMismatch) warnings.push(`This entries file is ${fileFmt.toUpperCase()} (${st.slots.join('/')}) but the slate is ${slateFmt.toUpperCase()} — nothing can be filled.`);
+  else st.contests.filter(c=>c.format!==slateFmt).forEach(c=>warnings.push(`${c.name}: contest format is ${c.format}, slate is ${slateFmt} — skipped.`));
+  if(blanks) warnings.push(`${blanks} entr${blanks===1?'y is':'ies are'} left blank` + (capBlocked?` (${capBlocked} because of the max-per-lineup cap)`:'') + '.');
+  const total=st.contests.reduce((s,c)=>s+c.count,0);
+  const counts=[...used.entries()].map(([key,n])=>({key,n,lineup:ranked.find(l=>l.key===key)||all.find(l=>l.key===key)}))
+                                  .sort((a,b)=>b.n-a.n);
+  if(cap!==Infinity && counts.some(c=>c.n>cap)) warnings.push('A lineup exceeded the max-per-lineup cap — this is a bug, please report it.');
+  return {assign, total, filled:assign.length, skipped, blanks, warnings, counts,
+          poolSize:ranked.length, distinct:counts.length, cap, fileFmt, slateFmt, fmtMismatch,
+          mode, balance};
+}
+// A field is quoted only when it has to be — DK reads both, and an unquoted
+// file diffs cleanly against the one the user downloaded.
+function dkCsvCell(v){
+  const s=String(v==null?'':v);
+  return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+// Ids in the order the FILE's slot header asks for. Our canonical assigners
+// already produce DK's own order, but matching by slot label means a file with
+// the columns in another order still comes out right.
+function dkRowIds(slate, l, slots){
+  const SD=isShowdown(slate);
+  // Positionless sports have nothing to assign: every slot is interchangeable,
+  // so the ids go out in the order the lineup was saved and the (identical)
+  // slot labels are never matched against anything.
+  if(!SD && !isNfl(slate)){
+    return (slots||[]).map((_,i)=>{ const id=l.ids[i]; return id==null?'':String(id); });
+  }
+  const pairs = SD
+    ? sdAssignSlots(slate, l.ids).map((id,i)=>{
+        const p=playerById(slate,id);
+        return {slot:i===0?'CPT':'FLEX', id:(i===0 && p && p.cptId) ? p.cptId : id};
+      })
+    : nflAssignSlots(slate, l.ids).map((id,i)=>({slot:['QB','RB','RB','WR','WR','WR','TE','FLEX','DST'][i], id}));
+  const left=[...pairs];
+  return slots.map((s,i)=>{
+    const k=left.findIndex(x=>x.slot.toUpperCase()===String(s).toUpperCase());
+    if(k>=0) return left.splice(k,1)[0].id;
+    return (pairs[i]||{}).id||'';
+  });
+}
+function exportDkEntriesCsv(){
+  const slate=activeSlate(); const st=dkEntriesState(slate);
+  if(!slate||!st){ showToast('Load a DKEntries.csv first.','err'); return; }
+  const res=dkComputeAssign(slate);
+  if(res.fmtMismatch){
+    const msg=`That file is a ${res.fileFmt} entries file (${st.slots.join(', ')}) but "${slate.name}" is a ${res.slateFmt} slate. Open the matching slate, or download the entries file for this contest type.`;
+    showToast(msg,'err');
+    const el=document.getElementById('dkEntriesStatus'); if(el){ el.textContent=msg; el.style.color='var(--red)'; }
+    return;
+  }
+  if(!res.filled){ showToast('Nothing to fill — every contest is skipped or blank.','err'); return; }
+  const header=[...DK_ENTRY_FIXED, ...st.slots].map(dkCsvCell).join(',');
+  const byId={}; st.contests.forEach(c=>c.entries.forEach(e=>byId[e.entryId]=c));
+  const rows=res.assign.map(a=>{
+    const c=byId[a.entryId];
+    return [a.entryId, c.name, c.contestId, c.fee, ...dkRowIds(slate, a.lineup, st.slots)].map(dkCsvCell).join(',');
+  });
+  const csv=[header,...rows].join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download='DKEntries_'+String(slate.name||'slate').replace(/[^\w]+/g,'_').replace(/^_|_$/g,'')+'_filled.csv';
+  a.click();
+  showToast(`Wrote ${rows.length} filled entr${rows.length===1?'y':'ies'}.`,'ok');
+  return csv;
+}
+
+// ── DK Entries modal ────────────────────────────────────────────────────────
+function openDkEntriesModal(){
+  const m=document.getElementById('dkEntriesModal'); if(!m) return;
+  m.style.display='flex';
+  renderDkEntriesModal();
+}
+function closeDkEntriesModal(){
+  const m=document.getElementById('dkEntriesModal'); if(m) m.style.display='none';
+}
+// Store the PARSED file on the slate, never the raw text: a 100 KB CSV with a
+// sidecar player table would bloat every localStorage write for no gain.
+function dkIngestEntriesText(text, fileName){
+  const slate=activeSlate(); if(!slate) return null;
+  const parsed=parseDkEntries(text);
+  const st=document.getElementById('dkEntriesStatus');
+  if(!parsed){
+    if(st){ st.textContent='That does not look like a DraftKings entries file (expected an "Entry ID,Contest Name,Contest ID,Entry Fee,…" header).'; st.style.color='var(--red)'; }
+    return null;
+  }
+  if(st){ st.textContent=`${parsed.contests.length} contest${parsed.contests.length===1?'':'s'} · ${parsed.contests.reduce((s,c)=>s+c.count,0)} entries.`; st.style.color='var(--muted)'; }
+  const prev=(slate._dkEntries&&slate._dkEntries.plan)||{};
+  const plan={};
+  parsed.contests.forEach(c=>{ plan[c.contestId]=prev[c.contestId]||dkDefaultPlan(c); });
+  slate._dkEntries={
+    ts:Date.now(), fileName:fileName||'pasted',
+    slots:parsed.slots, contests:parsed.contests, plan,
+    mode:(slate._dkEntries&&slate._dkEntries.mode)||'manual',
+    rankBy:(slate._dkEntries&&slate._dkEntries.rankBy)||'ev',
+    maxPer:(slate._dkEntries&&slate._dkEntries.maxPer)??'',
+    useFilter:!!(slate._dkEntries&&slate._dkEntries.useFilter),
+  };
+  save(); renderDkEntriesModal();
+  return slate._dkEntries;
+}
+// The dedicated "⬆ DK CSV" button. One file, two jobs: the player table
+// enriches the pool (game times, home/away, positions, DK ids — never Proj or
+// Own%, never late adds), and, when the file is a DKEntries export, the
+// contest entries are loaded for the DK Entries fill. No mapper screen —
+// DK's headers are fixed, so there is nothing for the user to confirm.
+function handleDkCsvFile(file){
+  if(!file) return;
+  const r=new FileReader();
+  r.onload=e=>{
+    const text=e.target.result;
+    const slate=activeSlate(); if(!slate) return;
+    const dk=extractDkPlayerTable(text);
+    if(!dk){ showToast('That is not a DraftKings salary/entries CSV (no Name + ID / Salary / Game Info table found).','err'); return; }
+    // The pool enrichment is deliberately NFL-only. For golf/UFC/NASCAR DK's
+    // "Game Info" column is just the tournament or event name and TeamAbbrev is
+    // blank (or the car/team), so there is nothing in the sidecar worth folding
+    // into the pool — running applyPoolUpdate there would only risk rewriting
+    // good data with an event string. Those sports upload this file purely for
+    // the contest entries.
+    const NFL=isNfl(slate);
+    let msg;
+    if(NFL){
+      updateParsedCSV={headers:dk.headers, rows:dk.rows, dkKind:dk.kind};
+      updateColMapping={};
+      applyAutoMap(dk.headers, updateColMapping, slate.sport||'');
+      delete updateColMapping.proj; delete updateColMapping.own;
+      applyPoolUpdate();                     // matches by DK id, enriches, no late adds
+      const after=(slate.players||[]).filter(p=>p.kick_label).length;
+      msg=`${dk.kind}: game info attached to ${after} player${after===1?'':'s'}`;
+    }else{
+      msg=String(slate.sport||'').toUpperCase();
+    }
+    let loaded=false;
+    if(dk.kind==='DKEntries'){
+      const parsed=parseDkEntries(text);
+      if(parsed && parsed.contests.length){
+        dkIngestEntriesText(text, file.name);
+        const n=parsed.contests.reduce((s,c)=>s+c.count,0);
+        msg+=`${NFL?' · ':': '}${n} entries in ${parsed.contests.length} contest${parsed.contests.length===1?'':'s'} loaded — open DK Entries to fill them`;
+        loaded=true;
+      }
+    }
+    // On a non-NFL slate there is no pool half to report, so a salary-only file
+    // has to say plainly that nothing happened rather than claim success.
+    if(!NFL && !loaded){
+      showToast(`${msg}: that file carries no contest entries (it is a ${dk.kind} salary export) — nothing to fill.`,'err');
+      renderSaved(); return;
+    }
+    showToast('✓ '+msg,'ok');
+    renderSaved();
+  };
+  r.readAsText(file);
+}
+function handleDkEntriesFile(file){
+  if(!file) return;
+  const r=new FileReader();
+  r.onload=e=>dkIngestEntriesText(e.target.result, file.name);
+  r.readAsText(file);
+}
+function dkEntriesPaste(){
+  const ta=document.getElementById('dkEntriesPasteBox');
+  if(!ta||!ta.value.trim()) return;
+  dkIngestEntriesText(ta.value, 'pasted');
+}
+function dkClearEntries(){
+  const slate=activeSlate(); if(!slate) return;
+  delete slate._dkEntries; save(); renderDkEntriesModal();
+}
+function dkSetPlan(cid, field, val){
+  const slate=activeSlate(), st=dkEntriesState(slate); if(!st) return;
+  const c=st.contests.find(x=>x.contestId===cid); if(!c) return;
+  st.plan[cid]=Object.assign({}, st.plan[cid]||dkDefaultPlan(c), {[field]:val});
+  save(); renderDkEntriesModal();
+}
+function dkSetGlobal(field, val){
+  const slate=activeSlate(), st=dkEntriesState(slate); if(!st) return;
+  st[field]=val; save(); renderDkEntriesModal();
+}
+// The fill-mode switch. Persisted on `_dkEntries.mode` so the modal reopens in
+// whichever mode the user works in; the per-contest plans for the OTHER mode
+// are untouched (they live under separate keys on the same plan object).
+function dkSetMode(v){
+  const slate=activeSlate(), st=dkEntriesState(slate); if(!st) return;
+  st.mode=(v==='balance')?'balance':'manual';
+  save(); renderDkEntriesModal();
+}
+// The exposure bar list is long on a 40-lineup portfolio; only the first 12
+// rows are drawn until the user asks for the rest.
+let _dkBalAll=false;
+function dkToggleBalRows(){ _dkBalAll=!_dkBalAll; renderDkEntriesModal(); }
+function renderDkEntriesModal(){
+  const host=document.getElementById('dkEntriesBody'); if(!host) return;
+  const slate=activeSlate();
+  const st=dkEntriesState(slate);
+  const drop=document.getElementById('dkEntriesDrop');
+  if(!st){
+    if(drop) drop.style.display='';
+    host.innerHTML='';
+    const f=document.getElementById('dkEntriesFooter'); if(f) f.style.display='none';
+    return;
+  }
+  if(drop) drop.style.display='none';
+  const res=dkComputeAssign(slate);
+  const modeSel=(cid,plan)=>`<select onchange="dkSetPlan('${cid}','mode',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;outline:none;">
+      ${DK_PLAN_MODES.map(([v,l])=>`<option value="${v}"${plan.mode===v?' selected':''}>${l}</option>`).join('')}
+    </select>`;
+  const BAL=res.mode==='balance';
+  const balSel=(cid,plan)=>`<select onchange="dkSetPlan('${cid}','bmode',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;outline:none;">
+      ${DK_BAL_MODES.map(([v,l])=>`<option value="${v}"${(plan.bmode||'include')===v?' selected':''}>${l}</option>`).join('')}
+    </select>`;
+  const rows=st.contests.map(c=>{
+    const plan=Object.assign({}, dkDefaultPlan(c), st.plan[c.contestId]||{});
+    const n=res.assign.filter(a=>a.contestId===c.contestId).length;
+    if(BAL){
+      // The overflow choice only means anything when the contest has more entry
+      // slots than there are lineups to put in them.
+      const over = (plan.bmode||'include')==='include' && c.count>res.poolSize
+        ? `<select onchange="dkSetPlan('${c.contestId}','boverflow',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:3px 6px;border-radius:4px;font-size:10px;cursor:pointer;outline:none;">
+             <option value="blank"${(plan.boverflow||'blank')==='blank'?' selected':''}>leave remaining blank</option>
+             <option value="cycle"${plan.boverflow==='cycle'?' selected':''}>cycle from the lowest exposure</option>
+           </select>`
+        : '';
+      const badf=c.format!==res.slateFmt;
+      return `<tr data-cid="${c.contestId}" style="border-top:1px solid var(--border);">
+        <td style="padding:6px 8px;font-size:11px;color:var(--text);">${esc(c.name)}
+          <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;">${esc(c.fee)} · ${c.count} entr${c.count===1?'y':'ies'} · ${c.fieldLabel}${badf?' · <span style="color:var(--red)">format mismatch</span>':''}</div></td>
+        <td style="padding:6px 8px;white-space:nowrap;">${balSel(c.contestId,plan)} ${over}</td>
+        <td class="dk-fill-n" style="padding:6px 8px;font-size:11px;font-family:'DM Mono',monospace;color:${n?'var(--accent)':'var(--muted)'};text-align:right;">${n}/${c.count}</td>
+      </tr>`;
+    }
+    const extra = plan.mode==='dist'
+      ? `<select onchange="dkSetPlan('${c.contestId}','overflow',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:3px 6px;border-radius:4px;font-size:10px;cursor:pointer;outline:none;">
+           <option value="cycle"${(plan.overflow||'cycle')==='cycle'?' selected':''}>cycle from the top</option>
+           <option value="blank"${plan.overflow==='blank'?' selected':''}>leave the rest blank</option>
+         </select>`
+      : plan.mode==='one'
+      ? `<input type="number" min="1" value="${plan.num??1}" onchange="dkSetPlan('${c.contestId}','num',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;width:64px;outline:none;">`
+      : '';
+    const bad=c.format!==res.slateFmt;
+    return `<tr data-cid="${c.contestId}" style="border-top:1px solid var(--border);">
+      <td style="padding:6px 8px;font-size:11px;color:var(--text);">${esc(c.name)}
+        <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;">${esc(c.fee)} · ${c.count} entr${c.count===1?'y':'ies'} · ${c.fieldLabel}${bad?' · <span style="color:var(--red)">format mismatch</span>':''}</div></td>
+      <td style="padding:6px 8px;white-space:nowrap;">${modeSel(c.contestId,plan)} ${extra}</td>
+      <td class="dk-fill-n" style="padding:6px 8px;font-size:11px;font-family:'DM Mono',monospace;color:${n?'var(--accent)':'var(--muted)'};text-align:right;">${n}/${c.count}</td>
+    </tr>`;
+  }).join('');
+  const top3=res.counts.slice(0,3).map(c=>`#${c.lineup?c.lineup.num:'?'} ×${c.n}`).join(' · ')||'—';
+  // Balance preview: the numbers that tell the user whether the portfolio is
+  // level (min / max / spread), the plain-English bucket sentence he would have
+  // written by hand ("20 lineups at $3.50, 20 at $1.75"), and a bar per lineup.
+  let balHtml='';
+  if(BAL){
+    const b=res.balance||{rows:[],buckets:{},min:0,max:0,spread:0,used:0};
+    const bk=Object.keys(b.buckets).map(k=>({v:+k,n:b.buckets[k]})).sort((x,y)=>y.v-x.v);
+    const sentence=bk.length
+      ? bk.map((x,i)=>`${x.n}${i===0?` lineup${x.n===1?'':'s'}`:''} at ${dkMoney(x.v)}`).join(', ')
+      : 'no lineup carries any money yet';
+    const shown=_dkBalAll?b.rows:b.rows.slice(0,12);
+    const maxA=b.max||1;
+    const bars=shown.map(r=>{
+      // 68% of the row at the widest, so the "which contests" label at the end
+      // of the longest bar still has somewhere to sit.
+      const w=Math.max(2,Math.round((r.amount/maxA)*68));
+      const where=r.contests.map(c=>`${esc(c.fee||'')}${c.n>1?'×'+c.n:''}`).join(' + ');
+      const names=r.contests.map(c=>`${c.name} (${c.fee}${c.n>1?' ×'+c.n:''})`).join('\n');
+      return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;" title="${esc(names)}">
+        <span style="width:34px;font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;text-align:right;">#${r.num}</span>
+        <span style="width:52px;font-size:10px;color:var(--text);font-family:'DM Mono',monospace;">${dkMoney(r.amount)}</span>
+        <span style="flex:0 0 ${w}%;height:7px;border-radius:3px;background:var(--accent);opacity:.8;"></span>
+        <span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;white-space:nowrap;">${where}</span>
+      </div>`;
+    }).join('');
+    const more=b.rows.length>12
+      ? `<button onclick="dkToggleBalRows()" style="margin-top:4px;background:none;border:1px solid var(--border);color:var(--muted);padding:2px 8px;border-radius:4px;font-size:10px;cursor:pointer;">${_dkBalAll?'show fewer':`show all ${b.rows.length}`}</button>`
+      : '';
+    balHtml=`
+      <div id="dkBalanceSummary" style="font-size:11px;color:var(--text);font-family:'DM Mono',monospace;margin-bottom:5px;">
+        $ per lineup: min <span style="color:var(--accent);">${dkMoney(b.min)}</span> · max <span style="color:var(--accent);">${dkMoney(b.max)}</span>
+        · spread <span style="color:${b.spread>0?'var(--text)':'var(--accent)'};">${dkMoney(b.spread)}</span> · ${b.used} lineup${b.used===1?'':'s'} used
+      </div>
+      <div id="dkBalanceBuckets" style="font-size:10px;color:var(--muted);margin-bottom:7px;">${esc(sentence)}${b.totalSpend?` · ${dkMoney(b.totalSpend)} total`:''}</div>
+      <div id="dkBalanceBars">${bars||'<div style="font-size:10px;color:var(--muted);">nothing assigned</div>'}${more}</div>`;
+  }
+  const filterOn=!!(slate._savedFilter && slate._savedFilter.v!=='' && !isNaN(parseFloat(slate._savedFilter.v)));
+  host.innerHTML=`
+    <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;margin-bottom:8px;">
+      ${esc(st.fileName)} · ${st.contests.length} contest${st.contests.length===1?'':'s'} · ${res.total} entries · ${st.slots.join('/')} (${res.fileFmt})
+      <button onclick="dkClearEntries()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:2px 7px;border-radius:4px;font-size:10px;cursor:pointer;margin-left:6px;">load another</button>
+    </div>
+    <div id="dkModeSwitch" style="display:flex;gap:0;margin-bottom:9px;border:1px solid var(--border);border-radius:6px;overflow:hidden;width:fit-content;">
+      ${[['manual','Manual plans'],['balance','Balance $ exposure']].map(([v,l])=>
+        `<button id="dkMode_${v}" onclick="dkSetMode('${v}')" style="background:${res.mode===v?'var(--accent)':'transparent'};color:${res.mode===v?'#000':'var(--muted)'};border:none;padding:5px 14px;font-size:11px;font-weight:${res.mode===v?600:400};cursor:pointer;font-family:'DM Sans',sans-serif;">${l}</button>`).join('')}
+    </div>
+    ${BAL?`<div style="font-size:10px;color:var(--muted);margin-bottom:8px;line-height:1.5;">Every included contest is filled most-expensive-first, each entry going to the lineup carrying the fewest dollars so far (never the same lineup twice in one contest). Single-entry and tiny contests take your best lineup and stay out of the arithmetic.</div>`:''}
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:11px;color:var(--muted);">
+      <label>Rank by
+        <select id="dkRankBy" onchange="dkSetGlobal('rankBy',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;cursor:pointer;outline:none;">
+          <option value="ev"${st.rankBy==='ev'?' selected':''}>EV%</option>
+          <option value="sim"${st.rankBy==='sim'?' selected':''}>Sim</option>
+          <option value="proj"${st.rankBy==='proj'?' selected':''}>Proj</option>
+        </select></label>
+      <label>Max entries per lineup
+        <input type="number" min="1" id="dkMaxPer" value="${st.maxPer??''}" placeholder="∞"
+          onchange="dkSetGlobal('maxPer',this.value)"
+          style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;width:70px;outline:none;"></label>
+      ${filterOn?`<label style="cursor:pointer;"><input type="checkbox" id="dkUseFilter" ${st.useFilter?'checked':''} onchange="dkSetGlobal('useFilter',this.checked)"> Use only lineups matching the Saved filter</label>`:''}
+    </div>
+    <table style="width:100%;border-collapse:collapse;">
+      <thead><tr style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;text-align:left;">
+        <th style="padding:4px 8px;">CONTEST</th><th style="padding:4px 8px;">PLAN</th><th style="padding:4px 8px;text-align:right;">FILL</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div id="dkEntriesPreview" style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;">
+      ${balHtml}
+      <div style="font-size:11px;color:var(--text);font-family:'DM Mono',monospace;">
+        <span style="color:var(--accent);">${res.filled}</span> of ${res.total} entries filled
+        · ${res.distinct} distinct lineup${res.distinct===1?'':'s'} of ${res.poolSize} usable
+        ${res.skipped?`· ${res.skipped} skipped`:''}${res.blanks?` · <span style="color:var(--red);">${res.blanks} blank</span>`:''}
+      </div>
+      <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;margin-top:3px;">Most used: ${top3}</div>
+      ${res.warnings.length?`<div style="margin-top:7px;font-size:10px;color:var(--red);line-height:1.5;">${res.warnings.map(w=>'⚠ '+esc(w)).join('<br>')}</div>`:''}
+    </div>`;
+  const f=document.getElementById('dkEntriesFooter');
+  if(f){
+    f.style.display='';
+    const b=document.getElementById('dkEntriesExportBtn');
+    if(b){ b.disabled=!res.filled||res.fmtMismatch; b.style.opacity=(b.disabled?.45:1);
+           b.textContent=res.filled?`Download ${res.filled} filled entr${res.filled===1?'y':'ies'}`:'Nothing to download'; }
+  }
 }
 
 // Export each golfer's simulated DK-outcome distribution (the data behind the
@@ -5584,6 +6849,8 @@ function renderGroupRulesSummary(){
     }
     const shA = document.getElementById('nflShareAlpha');
     if(shA) shA.value = slate._nflShareAlpha || 'normal';
+    const pcC = document.getElementById('nflPaceCorr');
+    if(pcC) pcC.value = slate._nflPaceCorr || 'normal';
     const sN = document.getElementById('nflStackN');
     if(sN) sN.value = String(slate._nflStackN|0);
     const bB = document.getElementById('nflBringBack');
@@ -15487,30 +16754,114 @@ function nflScriptMargins(ti, teamInfo){
 // 13·z2)/2) with ref = 2·implied − total, and the lognormal on the third grid.
 // 41³ nodes, a few milliseconds, memoized on the teamInfo object.
 const NFL_YARDF_SIG = 0.16;
-function nflYardNorms(implied, total){
+// ── GAME-STACK CORRELATION: the shared game-pace factor ─────────────────────
+// Everything above this line is per-TEAM. The scoreboard is shared (one total
+// T and one margin M produce both teams' scores), but the yardage/pace factors
+// derived from it are each team's own function of its own score ratio — and
+// because Cov(scoreA, scoreB) = (Var(T) − Var(M))/4 is NEGATIVE at the sampled
+// spreads (10.4² vs 13.0²), the two offenses came out essentially UNcorrelated:
+// a reviewer measured QB ↔ opposing-WR1 Pearson r of 0.01–0.07 against 0.40–0.45
+// for a QB and his own WR1.
+//
+// That is wrong about real football. Shootouts and slogs are game-LEVEL events:
+// pace, neutral-script play count, weather, field position and officiating all
+// move BOTH offenses the same way, which is the whole reason "bring-back" is a
+// standard DFS play. 4for4's stacking study finds the effect directly — when a
+// QB goes for 25+ DK points the OPPOSING quarterback also clears 25 in 61.1% of
+// those games and the opposing WR1 in 26.2% — and states plainly that "some
+// positive correlation exists between QB and members of the opposing passing
+// game, and especially between opposing QBs"
+// (https://www.4for4.com/2018/preseason/definitive-guide-stacking-draftkings).
+// Neither that article nor FantasyLabs' correlation-values piece
+// (https://www.fantasylabs.com/articles/introducing-nfl-correlation-values/,
+// which is the source for QB ↔ own WR1 = 0.34 and WR2 = 0.39, i.e. exactly
+// where this sim already sits) publishes the cross-team coefficients as
+// numbers; the values this model is tuned to — roughly +0.05 to +0.15 for QB vs
+// opposing WR1 and +0.10 to +0.20 for QB vs opposing QB — are the consensus of
+// the DFS-industry stack-correlation tables rather than a figure lifted from
+// one paper. They are deliberately MILD: the shared environment is real, but it
+// is much weaker than a genuine stack.
+//
+// TWO shared components, both multiplied into `yardF` (and therefore into every
+// yardage product and, through `paceF`, into the reception counts):
+//   1. `sig` — one game-level lognormal per sim, drawn ONCE in simNflGames and
+//      handed to both mkTeamEnv calls. This is pure shared pace/environment; it
+//      has no scoreboard meaning at all, which is exactly the point, since the
+//      scoreboard's own cross-team covariance is negative.
+//   2. `kappa` — the sampled game total's deviation from the posted one,
+//      (T/T0)^κ, which both teams also share. A 55-point game really did have
+//      more yards on both sides than a 34-point game did.
+// `ratioW` is the per-team score-RATIO weight, cut from 0.45 to 0.35 when this
+// is on so the two shared components REPLACE part of the private one and each
+// team's own yardF variance (and every player's p80) stays where it was instead
+// of growing.
+//
+// TUNED VALUES, by sweeping σ ∈ {0.08, 0.09, 0.10} × κ ∈ {0.18, 0.22, 0.25} at
+// 6,000–8,000 sims (probe_pace_sweep.js) and reading the correlation table off
+// each. σ sits mid-band. κ came down from the 0.25 the effect was first sized
+// at because (T/T0)^κ is DOUBLY shared — it correlates with both teams' own
+// score ratios as well as with itself — so it buys about three times as much
+// cross-team covariance per unit as the plain lognormal does, and at 0.25 the
+// measured numbers ran over the target band. ratioW is solved for variance
+// neutrality, not for correlation: left at 0.45 the seed's own-team QB↔WR1
+// climbed to 0.505, outside the 0.35–0.50 band this model is supposed to hold,
+// and p80s drifted up with it; at 0.35 both sit still.
+// Measured on the NEvSEA seed, 4 runs × 16,000 sims (Pearson r on DK points;
+// the run-to-run sd of each of these at 16,000 is about 0.006):
+//     own-team QB↔WR1    0.39 / 0.45 off → 0.42 / 0.48 on
+//     QB ↔ opposing QB   0.03–0.05  off → 0.137–0.152 on
+//     QB ↔ opposing WR1  0.04–0.07  off → 0.139–0.171 on
+//     WR1 ↔ opposing WR1 0.04       off → 0.097–0.118 on
+//     RB1 ↔ opposing RB1 −0.05      off → ~0.01 on
+// The high end of the opposing-WR1 range is the seed's own shape, not a
+// mis-tune: it is a 4-pass-catcher showdown slate where the SEA WR1 owns 42% of
+// the receiving pie, so he IS most of that offense and reads almost like its
+// quarterback. A Classic slate with a normal 25–30% WR1 share lands lower.
+// Note the RB pair: opposing RBs go from mildly NEGATIVE (each rides his own
+// team's lead/trail script, and the scripts are mirror images) to about zero,
+// which is the right answer — shared pace is a passing-game effect first.
+const NFL_PACE = { sig: 0.09, kappa: 0.21, ratioW: 0.35 };
+const NFL_RATIO_W = 0.45;      // score-ratio weight with game-stack correlation OFF
+// E[(T/T0)^κ] over the same total draw simNflGames makes, so `paceF` is itself
+// mean-1 and the 0.62 constant in the reception blend keeps its meaning.
+function nflPaceTotNorm(tot, kappa){
+  let s = 0;
+  for(let a = 0; a < _NFL_PA_Z.length; a++)
+    s += _NFL_PA_W[a] * Math.pow(Math.max(13, tot + _NFL_PA_Z[a] * 10.4) / tot, kappa);
+  return s > 0 ? s : 1;
+}
+function nflYardNorms(implied, total, pace){
   const imp = Number.isFinite(implied) && implied > 0 ? implied : 22;
   const tot = Number.isFinite(total) && total > 0 ? total : imp * 2;
   const ref = 2 * imp - tot;                       // this team's expected margin
   const c = NFL_YARDF_SIG * NFL_YARDF_SIG / 2;
   const L = _NFL_PA_Z.map(z => Math.exp(z * NFL_YARDF_SIG - c));
+  // With game-stack correlation on the ratio weight is lighter and the shared
+  // (T/T0)^κ rides along inside the expectation — it is a function of the SAME
+  // z1 that sets the score, so it cannot be factored out the way the game-level
+  // lognormal (independent and already mean-1) can.
+  const rw = pace ? pace.ratioW : NFL_RATIO_W, b0 = 1 - rw;
+  const pn = pace ? nflPaceTotNorm(tot, pace.kappa) : 1;
   let yn = 0, sp = 0, sr = 0;
   for(let a = 0; a < _NFL_PA_Z.length; a++){
     const T = Math.max(13, tot + _NFL_PA_Z[a] * 10.4);
+    const pf = pace ? Math.pow(T / tot, pace.kappa) / pn : 1;
     for(let b = 0; b < _NFL_PA_Z.length; b++){
       const d = _NFL_PA_Z[b] * 13.0;
       const score = Math.max(0, (T + ref + d) / 2);
       const ratio = Math.max(0.25, Math.min(2.6, score / Math.max(9, imp)));
-      const bse = 0.55 + 0.45 * ratio;
+      const bse = b0 + rw * ratio;
       let y = 0;
       for(let j = 0; j < L.length; j++) y += _NFL_PA_W[j] * Math.max(0.45, Math.min(1.95, bse * L[j]));
+      y *= pf;
       const sc = scriptTilt(d), w = _NFL_PA_W[a] * _NFL_PA_W[b];
       yn += w * y;
       sp += w * y * sc.passF * sc.volF;
       sr += w * y * sc.rushF * sc.volF;
     }
   }
-  if(!(yn > 0)) return { yn: 1, cp: 1, cr: 1 };
-  return { yn, cp: (sp / yn) || 1, cr: (sr / yn) || 1, imp, tot };
+  if(!(yn > 0)) return { yn: 1, cp: 1, cr: 1, pn };
+  return { yn, cp: (sp / yn) || 1, cr: (sr / yn) || 1, imp, tot, pn };
 }
 function nflScriptFor(ti, teamInfo){
   const m = nflScriptMargins(ti, teamInfo);
@@ -15645,6 +16996,10 @@ function nflMeanFromOu(ou, cv){
 function buildNflSimInputs(pool){
   const gamesByKey = new Map();
   const _dash = (typeof activeSlate==='function' && activeSlate()) ? activeSlate()._simAdj : null;
+  // Game-stack correlation: 'normal' (the default) shares a pace factor between
+  // the two offenses in a game; 'off' is the pre-2026-09-05 model, bit-for-bit.
+  const _paceKey = ((typeof activeSlate==='function' && activeSlate()) ? activeSlate()._nflPaceCorr : null) || 'normal';
+  const _paceCfg = _paceKey === 'off' ? null : NFL_PACE;
   const teamInfo = new Map();
 
   const teamOf = p => String(p.team||'').toUpperCase().replace(/[^A-Z]/g,'') || null;
@@ -15716,7 +17071,15 @@ function buildNflSimInputs(pool){
     // The (possibly adjusted) game total, on each side, so mkTeamEnv's yardF
     // normalizer can integrate over the same score distribution simNflGames
     // will actually sample from.
-    for(const t of names) g.teams[t]._gtotal = g.total;
+    // `_pace` is the game-stack correlation config (or null when it is off),
+    // stamped on the game AND on each side: simNflGames reads it off the game
+    // to decide whether to draw the shared lognormal at all, mkTeamEnv and
+    // nflYardNorms read it off the team. Stamping it here rather than reading
+    // the slate inside the sim keeps the hot loop free of activeSlate() calls
+    // and keeps nflCalibrateDst — which re-runs simNflGames on these same game
+    // objects — on the identical model.
+    for(const t of names){ g.teams[t]._gtotal = g.total; g.teams[t]._pace = _paceCfg; }
+    g._pace = _paceCfg;
   }
 
   // Players the market didn't price are NOT projected off salary any more.
@@ -15748,7 +17111,7 @@ function buildNflSimInputs(pool){
   // keeps the per-sim DST branch as cheap as it was.
   nflCalibrateDst(entries, _games);
 
-  return { games: _games, teamInfo, entries, shareSim, shareAlphaKey: _alphaKey };
+  return { games: _games, teamInfo, entries, shareSim, shareAlphaKey: _alphaKey, paceKey: _paceKey, pace: _paceCfg };
 }
 
 // One player's market-derived sim inputs (means per stat, from prop lines).
@@ -16363,12 +17726,18 @@ function simNflGames(games, gauss){
     const names = Object.keys(g.teams);
     // Total and margin are close to independent in NFL — sample separately.
     const T = Math.max(13, g.total + gauss() * 10.4);
+    // GAME-STACK CORRELATION: one shared pace draw for the whole game, made
+    // here (not in mkTeamEnv) precisely so both teams get the SAME number.
+    // Drawn only when the feature is on, so the gauss stream — and therefore
+    // every sim downstream of it — is bit-for-bit unchanged with it off.
+    const pace = g._pace || null;
+    const paceLn = pace ? Math.exp(gauss() * pace.sig - pace.sig * pace.sig / 2) : 1;
     const a = names[0], b = names[1];
     if(!b){
       const ti = g.teams[a];
       const sc = Math.max(0, ti.implied + gauss() * 7.6);
       const oppImp = Number.isFinite(ti.oppImplied) ? ti.oppImplied : Math.max(0, g.total - ti.implied);
-      env[a] = mkTeamEnv(ti, sc, Math.max(0, T - sc), gauss, ti.implied - oppImp);
+      env[a] = mkTeamEnv(ti, sc, Math.max(0, T - sc), gauss, ti.implied - oppImp, paceLn, T);
       continue;
     }
     const tiA = g.teams[a], tiB = g.teams[b];
@@ -16379,22 +17748,40 @@ function simNflGames(games, gauss){
     // `meanMargin` is the ADJUSTED expected margin, and it is the reference the
     // per-sim tilt is measured against — see mkTeamEnv for why it is that and
     // not the market baseline.
-    env[a] = mkTeamEnv(tiA, scA, scB, gauss, meanMargin);
-    env[b] = mkTeamEnv(tiB, scB, scA, gauss, -meanMargin);
+    env[a] = mkTeamEnv(tiA, scA, scB, gauss, meanMargin, paceLn, T);
+    env[b] = mkTeamEnv(tiB, scB, scA, gauss, -meanMargin, paceLn, T);
   }
   return env;
 }
-function mkTeamEnv(ti, score, oppScore, gauss, refMargin){
+function mkTeamEnv(ti, score, oppScore, gauss, refMargin, paceLn, gameT){
   const ratio = Math.max(0.25, Math.min(2.6, score / Math.max(9, ti.implied)));
   // Yards track points, but loosely — blunt the ratio and add its own noise.
   // MEAN-NORMALIZED (see nflYardNorm): the noise carries the −σ²/2 correction
   // every other lognormal in this file already carried, and the whole
   // expression is divided by its own expectation under this team's scoring
   // distribution, so E[yardF] = 1 and the prop lines survive the sim.
-  const nz = (ti._yNorm && ti._yNorm.imp === ti.implied) ? ti._yNorm
-           : (ti._yNorm = nflYardNorms(ti.implied, ti._gtotal));
-  const yardF = Math.max(0.45, Math.min(1.95,
-    (0.55 + 0.45 * ratio) * Math.exp(gauss() * NFL_YARDF_SIG - NFL_YARDF_SIG * NFL_YARDF_SIG / 2))) / nz.yn;
+  const pace = ti._pace || null;
+  const nz = (ti._yNorm && ti._yNorm.imp === ti.implied && ti._yNorm.pace === !!pace) ? ti._yNorm
+           : (ti._yNorm = Object.assign(nflYardNorms(ti.implied, ti._gtotal, pace), { pace: !!pace }));
+  // GAME-STACK CORRELATION. `paceF` is the half of the volume factor BOTH teams
+  // in this game share: the game-level lognormal drawn once in simNflGames and
+  // the sampled total's deviation from the posted one. It is mean-1 on its own
+  // (the lognormal by construction, the (T/T0)^κ leg divided by `nz.pn`), so it
+  // can be read as a standalone play-count multiplier — which is what the
+  // reception blend does with it. The score-ratio leg's weight drops to
+  // NFL_PACE.ratioW so total yardF variance is roughly unchanged; the whole
+  // product is then divided by nz.yn, which was integrated over exactly this
+  // construction, so E[yardF] = 1 still holds and the prop lines are still
+  // pinned. Note the [0.45, 1.95] clamp stays on the score-ratio part only —
+  // clamping after the shared factor would put a game-level ceiling on pace and
+  // quietly re-break the correlation in the tails, which is where it matters.
+  const paceF = pace
+    ? (Number.isFinite(paceLn) ? paceLn : 1) *
+      Math.pow(Math.max(1, Number.isFinite(gameT) ? gameT : nz.tot) / Math.max(1, nz.tot), pace.kappa) / nz.pn
+    : 1;
+  const rw = pace ? pace.ratioW : NFL_RATIO_W;
+  const yardF = paceF * Math.max(0.45, Math.min(1.95,
+    ((1 - rw) + rw * ratio) * Math.exp(gauss() * NFL_YARDF_SIG - NFL_YARDF_SIG * NFL_YARDF_SIG / 2))) / nz.yn;
   // GAME SCRIPT, per sim. This used to tilt off the ABSOLUTE realized margin,
   // which double-counted the market: the prop lines the entry means come from
   // already price the script at the posted spread, so a 3.5-point favourite was
@@ -16421,7 +17808,7 @@ function mkTeamEnv(ti, score, oppScore, gauss, refMargin){
   // one), so it is folded into the factors the consumers already multiply by.
   // `cp` / `cr` divide out E[yardF·passF] / E[yardF·rushF] — see nflYardNorms.
   const passF = sc.passF * sc.volF / nz.cp, rushF = sc.rushF * sc.volF / nz.cr;
-  return { score, oppScore, implied: ti.implied, ratio, yardF, passF, rushF,
+  return { score, oppScore, implied: ti.implied, ratio, yardF, passF, rushF, paceF,
            volF: sc.volF, scriptD: sc.d, passTilt: sc.passF, rushTilt: sc.rushF };
 }
 
@@ -16600,8 +17987,13 @@ function nflDrawTeamPie(TS, te, gauss){
   const rushMult = te.yardF * te.rushF * lnT(NFL_SIG_TEAM_YDS);
   const recTot  = TS.base.recYds  * passMult;
   const rushTot = TS.base.rushYds * rushMult;
-  // Receptions ride the same pass-game factors the old model used.
-  const recCntTot = TS.base.rec * te.passF * (0.62 + 0.38 * te.yardF);
+  // Receptions ride the same pass-game factors the old model used. The blend is
+  // written against `paceF` rather than a bare 0.62 so the SHARED half of the
+  // volume factor reaches catch counts at full strength (a fast game is more
+  // plays, hence more receptions, for both sides) while the team's own
+  // score-ratio half stays blunted the way it always was. paceF is 1 with
+  // game-stack correlation off, so this is the old expression exactly.
+  const recCntTot = TS.base.rec * te.passF * (0.62 * (te.paceF ?? 1) + 0.38 * te.yardF);
 
   const shRec  = nflDirichlet(TS.aRec,  TS.bufRec,  gauss);
   const shRush = nflDirichlet(TS.aRush, TS.bufRush, gauss);
@@ -16666,7 +18058,7 @@ function dkKickerScore(teamScore, gauss, tdsIn){
 // `out`, when passed, is filled with the component stat line (the sim debug
 // hook uses it; the hot loop passes nothing and allocates nothing).
 function simNflPlayer(e, te, gauss, out){
-  if(!te) te = { ratio:1, yardF:1, passF:1, rushF:1, score:22, oppScore:22 };
+  if(!te) te = { ratio:1, yardF:1, passF:1, rushF:1, paceF:1, score:22, oppScore:22 };
   if(e.pos === 'K'){
     const kp = dkKickerScore(te.score, gauss, te.pie ? te.pie.teamTD : undefined);
     if(out){ out.pos = 'K'; out.xp = te.pie ? te.pie.teamTD : null; out.pts = kp; }
@@ -16735,7 +18127,7 @@ function simNflPlayer(e, te, gauss, out){
     passYds = e.passYds != null ? ln(e.passYds * te.yardF * te.passF, 0.30) : 0;
     rushYds = e.rushYds != null ? ln(e.rushYds * te.yardF * te.rushF, 0.46) : 0;
     recYds  = e.recYds  != null ? ln(e.recYds  * te.yardF * te.passF, 0.52) : 0;
-    rec     = e.rec     != null ? poissonSample(Math.max(0, e.rec * te.passF * (0.62 + 0.38 * te.yardF)), gauss) : 0;
+    rec     = e.rec     != null ? poissonSample(Math.max(0, e.rec * te.passF * (0.62 * (te.paceF ?? 1) + 0.38 * te.yardF)), gauss) : 0;
 
     // Touchdowns scale with the team's realized scoring, anchored on the ATD price.
     if(e.atd != null){
@@ -17023,7 +18415,7 @@ async function runNflSims(pool, numSims, log){
     delete p._simT10; delete p._simT20; delete p._simCut; delete p._simP50;
     delete p._simBoom; });
 
-  const { games, entries, shareSim, shareAlphaKey } = buildNflSimInputs(pool);
+  const { games, entries, shareSim, shareAlphaKey, paceKey, pace } = buildNflSimInputs(pool);
   const priced = entries.filter(e => e.hasProps).length;
   const projOnly = entries.filter(e => !e.hasProps && !e.unpriced && e.pos !== 'K' && e.pos !== 'DST').length;
   const teamModeled = entries.filter(e => !e.hasProps && (e.pos === 'K' || e.pos === 'DST')).length;
@@ -17043,6 +18435,11 @@ async function runNflSims(pool, numSims, log){
     log(`Share correlation: ${shareAlphaKey} (α=${shareSim.alpha}) — ${nT} team${nT===1?'':'s'} split as a pie, so teammates trade shares of the same yards/TDs.`);
   } else {
     log('Share correlation: off — each player drawn independently around his own line.');
+  }
+  if(pace){
+    log(`Game-stack correlation: ${paceKey} (σ=${pace.sig}, κ=${pace.kappa}) — both offenses in a game share one pace factor, so bring-backs carry mild positive correlation.`);
+  } else {
+    log('Game-stack correlation: off — each team\'s volume rides its own score only, so opposing offenses are ~uncorrelated.');
   }
   if(!games.length){ log('⚠ No Team column — NFL sims need Team (and ideally O/U + Spread) to build game environments.'); return null; }
   // Warn loudly when the game env is missing: correlation is the whole point.
@@ -17283,6 +18680,7 @@ async function runNflSimGen(){
       adj: nflAdjClone(slate._simAdj),
       adjSummary: nflAdjSummary(_nA ? slate._simAdj : null),
       shareAlpha: slate._nflShareAlpha || 'normal',
+      paceCorr: slate._nflPaceCorr || 'normal',
       evOn: _evOn,
     });
   }
@@ -21147,6 +22545,46 @@ function closeUpdatePoolModal(){
   document.getElementById('updatePoolModal').style.display='none';
 }
 
+// DraftKings exports come in two shapes. DKSalaries.csv is a plain player
+// table. DKEntries.csv is the contest-entry upload template, whose player table
+// is tucked into the SAME file starting at the column after "Instructions"
+// (header row: Position, Name + ID, Name, ID, Roster Position, Salary, Game
+// Info, TeamAbbrev, AvgPointsPerGame). Find that header wherever it sits and
+// return a clean {headers, rows} of just the player table, so a user can drop
+// either file on Update Pool and get game times / positions / DK ids.
+function parseCsvLine(l){
+  const cols=[]; let cur='', inQ=false;
+  for(let i=0;i<l.length;i++){
+    const c=l[i];
+    if(c==='"'){ inQ=!inQ; }
+    else if(c===','&&!inQ){ cols.push(cur.trim()); cur=''; }
+    else cur+=c;
+  }
+  cols.push(cur.trim());
+  return cols;
+}
+function extractDkPlayerTable(text){
+  const lines = text.split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length) return null;
+  const first = parseCsvLine(lines[0]).map(h=>h.replace(/^"|"$/g,'').trim());
+  const isPlayerHdr = cols => cols.some(c=>/^name \+ id$/i.test(c)) && cols.some(c=>/^salary$/i.test(c));
+  if(isPlayerHdr(first)) return { headers:first, rows:lines.slice(1).map(parseCsvLine).filter(r=>r.some(c=>c)), kind:'DKSalaries' };
+  // DKEntries: scan the first ~40 lines for the sidecar header and its column offset.
+  for(let i=0;i<Math.min(lines.length,40);i++){
+    const cols=parseCsvLine(lines[i]);
+    const off=cols.findIndex(c=>/^position$/i.test(c));
+    if(off<0) continue;
+    const hdr=cols.slice(off).map(h=>h.replace(/^"|"$/g,'').trim());
+    if(!isPlayerHdr(hdr)) continue;
+    const rows=[];
+    for(let j=i+1;j<lines.length;j++){
+      const r=parseCsvLine(lines[j]).slice(off);
+      if(r.length>=hdr.length-1 && r[1] && /\(\d+\)/.test(r[1])) rows.push(r);
+    }
+    return { headers:hdr, rows, kind:'DKEntries', entries: lines.slice(1,i).length };
+  }
+  return null;
+}
 function handleUpdatePoolFile(file){
   if(!file) return;
   const reader = new FileReader();
@@ -21154,26 +22592,23 @@ function handleUpdatePoolFile(file){
     const text = e.target.result;
     const lines = text.split(/\r?\n/).filter(l=>l.trim());
     if(!lines.length){ document.getElementById('updatePoolStatus').textContent='Empty file.'; return; }
-    const headers = lines[0].split(',').map(h=>h.replace(/^"|"$/g,'').trim());
-    const rows = lines.slice(1).map(l=>{
-      const cols=[]; let cur='', inQ=false;
-      for(let i=0;i<l.length;i++){
-        const c=l[i];
-        if(c==='"'){inQ=!inQ;}
-        else if(c===','&&!inQ){cols.push(cur.trim());cur='';}
-        else cur+=c;
-      }
-      cols.push(cur.trim());
-      return cols;
-    }).filter(r=>r.some(c=>c));
-    updateParsedCSV = {headers, rows};
+    const dk = extractDkPlayerTable(text);
+    const headers = dk ? dk.headers : lines[0].split(',').map(h=>h.replace(/^"|"$/g,'').trim());
+    const rows = dk ? dk.rows : lines.slice(1).map(parseCsvLine).filter(r=>r.some(c=>c));
+    updateParsedCSV = {headers, rows, dkKind: dk ? dk.kind : null};
 
     // Auto-map using priority + normal pass
     updateColMapping = {};
     // Update Pool acts on the ACTIVE slate — never the new-slate modal select.
     applyAutoMap(headers, updateColMapping, activeSlate()?.sport||'');
+    // A DK file is an ENRICHMENT source (ids, positions, game info, salary) —
+    // never a projection: AvgPointsPerGame is last season's average, and it
+    // would silently overwrite the user's Proj column.
+    if(dk){ delete updateColMapping.proj; delete updateColMapping.own; }
 
-    document.getElementById('updatePoolStatus').textContent = `Loaded ${rows.length} rows, ${headers.length} columns.`;
+    document.getElementById('updatePoolStatus').textContent = dk
+      ? `DraftKings ${dk.kind} detected — ${rows.length} players with Game Info / positions / DK ids. Matching by DK id; your projections, ownership and props are untouched.`
+      : `Loaded ${rows.length} rows, ${headers.length} columns.`;
     document.getElementById('updatePoolDropZone').style.display='none';
     renderUpdatePoolMapper();
     document.getElementById('updatePoolMapper').style.display='block';
@@ -21412,8 +22847,12 @@ function applyPoolUpdate(){
     if(slate.sport==='nfl') applyNflStats(p, row, updateParsedCSV.headers);
   });
 
-  // Add brand-new players that weren't in the pool (e.g. late adds)
-  groups.filter(g=>!g.consumed).forEach(g=>{
+  // Add brand-new players that weren't in the pool (e.g. late adds).
+  // Not from a DraftKings file: DK lists the whole draft group (700+ on a main
+  // slate), and anyone the odds sheet left out has no props — adding him just
+  // buries the pool in 0-point bodies.
+  const _skipLateAdds = !!updateParsedCSV.dkKind;
+  groups.filter(g=>!g.consumed && !_skipLateAdds).forEach(g=>{
     const row=g.row;
     const salRaw=(cm.salary!=null?row[cm.salary]||'':'').replace(/[^0-9.]/g,'');
     const sal=parseFloat(salRaw)||0; if(!sal) return;
