@@ -2520,17 +2520,25 @@ function applyNflStats(p, row, headers){
   const idx = (rx)=>headers.findIndex(h=>rx.test((h||'').trim()));
   const get = (rx)=>{ const i=idx(rx); return i>=0?(row[i]||'').trim():null; };
   const num = (rx)=>{ const v=get(rx); const n=parseFloat(v); return Number.isFinite(n)?n:null; };
-  p.pass_yds_ou = get(/^pass\s*yds?\s*o\/u$/i) || null;
-  p.pass_td_ou  = get(/^pass\s*tds?\s*o\/u$/i) || null;
-  p.rush_yds_ou = get(/^rush\s*yds?\s*o\/u$/i) || null;
-  p.rec_yds_ou  = get(/^rec\s*yds?\s*o\/u$/i)  || null;
-  p.rec_ou      = get(/^rec\s*o\/u$/i)         || null;
-  p.rush_rec_ou = get(/^rush\s*\+\s*rec\s*o\/u$/i) || null;
-  p.atd         = get(/^atd$/i) || get(/^anytime\s*td$/i) || null;
-  p.game_ou     = num(/^o\/u$/i);
-  p.spread      = num(/^spread$/i);
-  p.tm_tot      = num(/^tm\s*tot(al)?$/i);
-  p.opp_tot     = num(/^opp\s*tot(al)?$/i);
+  // Only fields whose column is PRESENT in this source are written. A file
+  // without a column says nothing about that stat — a DraftKings salary CSV
+  // dropped on a sheet-built slate used to blank every prop line and game
+  // total simply because DK's file doesn't carry them.
+  const has = (rx)=>idx(rx)>=0;
+  const setStr = (key, rx)=>{ if(has(rx)) p[key] = get(rx) || null; };
+  const setNum = (key, rx)=>{ if(has(rx)) p[key] = num(rx); };
+  setStr('pass_yds_ou', /^pass\s*yds?\s*o\/u$/i);
+  setStr('pass_td_ou',  /^pass\s*tds?\s*o\/u$/i);
+  setStr('rush_yds_ou', /^rush\s*yds?\s*o\/u$/i);
+  setStr('rec_yds_ou',  /^rec\s*yds?\s*o\/u$/i);
+  setStr('rec_ou',      /^rec\s*o\/u$/i);
+  setStr('rush_rec_ou', /^rush\s*\+\s*rec\s*o\/u$/i);
+  if(has(/^atd$/i)) p.atd = get(/^atd$/i) || null;
+  else if(has(/^anytime\s*td$/i)) p.atd = get(/^anytime\s*td$/i) || null;
+  setNum('game_ou', /^o\/u$/i);
+  setNum('spread',  /^spread$/i);
+  setNum('tm_tot',  /^tm\s*tot(al)?$/i);
+  setNum('opp_tot', /^opp\s*tot(al)?$/i);
   // Kickoff. DK's salary file carries "Game Info" ("NE@SEA 09/09/2026 08:20PM
   // ET"); a sheet may instead have "Game Time" / "Kickoff" / "Start". Keep the
   // raw cell and a parsed {mins, label} so tiles can show and sort by it.
@@ -21695,9 +21703,20 @@ function parseSlateTab(title){
     const sm=rest.match(/^(CUP|XFINITY|ORLY|O'?REILLY|TRUCKS?|ARCA)\b\s*/i);
     if(sm){ series=sm[1].toUpperCase(); rest=rest.slice(sm[0].length).trim(); }
   }
-  const KEEP_CAPS=new Set(['UFC','PGA','TPC','LIV','II','III','IV']);
+  const KEEP_CAPS=new Set(['UFC','PGA','TPC','LIV','II','III','IV','MNF','SNF','TNF','AFC','NFC','DK','FD']);
+  // NFL tabs name the matchup as "NEvSEA" / "NE vs SEA" / "NE@SEA" — team
+  // abbreviations must stay upper-case (2–3 letters, sometimes 4 like JAX/LAC).
+  const NFL_TEAMS=new Set(['ARI','ATL','BAL','BUF','CAR','CHI','CIN','CLE','DAL','DEN','DET','GB','HOU','IND','JAX','JAC','KC','LV','LAC','LAR','LA','MIA','MIN','NE','NO','NYG','NYJ','PHI','PIT','SF','SEA','TB','TEN','WAS','WSH','OAK','SD','STL']);
+  if(sport==='nfl'){
+    // split the fused "NEvSEA" form into "NE vs SEA" before title-casing
+    rest=rest.replace(/\b([A-Z]{2,3})(?:v|vs|@)([A-Z]{2,3})\b/i,(m,a,b)=>
+      (NFL_TEAMS.has(a.toUpperCase())&&NFL_TEAMS.has(b.toUpperCase()))?`${a.toUpperCase()} vs ${b.toUpperCase()}`:m);
+  }
   const event=rest.split(' ').map(w=>{
-    if(KEEP_CAPS.has(w.toUpperCase())) return w.toUpperCase();
+    const up=w.toUpperCase();
+    if(KEEP_CAPS.has(up)) return up;
+    if(sport==='nfl' && NFL_TEAMS.has(up)) return up;
+    if(/^vs$/i.test(w)) return 'vs';
     return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase();
   }).join(' ')||String(title);
   return {sport, series, event, dateStr, icon:SLATE_SPORT_ICON[sport]||'📋'};
