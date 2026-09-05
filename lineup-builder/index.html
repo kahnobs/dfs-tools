@@ -257,7 +257,8 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .sdash-stat-tot{font-family:'DM Mono',monospace;font-size:10px;color:var(--green);white-space:nowrap;}
 .sdash-stat-top{flex:1;font-size:9.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .sdash-over{font-size:9px;color:var(--red);border:1px solid rgba(239,68,68,.4);padding:0 4px;border-radius:3px;}
-.sdash-prow{display:grid;grid-template-columns:minmax(96px,1.1fr) 1fr 86px 54px 20px 22px;align-items:center;gap:6px;padding:2px 0;}
+.sdash-prow{display:grid;grid-template-columns:minmax(96px,1.1fr) 1fr 86px 54px 20px 22px 20px;align-items:center;gap:6px;padding:2px 0;}
+.sdash-prow.isout .sdash-pname{color:var(--red);text-decoration:line-through;}
 .sdash-prow.ov .sdash-pname{color:var(--accent);}
 .sdash-prow.lock .sdash-pname{color:var(--blue);}
 .sdash-pname{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -286,6 +287,15 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .sd-pool-actions button:hover{color:var(--text);border-color:var(--muted);}
 .driver-row.sd-pool-off{opacity:.28;}
 .driver-row.sd-pool-off:hover{opacity:.5;}
+.driver-row.is-out{background:repeating-linear-gradient(135deg,transparent,transparent 5px,rgba(239,68,68,.05) 5px,rgba(239,68,68,.05) 10px);}
+.out-name{text-decoration:line-through;text-decoration-color:var(--red);opacity:.6;}
+.out-badge{font-size:8px;font-weight:700;letter-spacing:.4px;color:var(--red);border:1px solid rgba(239,68,68,.45);border-radius:3px;padding:0 3px;vertical-align:middle;}
+.lock-badge{font-size:9px;opacity:.75;vertical-align:middle;cursor:help;}
+.sdash-out-note{margin:0 0 10px;padding:7px 10px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.07);border-radius:6px;font-size:11px;color:var(--text);line-height:1.6;font-family:'DM Mono',monospace;}
+.sdash-outbtn{background:none;border:1px solid transparent;color:var(--muted);border-radius:3px;font-size:9px;line-height:1;padding:2px 3px;cursor:pointer;opacity:.3;filter:grayscale(1);}
+.sdash-outbtn:hover{opacity:1;filter:none;border-color:var(--border);}
+.sdash-outbtn.on{opacity:1;filter:none;color:var(--red);border-color:rgba(239,68,68,.45);}
+.sdash-auto-tag{font-size:8px;color:var(--red);border:1px solid rgba(239,68,68,.4);border-radius:3px;padding:0 3px;margin-left:4px;white-space:nowrap;}
 .sd-pool-btn{opacity:1;font-size:11px;}
 .sd-pool-btn.on{color:var(--green);}
 .sd-pool-btn.off{color:var(--muted);}
@@ -302,7 +312,6 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
    name column never reflows when archetypes appear. */
 .grp-dot-auto{width:6px;height:6px;margin:0.5px;opacity:.8;}
 .grp-dots:hover .grp-dot-auto{opacity:1;}
-.grp-dot-more{font-family:'DM Mono',monospace;font-size:8px;color:var(--muted);line-height:7px;flex-shrink:0;cursor:help;}
 
 /* RIGHT PANEL */
 .right-panel{display:flex;flex-direction:column;overflow:hidden;}
@@ -494,7 +503,6 @@ input:checked+.toggle-slider:before{transform:translateX(15px);background:var(--
 /* Proj cell - clean number, overlay controls on hover */
 .proj-cell-wrap{position:relative;display:block;width:100%;height:100%;overflow:hidden;}
 .proj-cell-input{display:block;width:100%;background:none;border:1px solid rgba(255,255,255,.15);color:var(--text);padding:2px 4px;border-radius:3px;font-size:11px;font-family:'DM Mono',monospace;outline:none;text-align:right;box-sizing:border-box;}
-.proj-cell-input.modified{background:rgba(255,255,255,.04);border-color:inherit;}
 .proj-cell-input:focus{border-color:var(--accent)!important;background:rgba(255,255,255,.06);}
 .proj-controls{position:absolute;inset:0;display:none;align-items:center;justify-content:space-between;padding:0 2px;pointer-events:none;}
 .proj-spin-wrap{display:flex;flex-direction:column;gap:1px;}
@@ -517,9 +525,6 @@ input[type=number].rule-num:hover::-webkit-inner-spin-button,
 input[type=number].rule-num:hover::-webkit-outer-spin-button,
 input[type=number].rule-num:focus::-webkit-inner-spin-button,
 input[type=number].rule-num:focus::-webkit-outer-spin-button{opacity:.6;}
-.proj-base{color:var(--muted);}
-.proj-up{color:var(--green);border-bottom-color:var(--green);}
-.proj-down{color:var(--red);border-bottom-color:var(--red);}
 .gpm-row{display:grid;grid-template-columns:20px 1fr 56px auto;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;border:1px solid transparent;transition:all .1s;}
 .gpm-row:hover{background:var(--surface2);border-color:var(--border);}
 .gpm-row.gpm-selected{background:rgba(168,85,247,.1);border-color:rgba(168,85,247,.3);}
@@ -627,10 +632,6 @@ select.mapper-select option{background:var(--surface2);}
   .slate-tab { padding: 6px 10px; font-size: 12px; }
   .btn-new-slate { padding: 6px 12px; font-size: 12px; }
 
-  /* Hide Restore/Clear All on mobile */
-  .topbar > label,
-  .topbar > button:not(.btn-new-slate):not(.btn-topbar-menu) { display: none; }
-
   #appWrap { height: auto; min-height: 100vh; }
   #mainLayout { display: flex !important; flex-direction: column; height: auto; overflow: visible; }
 
@@ -669,6 +670,17 @@ select.mapper-select option{background:var(--surface2);}
   .hide-btn { width: 22px; height: 22px; font-size: 12px; opacity: 1 !important; border: 1px solid var(--border) !important; border-radius: 4px !important; }
   .cell-sal { font-size: 11px !important; }
   .cell-name { font-size: 11px; }
+
+  /* The showdown sub-row is a non-wrapping flex row: the segmented control (two
+     nowrap buttons carrying "(30/30 in pool)" counters) plus the subtitle plus
+     All on / All off measured 506px against a 390px viewport, which scrolled the
+     WHOLE page sideways and pushed All on / All off off-screen entirely. Let it
+     wrap, drop the counters (they are the widest thing in it and the pool sizes
+     are one tap away), and give the subtitle its own line. */
+  .sd-pool-subrow { flex-wrap: wrap; row-gap: 5px; }
+  .sd-view-toggle { flex: 1 1 auto; }
+  .sd-vt-n { display: none; }
+  .sd-pool-sub { flex: 1 1 100%; order: 3; min-width: 0; }
 
   .right-panel { overflow: visible; height: auto; }
   .right-panel.mob-hidden { display: none; }
@@ -1056,8 +1068,11 @@ html { overscroll-behavior-y: contain; }
 .saved-lineup:hover,.preview-lineup-card:hover,.ngt:hover{
   border-color:var(--border-strong);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),var(--e1);}
 .ngt:hover{border-color:var(--muted);}  /* tiles are click targets — stronger lift than the passive cards above */
-.ngt.on{border-color:var(--accent);background:var(--accent-dim);}
+/* .on after .adj: same specificity, so the later rule wins — and an ACTIVE
+   filtered tile that was also adjusted used to compute the dim .adj border,
+   i.e. exactly the games you have been working on lost their selection cue. */
 .ngt.adj{border-color:var(--accent-line);}
+.ngt.on{border-color:var(--accent);background:var(--accent-dim);}
 .saved-lineup.dup{border-color:var(--red);background:rgba(239,68,68,.07);}
 
 /* ── Section headers ──────────────────────────────────────────────────────
@@ -1328,7 +1343,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
           ondragleave="this.style.borderColor='var(--border)'"
           ondrop="event.preventDefault();this.style.borderColor='var(--border)';handleUpdatePoolFile(event.dataTransfer.files[0])">
           <div style="font-size:13px;color:var(--muted);">Drop updated CSV here or click to browse</div>
-          <input type="file" id="updatePoolFile" accept=".csv" style="display:none" onchange="handleUpdatePoolFile(this.files[0])">
+          <input type="file" id="updatePoolFile" accept=".csv" style="display:none" onchange="handleUpdatePoolFile(this.files[0]);this.value='';">
         </div>
         <div id="updatePoolStatus" style="font-size:11px;color:var(--muted);margin-bottom:10px;min-height:16px;"></div>
         <!-- Column re-mapper (shown after file load) -->
@@ -1354,7 +1369,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
           ondragleave="this.style.borderColor='var(--border)'"
           ondrop="event.preventDefault();this.style.borderColor='var(--border)';handleDkEntriesFile(event.dataTransfer.files[0])">
           <div style="font-size:13px;color:var(--muted);">Drop DKEntries.csv here or click to browse</div>
-          <input type="file" id="dkEntriesFile" accept=".csv" style="display:none" onchange="handleDkEntriesFile(this.files[0])">
+          <input type="file" id="dkEntriesFile" accept=".csv" style="display:none" onchange="handleDkEntriesFile(this.files[0]);this.value='';">
           <div style="margin-top:12px;" onclick="event.stopPropagation()">
             <textarea id="dkEntriesPasteBox" placeholder="…or paste the file's contents here" style="width:100%;height:60px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:11px;font-family:'DM Mono',monospace;outline:none;resize:vertical;"></textarea>
             <button class="btn btn-sm btn-default" onclick="dkEntriesPaste()" style="margin-top:6px;">Use pasted text</button>
@@ -1404,6 +1419,8 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
           <div class="sal-avg-row"><div class="sal-avg" id="salAvg"></div></div>
           <div class="bar-track"><div class="bar-fill" id="barFill" style="width:0%"></div></div>
         </div>
+        <!-- LATE SWAP: shown while a DK entry is loaded here for hand-tuning. -->
+        <div id="lsEditBar" style="display:none;"></div>
         <!-- Contest EV for the lineup being built by hand. NFL only, hidden
              until renderHbEv decides the slate qualifies. -->
         <div class="hb-ev" id="hbEvBlock" style="display:none">
@@ -1534,19 +1551,23 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
           <div class="autogen-section-title">Settings</div>
           <div class="setting-row">
             <div class="setting-label">Number of lineups</div>
-            <input type="number" class="setting-num" id="genCount" value="20" min="1" max="500">
+            <input type="number" class="setting-num" id="genCount" value="20" min="1" max="500"
+              onchange="const _s=activeSlate();if(_s){_s._genCount=parseInt(this.value)||20;save();}">
           </div>
           <div class="setting-row">
             <div class="setting-label">Max exposure per player (%)</div>
-            <input type="number" class="setting-num" id="genMaxExp" value="100" min="1" max="100">
+            <input type="number" class="setting-num" id="genMaxExp" value="100" min="1" max="100"
+              onchange="const _s=activeSlate();if(_s){_s._genMaxExp=parseInt(this.value)||100;save();}">
           </div>
           <div class="setting-row">
             <div class="setting-label">Min lineup salary</div>
-            <input type="number" class="setting-num" id="genMinSal" value="49000" min="1" max="50000" style="width:80px;">
+            <input type="number" class="setting-num" id="genMinSal" value="49000" min="1" max="50000" style="width:80px;"
+              onchange="const _s=activeSlate();if(_s){_s._genMinSal=parseInt(this.value)||0;save();}">
           </div>
           <div class="setting-row">
             <div class="setting-label">Max lineup salary</div>
-            <input type="number" class="setting-num" id="genMaxSal" value="50000" min="1" max="50000" style="width:80px;">
+            <input type="number" class="setting-num" id="genMaxSal" value="50000" min="1" max="50000" style="width:80px;"
+              onchange="const _s=activeSlate();if(_s){_s._genMaxSal=parseInt(this.value)||SALARY_CAP;save();}">
           </div>
         </div>
 
@@ -2212,13 +2233,23 @@ function sdComplete(slate, ids){
 //      current lineup — a pin must never re-captain every saved lineup that
 //      happens to contain the same player)
 //   3. the highest-salaried CAPTAIN-ELIGIBLE player, else highest-salaried.
-function sdCaptainId(slate, ids){
+function sdCaptainId(slate, ids, saved){
   if(!ids || !ids.length) return null;
   const key = lineupKey(ids);
+  // ORDER MATTERS, and the pin comes FIRST. _lineupMeta is keyed by lineupKey,
+  // which is the sorted id list with no captain in it — so a SAVED lineup over
+  // the same six players used to answer for the lineup being hand-built, and
+  // clicking "captain" on the builder did nothing (the meta captain won, and
+  // sdSalary then cap-checked the wrong man). The pin only ever applies to
+  // slate.currentLineup, so it cannot leak onto a saved lineup; within that one
+  // lineup it is the user's last word.
+  // `saved` = the caller holds a SAVED lineup (sdLineupCaptain): the pin is a
+  // builder-only state and must not re-captain a saved roster that happens to
+  // hold the same six players as the one being built.
+  const pinned = !saved && slate && slate.sdCaptain;
+  if(pinned && ids.includes(pinned) && key === lineupKey(slate.currentLineup||[])) return pinned;
   const meta = slate && slate._lineupMeta && slate._lineupMeta[key];
   if(meta && meta.sdCaptain && ids.includes(meta.sdCaptain)) return meta.sdCaptain;
-  const pinned = slate && slate.sdCaptain;
-  if(pinned && ids.includes(pinned) && key === lineupKey(slate.currentLineup||[])) return pinned;
   let best = null, bestSal = -1, bestAny = null, bestAnySal = -1;
   for(const id of ids){
     const s = playerById(slate,id)?.salary || 0;
@@ -2260,10 +2291,13 @@ function sdSetPoolAll(mode, on){
   const k = mode === 'cpt' ? 'sdCptOff' : 'sdFlexOff';
   if(on) slate[k] = [];
   else {
-    const q = (document.getElementById('searchInput')?.value||'').toLowerCase();
-    // "All off" respects the search box so a filtered view can be cleared alone.
+    // "All off" acts on exactly the rows on screen. It used to consult the
+    // search box ONLY, so with the pool filtered to one team by a game tile it
+    // silently emptied the pool for BOTH teams while its tooltip said otherwise.
+    // getSortedPlayers is the one function that knows every active filter.
+    const vis = new Set(getSortedPlayers().map(p => p.id));
     slate[k] = [...new Set([...(slate[k]||[]), ...(slate.players||[])
-      .filter(p => !q || p.name.toLowerCase().includes(q)).map(p=>p.id)])];
+      .filter(p => vis.has(p.id)).map(p=>p.id)])];
     if(mode === 'cpt' && slate.sdCaptain && slate[k].includes(slate.sdCaptain)) slate.sdCaptain = null;
   }
   save(); renderAll();
@@ -2285,6 +2319,17 @@ function sdAddAsCaptain(id){
   const slate = activeSlate(); if(!slate || !isShowdown(slate)) return;
   slate.currentLineup = slate.currentLineup || [];
   const cur = slate.currentLineup;
+  // LATE SWAP: CPT and FLEX are two different DK roster slots, so re-captaining
+  // moves someone between slots. Neither end of that move may be locked.
+  if(slate.sport === 'nfl'){
+    const prevCpt = sdCaptainId(slate, cur);
+    if(prevCpt && prevCpt !== id && playerLockedById(slate, prevCpt)){
+      showToast('🔒 Your captain\'s game has already started — the CPT slot is locked.','err'); return;
+    }
+    if(playerLockedById(slate, id) && !(cur.includes(id) && prevCpt === id)){
+      showToast('🔒 That game has already started — he can\'t be moved into the captain slot.','err'); return;
+    }
+  }
   const already = cur.includes(id);
   if(!already && cur.length >= 6) return;
   const prevPin = slate.sdCaptain;
@@ -2299,7 +2344,8 @@ function sdAddAsCaptain(id){
   save(); renderAll();
 }
 // Per-lineup captain for the saved list / exposure (meta first, then default).
-function sdLineupCaptain(slate, ids){ return sdCaptainId(slate, ids); }
+// Captain of a SAVED lineup: stored meta first, never the builder pin.
+function sdLineupCaptain(slate, ids){ return sdCaptainId(slate, ids, true); }
 // How often each player is CAPTAIN across saved lineups.
 function sdCptCounts(slate){
   const c = {};
@@ -2360,6 +2406,10 @@ function sdDedupePlayers(slate){
   slate.hiddenIds = rmList(slate.hiddenIds||[]);
   slate.sdCptOff = rmList(slate.sdCptOff||[]);
   slate.sdFlexOff = rmList(slate.sdFlexOff||[]);
+  // OUT ids were added after this remapper was written. A scratch recorded
+  // against the twin that gets dropped here would otherwise survive as a dead
+  // id: the ⛔ silently stops applying and nflRedistributeOut never zeroes him.
+  if(Array.isArray(slate._outIds)) slate._outIds = rmList(slate._outIds);
   if(slate.sdCaptain) slate.sdCaptain = rm(slate.sdCaptain);
   (slate.groups||[]).forEach(g => {
     g.playerIds = rmList(g.playerIds||[]);
@@ -2385,18 +2435,22 @@ function sdDedupePlayers(slate){
     if(meta[oldKey]) newMeta[nk] = meta[oldKey];
   });
   slate.savedLineups = outL;
-  slate._lineupMeta = Object.assign({}, meta, newMeta);
+  // newMeta already holds every SURVIVING lineup's metadata under its remapped
+  // key. Merging the old map back in resurrected entries for lineups that were
+  // just dropped, and sdCaptainId reads _lineupMeta[key].sdCaptain for any six
+  // ids — so a resurrected entry could re-captain a lineup built later.
+  slate._lineupMeta = newMeta;
   return remap.size;
 }
 // Slot order for display/export: CPT first, then the 5 FLEX.
-function sdAssignSlots(slate, ids){
-  const cpt = sdCaptainId(slate, ids);
+function sdAssignSlots(slate, ids, cptOverride){
+  const cpt = cptOverride || sdCaptainId(slate, ids);
   const rest = (ids||[]).filter(id => id !== cpt);
   return [cpt, ...rest];
 }
 // Salary of a showdown roster, charging the captain 1.5×.
-function sdSalary(slate, ids){
-  const cpt = sdCaptainId(slate, ids);
+function sdSalary(slate, ids, cptOverride){
+  const cpt = cptOverride || sdCaptainId(slate, ids);
   let s = 0;
   for(const id of ids||[]){
     const p = playerById(slate,id);
@@ -2409,7 +2463,9 @@ function nflCounts(slate, ids){
   const c = {QB:0,RB:0,WR:0,TE:0,DST:0,UNK:0};
   for(const id of ids||[]){
     const pos = nflPosOf(playerById(slate,id));
-    c[pos||'UNK']++;
+    // nflPosOf also returns 'K' (showdown prices kickers); Classic has no such
+    // slot, so he counts as unrostered rather than creating a NaN bucket.
+    c[(pos && c[pos]!==undefined) ? pos : 'UNK']++;
   }
   return c;
 }
@@ -2434,7 +2490,10 @@ function nflAssignSlots(slate, ids){
   const groups = {QB:[],RB:[],WR:[],TE:[],DST:[]};
   for(const id of ids||[]){
     const pos = nflPosOf(playerById(slate,id));
-    if(pos) groups[pos].push(id); else (groups._bad=groups._bad||[]).push(id);
+    // `groups` has no K bucket — a kicker is not slottable in Classic — and
+    // groups[pos].push on an undefined bucket threw, taking the whole export
+    // down instead of reporting an unslottable player.
+    if(pos && groups[pos]) groups[pos].push(id); else (groups._bad=groups._bad||[]).push(id);
   }
   const bySal = a => a.sort((x,y)=>(playerById(slate,y)?.salary||0)-(playerById(slate,x)?.salary||0));
   Object.values(groups).forEach(g=>Array.isArray(g)&&bySal(g));
@@ -2443,6 +2502,113 @@ function nflAssignSlots(slate, ids){
     TE:groups.TE[0]||null, DST:groups.DST[0]||null,
     FLEX:groups.RB[2]||groups.WR[3]||groups.TE[1]||null};
   return [out.QB,out.RB,out.RB2,out.WR,out.WR2,out.WR3,out.TE,out.FLEX,out.DST];
+}
+
+// ── PLAYER OUT ───────────────────────────────────────────────────────────────
+// A late scratch is not the same event as hiding a player. Hiding says "I don't
+// want him in MY lineups"; OUT says "he is not playing at all", which is a fact
+// about the slate: he scores 0, nobody in the modeled field rosters him, and —
+// the part that actually matters for a projection — the touches, targets and
+// yards he was going to absorb DO NOT VANISH. His offense still runs the same
+// number of plays; somebody else catches those balls. So OUT redistributes his
+// market share to his positional teammates (see nflRedistributeOut) rather than
+// simply deleting him from the pie and letting renormalization smear his
+// vacated share evenly over a whole roster, which is not how a depth chart
+// works: the WR2's targets go to the other receivers, not to the running back.
+// Stored per slate as an id array so it survives save()/reload.
+function nflOutIds(slate){ return (slate && slate._outIds) || []; }
+function nflIsOut(slate, id){ return !!(slate && slate._outIds && slate._outIds.indexOf(id) >= 0); }
+function nflOutSet(slate){ return new Set(nflOutIds(slate)); }
+// The visible ⛔ button in the pool and on the Sim tab's player rows.
+function toggleOut(id, e){
+  if(e) e.stopPropagation();
+  const slate = activeSlate(); if(!slate) return;
+  slate._outIds = slate._outIds || [];
+  const i = slate._outIds.indexOf(id);
+  if(i >= 0) slate._outIds.splice(i, 1);
+  else {
+    slate._outIds.push(id);
+    // An OUT player cannot sit in the roster you are building, and he cannot be
+    // the pinned captain of it either.
+    slate.currentLineup = (slate.currentLineup||[]).filter(x => x !== id);
+    if(slate.sdCaptain === id) slate.sdCaptain = null;
+  }
+  const moved = nflRedistributeOut(slate);
+  save();
+  if(typeof renderAll === 'function') renderAll();
+  if(typeof renderSimDash === 'function' && document.getElementById('simDashPanel')) renderSimDash();
+  return moved;
+}
+
+// ── LATE SWAP — kickoff-aware locking ────────────────────────────────────────
+// DK's "Game Info" column is always EASTERN time ("NE@SEA 09/09/2026 08:20PM
+// ET"), and nflParseKickoff deliberately stores those numbers AS WRITTEN (no
+// timezone conversion). So the comparison has to happen in Eastern time too —
+// which means converting `now` to ET, not converting the kickoff to local. That
+// is what Intl.DateTimeFormat with timeZone:'America/New_York' gives us, with
+// no library and correct across the DST boundary in early November.
+let _etFmt = null, _etMemo = {t:null, v:null};
+function nflEtParts(d){
+  // Memoized on the instant: renderPool asks this once per row and building an
+  // Intl.DateTimeFormat is by far the most expensive thing in the question.
+  const t = d.getTime();
+  if(_etMemo.t === t) return _etMemo.v;
+  const f = _etFmt || (_etFmt = new Intl.DateTimeFormat('en-US', {timeZone:'America/New_York', year:'numeric',
+    month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false}));
+  const o = {};
+  for(const p of f.formatToParts(d)) if(p.type !== 'literal') o[p.type] = p.value;
+  // hourCycle h23 still prints "24" for midnight in some ICU builds.
+  const h = parseInt(o.hour, 10) % 24;
+  const v = {y:+o.year, m:+o.month, d:+o.day, mins: h*60 + parseInt(o.minute,10)};
+  _etMemo = {t, v};
+  return v;
+}
+// One sortable integer per (date, minute-of-day) so "has it started?" is a
+// single numeric compare. A kickoff with no date is compared on the clock only.
+function nflEtKey(y, m, d, mins){ return ((y*100 + m)*100 + d)*10000 + mins; }
+// "09/13/2026" or "2026-09-13" → {y,m,d}.
+function nflKickDateParts(s){
+  const str = String(s||'');
+  let m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(m){ let y = +m[3]; if(y < 100) y += 2000; return {y, m:+m[1], d:+m[2]}; }
+  m = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(m) return {y:+m[1], m:+m[2], d:+m[3]};
+  return null;
+}
+// The clock late swap runs against. Blank (the default) = the real one; the DK
+// Entries modal can pin it to any ISO instant so a plan can be built and tested
+// hours before the slate, and so the harness is not at the mercy of the wall
+// clock.
+function lateNowDate(slate){
+  const v = slate && slate._lateNow;
+  if(v){ const d = new Date(v); if(!isNaN(d.getTime())) return d; }
+  return new Date();
+}
+function lateNowIsSimulated(slate){
+  const v = slate && slate._lateNow;
+  return !!(v && !isNaN(new Date(v).getTime()));
+}
+// Has this player's game kicked off? Unknown kickoff → never locked: refusing to
+// swap a player because we could not read his game time would be worse than the
+// occasional illegal swap DK itself rejects.
+function playerLocked(slate, p, now){
+  if(!p || !slate) return false;
+  if(!Number.isFinite(p.kick_mins)) return false;
+  const N = nflEtParts(now || lateNowDate(slate));
+  const kd = nflKickDateParts(p.kick_date);
+  // No date on the file: compare on the clock alone — but only inside the
+  // football day. Past midnight ET a bare "8:20 PM" is BEHIND us, not ahead,
+  // and the naive compare quietly unlocked every Sunday-night game at 00:01,
+  // reopening slots DK has long since closed. Before 5 AM ET everything with a
+  // kickoff is treated as already played.
+  if(!kd) return N.mins < 300 ? true : p.kick_mins <= N.mins;
+  return nflEtKey(kd.y, kd.m, kd.d, p.kick_mins) <= nflEtKey(N.y, N.m, N.d, N.mins);
+}
+function playerLockedById(slate, id, now){ return playerLocked(slate, playerById(slate, id), now); }
+// "8:20 PM ET · 09/09/2026" for tooltips.
+function nflKickText(p){
+  if(!p || !p.kick_label) return '';
+  return p.kick_label + ' ET' + (p.kick_date ? ' · ' + p.kick_date : '');
 }
 
 // ── NFL odds/prop cell parsers + stat ingestion ──────────────────────────────
@@ -2547,9 +2713,12 @@ function applyNflStats(p, row, headers){
       // "NO@DET …" is away@home. Fill opponent when the sheet has none and
       // remember which side is home (tiles show it; the sim may use it later).
       const m = gi.match(/^\s*([A-Z]{2,4})@([A-Z]{2,4})\b/i);
-      if(m){ const away=m[1].toUpperCase(), home=m[2].toUpperCase(); const t=String(p.team||'').toUpperCase().replace(/[^A-Z]/g,'');
-        if(t===home){ p.home=true;  if(!p.opp) p.opp=away; }
-        else if(t===away){ p.home=false; if(!p.opp) p.opp=home; } }
+      // Both sides go through nflTeamNorm: DK writes WAS/JAX/LAR, plenty of odds
+      // sheets write WSH/JAC/LA, and a raw compare matched neither side.
+      if(m){ const away=m[1].toUpperCase(), home=m[2].toUpperCase();
+        const t=nflTeamNorm(p.team), H=nflTeamNorm(home), A=nflTeamNorm(away);
+        if(t===H){ p.home=true;  if(!p.opp) p.opp=away; }
+        else if(t===A){ p.home=false; if(!p.opp) p.opp=home; } }
     } }
   // Position fallback: DK salary CSVs carry "Position"; the mapper handles it,
   // but header-scan too so sheet imports without an explicit mapping work.
@@ -3107,10 +3276,6 @@ function archetypeData(slate){
 // Auto-groups are identified by an `autoArch` field holding the archetype name,
 // never by their display name — the user is free to rename them.
 const AUTO_ARCH_PREFIX='Auto: ';
-// Most archetype dots a single pool row will draw before collapsing the rest
-// into "+N". Measured on the July/Rocket slates: after the superset dedupe the
-// worst case is 6 (Schauffele, McIlroy, Knapp), which wraps the name cell.
-const ARCH_MAX_ROW_DOTS=4;
 function syncAutoArchetypeGroups(slate){
   if(!slate) return;
   // PGA only. Structured so another sport can supply its own definitions later:
@@ -3300,7 +3465,6 @@ function stampRun(slate, o){
   return _lastRunStamp;
 }
 let showHidden = false;
-let tempRevealPid = null;
 let parsedCSV = {headers:[], rows:[]};
 let colMapping = {};
 let previewLineups = [];
@@ -3320,7 +3484,6 @@ function setPreviewFilter(gid){
   renderPreviewLineupsList();
   renderPreviewExposure();
 }
-let activeDropdownGroupId = null;
 let lineupHistory = {}; // keyed by slateId, each value = [{id,label,ts,lineups}] max 10
 
 const HISTORY_KEY = 'dfs_builder_history_v1';
@@ -3444,7 +3607,7 @@ function restoreHistoryInputs(id){
   const n=nflSimAdjCount(slate);
   if(n && !confirm(`Restore the inputs from "${set.label}"? The ${n} adjustment${n>1?'s':''} currently on the dashboard will be replaced.`)) return;
   slate._simAdj = nflAdjClone(set.adj);
-  slate._simDashDirty = true;
+  if(nflOutIds(slate).length || (slate._simAdj && Object.values(slate._simAdj.players||{}).some(a=>a&&a.auto==='out'))) nflRedistributeOut(slate);
   save();
   const btn=document.getElementById('tab-btn-simdash');
   if(btn && btn.style.display!=='none') switchTab('simdash', btn); else renderSimDash();
@@ -3759,7 +3922,11 @@ function getMobileStatFields(fields){
   return{primary,secondary};
 }
 
-function gridTemplate(fields){
+// `sdTrail` adds ONE more trailing track: a showdown row carries both the pool
+// ●/○ toggle and the ✕ hide button, where every other slate carries only the
+// hide button. renderPool passes the same flag it uses to pick the row mode, so
+// the header spans, the grid tracks and the row cells can never disagree.
+function gridTemplate(fields, sdTrail){
   const slate=activeSlate();
   if(isMobileView()){
     // PGA tee col is just "AM"/"PM" on mobile — much narrower
@@ -3769,6 +3936,7 @@ function gridTemplate(fields){
     if(primary)parts.push('40px');
     if(secondary)parts.push('36px');
     parts.push('28px','22px');
+    if(sdTrail) parts.push('20px');
     return parts.join(' ');
   }
   const leftWidth = slate?.sport==='pga' ? '62px' : slate?.sport==='ufc' ? '76px' : slate?.sport==='nfl' ? '48px' : '38px';
@@ -3786,6 +3954,10 @@ function gridTemplate(fields){
     else cols.push(f.key==='team'?'56px':'44px');
   });
   cols.push('26px','22px','18px');
+  if(sdTrail) cols.push('18px');
+  // (The ⛔ OUT toggle lives on the Sim tab's player rows only — a scratch is
+  // rare, and the pool is the densest surface in the app. The pool still shows
+  // the OUT badge / strike-through so who is out stays visible.)
   return cols.join(' ');
 }
 function getPlayerGroups(slate, playerId) {
@@ -3877,8 +4049,20 @@ function renderTopBar() {
 }
 function switchSlate(id){
   activeSlateId=id;
+  try { localStorage.setItem('dfs_active_slate', id); } catch(e){}
   sortKey='salary';
+  // sortDir is half of the sort: resetting only the key left the new slate
+  // sorted salary ASCENDING (cheapest first, with a "$ ↓" indicator) whenever
+  // the previous slate had been clicked into descending order.
+  sortDir=1;
   showHidden=false;
+  // Group edit is a mode over ONE slate's group list. Carried across, renderPool
+  // still draws the checkbox column but the banner — which holds the only
+  // "Done" button — is hidden because the group belongs to the other slate.
+  editingGroupId = null; editingCondId = null;
+  // The search box filters getSortedPlayers, so a leftover query can open the
+  // new slate on "No players match."
+  { const _si = document.getElementById('searchInput'); if(_si) _si.value=''; }
   // Reset UFC-specific session state so it doesn't bleed between slates
   ufcExcludedFights = new Set();
   ufc5RoundFights   = new Set();
@@ -4068,9 +4252,14 @@ function editPlayerProj(pid, val){
   const p=playerById(slate,pid);if(!p)return;
   if(p._origProj==null) p._origProj=p.proj;
   const newVal=isNaN(val)?p.proj:Math.round(val*100)/100;
-  // if unchanged, remove _origProj to keep it clean
-  if(newVal===p._origProj){delete p._origProj;}
-  else{p.proj=newVal;}
+  // Always write the value FIRST. The old order only assigned in the else
+  // branch, so typing the original number back deleted the _origProj marker
+  // while leaving p.proj on the previous edit — the cell snapped straight back
+  // to the edited number on the next render, and the ↺ revert was gone with it.
+  // _origProj can be a CSV string, so the "unchanged" test is numeric.
+  p.proj=newVal;
+  const _orig=parseFloat(p._origProj);
+  if(Number.isFinite(_orig) && newVal===Math.round(_orig*100)/100) delete p._origProj;
   save();
 }
 
@@ -4093,10 +4282,9 @@ function getSortedPlayers(){
   const q=document.getElementById('searchInput').value.toLowerCase();
   const ec=expCounts(slate);
   const gf=slate.sport==='nfl' ? gameFilterTeams(slate) : null;
-  const TMK=t=>String(t||'').toUpperCase().replace(/[^A-Z]/g,'');
   return [...(slate.players||[])]
     .filter(p=>p.name.toLowerCase().includes(q))
-    .filter(p=>!gf || gf.has(TMK(p.team)))
+    .filter(p=>!gf || gf.has(nflTeamOf(p)))
     .sort((a,b)=>{
       const dir=(typeof sortDir!=="undefined"?sortDir:1);
       if(sortKey==='exp')return dir*((ec[b.id]||0)-(ec[a.id]||0));
@@ -4158,19 +4346,14 @@ const _oddsRangeCache = {};
 // render once per game above the pool instead of repeating down every row:
 // Showdown shows the one game, Classic gets a tile per game. Each tile: the
 // matchup, total, favorite/spread, and both implied team totals (the number
-// the sim actually builds each team's scoring around), plus how many pool
-// players are on each side.
+// the sim actually builds each team's scoring around).
 function nflGameEnvs(slate){
   const teams=new Map();
-  const TM=v=>String(v||'').toUpperCase().replace(/[^A-Z]/g,'');
-  const OPP=v=>String(v||'').toUpperCase().replace(/[^A-Z@]/g,'').replace(/^@/,'');
-  const hidden=new Set(slate.hiddenIds||[]);
   for(const p of slate.players||[]){
-    const t=TM(p.team); if(!t) continue;
-    if(!teams.has(t)) teams.set(t,{team:t,opp:OPP(p.opp)||null,total:null,spread:null,implied:null,oppImplied:null,n:0,nActive:0});
+    const t=nflTeamOf(p); if(!t) continue;
+    if(!teams.has(t)) teams.set(t,{team:t,opp:nflOppOf(p)||null,total:null,spread:null,implied:null,oppImplied:null});
     const ti=teams.get(t);
-    ti.n++; if(!hidden.has(p.id)) ti.nActive++;
-    if(!ti.opp && OPP(p.opp)) ti.opp=OPP(p.opp);
+    if(!ti.opp && nflOppOf(p)) ti.opp=nflOppOf(p);
     if(ti.total==null && Number.isFinite(p.game_ou)) ti.total=p.game_ou;
     if(ti.spread==null && Number.isFinite(p.spread)) ti.spread=p.spread;
     if(ti.implied==null && Number.isFinite(p.tm_tot)) ti.implied=p.tm_tot;
@@ -4205,15 +4388,14 @@ function renderNflGameTiles(slate){
   let adjMap=null;
   if(_adjT && Object.keys(_adjT).some(t=>Number.isFinite(_adjT[t].implied))){
     try{
-      const inp=buildNflSimInputs((slate.players||[]).filter(p=>p.salary>0));
+      const inp=buildNflSimInputs((slate.players||[]).filter(p=>p.salary>0),{skipDstCal:true});
       adjMap={};
       inp.teamInfo.forEach((ti,t)=>{ adjMap[t]={implied:ti.implied, base:ti.baseImplied}; });
     }catch(e){ adjMap=null; }
   }
-  const TMK=t=>String(t||'').toUpperCase().replace(/[^A-Z]/g,'');
   // Adjusted implied for a side, or null when this team was left at market.
   const adjOf=t=>{
-    const a=adjMap&&adjMap[TMK(t)];
+    const a=adjMap&&adjMap[nflTeamKey(t)];
     return (a && a.base!=null && Math.abs(a.implied-a.base)>=0.05) ? a : null;
   };
   const activeKey=slate._gameFilter||null;
@@ -4254,7 +4436,15 @@ function renderNflGameTiles(slate){
     // Team abbreviations are their own click targets (filter to one team);
     // anywhere else on the tile filters to the game.
     const homeOf=t=>{ const ti=g.teams.find(x=>x.team===t); return ti&&ti.home===true; };
-    const teamBtn=(t,isFav)=>`<span class="ngt-team${isFav?' fav':''}${activeTeam===t?' on':''}" onclick="event.stopPropagation();toggleTeamFilter('${t}')" title="Show only ${t} players${homeOf(t)?' (home)':''}">${homeOf(t)?'<span class="ngt-home" title="home">⌂</span>':''}${t}</span>`;
+    const teamBtn=(t,isFav)=>{
+      // A one-sided tile (only one of the two teams is in this pool) synthesises
+      // the other side from p.opp, or "?" when even that is missing. Filtering
+      // to a team with no rows is a guaranteed empty pool whose only escape is
+      // the clear button, so that half of the tile is a label, not a button.
+      const real=g.teams.some(x=>x.team===t);
+      if(!real) return `<span class="ngt-team" title="Not in this pool">${t}</span>`;
+      return `<span class="ngt-team${isFav?' fav':''}${activeTeam===t?' on':''}" onclick="event.stopPropagation();toggleTeamFilter('${t}')" title="Show only ${t} players${homeOf(t)?' (home)':''}">${homeOf(t)?'<span class="ngt-home" title="home">⌂</span>':''}${t}</span>`;
+    };
     const timeTxt=g.kickLabel?`<span class="ngt-time" title="Kickoff${g.kickDate?' '+g.kickDate:''}">${g.kickLabel}</span>`:'';
     return `<div class="ngt${isOn?' on':''}${gAdj?' adj':''}" data-gkey="${g.key}" onclick="toggleGameFilter('${g.key}')" title="${tip}">
       ${gAdj?'<span class="ngt-chip">⚙ adjusted</span>':''}
@@ -4288,7 +4478,13 @@ function toggleTeamFilter(team){
 }
 function gameFilterTeams(slate){
   if(!slate) return null;
-  if(slate._teamFilter) return new Set([slate._teamFilter]);
+  if(slate._teamFilter){
+    // Same self-heal the game filter below already has: a team key that no
+    // longer matches anybody (the pool was replaced by Update Pool or a sheet
+    // refresh) would otherwise render an empty pool on every load.
+    if(!(slate.players||[]).some(p=>nflTeamOf(p)===slate._teamFilter)){ slate._teamFilter=null; return null; }
+    return new Set([slate._teamFilter]);
+  }
   const k=slate._gameFilter; if(!k) return null;
   const g=nflGameEnvs(slate).find(x=>x.key===k);
   if(!g){ slate._gameFilter=null; return null; }
@@ -4331,9 +4527,14 @@ function renderPool(){
   }
 
   // grid — prepend checkbox col in edit mode
+  // Showdown rows outside group-edit carry TWO trailing buttons (pool toggle +
+  // hide), so they need one more track than everything else. This is the same
+  // predicate as SDpool below; it is hoisted here because the grid is built
+  // first and all three surfaces (tracks / header spans / row cells) key off it.
+  const _sdTrail = isShowdown(slate) && !isGroupEdit;
   const gt = isGroupEdit
-    ? '24px ' + gridTemplate(fields)
-    : gridTemplate(fields);
+    ? '24px ' + gridTemplate(fields, false)
+    : gridTemplate(fields, _sdTrail);
 
   const players=getSortedPlayers();
   const current=slate.currentLineup||[];
@@ -4382,7 +4583,7 @@ function renderPool(){
             ${headerLabel}</span>`; }).join('')
     )
     +(mobile ? '' : `<span class="col-c" onclick="setSort('exp')"${SDcpt?' title="Captain exposure — saved lineups where he IS the captain"':''}>${SDcpt?'CPT Exp':'Exp'}</span>`)
-    +`<span></span><span></span>`;
+    +`<span></span><span></span>`+(_sdTrail?`<span></span>`:'');
   // Segmented control + sub-row. Both live outside #driverList (in the panel
   // header and just above the column headers), so they survive the early
   // "no players match" return below.
@@ -4391,7 +4592,10 @@ function renderPool(){
   const _subBody=document.getElementById('sdPoolSubBody');
   if(_vt && _sub && _subBody){
     if(SDpool){
-      const _q=(document.getElementById('searchInput')?.value||'').trim();
+      // "filtered" covers the game / team tile filters as well as the search box
+      // — both narrow `players`, and both narrow what All on / All off act on.
+      const _q=((document.getElementById('searchInput')?.value||'').trim())
+        || slate._gameFilter || slate._teamFilter || '';
       const _vis=players.filter(p=>!hidden.includes(p.id));
       const _n=m=>_vis.filter(p=>m==='cpt'?sdCptEligible(slate,p.id):sdFlexEligible(slate,p.id)).length;
       const _btn=(m,lbl,tip)=>`<button class="sd-vt-btn${m==='cpt'?' sd-vt-cpt':''}${sdView===m?' active':''}" data-view="${m}" onclick="sdSetPoolView('${m}')" title="${tip}">${lbl}<span class="sd-vt-n">(${_n(m)}/${_vis.length} in pool${_q?', filtered':''})</span></button>`;
@@ -4441,6 +4645,11 @@ function renderPool(){
   };
   // Group membership, indexed once for the whole render (see buildGroupIndex).
   const _grpIdx = buildGroupIndex(slate);
+  // OUT / locked, resolved once per render rather than per row: playerLocked
+  // builds an Intl formatter, and renderPool runs on every keystroke.
+  const _outSet = slate.sport==='nfl' ? nflOutSet(slate) : new Set();
+  const _lockOn = slate.sport==='nfl';
+  const _lockNow = _lockOn ? lateNowDate(slate) : null;
   // One row renderer, three modes:
   //   null   — every non-showdown slate (unchanged behaviour)
   //   'cpt'  — Showdown CAPTAIN list: 1.5× salary/points, adding pins him as CPT
@@ -4450,6 +4659,8 @@ function renderPool(){
     const inCur=current.includes(p.id);
     const isSelected=SDm ? (mode==='cpt' ? (inCur && _sdCptNow===p.id) : (inCur && _sdCptNow!==p.id)) : inCur;
     const isHidden=hidden.includes(p.id);
+    const isOut=_outSet.has(p.id);
+    const isLocked=_lockOn && !isOut && playerLocked(slate,p,_lockNow);
     // Pool membership (showdown only): excluded rows stay visible but dimmed,
     // with a one-click toggle — unlike hidden, which removes a player entirely.
     const poolOff=SDm && !isHidden && (mode==='cpt' ? !sdCptEligible(slate,p.id) : !sdFlexEligible(slate,p.id));
@@ -4467,7 +4678,9 @@ function renderPool(){
       isFull=!isSelected&&((isNfl(slate)||isShowdown(slate)) ? _nflFullFor(p) : current.length>=rosterSize(slate));
     }
     const cantAfford=!isSelected&&!inCur&&rowSal>rem;
-    const dimmed=(isFull||cantAfford)&&!isSelected&&!isHidden;
+    // OUT and locked players can't be added at all — a scratch has no lineup and
+    // a started game cannot be entered (DK rejects the swap-in outright).
+    const dimmed=((isFull||cantAfford)&&!isSelected&&!isHidden)||isOut||(isLocked&&!isSelected);
     const exp=mode==='cpt' ? (_sdCptCounts[p.id]||0) : (ec[p.id]||0);
     // Dots: user groups first (their membership has no other per-row surface),
     // then archetype tags — ALL of them (the "+N" overflow collapse was
@@ -4621,7 +4834,7 @@ function renderPool(){
     const rowClick = isGroupEdit ? 'handleGroupRowClick(this)' : (isHidden||dimmed||poolOff ? '' : addFn);
     const rowClass = isGroupEdit
       ? `driver-row${inGroup?' selected':''}`
-      : `driver-row${isSelected?' selected':''}${dimmed?' dimmed':''}${isHidden?' is-hidden':''}${poolOff?' sd-pool-off':''}${mode==='cpt'&&isSelected?' sd-cpt-row':''}`;
+      : `driver-row${isSelected?' selected':''}${dimmed?' dimmed':''}${isHidden?' is-hidden':''}${isOut?' is-out':''}${poolOff?' sd-pool-off':''}${mode==='cpt'&&isSelected?' sd-cpt-row':''}`;
 
     // UFC name-hover odds tooltip (desktop only, when extended odds are loaded)
     // NFL: hover the name for the full prop card (pass/rush/rec yards, receptions,
@@ -4636,9 +4849,13 @@ function renderPool(){
     // blank space to the right of short names was popping the odds card. An
     // inline span is exactly as wide as the text, so the tooltip only triggers
     // (and anchors) on the name itself. The cell keeps flex:1 for layout.
-    const nameHtml = hasOddsTip
+    const nameHtml0 = hasOddsTip
       ? `<span style="cursor:help;" onmouseenter="showOddsTooltipById(this,'${p.id}')" onmouseleave="hideOddsTooltip()">${p.name}</span>`
       : p.name;
+    // OUT reads as a struck-through name plus a badge; 🔒 says the game has
+    // already kicked off, with the kickoff itself in the tooltip.
+    const nameHtml = (isOut ? `<span class="out-name">${nameHtml0}</span> <span class="out-badge" title="Marked OUT — scores 0 and his market share was handed to his teammates">OUT</span>` : nameHtml0)
+      + (isLocked ? ` <span class="lock-badge" title="Locked — ${esc(nflKickText(p)||'his game has started')}">🔒</span>` : '');
 
     return `<div class="${rowClass}" style="grid-template-columns:${gt}${isHidden&&!showHidden?';display:none':''}${isGroupEdit?';cursor:pointer':''}" data-pid="${p.id}" onclick="${rowClick}">
       ${isGroupEdit ? `<div class="col-c" style="font-size:13px;color:${inGroup?'var(--purple)':'var(--muted)'};">${inGroup?'☑':'☐'}</div>` : ''}
@@ -4676,12 +4893,23 @@ function renderPool(){
             ? `<button class="add-btn sd-cpt-add" data-pid="${p.id}" title="He's your captain — click to move him to a FLEX slot" onclick="event.stopPropagation();sdMoveToFlex('${p.id}')">C</button>`
             : `<button class="add-btn${mode==='cpt'?' sd-cpt-add':''}"${dimmed||isHidden||poolOff?' disabled':''} data-pid="${p.id}" title="${mode==='cpt'?(inCur?'Make him the captain':'Add as captain (1.5× points & salary)'):'Add'}" onclick="event.stopPropagation();${dimmed||isHidden||poolOff?'':(mode==='cpt'?`sdAddAsCaptain('${p.id}')`:'handleBtnClick(this)')}">${mode==='cpt'?'★':'+'}</button>`)
       }
-      ${isGroupEdit ? '' :
-        (SDm && !isHidden
-          // Pool toggle: ● in the pool, ○ out. Hidden (✕) still lives in the
-          // header's Hidden view — this toggle is per-list, hide is global.
-          ? `<button class="hide-btn sd-pool-btn${poolOff?' off':' on'}" data-pid="${p.id}" title="${poolOff?`Add to ${mode==='cpt'?'captain':'flex'} pool`:`Remove from ${mode==='cpt'?'captain':'flex'} pool`}" onclick="event.stopPropagation();sdTogglePool('${p.id}','${mode}')">${poolOff?'○':'●'}</button>`
-          : `<button class="hide-btn" data-pid="${p.id}" onclick="event.stopPropagation();handleHideClick(this,event)">${isHidden?'↩':'✕'}</button>`)}
+      ${(()=>{
+        if(isGroupEdit) return '';
+        // ✕ hide is a different act from the pool toggle: hide removes a player
+        // from BOTH showdown pools, from the sim field and from the lineup, and
+        // it is what the header's 👁 Hidden / ✕ Unhide All / hidden-count badge
+        // talk about. Showdown used to REPLACE the hide button with the pool
+        // toggle, which left a whole advertised feature with no entry point —
+        // so showdown now draws both, in two fixed cells.
+        const hideBtn = `<button class="hide-btn" data-pid="${p.id}" title="${isHidden?'Unhide':'Hide — remove him from every pool, the sim field and the builder'}" onclick="event.stopPropagation();handleHideClick(this,event)">${isHidden?'↩':'✕'}</button>`;
+        if(!SDm) return hideBtn;
+        // Pool toggle: ● in the pool, ○ out. Per-list; hide is global. A hidden
+        // row has no pool toggle (he is in neither pool) but keeps the cell.
+        const poolBtn = isHidden
+          ? `<span></span>`
+          : `<button class="hide-btn sd-pool-btn${poolOff?' off':' on'}" data-pid="${p.id}" title="${poolOff?`Add to ${mode==='cpt'?'captain':'flex'} pool`:`Remove from ${mode==='cpt'?'captain':'flex'} pool`}" onclick="event.stopPropagation();sdTogglePool('${p.id}','${mode}')">${poolOff?'○':'●'}</button>`;
+        return poolBtn + hideBtn;
+      })()}
     </div>`;
   };
   if(SDpool){
@@ -4720,6 +4948,9 @@ function canAddPlayer(slate, id){
   const cur=slate.currentLineup||[];
   if(cur.includes(id)) return false;
   const p=playerById(slate,id);
+  // A scratched player has no lineup, and a player whose game has kicked off
+  // cannot be swapped IN — DK rejects the entry, so the builder never offers it.
+  if(slate.sport==='nfl' && (nflIsOut(slate,id) || playerLocked(slate,p))) return false;
   if(isShowdown(slate)){
     if(cur.length>=6) return false;
     // Charge the captain 1.5× when testing the cap.
@@ -4749,6 +4980,15 @@ function togglePlayer(id){
   const slate=activeSlate();if(!slate)return;
   slate.currentLineup=slate.currentLineup||[];
   if(slate.currentLineup.includes(id)){
+    // LATE SWAP: a player whose game has started is frozen in this roster. He
+    // is already scoring — DK will not accept an entry that removes him — so the
+    // builder refuses rather than letting the user construct a lineup that
+    // cannot be submitted.
+    if(slate.sport==='nfl' && playerLockedById(slate,id)){
+      const p=playerById(slate,id);
+      showToast(`🔒 ${p?p.name:'That player'}'s game has already started (${nflKickText(p)||'locked'}) — he can't be removed.`,'err');
+      return;
+    }
     slate.currentLineup=slate.currentLineup.filter(x=>x!==id);
     if(slate.sdCaptain===id) slate.sdCaptain=null;
   }
@@ -4763,7 +5003,10 @@ function togglePlayer(id){
 function sdMoveToFlex(id){
   const slate=activeSlate(); if(!slate||!isShowdown(slate)) return;
   const cur=slate.currentLineup||[];
-  const others=cur.filter(x=>x!==id && sdCptEligible(slate,x))
+  if(slate.sport==='nfl' && playerLockedById(slate,id)){
+    showToast('🔒 His game has already started — the captain slot is locked.','err'); return;
+  }
+  const others=cur.filter(x=>x!==id && sdCptEligible(slate,x) && !(slate.sport==='nfl' && playerLockedById(slate,x)))
     .sort((a,b)=>(playerById(slate,b)?.salary||0)-(playerById(slate,a)?.salary||0));
   if(!others.length){ showToast('Add another captain-eligible player first — someone has to be captain.','err'); return; }
   const prev=slate.sdCaptain;
@@ -4772,6 +5015,13 @@ function sdMoveToFlex(id){
   save(); renderAll();
 }
 
+// LATE SWAP: the 🔒 the hand builder shows on a slot whose game has kicked off.
+// togglePlayer refuses to remove him; this is the reason, stated on the row.
+function lineupSlotLock(slate,id){
+  if(!slate || slate.sport!=='nfl' || !id || !playerLockedById(slate,id)) return '';
+  const p=playerById(slate,id);
+  return ` <span class="lock-badge" title="Locked — ${esc(nflKickText(p)||'his game has started')}. He can't be removed.">🔒</span>`;
+}
 function renderLineup(){
   const slate=activeSlate();if(!slate)return;
   const current=slate.currentLineup||[];
@@ -4790,7 +5040,7 @@ function renderLineup(){
         const p=playerById(slate,id);
         const sal=isCpt?cptSalaryOf(p):(p?.salary||0);
         const star=isCpt?'':`<button class="remove-btn" style="margin-left:4px;color:var(--accent);border-color:rgba(245,197,24,.4)" title="Make captain (1.5× points and salary)" onclick="setShowdownCaptain('${id}')">★</button>`;
-        rows.push(`<div class="slot filled">${tag}<div class="slot-name">${p?.name||id}${isCpt?' <span style="font-size:9px;color:var(--accent)">1.5×</span>':''}</div><div class="slot-sal">${fmt(sal)}</div>${star}<button class="remove-btn" style="margin-left:4px" onclick="togglePlayer('${id}')">−</button></div>`);
+        rows.push(`<div class="slot filled">${tag}<div class="slot-name">${p?.name||id}${isCpt?' <span style="font-size:9px;color:var(--accent)">1.5×</span>':''}${lineupSlotLock(slate,id)}</div><div class="slot-sal">${fmt(sal)}</div>${star}<button class="remove-btn" style="margin-left:4px" onclick="togglePlayer('${id}')">−</button></div>`);
       } else {
         rows.push(`<div class="slot">${tag}<div class="slot-empty">${isCpt?'Captain':'Flex'} slot</div></div>`);
       }
@@ -4822,6 +5072,7 @@ function renderLineup(){
     // it is cheap once the modeled field is cached, and stale is worse than
     // absent.
     if(typeof renderHbEv==='function') renderHbEv();
+    renderLsEditBar();
     if(sel.length===6&&teams.size<2) showToast('DK requires at least one player from each team.','err');
     return;
   }
@@ -4841,7 +5092,7 @@ function renderLineup(){
     })();
     filled.forEach((id,i)=>{
       const tag=`<div class="slot-num"><span class="slot-pos-tag">${names[i]}</span></div>`;
-      if(id){const p=playerById(slate,id);rows.push(`<div class="slot filled">${tag}<div class="slot-name">${p?.name||id}</div><div class="slot-sal">${fmt(p?.salary||0)}</div><button class="remove-btn" style="margin-left:4px" onclick="togglePlayer('${id}')">−</button></div>`);}
+      if(id){const p=playerById(slate,id);rows.push(`<div class="slot filled">${tag}<div class="slot-name">${p?.name||id}${lineupSlotLock(slate,id)}</div><div class="slot-sal">${fmt(p?.salary||0)}</div><button class="remove-btn" style="margin-left:4px" onclick="togglePlayer('${id}')">−</button></div>`);}
       else rows.push(`<div class="slot">${tag}<div class="slot-empty">${names[i]} slot</div></div>`);
     });
     // Any player who couldn't be slotted (over-limit at a position) still shows
@@ -4876,6 +5127,24 @@ function renderLineup(){
   const rosterOk=isNfl(slate)?nflComplete(nflCounts(slate,current)):sel.length===size;
   document.getElementById('saveBtn').disabled=!rosterOk||used>SALARY_CAP;
   if(typeof renderHbEv==='function') renderHbEv();
+  renderLsEditBar();
+}
+// LATE SWAP: the "you are editing DK entry N" bar. It exists only while
+// dkLateSwapEdit has parked an entry here, and its Apply button is the only way
+// a hand-tuned roster gets back into the plan.
+function renderLsEditBar(){
+  const el=document.getElementById('lsEditBar'); if(!el) return;
+  const slate=activeSlate(); const ed=slate && slate._lsEdit;
+  if(!ed){ el.style.display='none'; el.innerHTML=''; return; }
+  const locked=(ed.lockedIds||[]).map(id=>playerById(slate,id)).filter(Boolean);
+  el.style.display='';
+  el.innerHTML=`<div style="margin:8px 0;padding:8px 10px;border:1px solid rgba(245,197,24,.4);background:rgba(245,197,24,.08);border-radius:6px;">
+    <div style="font-size:11px;color:var(--text);font-weight:600;">Late swap — DK entry #${esc(ed.entryId)}</div>
+    <div style="font-size:10px;color:var(--muted);margin:2px 0 6px;line-height:1.5;">${esc(ed.contest||'')}${locked.length?`<br>🔒 frozen: ${locked.map(p=>esc(p.name)).join(', ')} — their games have started and they can't be removed.`:'<br>Nothing is locked yet in this entry.'}</div>
+    <div style="display:flex;gap:6px;">
+      <button class="btn btn-sm btn-primary" onclick="dkLateSwapApply()">Apply to entry</button>
+      <button class="btn btn-sm btn-default" onclick="dkLateSwapCancelEdit()">Cancel</button>
+    </div></div>`;
 }
 
 function clearLineup(){const slate=activeSlate();if(!slate)return;slate.currentLineup=[];save();renderAll();hideToast();}
@@ -5159,8 +5428,8 @@ function renderSaved(){
     const SDl=isShowdown(slate);
     const cptId=SDl?sdLineupCaptain(slate,lineup):null;
     // Showdown: captain first, charged/projected at 1.5×.
-    const players=(SDl?sdAssignSlots(slate,lineup):lineup).map(id=>playerById(slate,id)).filter(Boolean);
-    const sal=SDl?sdSalary(slate,lineup):players.reduce((s,p)=>s+(p.salary||0),0);
+    const players=(SDl?sdAssignSlots(slate,lineup,cptId):lineup).map(id=>playerById(slate,id)).filter(Boolean);
+    const sal=SDl?sdSalary(slate,lineup,cptId):players.reduce((s,p)=>s+(p.salary||0),0);
     const proj=players.reduce((s,p)=>s+(parseFloat(p.proj)||0)*(SDl&&p.id===cptId?CPT_MULT:1),0);
     const rtg=players.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
     const lk=lineupKey(lineup);
@@ -5246,7 +5515,7 @@ function exportCSV(){
   const header=(isShowdown(slate)?SHOWDOWN_SLOTS:(cfg.slots||Array(rosterSize(slate)).fill(pos))).join(',');
   const rowIds=l=>{
     if(isShowdown(slate)){
-      const ord=sdAssignSlots(slate,l);
+      const ord=sdAssignSlots(slate,l,sdLineupCaptain(slate,l));
       return ord.map((id,i)=>{
         const p=playerById(slate,id);
         return (i===0 && p && p.cptId) ? p.cptId : id;
@@ -5372,9 +5641,7 @@ function parseDkEntries(text){
 function dkDefaultPlan(c){
   const m=(c.maxEntries!=null)?c.maxEntries:c.count;
   const bal=dkDefaultBalancePlan(c);
-  if(m<=5) return Object.assign({mode:'best'}, bal);
-  if(m<=20) return Object.assign({mode:'dist', overflow:'cycle'}, bal);
-  return Object.assign({mode:'distfill', overflow:'cycle'}, bal);
+  return Object.assign({mode:'best'}, bal);
 }
 // Balance mode's own per-contest default, carried on the SAME plan object under
 // its own keys so switching modes back and forth never loses either choice.
@@ -5385,12 +5652,17 @@ function dkDefaultBalancePlan(c){
   const tiny=(c.maxEntries===1)||m<=3||c.count<=3;
   return {bmode:tiny?'best':'include', boverflow:'blank'};
 }
+// HOUSE RULE: a lineup is never entered twice in the same contest — every
+// entry in a contest is a distinct chance to win. The same lineup may sit in
+// any number of DIFFERENT contests. So "best" walks DOWN the ranking, one
+// lineup per entry, and a contest with more entries than distinct lineups is
+// left partly blank (and says so) rather than doubled up. The old 'dist' /
+// 'distfill' modes collapse onto the same rule; stored plans still using
+// those keys are read as 'best'.
 const DK_PLAN_MODES=[
   ['skip',    'Skip'],
-  ['best',    'Best lineup → all entries'],
-  ['dist',    'Distribute lineups'],
-  ['distfill','Distribute, then fill remaining with best'],
-  ['one',     'Specific lineup #'],
+  ['best',    'Best lineups, one per entry'],
+  ['one',     'Specific lineup # (then best for the rest)'],
 ];
 // Balance mode has three, not five: a contest either takes part in the dollar
 // balancing, gets the one best lineup, or is left alone.
@@ -5399,7 +5671,10 @@ const DK_BAL_MODES=[
   ['best',   'Best lineup → all'],
   ['skip',   'Skip'],
 ];
-function dkEntriesMode(st){ return (st && st.mode==='balance') ? 'balance' : 'manual'; }
+function dkEntriesMode(st){
+  if(st && st.mode==='lateswap') return 'lateswap';
+  return (st && st.mode==='balance') ? 'balance' : 'manual';
+}
 // Entry fee as a number. DK writes "$3", "$0.25", "$1,000"; a cell we cannot
 // read is worth 0, which keeps it out of the balance arithmetic instead of
 // poisoning every exposure with NaN.
@@ -5426,8 +5701,8 @@ function dkLineupList(slate){
     const key=lineupKey(l);
     const m=meta[key]||{};
     const cptId=SD?sdLineupCaptain(slate,l):null;
-    const players=(SD?sdAssignSlots(slate,l):l).map(id=>playerById(slate,id)).filter(Boolean);
-    const sal=SD?sdSalary(slate,l):players.reduce((s,p)=>s+(p.salary||0),0);
+    const players=(SD?sdAssignSlots(slate,l,cptId):l).map(id=>playerById(slate,id)).filter(Boolean);
+    const sal=SD?sdSalary(slate,l,cptId):players.reduce((s,p)=>s+(p.salary||0),0);
     const proj=players.reduce((s,p)=>s+(parseFloat(p.proj)||0)*(SD&&p.id===cptId?CPT_MULT:1),0);
     const rawSim=m.simWinAvg;
     const sim=(rawSim!=null&&rawSim!==''&&!isNaN(parseFloat(rawSim)))?parseFloat(rawSim):null;
@@ -5444,8 +5719,13 @@ function dkLineupList(slate){
     const complete=SD ? (players.length===RS && l.length===RS)
                 : NFL ? (players.length===RS && typeof nflComplete==='function' && nflComplete(nflCounts(slate,l)))
                       : (players.length===RS && new Set(l).size===RS);
+    // A lineup saved BEFORE a late scratch still looks complete and under the
+    // cap, and used to go straight into the entries file. Late swap already
+    // refuses to keep an OUT player in an open slot; the fill path has to agree.
+    const hasOut = isNfl(slate) && typeof nflIsOut==='function' && l.some(id=>nflIsOut(slate,id));
     return {idx:i, num:i+1, ids:l, key, players, cptId, sal, proj, sim, evPct,
-            complete, overCap:sal>SALARY_CAP, usable:complete && sal<=SALARY_CAP};
+            complete, hasOut, overCap:sal>SALARY_CAP,
+            usable:complete && sal<=SALARY_CAP && !hasOut};
   });
 }
 function dkRankLineups(list, rankBy){
@@ -5498,12 +5778,16 @@ function dkBalanceAssign(ranked, contests, opts){
   // spent on them before the balancing starts — they are the entries the user
   // has already decided on.
   for(const c of bestC){
+    // One lineup per entry within the contest (house rule, see DK_PLAN_MODES).
+    const here=new Set(); let short=0;
     for(const e of c.entries){
-      const l=ranked.find(x=>useOf(x.key)<cap);
-      if(!l){ blanks++; capBlocked++; continue; }
+      const l=ranked.find(x=>!here.has(x.key) && useOf(x.key)<cap);
+      if(!l){ blanks++; if(ranked.some(x=>useOf(x.key)>=cap)) capBlocked++; else short++; continue; }
+      here.add(l.key);
       used.set(l.key,useOf(l.key)+1);
       assign.push({entryId:e.entryId, contestId:c.contestId, lineup:l, fee:0, bal:false});
     }
+    if(short) warnings.push(`${c.name}: ${c.count} entries but only ${here.size} distinct usable lineup${here.size===1?'':'s'} — ${short} left blank rather than entering a lineup twice in one contest.`);
   }
   // Descending entry fee; a tie goes to the contest with more entries, because
   // the wider one has more freedom to level things once the narrow one is set.
@@ -5522,19 +5806,14 @@ function dkBalanceAssign(ranked, contests, opts){
       }
       return best;
     };
-    let overflowed=false;
+    let short=0;
     for(const e of c.entries){
+      // More entry slots than distinct lineups → the rest stay blank. A lineup
+      // is never entered twice in the same contest (house rule).
       let l=pickLowest();
-      if(!l && ((plan[c.contestId]||{}).boverflow||'blank')==='cycle'){
-        // More entry slots than lineups. Cycling clears the one-per-contest
-        // ledger and starts a second pass, i.e. double-entering lineups; the
-        // default instead stops, because the user only wants as many entries
-        // as he has distinct lineups.
-        here.clear(); overflowed=true; l=pickLowest();
-      }
       if(!l){
         blanks++;
-        if(ranked.some(x=>useOf(x.key)>=cap)) capBlocked++;
+        if(ranked.some(x=>useOf(x.key)>=cap)) capBlocked++; else short++;
         continue;
       }
       here.set(l.key,(here.get(l.key)||0)+1);
@@ -5543,7 +5822,7 @@ function dkBalanceAssign(ranked, contests, opts){
       exp.set(l.key,(exp.get(l.key)||0)+fee);
       assign.push({entryId:e.entryId, contestId:c.contestId, lineup:l, fee, bal:true});
     }
-    if(overflowed) warnings.push(`${c.name}: more entries than lineups — lineups were re-used to fill it.`);
+    if(short) warnings.push(`${c.name}: ${c.count} entries but only ${here.size} distinct usable lineup${here.size===1?'':'s'} — ${short} left blank rather than entering a lineup twice in one contest.`);
   }
 
   // ── Improvement pass ──────────────────────────────────────────────────────
@@ -5676,9 +5955,14 @@ function dkComputeAssign(slate){
   const bad=all.filter(l=>!l.usable);
   let pool=all.filter(l=>l.usable);
   if(bad.length){
-    const over=bad.filter(l=>l.overCap).length, inc=bad.length-over;
+    const over=bad.filter(l=>l.overCap).length, out=bad.filter(l=>l.hasOut).length;
+    const inc=bad.length-over-bad.filter(l=>l.hasOut&&!l.overCap).length;
+    const bits=[];
+    if(over) bits.push(`${over} over the $${(SALARY_CAP/1000)}k cap`);
+    if(out)  bits.push(`${out} holding a player marked OUT`);
+    if(inc>0) bits.push(`${inc} incomplete`);
     warnings.push(`${bad.length} saved lineup${bad.length===1?'':'s'} skipped as unusable` +
-      (over?` (${over} over the $${(SALARY_CAP/1000)}k cap)`:'') + (inc?`${over?',':''} (${inc} incomplete)`:'') + '.');
+      (bits.length?` (${bits.join(', ')})`:'') + '.');
   }
   // "Use only lineups matching the Saved filter" reuses the filter panel's own
   // matcher, so the set is exactly the set that panel is counting.
@@ -5698,7 +5982,38 @@ function dkComputeAssign(slate){
   let blanks=0, skipped=0, capBlocked=0;
   const fmtMismatch=(fileFmt!==slateFmt) || sizeMismatch;
   const mode=dkEntriesMode(st);
-  let balance=null;
+  let balance=null, lateswap=null;
+  // LATE SWAP re-optimizes the entries that are ALREADY in the file rather than
+  // filling them from the saved list, so it produces its own assignment and
+  // skips the plan machinery entirely. Only the entries whose roster actually
+  // changed are exported — that is DK's own instruction, and re-submitting an
+  // unchanged entry is at best a no-op and at worst a lost swap window.
+  if(mode==='lateswap'){
+    lateswap=nflLateSwapPlan(slate);
+    const total0=st.contests.reduce((s,c)=>s+c.count,0);
+    lateswap.warnings.forEach(w=>warnings.push(w));
+    if(lateswap.error){
+      const msg = lateswap.error==='nosim'
+        ? 'Run a simulation first (Auto-Gen) — late swap re-optimizes the open slots against the last sim\'s per-sim scores.'
+        : lateswap.error==='notnfl' ? 'Late swap is an NFL feature.'
+        : lateswap.error==='format' ? `This entries file is ${lateswap.fileFmt} but the slate is ${lateswap.slateFmt} — nothing can be swapped.`
+        : 'Load a DKEntries.csv first.';
+      warnings.push(msg);
+      return {assign:[], total:total0, filled:0, skipped:total0, blanks:0, warnings, counts:[],
+              poolSize:0, distinct:0, cap, fileFmt, slateFmt, fmtMismatch:fmtMismatch||lateswap.error==='format',
+              mode, balance:null, lateswap};
+    }
+    for(const r of lateswap.rows){
+      if(!r.changed || !r.rowIds) continue;
+      assign.push({entryId:r.entryId, contestId:r.contestId,
+                   lineup:{ids:r.newIds, key:lsKey(r.newIds,r.cptId), num:null}, rowIds:r.rowIds});
+    }
+    return {assign, total:total0, filled:assign.length,
+            skipped:lateswap.fullyLocked+lateswap.noExisting+lateswap.skipped,
+            blanks:0, warnings, counts:[], poolSize:lateswap.rows.length,
+            distinct:new Set(assign.map(a=>a.lineup.key)).size, cap, fileFmt, slateFmt,
+            fmtMismatch, mode, balance:null, lateswap};
+  }
   // Balance mode replaces the per-contest plans wholesale, so it takes the
   // contests the file can actually fill and hands the whole set to one planner
   // (the assignment is global — a contest's choices depend on every other
@@ -5723,38 +6038,25 @@ function dkComputeAssign(slate){
     const plan=(st.plan||{})[c.contestId]||dkDefaultPlan(c);
     if(plan.mode==='skip' || fmtMismatch || c.format!==slateFmt){ skipped+=c.count; continue; }
     if(!ranked.length){ blanks+=c.count; continue; }
+    // One lineup per entry within a contest, always (see DK_PLAN_MODES).
+    const here=new Set();
+    const nextDistinct=()=>ranked.find(l=>!here.has(l.key) && useOf(l)<cap)||null;
+    const entries=c.entries.slice();
+    let short=0;
     if(plan.mode==='one'){
       const n=parseInt(plan.num,10);
       const l=all.find(x=>x.num===n && x.usable);
-      if(!l){ blanks+=c.count; warnings.push(`${c.name}: lineup #${plan.num||'?'} is not a usable saved lineup.`); continue; }
-      for(const e of c.entries){
-        if(useOf(l)>=cap){ blanks++; capBlocked++; continue; }
-        assign.push({entryId:e.entryId, contestId:c.contestId, lineup:take(l)});
-      }
-      continue;
+      if(!l){ warnings.push(`${c.name}: lineup #${plan.num||'?'} is not a usable saved lineup — filled with the best distinct lineups instead.`); }
+      else if(useOf(l)>=cap){ blanks++; capBlocked++; entries.shift(); }
+      else { const e=entries.shift(); here.add(l.key); assign.push({entryId:e.entryId, contestId:c.contestId, lineup:take(l)}); }
     }
-    if(plan.mode==='best'){
-      for(const e of c.entries){
-        const l=bestAvail();
-        if(!l){ blanks++; capBlocked++; continue; }
-        assign.push({entryId:e.entryId, contestId:c.contestId, lineup:take(l)});
-      }
-      continue;
-    }
-    // dist / distfill: walk the ranked list once, one distinct lineup per
-    // entry. What happens when the entries outnumber the lineups is the
-    // difference between the two modes (and the overflow select).
-    let p=0;
-    for(const e of c.entries){
-      let l=null;
-      while(p<ranked.length && !l){ const cand=ranked[p++]; if(useOf(cand)<cap) l=cand; }
-      if(!l){
-        if(plan.mode==='distfill'){ l=bestAvail(); }
-        else if((plan.overflow||'cycle')==='cycle'){ p=0; while(p<ranked.length && !l){ const cand=ranked[p++]; if(useOf(cand)<cap) l=cand; } }
-      }
-      if(!l){ blanks++; capBlocked++; continue; }
+    for(const e of entries){
+      const l=nextDistinct();
+      if(!l){ blanks++; if(ranked.some(x=>useOf(x)>=cap)) capBlocked++; else short++; continue; }
+      here.add(l.key);
       assign.push({entryId:e.entryId, contestId:c.contestId, lineup:take(l)});
     }
+    if(short) warnings.push(`${c.name}: ${c.count} entries but only ${here.size} distinct usable lineup${here.size===1?'':'s'} — ${short} left blank rather than entering a lineup twice in one contest.`);
   }
   if(sizeMismatch) warnings.push(`This entries file has ${slotN} roster slot${slotN===1?'':'s'} (${st.slots.join('/')}) but a "${slate.name}" lineup is ${rosterSize(slate)} — nothing can be filled.`);
   else if(fmtMismatch) warnings.push(`This entries file is ${fileFmt.toUpperCase()} (${st.slots.join('/')}) but the slate is ${slateFmt.toUpperCase()} — nothing can be filled.`);
@@ -5766,7 +6068,7 @@ function dkComputeAssign(slate){
   if(cap!==Infinity && counts.some(c=>c.n>cap)) warnings.push('A lineup exceeded the max-per-lineup cap — this is a bug, please report it.');
   return {assign, total, filled:assign.length, skipped, blanks, warnings, counts,
           poolSize:ranked.length, distinct:counts.length, cap, fileFmt, slateFmt, fmtMismatch,
-          mode, balance};
+          mode, balance, lateswap};
 }
 // A field is quoted only when it has to be — DK reads both, and an unquoted
 // file diffs cleanly against the one the user downloaded.
@@ -5786,7 +6088,7 @@ function dkRowIds(slate, l, slots){
     return (slots||[]).map((_,i)=>{ const id=l.ids[i]; return id==null?'':String(id); });
   }
   const pairs = SD
-    ? sdAssignSlots(slate, l.ids).map((id,i)=>{
+    ? sdAssignSlots(slate, l.ids, l.cptId||sdLineupCaptain(slate,l.ids)).map((id,i)=>{
         const p=playerById(slate,id);
         return {slot:i===0?'CPT':'FLEX', id:(i===0 && p && p.cptId) ? p.cptId : id};
       })
@@ -5808,20 +6110,230 @@ function exportDkEntriesCsv(){
     const el=document.getElementById('dkEntriesStatus'); if(el){ el.textContent=msg; el.style.color='var(--red)'; }
     return;
   }
-  if(!res.filled){ showToast('Nothing to fill — every contest is skipped or blank.','err'); return; }
+  if(!res.filled){
+    showToast(res.mode==='lateswap'
+      ? 'Nothing to swap — every entry is either fully locked or already optimal.'
+      : 'Nothing to fill — every contest is skipped or blank.','err');
+    return;
+  }
   const header=[...DK_ENTRY_FIXED, ...st.slots].map(dkCsvCell).join(',');
   const byId={}; st.contests.forEach(c=>c.entries.forEach(e=>byId[e.entryId]=c));
   const rows=res.assign.map(a=>{
     const c=byId[a.entryId];
-    return [a.entryId, c.name, c.contestId, c.fee, ...dkRowIds(slate, a.lineup, st.slots)].map(dkCsvCell).join(',');
+    // Late swap carries its own slot ids (the captain is the one the search
+    // chose, not the one a salary heuristic would infer).
+    const ids=a.rowIds || dkRowIds(slate, a.lineup, st.slots);
+    return [a.entryId, c.name, c.contestId, c.fee, ...ids].map(dkCsvCell).join(',');
   });
   const csv=[header,...rows].join('\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-  a.download='DKEntries_'+String(slate.name||'slate').replace(/[^\w]+/g,'_').replace(/^_|_$/g,'')+'_filled.csv';
+  a.download='DKEntries_'+String(slate.name||'slate').replace(/[^\w]+/g,'_').replace(/^_|_$/g,'')
+    +(res.mode==='lateswap'?'_lateswap.csv':'_filled.csv');
   a.click();
-  showToast(`Wrote ${rows.length} filled entr${rows.length===1?'y':'ies'}.`,'ok');
+  showToast(res.mode==='lateswap'
+    ? `Wrote ${rows.length} swapped entr${rows.length===1?'y':'ies'} (unchanged entries omitted).`
+    : `Wrote ${rows.length} filled entr${rows.length===1?'y':'ies'}.`,'ok');
   return csv;
+}
+
+// ══ LATE SWAP ════════════════════════════════════════════════════════════════
+// DraftKings lets you keep editing an entry until each individual player's game
+// kicks off. So a submitted lineup is really two lineups: the slots that are
+// already playing (fixed by id, forever) and the slots that are still open. The
+// job here is to re-optimize ONLY the open slots against the latest simulation,
+// under three rules DK enforces and one the user asks for:
+//   1. a player whose game has started can never be removed;
+//   2. a player swapped IN must be in a game that has not started;
+//   3. the salary cap still applies to the whole lineup, with the locked
+//      salaries already spent;
+//   4. optionally, no two of your entries may end up identical.
+// The entries file DK exports after your lineups are set already carries the
+// existing rosters (`entry.existing`), which is what makes any of this possible
+// — a plain contest file with blank slots is a FILL job, not a swap job.
+const DK_LS_MAX_SIMS = 240;      // enough to rank completions; this runs per entry group
+// DK writes "Name (12345)" or a bare id in a slot cell. On showdown the CPT
+// column carries the captain-priced id, which is a DIFFERENT id for the same
+// person, so both are matched.
+function lsPlayerByDkId(slate, id){
+  if(id == null || id === '') return null;
+  const s = String(id);
+  const ps = slate.players || [];
+  for(const p of ps) if(String(p.id) === s) return p;
+  for(const p of ps) if(p.cptId != null && String(p.cptId) === s) return p;
+  return null;
+}
+// Slot ids for a swapped entry. Classic reuses the canonical exporter (DK
+// validates the roster as a whole, so which of the three WR columns a given
+// receiver sits in is immaterial); showdown needs its own because the captain
+// here is the one the SEARCH chose, not the one sdCaptainId would infer from
+// salary.
+function lsRowIds(slate, ids, slots, cptId){
+  if(!isShowdown(slate)) return dkRowIds(slate, {ids}, slots);
+  const ordered = [cptId, ...ids.filter(id => id !== cptId)];
+  const pairs = ordered.map((id,i) => { const p = playerById(slate,id);
+    return {slot: i===0?'CPT':'FLEX', id: (i===0 && p && p.cptId) ? p.cptId : id}; });
+  const left = [...pairs];
+  return slots.map((s,i) => {
+    const k = left.findIndex(x => x.slot === String(s).toUpperCase());
+    if(k >= 0) return left.splice(k,1)[0].id;
+    return (pairs[i]||{}).id || '';
+  });
+}
+function lsKey(ids, cptId){ return ids.slice().sort().join('|') + (cptId!=null?'|C'+cptId:''); }
+// The whole plan. Pure apart from reading `window._lastSimCtx` and the clock.
+function nflLateSwapPlan(slate){
+  const st = dkEntriesState(slate);
+  const now = lateNowDate(slate);
+  const res = {rows:[], warnings:[], error:null, changed:0, unchanged:0, fullyLocked:0,
+               noExisting:0, skipped:0, now, simulated:lateNowIsSimulated(slate),
+               rankBy:(st && st.rankBy) || 'ev', uniq: !!(st && st.lsUniq)};
+  if(!st) { res.error = 'nofile'; return res; }
+  const slateFmt = dkSlateFormat(slate), fileFmt = (st.contests[0]||{}).format || 'classic';
+  if(!isNfl(slate)){ res.error = 'notnfl'; return res; }
+  if(fileFmt !== slateFmt){ res.error = 'format'; res.fileFmt = fileFmt; res.slateFmt = slateFmt; return res; }
+  const ctx = window._lastSimCtx;
+  if(!ctx || !ctx.simScoresById || ctx.slateId !== slate.id){ res.error = 'nosim'; return res; }
+
+  const SD = isShowdown(slate), RS = rosterSize(slate);
+  const pool = (slate.players||[]).filter(p => (p.salary||0) > 0 && ctx.simScoresById[p.id]);
+  if(pool.length < RS){ res.error = 'nosim'; return res; }
+  const idxById = new Map(pool.map((p,i) => [p.id, i]));
+  const outS = nflOutSet(slate), hiddenS = new Set(slate.hiddenIds||[]);
+  const lockedArr = pool.map(p => playerLocked(slate, p, now));
+  // Who may fill an OPEN slot: game not started, not scratched, not hidden.
+  const openOk = pool.map((p,i) => !lockedArr[i] && !outS.has(p.id) && !hiddenS.has(p.id));
+  const cands = pool.map((p,i) => ({i, pos:nflPosOf(p), sal:p.salary||0, score:0,
+    team:String(p.team||'').toUpperCase(), opp:String(p.opp||'').toUpperCase(),
+    cptSal:cptSalaryOf(p), cptOk:SD?sdCptEligible(slate,p.id):true, flexOk:SD?sdFlexEligible(slate,p.id):true}));
+  // Held-out sims, strided: the same population every other selector prices on.
+  const all = _detailSimIdx(ctx.simsDone);
+  const stride = Math.max(1, Math.ceil(all.length / DK_LS_MAX_SIMS));
+  const simIdx = all.filter((_,k) => k % stride === 0);
+
+  const metricOf = (ids, cptId) => {
+    const players = ids.map(id => playerById(slate,id)).filter(Boolean);
+    const sim = (() => { const t = lineupSimTotals(players, cptId, ctx, simIdx);
+      let s = 0; for(let k=0;k<t.length;k++) s += t[k]; return t.length ? s/t.length : 0; })();
+    let ev = null;
+    if(res.rankBy === 'ev'){
+      try { const r = hbPriceLineup(players, cptId); if(r && r.evPct != null && isFinite(r.evPct)) ev = r.evPct; } catch(e){}
+    }
+    const proj = players.reduce((s,p) => s + (parseFloat(p.proj)||0) * (SD && p.id===cptId ? CPT_MULT : 1), 0);
+    const sal = SD ? sdLateSalary(slate, ids, cptId) : players.reduce((s,p)=>s+(p.salary||0),0);
+    return {sim, ev, proj, sal, rank: res.rankBy==='ev' && ev!=null ? ev : res.rankBy==='proj' ? proj : sim};
+  };
+
+  // One search per distinct set of locked slots — a 20-entry contest usually has
+  // only a handful of distinct lock signatures, and each search is the expensive
+  // part (one optimizer call per sim).
+  const groupCache = new Map();
+  const searchGroup = (fx, fxCpt) => {
+    const gkey = [...fx].sort((a,b)=>a-b).join(',') + '|' + (fxCpt==null?'':fxCpt);
+    if(groupCache.has(gkey)) return groupCache.get(gkey);
+    const sub = cands.filter(c => openOk[c.i] || fx.has(c.i));
+    const seen = new Map();
+    for(const s of simIdx){
+      for(const c of sub) c.score = ctx.simScoresById[pool[c.i].id][s];
+      let idxs = null, cptIdx = null;
+      if(SD){ const r = sdOptimalForSim(sub, SALARY_CAP, 0, fx, fxCpt); if(r){ idxs = r.idxs; cptIdx = r.cptIdx; } }
+      else { idxs = nflOptimalForSim(sub, SALARY_CAP, 0, null, fx); }
+      if(!idxs) continue;
+      const ids = idxs.map(i => pool[i].id);
+      const cptId = cptIdx != null ? pool[cptIdx].id : null;
+      const k = lsKey(ids, cptId);
+      if(seen.has(k)) seen.get(k).n++;
+      else seen.set(k, {ids, cptId, key:k, n:1});
+    }
+    const list = [...seen.values()];
+    for(const c of list) c.m = metricOf(c.ids, c.cptId);
+    list.sort((a,b) => b.m.rank - a.m.rank || b.n - a.n);
+    groupCache.set(gkey, list);
+    return list;
+  };
+
+  const usedKeys = new Set();
+  for(const c of st.contests){
+    for(const e of c.entries){
+      const cells = e.existing || [];
+      const cur = cells.map(v => lsPlayerByDkId(slate, v)).filter(Boolean);
+      const row = {entryId:e.entryId, contestId:c.contestId, contest:c.name, fee:c.fee,
+                   locked:0, open:0, changed:false, reason:null, changes:[], existingIds:cur.map(p=>p.id)};
+      if(cur.length !== RS){ row.reason = cur.length ? 'partial' : 'empty'; res.noExisting++; res.rows.push(row); continue; }
+      const curCpt = SD ? (lsPlayerByDkId(slate, cells[st.slots.findIndex(s=>String(s).toUpperCase()==='CPT')])||{}).id || null : null;
+      const lockedIds = cur.filter(p => playerLocked(slate, p, now)).map(p => p.id);
+      row.locked = lockedIds.length;
+      row.open = RS - lockedIds.length;
+      row.lockedIds = lockedIds;
+      if(!row.open){ row.reason = 'fullylocked'; res.fullyLocked++; res.rows.push(row); continue; }
+      // Every man in the entry has to be a player we can score, or the search
+      // has nothing to hold fixed.
+      const fx = new Set();
+      let bad = false;
+      for(const id of lockedIds){ const i = idxById.get(id); if(i == null){ bad = true; break; } fx.add(i); }
+      if(bad){ row.reason = 'unknown'; res.skipped++; res.rows.push(row); continue; }
+      const fxCpt = (SD && curCpt && lockedIds.includes(curCpt)) ? idxById.get(curCpt) : null;
+      // The user's hand-tuned answer for this entry wins outright.
+      const ov = (st.lsOverride||{})[e.entryId];
+      let list = searchGroup(fx, fxCpt);
+      // The entry AS IT STANDS is a legal completion too, and has to be on the
+      // ballot: if it is still the best one, the right answer is to leave it
+      // alone (and DK's own instructions say to export only what changed).
+      const curOutOpen = cur.some(p => outS.has(p.id) && !lockedIds.includes(p.id));
+      const curM = metricOf(row.existingIds, curCpt);
+      const opts = list.slice();
+      if(!curOutOpen && curM.sal <= SALARY_CAP)
+        opts.push({ids:row.existingIds, cptId:curCpt, key:lsKey(row.existingIds,curCpt), n:0, m:curM, isCurrent:true});
+      opts.sort((a,b) => b.m.rank - a.m.rank);
+      // A hand-tuned answer for this entry is not a candidate to be ranked —
+      // it is the answer. It goes to the front of the list.
+      if(ov && Array.isArray(ov.ids) && ov.ids.length === RS){
+        const m = metricOf(ov.ids, ov.cptId||null);
+        opts.unshift({ids:ov.ids.slice(), cptId:ov.cptId||null, key:lsKey(ov.ids, ov.cptId||null), n:0, m, manual:true});
+      }
+      if(!opts.length){ row.reason = 'nocandidate'; res.skipped++; res.rows.push(row); continue; }
+      let pick = opts[0];
+      if(res.uniq){
+        // Greedy: walk down this entry's own ranking until we reach a completion
+        // no earlier entry already took.
+        const free = opts.find(o => !usedKeys.has(o.key));
+        if(free) pick = free; else row.dupWarn = true;
+      }
+      usedKeys.add(pick.key);
+      row.newIds = pick.ids.slice();
+      row.cptId = pick.cptId || null;
+      row.manual = !!pick.manual;
+      row.metric = pick.m; row.curMetric = curM;
+      row.deltaSim = Math.round((pick.m.sim - curM.sim) * 100) / 100;
+      row.deltaEv = (pick.m.ev != null && curM.ev != null) ? Math.round((pick.m.ev - curM.ev) * 10) / 10 : null;
+      row.sal = pick.m.sal;
+      const curSet = new Set(row.existingIds), newSet = new Set(row.newIds);
+      const dropped = row.existingIds.filter(id => !newSet.has(id));
+      const added   = row.newIds.filter(id => !curSet.has(id));
+      const sameCpt = !SD || (curCpt === row.cptId);
+      row.changed = dropped.length > 0 || added.length > 0 || !sameCpt;
+      row.changes = dropped.map((id,k) => ({
+        oldId:id, oldName:(playerById(slate,id)||{}).name || id,
+        newId:added[k] || null, newName: added[k] ? ((playerById(slate,added[k])||{}).name || added[k]) : '—'}));
+      if(!sameCpt && !dropped.length) row.changes.push({oldId:curCpt, oldName:(playerById(slate,curCpt)||{}).name||'?',
+        newId:row.cptId, newName:(playerById(slate,row.cptId)||{}).name||'?', cptOnly:true});
+      row.rowIds = lsRowIds(slate, row.newIds, st.slots, row.cptId);
+      if(row.changed) res.changed++; else res.unchanged++;
+      res.rows.push(row);
+    }
+  }
+  if(res.noExisting) res.warnings.push(`${res.noExisting} entr${res.noExisting===1?'y has':'ies have'} no existing lineup in this file — late swap needs the entries file DK exports AFTER your lineups are set.`);
+  if(res.skipped) res.warnings.push(`${res.skipped} entr${res.skipped===1?'y':'ies'} could not be read (a rostered player is not on this slate).`);
+  if(res.rows.some(r => r.dupWarn)) res.warnings.push('Uniqueness could not be kept for every entry — the pool of legal completions ran out.');
+  return res;
+}
+// Salary of a showdown roster whose captain is chosen by the search rather than
+// by sdCaptainId's salary heuristic.
+function sdLateSalary(slate, ids, cptId){
+  let s = 0;
+  for(const id of ids){ const p = playerById(slate,id); if(!p) continue;
+    s += (id === cptId) ? cptSalaryOf(p) : (p.salary||0); }
+  return s;
 }
 
 // ── DK Entries modal ────────────────────────────────────────────────────────
@@ -5832,6 +6344,17 @@ function openDkEntriesModal(){
 }
 function closeDkEntriesModal(){
   const m=document.getElementById('dkEntriesModal'); if(m) m.style.display='none';
+  // `_lateNow` is slate-wide and persisted: it gates the pool's 🔒, canAddPlayer,
+  // togglePlayer's refusal to remove a locked man AND runNflSimGen's candidate
+  // pool. The only place it is visible or clearable is the late-swap tab, so
+  // leaving it armed on close is a trap — the user gets a pool full of locked
+  // players and nothing on screen explaining why.
+  const s=activeSlate();
+  if(s && s._lateNow){
+    delete s._lateNow; save();
+    if(typeof renderAll==='function') renderAll();
+    showToast('Simulated clock cleared — locking is back on the real one.','ok');
+  }
 }
 // Store the PARSED file on the slate, never the raw text: a 100 KB CSV with a
 // sidecar player table would bloat every localStorage write for no gain.
@@ -5854,6 +6377,12 @@ function dkIngestEntriesText(text, fileName){
     rankBy:(slate._dkEntries&&slate._dkEntries.rankBy)||'ev',
     maxPer:(slate._dkEntries&&slate._dkEntries.maxPer)??'',
     useFilter:!!(slate._dkEntries&&slate._dkEntries.useFilter),
+    // The late-swap workflow is: export, swap, RE-export, swap again. The
+    // hand-tuned rosters and the uniqueness flag belong to the user, not to the
+    // file — rebuilding the state object from scratch silently discarded every
+    // "Apply to entry" the moment the next wave's file was loaded.
+    lsUniq:!!(slate._dkEntries&&slate._dkEntries.lsUniq),
+    lsOverride:(slate._dkEntries&&slate._dkEntries.lsOverride)||{},
   };
   save(); renderDkEntriesModal();
   return slate._dkEntries;
@@ -5878,15 +6407,23 @@ function handleDkCsvFile(file){
     // good data with an event string. Those sports upload this file purely for
     // the contest entries.
     const NFL=isNfl(slate);
-    let msg;
+    let msg, gained=null;
     if(NFL){
+      // Count BEFORE as well as after. A slate built from the odds sheet often
+      // already carries kickoffs, and quoting the TOTAL afterwards let a file
+      // from the wrong draft group — which matched nobody — report success.
+      const before=(slate.players||[]).filter(p=>p.kick_label).length;
       updateParsedCSV={headers:dk.headers, rows:dk.rows, dkKind:dk.kind};
       updateColMapping={};
       applyAutoMap(dk.headers, updateColMapping, slate.sport||'');
       delete updateColMapping.proj; delete updateColMapping.own;
       applyPoolUpdate();                     // matches by DK id, enriches, no late adds
       const after=(slate.players||[]).filter(p=>p.kick_label).length;
-      msg=`${dk.kind}: game info attached to ${after} player${after===1?'':'s'}`;
+      const tot=(slate.players||[]).length;
+      gained=after-before;
+      msg=gained>0
+        ? `${dk.kind}: game info attached to ${gained} new player${gained===1?'':'s'} (${after}/${tot} now have a kickoff)`
+        : `${dk.kind}: no new player matched this file (${after}/${tot} have a kickoff)`;
     }else{
       msg=String(slate.sport||'').toUpperCase();
     }
@@ -5904,6 +6441,12 @@ function handleDkCsvFile(file){
     // has to say plainly that nothing happened rather than claim success.
     if(!NFL && !loaded){
       showToast(`${msg}: that file carries no contest entries (it is a ${dk.kind} salary export) — nothing to fill.`,'err');
+      renderSaved(); return;
+    }
+    // Nothing enriched AND nothing loaded is a no-op, not a success — almost
+    // always the wrong draft group's file.
+    if(NFL && gained===0 && !loaded){
+      showToast(msg+' — is this the right draft group?','err');
       renderSaved(); return;
     }
     showToast('✓ '+msg,'ok');
@@ -5941,8 +6484,78 @@ function dkSetGlobal(field, val){
 // are untouched (they live under separate keys on the same plan object).
 function dkSetMode(v){
   const slate=activeSlate(), st=dkEntriesState(slate); if(!st) return;
-  st.mode=(v==='balance')?'balance':'manual';
+  st.mode=(v==='balance'||v==='lateswap')?v:'manual';
   save(); renderDkEntriesModal();
+}
+// "Simulate now = …" — the clock late swap (and the pool's 🔒) runs against.
+// Blank restores the real one. Stored as an ISO instant so it means the same
+// thing in every timezone; the input is a plain local datetime-local field.
+function dkSetLateNow(v){
+  const slate=activeSlate(); if(!slate) return;
+  if(!v){ delete slate._lateNow; }
+  else { const d=new Date(v); if(isNaN(d.getTime())){ showToast('Could not read that date/time.','err'); return; } slate._lateNow=d.toISOString(); }
+  save();
+  renderDkEntriesModal();
+  if(typeof renderPool==='function') renderPool();
+  if(typeof renderLineup==='function') renderLineup();
+}
+function dkSetLsUniq(on){
+  const st=dkEntriesState(activeSlate()); if(!st) return;
+  st.lsUniq=!!on; save(); renderDkEntriesModal();
+}
+// A datetime-local value ("2026-09-13T14:00") for the stored instant, in the
+// BROWSER's timezone — which is what the input widget shows.
+function dkLateNowInputValue(slate){
+  const v=slate&&slate._lateNow; if(!v) return '';
+  const d=new Date(v); if(isNaN(d.getTime())) return '';
+  const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+// Load one late-swap entry into the hand builder so the user can finish it by
+// hand. The locked slots come along and the builder refuses to remove them
+// (see togglePlayer), so whatever he ends up with is still a legal swap.
+function dkLateSwapEdit(entryId){
+  const slate=activeSlate(), st=dkEntriesState(slate); if(!slate||!st) return;
+  const plan=nflLateSwapPlan(slate);
+  const row=(plan.rows||[]).find(r=>String(r.entryId)===String(entryId));
+  if(!row||!row.newIds){ showToast('That entry has nothing to edit.','err'); return; }
+  slate.currentLineup=row.newIds.slice();
+  if(isShowdown(slate)) slate.sdCaptain=row.cptId||null;
+  slate._lsEdit={entryId:row.entryId, contest:row.contest, lockedIds:(row.lockedIds||[]).slice()};
+  save();
+  closeDkEntriesModal();
+  const btn=[...document.querySelectorAll('.tab')].find(t=>/switchTab\('builder'/.test(t.getAttribute('onclick')||''));
+  if(typeof switchTab==='function' && btn) switchTab('builder', btn);
+  renderAll();
+  showToast(`Entry ${row.entryId} loaded — ${row.locked} locked slot${row.locked===1?'':'s'} are frozen. Hit "Apply to entry" when you're done.`,'ok');
+}
+// Write the hand-tuned roster back into the plan for that entry.
+function dkLateSwapApply(){
+  const slate=activeSlate(), st=dkEntriesState(slate); if(!slate||!st||!slate._lsEdit) return;
+  const ids=(slate.currentLineup||[]).slice();
+  const RS=rosterSize(slate);
+  if(ids.length!==RS){ showToast(`That roster is ${ids.length}/${RS} — fill it before applying.`,'err'); return; }
+  if(isNflClassic(slate) && !nflComplete(nflCounts(slate,ids))){ showToast('That roster does not fill the 9 DK slots.','err'); return; }
+  const cptId=isShowdown(slate)?sdCaptainId(slate,ids):null;
+  const sal=isShowdown(slate)?sdLateSalary(slate,ids,cptId):ids.reduce((s,id)=>s+(playerById(slate,id)?.salary||0),0);
+  if(sal>SALARY_CAP){ showToast('Over the salary cap.','err'); return; }
+  for(const lid of (slate._lsEdit.lockedIds||[])) if(!ids.includes(lid)){
+    showToast('A locked player is missing from the roster — he cannot be swapped out.','err'); return; }
+  st.lsOverride=st.lsOverride||{};
+  st.lsOverride[slate._lsEdit.entryId]={ids, cptId};
+  const eid=slate._lsEdit.entryId;
+  delete slate._lsEdit;
+  save(); renderAll();
+  openDkEntriesModal();
+  showToast(`Applied to entry ${eid}.`,'ok');
+}
+function dkLateSwapCancelEdit(){
+  const slate=activeSlate(); if(!slate) return;
+  delete slate._lsEdit; save(); renderAll();
+}
+function dkLateSwapClearOverride(entryId){
+  const st=dkEntriesState(activeSlate()); if(!st||!st.lsOverride) return;
+  delete st.lsOverride[entryId]; save(); renderDkEntriesModal();
 }
 // The exposure bar list is long on a 40-lineup portfolio; only the first 12
 // rows are drawn until the user asks for the rest.
@@ -5968,17 +6581,16 @@ function renderDkEntriesModal(){
   const balSel=(cid,plan)=>`<select onchange="dkSetPlan('${cid}','bmode',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;outline:none;">
       ${DK_BAL_MODES.map(([v,l])=>`<option value="${v}"${(plan.bmode||'include')===v?' selected':''}>${l}</option>`).join('')}
     </select>`;
-  const rows=st.contests.map(c=>{
+  const LS=res.mode==='lateswap';
+  const rows=LS ? '' : st.contests.map(c=>{
     const plan=Object.assign({}, dkDefaultPlan(c), st.plan[c.contestId]||{});
+    if(plan.mode==='dist'||plan.mode==='distfill') plan.mode='best';   // legacy keys
     const n=res.assign.filter(a=>a.contestId===c.contestId).length;
     if(BAL){
       // The overflow choice only means anything when the contest has more entry
       // slots than there are lineups to put in them.
       const over = (plan.bmode||'include')==='include' && c.count>res.poolSize
-        ? `<select onchange="dkSetPlan('${c.contestId}','boverflow',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:3px 6px;border-radius:4px;font-size:10px;cursor:pointer;outline:none;">
-             <option value="blank"${(plan.boverflow||'blank')==='blank'?' selected':''}>leave remaining blank</option>
-             <option value="cycle"${plan.boverflow==='cycle'?' selected':''}>cycle from the lowest exposure</option>
-           </select>`
+        ? `<span style="font-size:10px;color:var(--muted);">${res.poolSize} distinct — rest blank</span>`
         : '';
       const badf=c.format!==res.slateFmt;
       return `<tr data-cid="${c.contestId}" style="border-top:1px solid var(--border);">
@@ -5988,12 +6600,7 @@ function renderDkEntriesModal(){
         <td class="dk-fill-n" style="padding:6px 8px;font-size:11px;font-family:'DM Mono',monospace;color:${n?'var(--accent)':'var(--muted)'};text-align:right;">${n}/${c.count}</td>
       </tr>`;
     }
-    const extra = plan.mode==='dist'
-      ? `<select onchange="dkSetPlan('${c.contestId}','overflow',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:3px 6px;border-radius:4px;font-size:10px;cursor:pointer;outline:none;">
-           <option value="cycle"${(plan.overflow||'cycle')==='cycle'?' selected':''}>cycle from the top</option>
-           <option value="blank"${plan.overflow==='blank'?' selected':''}>leave the rest blank</option>
-         </select>`
-      : plan.mode==='one'
+    const extra = plan.mode==='one'
       ? `<input type="number" min="1" value="${plan.num??1}" onchange="dkSetPlan('${c.contestId}','num',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;width:64px;outline:none;">`
       : '';
     const bad=c.format!==res.slateFmt;
@@ -6005,6 +6612,68 @@ function renderDkEntriesModal(){
     </tr>`;
   }).join('');
   const top3=res.counts.slice(0,3).map(c=>`#${c.lineup?c.lineup.num:'?'} ×${c.n}`).join(' · ')||'—';
+  // ── Late-swap panel ───────────────────────────────────────────────────────
+  // One row per entry: what is locked, what changed, and what it bought. The
+  // row itself is the handle for hand-tuning (dkLateSwapEdit).
+  let lsHtml='';
+  if(LS){
+    const ls=res.lateswap||{rows:[],warnings:[]};
+    const nowEt=(()=>{ try{ const p=nflEtParts(ls.now||new Date());
+      const h=Math.floor(p.mins/60), mi=p.mins%60, h12=h%12===0?12:h%12;
+      return `${String(p.m).padStart(2,'0')}/${String(p.d).padStart(2,'0')}/${p.y} ${h12}:${String(mi).padStart(2,'0')} ${h>=12?'PM':'AM'} ET`; }catch(e){ return '?'; } })();
+    const err=ls.error;
+    const body=err
+      ? `<div style="font-size:11px;color:var(--red);line-height:1.6;">${esc(
+          err==='nosim' ? 'Run a simulation first (Auto-Gen tab) — late swap re-optimizes the open slots against the last sim\'s per-sim scores, so it needs one.'
+        : err==='format' ? `This entries file is ${ls.fileFmt} but the slate is ${ls.slateFmt}.`
+        : err==='notnfl' ? 'Late swap is an NFL feature.' : 'Load a DKEntries.csv first.')}</div>`
+      : (()=>{
+        const trs=ls.rows.map(r=>{
+          const reason = r.reason==='fullylocked' ? '<span style="color:var(--muted)">every game has started</span>'
+            : r.reason==='empty' ? '<span style="color:var(--red)">no existing lineup in the file</span>'
+            : r.reason==='partial' ? '<span style="color:var(--red)">incomplete existing lineup</span>'
+            : r.reason==='unknown' ? '<span style="color:var(--red)">rosters a player not on this slate</span>'
+            : r.reason ? '<span style="color:var(--red)">no legal completion</span>' : null;
+          const chg = reason ? reason
+            : !r.changed ? '<span style="color:var(--muted)">already optimal — not exported</span>'
+            : r.changes.map(c=>`<div>${esc(c.oldName)} <span style="color:var(--muted)">→</span> <b style="color:var(--accent)">${esc(c.newName)}</b>${c.cptOnly?' <span style="font-size:9px;color:var(--muted)">(captain)</span>':''}</div>`).join('');
+          const d = (r.reason||!r.changed) ? '' :
+            `${r.deltaSim>0?'+':''}${(r.deltaSim||0).toFixed(2)} sim` + (r.deltaEv!=null?`<div style="color:var(--muted)">${r.deltaEv>0?'+':''}${r.deltaEv.toFixed(1)} EV pts</div>`:'');
+          const clickable=!r.reason;
+          return `<tr class="dk-ls-row" data-eid="${esc(r.entryId)}" style="border-top:1px solid var(--border);${clickable?'cursor:pointer;':''}"
+              ${clickable?`onclick="dkLateSwapEdit('${esc(r.entryId)}')" title="Open this entry in the hand builder with its locked slots frozen"`:''}>
+            <td style="padding:6px 8px;font-size:11px;color:var(--text);">${esc(r.contest)}
+              <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;">#${esc(r.entryId)} · ${esc(r.fee||'')}${r.manual?` · <span style="color:var(--accent)">hand-tuned</span> <span onclick="event.stopPropagation();dkLateSwapClearOverride('${esc(r.entryId)}')" title="Drop the hand-tuned roster and let the search choose again" style="cursor:pointer;color:var(--muted);">✕</span>`:''}</div></td>
+            <td style="padding:6px 8px;font-size:11px;font-family:'DM Mono',monospace;color:${r.locked?'var(--text)':'var(--muted)'};text-align:center;">${r.locked}🔒 / ${r.open}</td>
+            <td style="padding:6px 8px;font-size:10px;line-height:1.55;">${chg}</td>
+            <td style="padding:6px 8px;font-size:10px;font-family:'DM Mono',monospace;text-align:right;color:${(r.deltaSim||0)>0?'var(--green)':'var(--muted)'};">${d}</td>
+          </tr>`;
+        }).join('');
+        return `<table style="width:100%;border-collapse:collapse;">
+          <thead><tr style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;text-align:left;">
+            <th style="padding:4px 8px;">ENTRY</th><th style="padding:4px 8px;text-align:center;">LOCKED/OPEN</th>
+            <th style="padding:4px 8px;">CHANGES</th><th style="padding:4px 8px;text-align:right;">Δ</th>
+          </tr></thead><tbody>${trs}</tbody></table>
+          <div id="dkLsTotals" style="margin-top:9px;font-size:11px;color:var(--text);font-family:'DM Mono',monospace;">
+            <span style="color:var(--accent);">${ls.changed}</span> changed · ${ls.unchanged} unchanged
+            · ${ls.fullyLocked} fully locked${ls.noExisting?` · ${ls.noExisting} with no existing lineup`:''}
+          </div>`;
+      })();
+    lsHtml=`
+      <div style="font-size:10px;color:var(--muted);margin-bottom:9px;line-height:1.5;">
+        Slots whose game has kicked off are frozen by id; the rest are re-optimized against the last sim, under the cap, never using a player whose game has already started. Only the entries that actually change are written to the file — that is DK's own instruction. Click a row to finish one by hand.
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:9px;font-size:11px;color:var(--muted);">
+        <label title="Pretend it is this moment. Blank = the real clock. Kickoffs are compared in Eastern time, which is what DK's Game Info column is written in.">Simulate now =
+          <input type="datetime-local" id="dkLateNow" value="${dkLateNowInputValue(slate)}" onchange="dkSetLateNow(this.value)"
+            style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
+        </label>
+        ${slate._lateNow?`<button onclick="dkSetLateNow('')" style="background:none;border:1px solid var(--border);color:var(--muted);padding:2px 7px;border-radius:4px;font-size:10px;cursor:pointer;">use the real clock</button>`:''}
+        <span id="dkLsNow" style="font-family:'DM Mono',monospace;color:${lateNowIsSimulated(slate)?'var(--accent)':'var(--muted)'};">${esc(nowEt)}${lateNowIsSimulated(slate)?' (simulated)':''}</span>
+        <label style="cursor:pointer;"><input type="checkbox" id="dkLsUniq" ${st.lsUniq?'checked':''} onchange="dkSetLsUniq(this.checked)"> Keep my entries unique</label>
+      </div>
+      ${body}`;
+  }
   // Balance preview: the numbers that tell the user whether the portfolio is
   // level (min / max / spread), the plain-English bucket sentence he would have
   // written by hand ("20 lineups at $3.50, 20 at $1.75"), and a bar per lineup.
@@ -6048,37 +6717,39 @@ function renderDkEntriesModal(){
       <button onclick="dkClearEntries()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:2px 7px;border-radius:4px;font-size:10px;cursor:pointer;margin-left:6px;">load another</button>
     </div>
     <div id="dkModeSwitch" style="display:flex;gap:0;margin-bottom:9px;border:1px solid var(--border);border-radius:6px;overflow:hidden;width:fit-content;">
-      ${[['manual','Manual plans'],['balance','Balance $ exposure']].map(([v,l])=>
+      ${[['manual','Manual plans'],['balance','Balance $ exposure']]
+        .concat(isNfl(slate)?[['lateswap','Late swap']]:[]).map(([v,l])=>
         `<button id="dkMode_${v}" onclick="dkSetMode('${v}')" style="background:${res.mode===v?'var(--accent)':'transparent'};color:${res.mode===v?'#000':'var(--muted)'};border:none;padding:5px 14px;font-size:11px;font-weight:${res.mode===v?600:400};cursor:pointer;font-family:'DM Sans',sans-serif;">${l}</button>`).join('')}
     </div>
     ${BAL?`<div style="font-size:10px;color:var(--muted);margin-bottom:8px;line-height:1.5;">Every included contest is filled most-expensive-first, each entry going to the lineup carrying the fewest dollars so far (never the same lineup twice in one contest). Single-entry and tiny contests take your best lineup and stay out of the arithmetic.</div>`:''}
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:11px;color:var(--muted);">
+    ${LS?lsHtml:''}
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:11px;color:var(--muted);${LS?'margin-top:10px;':''}">
       <label>Rank by
         <select id="dkRankBy" onchange="dkSetGlobal('rankBy',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;cursor:pointer;outline:none;">
           <option value="ev"${st.rankBy==='ev'?' selected':''}>EV%</option>
           <option value="sim"${st.rankBy==='sim'?' selected':''}>Sim</option>
           <option value="proj"${st.rankBy==='proj'?' selected':''}>Proj</option>
         </select></label>
-      <label>Max entries per lineup
+      ${LS?'':`<label>Max entries per lineup
         <input type="number" min="1" id="dkMaxPer" value="${st.maxPer??''}" placeholder="∞"
           onchange="dkSetGlobal('maxPer',this.value)"
-          style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;width:70px;outline:none;"></label>
-      ${filterOn?`<label style="cursor:pointer;"><input type="checkbox" id="dkUseFilter" ${st.useFilter?'checked':''} onchange="dkSetGlobal('useFilter',this.checked)"> Use only lineups matching the Saved filter</label>`:''}
+          style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;width:70px;outline:none;"></label>`}
+      ${(!LS&&filterOn)?`<label style="cursor:pointer;"><input type="checkbox" id="dkUseFilter" ${st.useFilter?'checked':''} onchange="dkSetGlobal('useFilter',this.checked)"> Use only lineups matching the Saved filter</label>`:''}
     </div>
-    <table style="width:100%;border-collapse:collapse;">
+    ${LS?'':`<table style="width:100%;border-collapse:collapse;">
       <thead><tr style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;text-align:left;">
         <th style="padding:4px 8px;">CONTEST</th><th style="padding:4px 8px;">PLAN</th><th style="padding:4px 8px;text-align:right;">FILL</th>
       </tr></thead>
       <tbody>${rows}</tbody>
-    </table>
+    </table>`}
     <div id="dkEntriesPreview" style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;">
       ${balHtml}
       <div style="font-size:11px;color:var(--text);font-family:'DM Mono',monospace;">
-        <span style="color:var(--accent);">${res.filled}</span> of ${res.total} entries filled
-        · ${res.distinct} distinct lineup${res.distinct===1?'':'s'} of ${res.poolSize} usable
+        <span style="color:var(--accent);">${res.filled}</span> of ${res.total} entries ${LS?'to swap':'filled'}
+        ${LS?'':`· ${res.distinct} distinct lineup${res.distinct===1?'':'s'} of ${res.poolSize} usable`}
         ${res.skipped?`· ${res.skipped} skipped`:''}${res.blanks?` · <span style="color:var(--red);">${res.blanks} blank</span>`:''}
       </div>
-      <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;margin-top:3px;">Most used: ${top3}</div>
+      ${LS?'':`<div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;margin-top:3px;">Most used: ${top3}</div>`}
       ${res.warnings.length?`<div style="margin-top:7px;font-size:10px;color:var(--red);line-height:1.5;">${res.warnings.map(w=>'⚠ '+esc(w)).join('<br>')}</div>`:''}
     </div>`;
   const f=document.getElementById('dkEntriesFooter');
@@ -6086,7 +6757,11 @@ function renderDkEntriesModal(){
     f.style.display='';
     const b=document.getElementById('dkEntriesExportBtn');
     if(b){ b.disabled=!res.filled||res.fmtMismatch; b.style.opacity=(b.disabled?.45:1);
-           b.textContent=res.filled?`Download ${res.filled} filled entr${res.filled===1?'y':'ies'}`:'Nothing to download'; }
+           b.textContent=res.filled
+             ? (res.mode==='lateswap'
+                ? `Download ${res.filled} changed entr${res.filled===1?'y':'ies'}`
+                : `Download ${res.filled} filled entr${res.filled===1?'y':'ies'}`)
+             : (res.mode==='lateswap'?'Nothing to swap':'Nothing to download'); }
   }
 }
 
@@ -6759,9 +7434,24 @@ function toggleUfcFightExclusion(fightNum, btn){
   }
 }
 
+// The four SHARED Auto-Gen numbers, defaults included. They used to live only
+// in the DOM, so they reset on every reload and — worse — carried across a
+// slate switch, silently applying one slate's salary floor to the next. Every
+// other generator setting is per-slate; these are now too.
+const GEN_SHARED_INPUTS = [['genCount','_genCount',20], ['genMaxExp','_genMaxExp',100],
+                           ['genMinSal','_genMinSal',49000], ['genMaxSal','_genMaxSal',50000]];
+function syncGenSharedInputs(slate){
+  if(!slate) return;
+  for(const [id, key, dflt] of GEN_SHARED_INPUTS){
+    const el = document.getElementById(id); if(!el) continue;
+    const v = slate[key];
+    el.value = String(Number.isFinite(v) && v > 0 ? v : dflt);
+  }
+}
 function renderGroupRulesSummary(){
   const slate=activeSlate();if(!slate)return;
   const groups=slate.groups||[];
+  syncGenSharedInputs(slate);
 
   // Show/hide sport-specific sections — must happen regardless of group count
   const ufcSection = document.getElementById('ufcSection');
@@ -9973,7 +10663,11 @@ function beatersEstimate(beating, tied, sampleN, arr, t, F, refine){
     const xM=arr[sampleN-M];
     if(t>=xM){
       let ex=0; for(let j=sampleN-M;j<sampleN;j++) ex+=arr[j]-xM;
-      const lam=Math.max(1e-6, ex/M);
+      // M-1, not M: arr[sampleN-M] IS the threshold, so it contributes a zero
+      // excess and there are only M-1 strict exceedances above it. Dividing by
+      // M shrank lambda ~2.5% at M=40, which shrinks pHat and therefore
+      // overstates the rank every top-of-curve lineup earns.
+      const lam=Math.max(1e-6, ex/Math.max(1, M-1));
       const pHat=(M/sampleN)*Math.exp(-(t-xM)/lam);
       return { shape: F*pHat + 0.5, scale: 1 };
     }
@@ -16741,7 +17435,7 @@ function nflScriptMargins(ti, teamInfo){
 // 17-point implied total puts the zero-truncation inside 2.1σ. The integration
 // is the same 41-node ±4σ grid the DST tier table uses, taken jointly over the
 // score draw and the lognormal draw (1,681 nodes, once per team per input
-// build, memoized on the teamInfo object as `ti.yardNorm`).
+// build, memoized on the teamInfo object as `ti._yNorm`).
 //
 // There is a THIRD bias, which only normalizing yardF on its own does not
 // remove: yardF and the script factors are correlated. A team that outscores
@@ -16850,7 +17544,7 @@ function nflYardNorms(implied, total, pace){
   // lognormal (independent and already mean-1) can.
   const rw = pace ? pace.ratioW : NFL_RATIO_W, b0 = 1 - rw;
   const pn = pace ? nflPaceTotNorm(tot, pace.kappa) : 1;
-  let yn = 0, sp = 0, sr = 0;
+  let yn = 0, sp = 0, sr = 0, pv = 0;
   for(let a = 0; a < _NFL_PA_Z.length; a++){
     const T = Math.max(13, tot + _NFL_PA_Z[a] * 10.4);
     const pf = pace ? Math.pow(T / tot, pace.kappa) / pn : 1;
@@ -16866,10 +17560,13 @@ function nflYardNorms(implied, total, pace){
       yn += w * y;
       sp += w * y * sc.passF * sc.volF;
       sr += w * y * sc.rushF * sc.volF;
+      // E[passF·volF] on its OWN — the reception blend multiplies by the pass
+      // factor without yardF, and only the product was normalized above.
+      pv += w * sc.passF * sc.volF;
     }
   }
-  if(!(yn > 0)) return { yn: 1, cp: 1, cr: 1, pn };
-  return { yn, cp: (sp / yn) || 1, cr: (sr / yn) || 1, imp, tot, pn };
+  if(!(yn > 0)) return { yn: 1, cp: 1, cr: 1, pv: 1, imp, tot, pn };
+  return { yn, cp: (sp / yn) || 1, cr: (sr / yn) || 1, pv: pv || 1, imp, tot, pn };
 }
 function nflScriptFor(ti, teamInfo){
   const m = nflScriptMargins(ti, teamInfo);
@@ -17001,7 +17698,13 @@ function nflMeanFromOu(ou, cv){
 
 // Build the per-player sim inputs once (parsing props is expensive vs the loop).
 // Returns { teams, games, entries } where entries[i] aligns with pool[i].
-function buildNflSimInputs(pool){
+function buildNflSimInputs(pool, opts){
+  // `opts.skipDstCal` — the DST points-line calibration is 4,000 draws of the
+  // whole game model, and the render surfaces (game tiles, the dashboard's
+  // market baseline, the Total/Spread slider read-back) only want the team
+  // environments and the shares. Only the paths that actually SIMULATE need
+  // e.dstCal to be solved.
+  const _skipDstCal = !!(opts && opts.skipDstCal);
   const gamesByKey = new Map();
   const _dash = (typeof activeSlate==='function' && activeSlate()) ? activeSlate()._simAdj : null;
   // Game-stack correlation: 'normal' (the default) shares a pace factor between
@@ -17072,8 +17775,12 @@ function buildNflSimInputs(pool){
       // and renderSimDash says so out loud when a combination exceeds it.
       ti.implied = Math.max(NFL_IMPLIED_MIN, Math.min(NFL_IMPLIED_MAX, ti.implied));
     }
-    // Game total follows the (possibly adjusted) team totals.
-    if(names.length === 2 && (_dash && _dash.teams && names.some(t => _dash.teams[t] && Number.isFinite(_dash.teams[t].implied)))){
+    // Game total follows the (possibly adjusted) team totals — ALWAYS, not just
+    // when the dashboard moved one. simNflGames samples the total around g.total
+    // and the margin around the implied difference, so E[score] equals the
+    // implied total only if the two agree; a sheet whose tm_tot/opp_tot do not
+    // sum exactly to its game_ou otherwise biases every score in the game.
+    if(names.length === 2){
       g.total = g.teams[names[0]].implied + g.teams[names[1]].implied;
     }
     // The (possibly adjusted) game total, on each side, so mkTeamEnv's yardF
@@ -17106,6 +17813,44 @@ function buildNflSimInputs(pool){
   // Sim dashboard: game / team / player-share adjustments re-derive the means.
   nflApplySimDash(pool, entries, teamInfo, _dash);
 
+  // PLAYER OUT: a scratched player scores 0, exactly like an unpriced one. The
+  // redistribution already pins his dashboard shares at 0, so this is normally
+  // a no-op — but it is a HARD guarantee that survives "Reset all to Vegas", a
+  // restored history snapshot or an applied preset, none of which know about
+  // the OUT list. `_nflOutBypass` is set only by nflRedistributeOut, which has
+  // to see his market share in order to give it away.
+  if(!window._nflOutBypass){
+    const _outS = (typeof activeSlate === 'function' && activeSlate()) ? nflOutSet(activeSlate()) : new Set();
+    if(_outS.size) pool.forEach((p, i) => {
+      if(!_outS.has(p.id)) return;
+      const e = entries[i]; if(!e) return;
+      e.hasProps = false; e.unpriced = true; e.fallbackMean = 0; e.out = true;
+      e.passYds = e.passTD = e.rushYds = e.recYds = e.rec = null; e.atd = null;
+      e.dstProps = e.dstProps || null;
+    });
+  }
+
+  // Anytime-TD over-round, per team. Σ λ(ATD) over a team's skill players is
+  // the book's opinion of how many touchdowns it scores, and books hold enough
+  // on ATD that the sum runs 20–30% above the team's implied touchdown budget
+  // (implied points × 0.74 / 7 — the same assumption the TD count uses). The
+  // pie path is immune (it uses the prices as a ratio and takes the COUNT from
+  // the sampled score), but simNflPlayer's independent path uses λ absolutely,
+  // so it divides by this. Floored at 1: this may deflate an over-round book,
+  // never inflate a tight one.
+  {
+    const _lamBy = {}, _impBy = {};
+    entries.forEach(e => {
+      if(!e.team || e.pos === 'K' || e.pos === 'DST') return;
+      _lamBy[e.team] = (_lamBy[e.team] || 0) + nflTdLam(e.atd);
+    });
+    teamInfo.forEach((ti, t) => { _impBy[t] = Number.isFinite(ti.implied) ? ti.implied : 22; });
+    for(const e of entries){
+      const budget = (_impBy[e.team] || 22) * 0.74 / 7;
+      e._tdVig = (e.team && budget > 0) ? Math.max(1, (_lamBy[e.team] || 0) / budget) : 1;
+    }
+  }
+
   // Within-team share correlation: build the production pie off the entries as
   // the dashboard left them, so the adjusted shares are the Dirichlet means.
   const _slate = (typeof activeSlate==='function') ? activeSlate() : null;
@@ -17117,7 +17862,7 @@ function buildNflSimInputs(pool){
   // here for the single factor on the sack/INT/fumble rates that makes the
   // sim's mean match it (see nflCalibrateDst). Doing it at input-build time
   // keeps the per-sim DST branch as cheap as it was.
-  nflCalibrateDst(entries, _games);
+  if(!_skipDstCal) nflCalibrateDst(entries, _games);
 
   return { games: _games, teamInfo, entries, shareSim, shareAlphaKey: _alphaKey, paceKey: _paceKey, pace: _paceCfg };
 }
@@ -17220,7 +17965,14 @@ function nflSimAdjCount(slate){
   const a = slate && slate._simAdj; if(!a) return 0;
   let n = 0;
   for(const t of Object.values(a.teams||{})){ if(Number.isFinite(t.implied)) n++; if(t.lean) n++; }
-  for(const p of Object.values(a.players||{})){ for(const k of Object.keys(p)) if(k!=='lock' && Number.isFinite(p[k])) n++; }
+  // Entries tagged auto:'out' were written by nflRedistributeOut, not by the
+  // user. Counting them made ONE ⛔ click report "12 adjustments active",
+  // arm "Reset all to Vegas", and make Apply-preset / Restore-inputs warn about
+  // replacing work nobody did. The OUT banner announces the redistribution.
+  for(const p of Object.values(a.players||{})){
+    if(p.auto==='out') continue;
+    for(const k of Object.keys(p)) if(k!=='lock' && k!=='auto' && Number.isFinite(p[k])) n++;
+  }
   return n;
 }
 // TD expectation from an anytime price: λ = −ln(1−p) (Poisson), and back.
@@ -17243,7 +17995,7 @@ function nflShareModel(slate, pool, entries){
     if(e.pos==='K' || e.pos==='DST'){ T.players.push({p, i, e, m, share:{}, skip:true}); return; }
     T.players.push({p, i, e, m, share:{}});
     T.base.recYds += m.recYds; T.base.rec += m.rec; T.base.rushYds += m.rushYds; T.base.td += m.td;
-    T.base.passYds = Math.max(T.base.passYds, m.passYds);
+    T.base.passYds += m.passYds;                          // SUM, not max: two priced QBs share one pie
   });
   for(const T of Object.values(teams)){
     if(!T.base.passYds) T.base.passYds = T.base.recYds;   // no QB line → receivers' sum
@@ -17280,6 +18032,174 @@ function nflAdjShares(T, statKey, adj){
     if(out[id] == null) out[id] = pl.share[statKey] * k;
   }
   return { shares: out, over, fixed, restBase };
+}
+
+// ── OUT → share redistribution ───────────────────────────────────────────────
+// Which teammates absorb an OUT player's share of a given stat, in order of
+// preference. Tiers, not one list, because "the QB's rushing yards" has a real
+// fallback chain: the backup QB inherits the designed QB runs, and only if
+// there is no second QB on the slate do they become carries for the backs.
+// The receiving stats and the touchdown pie use the DEPTH-CHART group — a WR's
+// vacated targets go to the other pass catchers, not to the running back — and
+// TE is grouped with WR because DK's own flex treats them as one pool and every
+// modern offense moves its TE into the slot.
+//
+// Deliberately NOT modeled: the team's totals. The offense still takes the same
+// number of snaps against the same defense with the same implied point total,
+// so team receiving yards / rush yards / TDs are unchanged and only the SPLIT
+// moves. Losing a star does cost an offense some efficiency in reality, but the
+// size of that effect is small, noisy, and player-specific, and guessing at it
+// here would quietly contaminate the market baseline that every other number on
+// this board is anchored to. If the user believes the offense got worse, the
+// team implied-total slider is the honest place to say so.
+function nflOutAbsorbTiers(stat, pos){
+  const P = pos || '';
+  if(stat === 'passYds') return [['QB']];
+  if(stat === 'rushYds'){
+    if(P === 'QB') return [['QB'], ['RB']];
+    if(P === 'RB') return [['RB']];
+    return [['WR','TE'], ['RB']];
+  }
+  // recYds / rec / td
+  if(P === 'QB') return [['QB']];
+  if(P === 'RB') return [['RB']];
+  return [['WR','TE']];
+}
+// Rebuild the automatic OUT adjustments on `slate._simAdj.players`.
+//
+// Every entry it writes is tagged `{auto:'out'}`, which is the whole contract:
+//   · this function deletes ONLY tagged entries before recomputing, so a hand
+//     override survives untouched and un-OUTing a player removes exactly the
+//     numbers this function put there and nothing else;
+//   · simDashSet strips the tag the moment the user drags one of those sliders,
+//     which promotes the entry to a manual adjustment (his number, his to keep).
+// The arithmetic is expressed as explicit shares rather than as a special case
+// inside nflAdjShares so the dashboard SHOWS the result — the redistribution is
+// a claim about the slate the user should be able to see, argue with and edit.
+function nflRedistributeOut(slate){
+  if(!slate || !isNfl(slate)) return null;
+  const adj = slate._simAdj;
+  if(adj && adj.players){
+    for(const id of Object.keys(adj.players)){
+      if(adj.players[id] && adj.players[id].auto === 'out') delete adj.players[id];
+    }
+    if(!Object.keys(adj.players).length && !Object.keys(adj.teams||{}).length) delete slate._simAdj;
+  }
+  slate._outMoves = null;
+  const outIds = nflOutIds(slate);
+  if(!outIds.length) return null;
+  const pool = (slate.players||[]).filter(p => (p.salary||0) > 0);
+  if(!pool.length) return null;
+  // Market entries: the dashboard OFF and the OUT zeroing bypassed, because the
+  // share we are about to hand out is exactly the one the zeroing removes.
+  const savedAdj = slate._simAdj;
+  slate._simAdj = null;
+  window._nflOutBypass = true;
+  let base;
+  try { base = buildNflSimInputs(pool); }
+  finally { window._nflOutBypass = false; slate._simAdj = savedAdj; }
+  const model = nflShareModel(slate, pool, base.entries);
+  const A = nflSimAdj(slate, true);
+  const outSet = new Set(outIds);
+  const manual = (id, key) => { const a = A.players[id]; return !!(a && a.auto !== 'out' && Number.isFinite(a[key])); };
+  const moves = [];
+  for(const T of Object.values(model)){
+    const outs = T.players.filter(pl => !pl.skip && outSet.has(pl.p.id));
+    if(!outs.length) continue;
+    const mates = T.players.filter(pl => !pl.skip && !outSet.has(pl.p.id));
+    for(const st of NFL_SHARE_STATS){
+      const key = st.key;
+      // "Existing" shares — after the auto entries were cleared above, this is
+      // the market baseline plus whatever the user set by hand.
+      const cur = nflAdjShares(T, key, A).shares;
+      const add = new Map();
+      let anyOut = false;
+      for(const pl of outs){
+        const S = cur[pl.p.id] || 0;
+        if(!(S > 0)) continue;
+        anyOut = true;
+        // First tier with any member at all wins; the whole team is the last
+        // resort (a one-QB, one-RB showdown side has no positional group left).
+        const tiers = nflOutAbsorbTiers(key, pl.e.pos);
+        let grp = null;
+        for(const t of tiers){
+          const g = mates.filter(m => t.includes(m.e.pos));
+          if(g.length){ grp = g; break; }
+        }
+        if(!grp || !grp.length) grp = mates;
+        if(!grp.length) continue;
+        const tot = grp.reduce((s,m) => s + (cur[m.p.id] || 0), 0);
+        // Nobody in the group carries a market share (the classic case: the
+        // starting QB is out and every other QB on the slate is an unpriced
+        // backup). Then the fallback is an even split — EXCEPT for passing
+        // yards, where an even split is physically wrong: a team throws with
+        // one quarterback, not with all of them. So the whole passing pie goes
+        // to the next man on the depth chart, and DK's own salary is the best
+        // depth chart available (the backup who is expected to play is priced
+        // above the third-stringer). Through the share model that alone prices
+        // him: he goes from unpriced-scores-zero to the starter's yardage.
+        let succ = null;
+        if(tot <= 0 && grp.length > 1 && key === 'passYds'){
+          succ = grp.slice().sort((a,b)=>(b.p.salary||0)-(a.p.salary||0))[0];
+        }
+        const to = [];
+        for(const m of grp){
+          const w = succ ? (m === succ ? 1 : 0) : (tot > 0 ? (cur[m.p.id] || 0) / tot : 1 / grp.length);
+          const d = S * w;
+          if(!(d > 0)) continue;
+          add.set(m.p.id, (add.get(m.p.id) || 0) + d);
+          to.push({id:m.p.id, name:m.p.name, share:(cur[m.p.id]||0) + d, add:d});
+        }
+        if(to.length) moves.push({outId:pl.p.id, outName:pl.p.name, team:T.team, pos:pl.e.pos,
+          stat:key, statLabel:st.label, share:S,
+          to: to.sort((a,b)=>b.add-a.add)});
+      }
+      if(!anyOut) continue;
+      // Write the explicit shares. The OUT player is pinned at 0 and every
+      // absorber at his new number; nflAdjShares then leaves the rest of the
+      // roster exactly where it was (its renormalization constant is unchanged
+      // by construction — the fixed block grew by precisely the share that left).
+      for(const pl of outs){ if(manual(pl.p.id, key)) continue;
+        A.players[pl.p.id] = A.players[pl.p.id] || {};
+        A.players[pl.p.id].auto = 'out';
+        A.players[pl.p.id][key] = 0;
+      }
+      for(const [id, d] of add.entries()){
+        if(manual(id, key)) continue;
+        A.players[id] = A.players[id] || {};
+        A.players[id].auto = 'out';
+        A.players[id][key] = Math.max(0, Math.min(1, (cur[id] || 0) + d));
+      }
+    }
+  }
+  slate._outMoves = moves.length ? moves : null;
+  return moves;
+}
+// One line per OUT player for the run log and the Sim tab banner:
+// "⛔ Out: JSN — 42% rec yds → Kupp 18%, Shaheed 15%, Barner 9%".
+// The stat quoted is the one he owned the most of, which is the one the user
+// actually cares about (a WR's receiving yards, an RB's rushing yards).
+function nflOutSummaryLines(slate){
+  const moves = (slate && slate._outMoves) || [];
+  const byOut = new Map();
+  for(const m of moves){
+    const cur = byOut.get(m.outId);
+    if(!cur || m.share > cur.share) byOut.set(m.outId, m);
+  }
+  const short = n => String(n||'').split(' ').slice(-1)[0] || n;
+  const pct = v => (Math.round(v*1000)/10).toFixed(v >= 0.1 ? 0 : 1) + '%';
+  const out = [];
+  for(const id of nflOutIds(slate)){
+    const p = playerById(slate, id);
+    const m = byOut.get(id);
+    if(!m){ out.push(`⛔ Out: ${p ? p.name : id} — no market share to redistribute`); continue; }
+    // The numbers quoted are what each teammate GAINED, so they add back up to
+    // the share that left — the arithmetic is checkable at a glance.
+    const to = m.to.slice(0, 4).map(t => `${short(t.name)} ${pct(t.add)}`).join(', ');
+    const more = m.to.length > 4 ? `, +${m.to.length-4} more` : '';
+    out.push(`⛔ Out: ${short(m.outName)} — ${pct(m.share)} ${m.statLabel.toLowerCase()} → ${to}${more}`);
+  }
+  return out;
 }
 // Adjusted team totals: production scales with implied points, then tilts
 // pass ↔ rush by the AUTO game-script response to the adjusted spread, and only
@@ -17359,8 +18279,11 @@ function nflApplySimDash(pool, entries, teamInfo, adj){
       e.atd    = nflTdProb(tdLam);
       if(e.pos==='QB'){
         e.passYds = passYds > 0 ? passYds : e.passYds;
-        // Passing TDs ride the team's TD expectation and the pass lean.
-        e.passTD = (e.passTD != null ? e.passTD : (e.passYds||0)/125) * tot.f * (1 + tot.lean);
+        // Passing TDs ride the team's TD expectation, the AUTO game-script pass
+        // tilt and the manual pass lean — the same three factors passing yards
+        // take two lines up. Leaving autoPassF off here meant the spread slider
+        // moved a QB's yards without moving his touchdowns.
+        e.passTD = (e.passTD != null ? e.passTD : (e.passYds||0)/125) * tot.f * tot.autoPassF * (1 + tot.lean);
         if(e.rushYds == null) e.rushYds = 12 * tot.f;
       }
       e._dashAdjusted = true;
@@ -17408,10 +18331,15 @@ function simDashSet(path, val){
   } else if(kind === 'player'){
     adj.players[key] = adj.players[key] || {};
     if(stat === 'lock'){ adj.players[key].lock = !adj.players[key].lock; if(!adj.players[key].lock) delete adj.players[key].lock; }
-    else { const v = parseFloat(val)/100; if(!Number.isFinite(v)) delete adj.players[key][stat]; else adj.players[key][stat] = Math.max(0, Math.min(1, v)); }
-    if(!Object.keys(adj.players[key]).length) delete adj.players[key];
+    else {
+      // Touching a slider the OUT redistribution wrote makes the whole entry
+      // the user's: it stops being rebuilt (and stops being deleted) by
+      // nflRedistributeOut, which only ever owns entries still tagged 'out'.
+      delete adj.players[key].auto;
+      const v = parseFloat(val)/100; if(!Number.isFinite(v)) delete adj.players[key][stat]; else adj.players[key][stat] = Math.max(0, Math.min(1, v));
+    }
+    if(!Object.keys(adj.players[key]).length || (Object.keys(adj.players[key]).length === 1 && adj.players[key].auto)) delete adj.players[key];
   }
-  slate._simDashDirty = true;
   simDashCommit();
 }
 // Total / Spread sliders move both teams' implied points together.
@@ -17428,11 +18356,10 @@ function simDashSetGame(a, b, which, val){
   // quote the same total; renderSimDash prints a note wherever the clamp bit.
   adj.teams[a] = Object.assign({}, adj.teams[a], { implied: nflClampImplied(Math.round((total/2 + margin/2)*10)/10) });
   adj.teams[b] = Object.assign({}, adj.teams[b], { implied: nflClampImplied(Math.round((total/2 - margin/2)*10)/10) });
-  slate._simDashDirty = true;
   simDashCommit();
 }
 function simDashGameState(slate, a, b){
-  const inp = buildNflSimInputs((slate.players||[]).filter(p=>p.salary>0));
+  const inp = buildNflSimInputs((slate.players||[]).filter(p=>p.salary>0), {skipDstCal:true});
   const ta = inp.teamInfo.get(a), tb = inp.teamInfo.get(b);
   const ia = ta ? ta.implied : 22, ib = tb ? tb.implied : 22;
   const ba = ta ? ta.baseImplied : ia, bb = tb ? tb.baseImplied : ib;
@@ -17455,6 +18382,7 @@ function nflAdjSummary(adj){
   }
   let nPl = 0;
   for(const p of Object.values(adj.players||{})){
+    if(p.auto==='out') continue;            // written by the OUT redistribution, not by the user
     if(NFL_SHARE_STATS.some(st => Number.isFinite(p[st.key]))) nPl++;
   }
   if(nPl) bits.push(`${nPl} player share${nPl>1?'s':''}`);
@@ -17493,8 +18421,11 @@ function simDashApplyPreset(nameArg, force){
   const n = nflSimAdjCount(slate);
   if(n && !force && !confirm(`Apply "${nm}"? The ${n} adjustment${n>1?'s':''} currently on the board will be replaced.`)) return;
   slate._simAdj = nflAdjClone(pre.adj);
+  // A preset is a snapshot of the USER's board, but the OUT list is a fact about
+  // the slate that outlives it — so the automatic entries are rebuilt (and any
+  // stale ones the snapshot carried are dropped) on top of what was applied.
+  if(nflOutIds(slate).length || (slate._simAdj && Object.values(slate._simAdj.players||{}).some(a=>a&&a.auto==='out'))) nflRedistributeOut(slate);
   slate._simDashPreset = nm;
-  slate._simDashDirty = true;
   simDashCommit(); if(typeof renderPool==='function') renderPool();
   showToast(`✓ Applied "${nm}" — ${nflAdjSummary(slate._simAdj)}`,'ok');
   return nm;
@@ -17517,12 +18448,15 @@ function simDashReset(scope, key){
   else if(scope === 'team'){ delete adj.teams[key]; }
   else if(scope === 'teamPlayers'){
     const pool = (slate.players||[]);
-    pool.filter(p => String(p.team||'').toUpperCase().replace(/[^A-Z]/g,'') === key).forEach(p => { delete adj.players[p.id]; });
+    pool.filter(p => nflTeamOf(p) === key).forEach(p => { delete adj.players[p.id]; });
   }
   else if(scope === 'player'){ delete adj.players[key]; }
   else if(scope === 'stat'){ const [t, st] = key.split('/'); const pool = (slate.players||[]);
-    pool.filter(p => String(p.team||'').toUpperCase().replace(/[^A-Z]/g,'') === t).forEach(p => { const a = adj.players[p.id]; if(a){ delete a[st]; if(!Object.keys(a).length) delete adj.players[p.id]; } }); }
-  slate._simDashDirty = true;
+    pool.filter(p => nflTeamOf(p) === t).forEach(p => { const a = adj.players[p.id]; if(a){ delete a[st]; if(!Object.keys(a).length) delete adj.players[p.id]; } }); }
+  // A reset clears the user's numbers, not the slate's facts: someone who is
+  // OUT is still out afterwards, so the automatic entries are rebuilt on top of
+  // whatever survived.
+  if(nflOutIds(slate).length) nflRedistributeOut(slate);
   simDashCommit();
 }
 function simDashToggle(id){
@@ -17542,14 +18476,36 @@ function renderSimDash(){
   const slate = activeSlate();
   if(!slate || slate.sport !== 'nfl'){ el.innerHTML = '<div class="no-data" style="margin-top:40px">The simulation dashboard is for NFL slates.</div>'; return; }
   const pool = (slate.players||[]).filter(p => p.salary > 0);
+  // OUT: the auto entries and the "who moved what" ledger are rebuilt lazily if
+  // this slate came back from storage (or a preset) without them. This has to
+  // happen BEFORE `adj` is captured below — nflRedistributeOut may create
+  // slate._simAdj from scratch, and a local captured first would be a detached
+  // empty object the redistribution never reaches, so the whole board would
+  // render at market shares with no auto tags.
+  const _dashOut = nflOutSet(slate);
+  if(_dashOut.size && !slate._outMoves) nflRedistributeOut(slate);
   // Base entries (market) and adjusted entries (dashboard applied) side by side.
   const adj = slate._simAdj || {teams:{}, players:{}};
   const saved = slate._simAdj; slate._simAdj = null;
-  const base = buildNflSimInputs(pool);
-  slate._simAdj = saved;
+  // The market baseline needs the OUT zeroing BYPASSED as well as the dashboard
+  // suppressed. Nulling _simAdj does not stop buildNflSimInputs blanking a
+  // scratched player's props, and `model`'s team totals are what this panel
+  // displays and what every player's mean is a share OF — without the bypass a
+  // team's receiving yards, and every teammate's mean with them, came out short
+  // by the OUT player's share, while the sim (whose model is built from the
+  // market entries, before the zeroing) ran the full total. Also skip the DST
+  // calibration: this build is read for shares and team totals only.
+  window._nflOutBypass = true;
+  let base;
+  try { base = buildNflSimInputs(pool, {skipDstCal:true}); }
+  finally { window._nflOutBypass = false; slate._simAdj = saved; }
   const cur = buildNflSimInputs(pool);
   const model = nflShareModel(slate, pool, base.entries);
   const hidden = new Set(slate.hiddenIds||[]);
+  const _outMoveFor = new Map();
+  for(const mv of (slate._outMoves||[])) for(const t of mv.to)
+    _outMoveFor.set(t.id + '|' + mv.stat, String(mv.outName||'').split(' ').slice(-1)[0]);
+  for(const mv of (slate._outMoves||[])) _outMoveFor.set(mv.outId + '|' + mv.stat, String(mv.outName||'').split(' ').slice(-1)[0]);
   const nAdj = nflSimAdjCount(slate);
   const open = slate._simDashOpen || {};
   const pct = v => (Math.round(v*1000)/10).toFixed(1);
@@ -17580,6 +18536,13 @@ function renderSimDash(){
       </div>
     </div>
   </div>`;
+  // The OUT summary sits at the very top of the board: it is the one change on
+  // this panel the user did not make with a slider, so it has to announce itself.
+  {
+    const lines = nflOutSummaryLines(slate);
+    if(lines.length) html += `<div class="sdash-out-note" id="sdashOutNote">${lines.map(l=>esc(l)).join('<br>')}
+      <div style="font-family:'DM Sans',sans-serif;color:var(--muted);font-size:10px;margin-top:3px;">Team totals are unchanged — the offense still runs its plays. Every ⛔ share below can be overridden by hand.</div></div>`;
+  }
   if(!cur.games.length){ el.innerHTML = html + '<div class="no-data">No Team column — the sim needs teams (and O/U + spread from the odds puller) to build games.</div>'; return; }
 
   for(const g of cur.games){
@@ -17587,7 +18550,16 @@ function renderSimDash(){
     const bg = base.games.find(x => x.key === g.key) || g;
     // Favorite (by base implied) on the left; margin = A − B.
     const [A, B] = names.length === 2 ? names.slice().sort((x,y) => (bg.teams[y].implied) - (bg.teams[x].implied)) : [names[0], null];
-    const gs = B ? simDashGameState(slate, A, B) : null;
+    // Read the slider state straight off the two builds we already have rather
+    // than calling simDashGameState — that helper rebuilds the whole input set,
+    // and doing it once per game turned a slider release into a dozen full
+    // rebuilds of the slate.
+    const gs = B ? (() => {
+      const ta = cur.teamInfo.get(A), tb = cur.teamInfo.get(B);
+      const ia = ta ? ta.implied : 22, ib = tb ? tb.implied : 22;
+      const ba = ta ? ta.baseImplied : ia, bb = tb ? tb.baseImplied : ib;
+      return { total: ia + ib, margin: ia - ib, baseTotal: ba + bb, baseMargin: ba - bb, ia, ib, ba, bb };
+    })() : null;
     const gAdj = names.some(t => adj.teams[t] && Number.isFinite(adj.teams[t].implied));
     html += `<div class="sdash-game${gAdj?' adj':''}">
       <div class="sdash-game-hdr">
@@ -17658,6 +18630,13 @@ function renderSimDash(){
         const di = cur.entries.findIndex(en => en.pos === 'DST' && en.team === t);
         if(di >= 0){
           const de = cur.entries[di];
+          // A DST has no share row, so before this it was the one rostered
+          // position that could never be marked OUT — and a defense does get
+          // ruled out (a team resting starters, a slate-level scratch). Same
+          // toggleOut path as the skill rows; the redistribution is a no-op for
+          // him because he owns no share of the offensive pie.
+          const dp = pool[di];
+          const dOut = dp && _dashOut.has(dp.id);
           const oppT = [A, B].find(x => x && x !== t);
           const oppImp = oppT && cur.teamInfo.get(oppT) ? cur.teamInfo.get(oppT).implied
                        : (cur.teamInfo.get(t) ? cur.teamInfo.get(t).oppImplied : null);
@@ -17669,9 +18648,10 @@ function renderSimDash(){
           html += `<div class="sdash-stat sdash-dst" title="Team defense: expected sacks / interceptions / fumble recoveries and the resulting mean DK score against ${oppT||'the opponent'}'s ${oppImp!=null?fmt1(oppImp):'?'}-point implied total. Source: ${src}.">
             <div class="sdash-stat-hdr" style="cursor:default;">
               <span class="sdash-caret" style="visibility:hidden">▸</span>
-              <span class="sdash-stat-name">Defense</span>
-              <span class="sdash-stat-tot">${x.pts.toFixed(1)} DK</span>
+              <span class="sdash-stat-name">Defense${dOut?' <span class="out-badge">OUT</span>':''}</span>
+              <span class="sdash-stat-tot">${dOut?'0.0':x.pts.toFixed(1)} DK</span>
               <span class="sdash-stat-top">${x.sacks.toFixed(1)} sk · ${x.ints.toFixed(1)} int · ${x.fumRec.toFixed(1)} fr · ${src}</span>
+              ${dp?`<button class="sdash-outbtn${dOut?' on':''}" title="${dOut?'Undo OUT — put this defense back in the sim':'Mark this defense OUT: it scores 0 and drops out of every lineup'}" onclick="event.stopPropagation();toggleOut('${dp.id}',event)">⛔</button>`:''}
             </div>
           </div>`;
         }
@@ -17702,14 +18682,21 @@ function renderSimDash(){
         for(const r of rows){
           const id = r.pl.p.id, a = adj.players[id] || {};
           const isOv = Number.isFinite(a[st.key]);
+          // An entry the OUT redistribution wrote says so on the row, and names
+          // whose absence produced it — a share that moved on its own with no
+          // visible cause is exactly the kind of number nobody trusts.
+          const isAuto = isOv && a.auto === 'out';
+          const isOutRow = _dashOut.has(id);
+          const autoWhy = isAuto ? (_outMoveFor.get(id + '|' + st.key) || '') : '';
           const mean = teamTot * r.share, baseMean = baseTot * r.base;
-          html += `<div class="sdash-prow${isOv?' ov':''}${a.lock?' lock':''}">
-            <div class="sdash-pname" title="${esc(r.pl.p.name)}"><span class="pos-badge" style="font-size:8px;margin-right:4px;">${r.pl.e.pos||'?'}</span>${esc(r.pl.p.name)}</div>
+          html += `<div class="sdash-prow${isOv?' ov':''}${a.lock?' lock':''}${isOutRow?' isout':''}">
+            <div class="sdash-pname" title="${esc(r.pl.p.name)}"><span class="pos-badge" style="font-size:8px;margin-right:4px;">${r.pl.e.pos||'?'}</span>${esc(r.pl.p.name)}${isAuto?`<span class="sdash-auto-tag" title="Written automatically when ${esc(autoWhy||'a teammate')} was marked OUT. Drag the slider to take it over by hand.">auto — ${esc(autoWhy||'out')} out</span>`:''}</div>
             ${rng('sdP_'+id+'_'+st.key, pct(r.share), 0, 100, 0.5, `simDashSet('player/${id}/${st.key}',this.value)`, '', '%')}
             <div class="sdash-pshare${isOv?' hot':''}">${pct(r.share)}%${Math.abs(r.share-r.base)>=0.0005?`<i>${pct(r.base)}%</i>`:''}</div>
             <div class="sdash-pmean">${st.fmt(mean)}${Math.abs(mean-baseMean)>=0.05?`<i>${st.fmt(baseMean)}</i>`:''}</div>
             <button class="sdash-lock${a.lock?' on':''}" title="${a.lock?'Unlock — let renormalization move him':'Lock his share so other sliders never move him'}" onclick="simDashSet('player/${id}/lock')">${a.lock?'🔒':'🔓'}</button>
             <button class="sdash-mini" style="visibility:${isOv?'visible':'hidden'}" title="Back to market share" onclick="simDashSet('player/${id}/${st.key}','')">↺</button>
+            <button class="sdash-outbtn${isOutRow?' on':''}" title="${isOutRow?'Undo OUT — put his market share back':'Mark OUT: he scores 0 and this share goes to his teammates'}" onclick="toggleOut('${id}',event)">⛔</button>
           </div>`;
         }
         if(extras.length){
@@ -17764,7 +18751,7 @@ function simNflGames(games, gauss){
 function mkTeamEnv(ti, score, oppScore, gauss, refMargin, paceLn, gameT){
   const ratio = Math.max(0.25, Math.min(2.6, score / Math.max(9, ti.implied)));
   // Yards track points, but loosely — blunt the ratio and add its own noise.
-  // MEAN-NORMALIZED (see nflYardNorm): the noise carries the −σ²/2 correction
+  // MEAN-NORMALIZED (see nflYardNorms): the noise carries the −σ²/2 correction
   // every other lognormal in this file already carried, and the whole
   // expression is divided by its own expectation under this team's scoring
   // distribution, so E[yardF] = 1 and the prop lines survive the sim.
@@ -17816,7 +18803,13 @@ function mkTeamEnv(ti, score, oppScore, gauss, refMargin, paceLn, gameT){
   // one), so it is folded into the factors the consumers already multiply by.
   // `cp` / `cr` divide out E[yardF·passF] / E[yardF·rushF] — see nflYardNorms.
   const passF = sc.passF * sc.volF / nz.cp, rushF = sc.rushF * sc.volF / nz.cr;
-  return { score, oppScore, implied: ti.implied, ratio, yardF, passF, rushF, paceF,
+  // `passVol` is the same pass tilt normalized to mean 1 ON ITS OWN (÷ nz.pv)
+  // rather than as a product with yardF. Reception counts are the only consumer
+  // that multiplies by the pass factor alone, and E[passF] ≈ 1.01–1.016 because
+  // yardF and passF are negatively correlated — so using passF there ran every
+  // posted reception line ~1% high.
+  const passVol = sc.passF * sc.volF / (nz.pv || 1);
+  return { score, oppScore, implied: ti.implied, ratio, yardF, passF, rushF, paceF, passVol,
            volF: sc.volF, scriptD: sc.d, passTilt: sc.passF, rushTilt: sc.rushF };
 }
 
@@ -18001,7 +18994,7 @@ function nflDrawTeamPie(TS, te, gauss){
   // plays, hence more receptions, for both sides) while the team's own
   // score-ratio half stays blunted the way it always was. paceF is 1 with
   // game-stack correlation off, so this is the old expression exactly.
-  const recCntTot = TS.base.rec * te.passF * (0.62 * (te.paceF ?? 1) + 0.38 * te.yardF);
+  const recCntTot = TS.base.rec * (te.passVol ?? te.passF) * (0.62 * (te.paceF ?? 1) + 0.38 * te.yardF);
 
   const shRec  = nflDirichlet(TS.aRec,  TS.bufRec,  gauss);
   const shRush = nflDirichlet(TS.aRush, TS.bufRush, gauss);
@@ -18067,6 +19060,10 @@ function dkKickerScore(teamScore, gauss, tdsIn){
 // hook uses it; the hot loop passes nothing and allocates nothing).
 function simNflPlayer(e, te, gauss, out){
   if(!te) te = { ratio:1, yardF:1, passF:1, rushF:1, paceF:1, score:22, oppScore:22 };
+  // A player flagged OUT is not on the field in any sim — before the K/DST
+  // branches, which score off the team's scoreboard rather than off props and
+  // would otherwise keep producing for a defense that isn't playing.
+  if(e.out){ if(out){ out.pos = e.pos; out.pts = 0; } return 0; }
   if(e.pos === 'K'){
     const kp = dkKickerScore(te.score, gauss, te.pie ? te.pie.teamTD : undefined);
     if(out){ out.pos = 'K'; out.xp = te.pie ? te.pie.teamTD : null; out.pts = kp; }
@@ -18135,12 +19132,16 @@ function simNflPlayer(e, te, gauss, out){
     passYds = e.passYds != null ? ln(e.passYds * te.yardF * te.passF, 0.30) : 0;
     rushYds = e.rushYds != null ? ln(e.rushYds * te.yardF * te.rushF, 0.46) : 0;
     recYds  = e.recYds  != null ? ln(e.recYds  * te.yardF * te.passF, 0.52) : 0;
-    rec     = e.rec     != null ? poissonSample(Math.max(0, e.rec * te.passF * (0.62 * (te.paceF ?? 1) + 0.38 * te.yardF)), gauss) : 0;
+    rec     = e.rec     != null ? poissonSample(Math.max(0, e.rec * (te.passVol ?? te.passF) * (0.62 * (te.paceF ?? 1) + 0.38 * te.yardF)), gauss) : 0;
 
     // Touchdowns scale with the team's realized scoring, anchored on the ATD price.
     if(e.atd != null){
       const lamBase = -Math.log(1 - Math.min(0.85, Math.max(0.01, e.atd)));
-      const lam = lamBase * Math.max(0.2, Math.min(2.8, te.ratio));
+      // De-vig: the ATD book is over-round, so Σλ over the team exceeds the
+      // team's implied touchdown budget. The pie path never sees this (it uses
+      // the ATD prices as a ratio only), so without this the Off setting scored
+      // 20–30% more touchdowns than Normal on the same slate.
+      const lam = lamBase / (e._tdVig > 0 ? e._tdVig : 1) * Math.max(0.2, Math.min(2.8, te.ratio));
       const tds = poissonSample(lam, gauss);
       // rush/rec split doesn't change DK points (both 6) — keep for readability.
       if(e.pos === 'RB'){ rushTD = tds; } else { recTD = tds; }
@@ -18168,31 +19169,52 @@ function simNflPlayer(e, te, gauss, out){
 // problem is "who to captain" — and because the multiplier is worth most on the
 // highest scorer, we try each plausible captain and greedily fill around him.
 // cands: [{i, sal, cptSal, score, team}]
-function sdOptimalForSim(cands, salaryCap, minSal){
+// `fixed` (LATE SWAP) is a Set of candidate indices that MUST be in the lineup —
+// the players whose game has already kicked off. Their salary is spent before
+// the search starts and they are never swapped out. `fixedCpt` is the candidate
+// index of a locked CAPTAIN: when the captain's game has started the CPT slot
+// is settled, and when it hasn't the captain slot is open like any other (but a
+// locked FLEX player still may not be promoted into it — that is a slot change
+// DK does not allow).
+function sdOptimalForSim(cands, salaryCap, minSal, fixed, fixedCpt){
   if(!cands || cands.length < 6) return null;
   const teams = [...new Set(cands.map(c=>c.team).filter(Boolean))];
   if(teams.length < 2) return null;          // DK requires both sides
   // Two pools: cptOk / flexOk (undefined = eligible) — the user's Captain and
   // Flex lists. A player can be in one, both, or neither.
   const byScore = cands.slice().sort((a,b)=>b.score-a.score);
-  const flexList = byScore.filter(c => c.flexOk !== false);
+  const FX = fixed && fixed.size ? fixed : null;
+  const flexList = byScore.filter(c => c.flexOk !== false && !(FX && FX.has(c.i)));
+  const fixedList = FX ? cands.filter(c => FX.has(c.i) && c.i !== fixedCpt) : [];
+  if(FX && fixedList.length + (fixedCpt != null ? 1 : 0) !== FX.size) return null;
   // Only the better scorers are worth the captain slot; cap the search so this
   // stays cheap inside a multi-thousand-sim loop.
-  const capPool = byScore.filter(c => c.cptOk !== false).slice(0, 14);
+  const capPool = fixedCpt != null
+    ? cands.filter(c => c.i === fixedCpt)
+    : byScore.filter(c => c.cptOk !== false && !(FX && FX.has(c.i))).slice(0, 14);
   let best = null;
   for(const cpt of capPool){
     const cptCost = Number.isFinite(cpt.cptSal) ? cpt.cptSal : Math.round(cpt.sal*1.5);
     if(cptCost > salaryCap) continue;
     let sal = cptCost, total = cpt.score*1.5;
     const pick = [cpt]; const used = new Set([cpt.i]);
-    const teamSet = new Set([cpt.team]);
+    // Only a REAL team counts toward the both-teams rule. A row with no Team
+    // (a late-added DST, a repair leftover) used to enter the set as '' and
+    // make {'NE',''} read as two sides, emitting a one-team roster DK rejects.
+    const teamSet = new Set(); if(cpt.team) teamSet.add(cpt.team);
+    for(const c of fixedList){
+      if(used.has(c.i)) continue;
+      pick.push(c); used.add(c.i); sal += c.sal; total += c.score; if(c.team) teamSet.add(c.team);
+    }
+    if(pick.length > 6 || sal > salaryCap) continue;
+    const nFixed = pick.length;               // cpt + locked flex, never swapped
     for(const c of flexList){
       if(pick.length >= 6) break;
       if(used.has(c.i)) continue;
       if(sal + c.sal > salaryCap) continue;
       // Reserve room for the both-teams rule on the last slot.
       if(pick.length === 5 && teamSet.size < 2 && c.team === cpt.team) continue;
-      pick.push(c); used.add(c.i); sal += c.sal; total += c.score; teamSet.add(c.team);
+      pick.push(c); used.add(c.i); sal += c.sal; total += c.score; if(c.team) teamSet.add(c.team);
     }
     if(pick.length < 6 || teamSet.size < 2) continue;
     if(minSal && sal < minSal){
@@ -18200,7 +19222,7 @@ function sdOptimalForSim(cands, salaryCap, minSal){
       let guard=0;
       while(sal < minSal && guard++ < 20){
         let up=null;
-        for(let k=1;k<pick.length;k++){
+        for(let k=nFixed;k<pick.length;k++){
           for(const c of flexList){
             if(used.has(c.i) || c.sal <= pick[k].sal) continue;
             if(sal - pick[k].sal + c.sal > salaryCap) continue;
@@ -18230,8 +19252,30 @@ function sdOptimalForSim(cands, salaryCap, minSal){
 //   bringBack  — require N skill players from the QB's OPPONENT
 //   noRbVsDst  — forbid rostering an RB who plays against your own DST
 // `rules` is {stackN, bringBack, noRbVsDst, rbCounts}; all default to off.
-function nflTeamOf(p){ return String(p && p.team || '').toUpperCase().replace(/[^A-Z]/g,''); }
-function nflOppOf(p){ return String(p && p.opp || '').toUpperCase().replace(/[^A-Z]/g,''); }
+// One team-abbreviation normalizer for the whole app: upper-case, letters only
+// (so "NE", "ne", "@NE" and "N.E." are one key). It was re-inlined as TM / TMK /
+// OPP / teamOf in a dozen places, which is a dozen chances for one of them to
+// drift. These are function declarations, so they are hoisted over the whole
+// script and the pool code above may call them.
+// DraftKings, the odds sheet and the market books do not spell three of these
+// the same way — WAS/WSH, JAX/JAC, LAR/LA (plus the relocated OAK/SD/STL that
+// still turn up in historical files). Every "is this the same team?" test in
+// the app is a raw string compare, so one mismatched abbreviation silently
+// unmatches a whole roster in applyPoolUpdate and costs the sim its home/away
+// read. Normalize at the point of comparison instead.
+// The lookup is built lazily onto the function object rather than living in a
+// top-level const: renderPool runs during script load, and a const declared
+// this far down the file would be in its temporal dead zone.
+function nflTeamKey(v){ return String(v==null?'':v).toUpperCase().replace(/[^A-Z]/g,''); }
+function nflTeamNorm(t){
+  const k = nflTeamKey(t);
+  if(!k) return '';
+  const m = nflTeamNorm._m || (nflTeamNorm._m =
+    {WSH:'WAS', JAC:'JAX', LA:'LAR', OAK:'LV', SD:'LAC', STL:'LAR'});
+  return m[k] || k;
+}
+function nflTeamOf(p){ return nflTeamNorm(p && p.team); }
+function nflOppOf(p){ return nflTeamNorm(p && p.opp); }
 
 // Does a COMPLETE lineup satisfy the rules? entries are player objects.
 function nflStackOk(players, rules){
@@ -18273,7 +19317,12 @@ function nflStackOk(players, rules){
 // cap, one of these three finds it).
 const NFL_DISTS = [ {RB:3,WR:3,TE:1}, {RB:2,WR:4,TE:1}, {RB:2,WR:3,TE:2} ];
 
-function nflOptimalForSim(cands, salaryCap, minSal, rules){
+// `fixed` (LATE SWAP) is a Set of candidate indices that must appear in the
+// lineup and must never be swapped out — the slots whose games have kicked off.
+// They are expressed as an extra seed, which is exactly the mechanism the stack
+// rules already use: `fill` charges their salary and their positional slots
+// before anything else is chosen, and `swapWithin` refuses to touch a seed.
+function nflOptimalForSim(cands, salaryCap, minSal, rules, fixed){
   const byScore = { QB:[], RB:[], WR:[], TE:[], DST:[] };
   for(const c of cands){ if(byScore[c.pos]) byScore[c.pos].push(c); }
   for(const k in byScore) byScore[k].sort((a,b)=>b.score-a.score);
@@ -18291,6 +19340,9 @@ function nflOptimalForSim(cands, salaryCap, minSal, rules){
 
   // ── Seeds: the players a stack rule forces in before optimizing the rest ──
   // Try the top few QBs so a rule can't collapse every sim onto one stack.
+  const FXi = fixed && fixed.size ? fixed : null;
+  const fixedSeed = FXi ? cands.filter(c => FXi.has(c.i)) : [];
+  if(FXi && fixedSeed.length !== FXi.size) return null;   // a locked man isn't in this pool
   const seeds = [];
   if(stackN>0 || bringBack>0){
     for(const qb of byScore.QB.slice(0, 4)){
@@ -18310,6 +19362,14 @@ function nflOptimalForSim(cands, salaryCap, minSal, rules){
     if(!seeds.length) return null;          // rules unsatisfiable with this pool
   } else {
     seeds.push([]);
+  }
+  if(FXi){
+    // Locked players ride in front of every seed, de-duplicated: a stack rule
+    // may well have picked the same man the clock already froze.
+    for(let s=0;s<seeds.length;s++){
+      const have = new Set(fixedSeed.map(c=>c.i));
+      seeds[s] = [...fixedSeed, ...seeds[s].filter(c=>!have.has(c.i))];
+    }
   }
 
   // Fill one (seed, distribution) pair from `lists` (pre-sorted by the
@@ -18343,11 +19403,18 @@ function nflOptimalForSim(cands, salaryCap, minSal, rules){
 
   // Same-position swaps only: distribution (and therefore legality) is
   // preserved by construction, and seeded players are never touched.
-  const swapWithin = (st, wantCheaper) => {
+  // mode: 'cheaper' (repair over the cap), 'upgrade' (gain-only swaps under
+  // the cap), 'spend' (reach the Min Salary floor: same-position swaps that add
+  // salary, taking the one that costs the least score per dollar even when the
+  // gain is negative — the floor is the user's constraint, and every other
+  // sport's per-sim optimizer honours it as a hard bound).
+  const swapWithin = (st, wantCheaper, mode) => {
+    mode = mode || (wantCheaper ? 'cheaper' : 'upgrade');
     let guard = 0;
     while(guard++ < 60){
       const over = st.sal > salaryCap;
       if(wantCheaper && !over) break;
+      if(mode==='spend' && st.sal >= (minSal||0)) break;
       let best = null;
       for(let k=0;k<st.pick.length;k++){
         const out = st.pick[k];
@@ -18370,6 +19437,12 @@ function nflOptimalForSim(cands, salaryCap, minSal, rules){
           if(wantCheaper){
             if(c.sal >= out.sal) continue;
             const eff = (out.score - c.score) / Math.max(1, out.sal - c.sal);
+            if(!best || eff < best.eff) best = { k, out, c, eff };
+          } else if(mode==='spend'){
+            if(c.sal <= out.sal) continue;
+            if(st.sal - out.sal + c.sal > salaryCap) continue;
+            // Loss per dollar added; a positive gain is a negative loss and wins.
+            const eff = (out.score - c.score) / Math.max(1, c.sal - out.sal);
             if(!best || eff < best.eff) best = { k, out, c, eff };
           } else {
             if(st.sal - out.sal + c.sal > salaryCap) continue;
@@ -18401,7 +19474,8 @@ function nflOptimalForSim(cands, salaryCap, minSal, rules){
         swapWithin(st, false);
       }
       if(st.sal > salaryCap) continue;
-      if(minSal && st.sal < minSal) swapWithin(st, false);
+      if(minSal && st.sal < minSal){ swapWithin(st, false); if(st.sal < minSal) swapWithin(st, false, 'spend'); }
+      if(minSal && st.sal < minSal) continue;   // this shape cannot reach the floor
       const total = st.pick.reduce((s,c)=>s+c.score,0);
       if(!best || total > best.total) best = { total, st };
     }
@@ -18437,12 +19511,19 @@ async function runNflSims(pool, numSims, log){
     const names = zeroed.slice(0, 12).map(e => pool[entries.indexOf(e)]?.name).filter(Boolean);
     log(`   Unpriced (no props, no Proj — treated as not playing): ${names.join(', ')}${zeroed.length > 12 ? `, +${zeroed.length-12} more` : ''}. Type a Proj to include one.`);
   }
+  // What the OUT list actually did to the board — the redistribution is a real
+  // change to every teammate's mean, so it is stated in full, not implied.
+  {
+    const _s = (typeof activeSlate === 'function') ? activeSlate() : null;
+    for(const line of (_s ? nflOutSummaryLines(_s) : [])) log(line);
+  }
   log(`Games: ${games.length} (${gamesWithEnv} with a consensus total).`);
   if(shareSim){
     const nT = Object.keys(shareSim.teams).length;
     log(`Share correlation: ${shareAlphaKey} (α=${shareSim.alpha}) — ${nT} team${nT===1?'':'s'} split as a pie, so teammates trade shares of the same yards/TDs.`);
   } else {
-    log('Share correlation: off — each player drawn independently around his own line.');
+    log('Share correlation: off — each player drawn independently around his own line. '
+      + 'Touchdown rates are de-vigged against each team\'s implied TD budget, so the totals still match Vegas.');
   }
   if(pace){
     log(`Game-stack correlation: ${paceKey} (σ=${pace.sig}, κ=${pace.kappa}) — both offenses in a game share one pace factor, so bring-backs carry mild positive correlation.`);
@@ -18554,6 +19635,10 @@ async function runNflSims(pool, numSims, log){
 // pool → build per-sim optimal candidates → select → preview.
 async function runNflSimGen(){
   const slate=activeSlate(); if(!slate) return;
+  // Drop any stamp a previous run set but never spent (it was cancelled, or it
+  // errored out before addToHistory) — otherwise it labels the NEXT set with
+  // the inputs of a run that produced nothing.
+  setPendingHistStamp(null);
   const target=parseInt(document.getElementById('genCount').value)||20;
   const maxExpPct=parseInt(document.getElementById('genMaxExp').value)||100;
   const maxSal=Math.min(SALARY_CAP, parseInt(document.getElementById('genMaxSal').value)||SALARY_CAP);
@@ -18566,7 +19651,13 @@ async function runNflSimGen(){
   // Showdown: the selection pool is the UNION of the Captain and Flex lists;
   // a player in neither is out (same as hidden). Which slot each may fill is
   // enforced per-candidate inside sdOptimalForSim.
+  // OUT players are off the slate entirely and LOCKED players cannot be entered
+  // any more (their game has kicked off), so neither may reach a candidate
+  // lineup — but both stay in `simPool` so the game environments, the team
+  // pies and the DST calibration still see a complete offense.
+  const _lsNow=lateNowDate(slate);
   const pool=simPool.filter(p=>!hidden.includes(p.id) &&
+    !nflIsOut(slate,p.id) && !playerLocked(slate,p,_lsNow) &&
     (!isShowdown(slate) || sdCptEligible(slate,p.id) || sdFlexEligible(slate,p.id)));
   const overrides=slate.playerExpOverrides||{};
 
@@ -18594,7 +19685,12 @@ async function runNflSimGen(){
   if(SD){
     const teams=[...new Set(pool.map(p=>String(p.team||'').toUpperCase()).filter(Boolean))];
     if(pool.length < 6 || teams.length < 2){
-      alert('Showdown needs at least 6 players covering BOTH teams — pool has '+pool.length+' players across '+teams.length+' team(s).');
+      // Same misdiagnosis risk as the Classic branch: say when the shortfall is
+      // locked/OUT/hidden players rather than a thin pool.
+      const _ex=simPool.length-pool.length;
+      alert(_ex > simPool.length/2
+        ? `Only ${pool.length} of ${simPool.length} players are still available — ${_ex} are locked (their game has kicked off), marked OUT, or hidden. Auto-Gen builds NEW lineups; to re-optimize entries that are already in, use DK Entries → Late swap.`
+        : 'Showdown needs at least 6 players covering BOTH teams — pool has '+pool.length+' players across '+teams.length+' team(s).');
       done(); return;
     }
     const nCpt=pool.filter(p=>sdCptEligible(slate,p.id)).length;
@@ -18607,7 +19703,13 @@ async function runNflSimGen(){
   } else {
     const posOk=pool.filter(p=>nflPosOf(p)).length;
     if(posOk < 9){
-      alert('NFL sims need a Position column (QB/RB/WR/TE/DST) mapped — only '+posOk+' players have one.');
+      // `pool` has already dropped locked / OUT / hidden players, so on a slate
+      // whose games have kicked off this fired with "only 0 players have a
+      // position" — a wrong diagnosis of a correct exclusion.
+      const _ex=simPool.length-pool.length;
+      alert(_ex > simPool.length/2
+        ? `Only ${pool.length} of ${simPool.length} players are still available — ${_ex} are locked (their game has kicked off), marked OUT, or hidden. Auto-Gen builds NEW lineups; to re-optimize entries that are already in, use DK Entries → Late swap.`
+        : 'NFL sims need a Position column (QB/RB/WR/TE/DST) mapped — only '+posOk+' players have one.');
       done(); return;
     }
     const need={QB:1,RB:2,WR:3,TE:1,DST:1}, have={QB:0,RB:0,WR:0,TE:0,DST:0};
@@ -18669,7 +19771,7 @@ async function runNflSimGen(){
       // The spread's own script response — the part of the pass/rush tilt the
       // user did NOT dial in by hand. Worth its own line: it moves means.
       try {
-        const _inp = buildNflSimInputs(pool);
+        const _inp = buildNflSimInputs(simPool, {skipDstCal:true});
         const _sl = [];
         _inp.teamInfo.forEach((ti, t) => {
           const s = nflScriptFor(ti, _inp.teamInfo);
@@ -18679,7 +19781,6 @@ async function runNflSimGen(){
         if(_sl.length) log(`⚙ Game script (auto, from the adjusted spread): ${_sl.join(' · ')}.`);
       } catch(e){}
     }
-    slate._simDashDirty=false;
     // Stamp the history entry this run is about to produce with the exact
     // inputs behind it — the adjustments, the share-correlation setting and
     // whether Contest EV priced the board. addToHistory claims it.
@@ -18804,6 +19905,29 @@ async function runNflSimGen(){
     }
   }
   const ranked=[...rankedMap.values()].sort((a,b)=>b.count-a.count);
+  // SHOWDOWN CANDIDATE IDENTITY. addCand keys on the captain, which is right —
+  // the same six under a different C is a different DK entry with a different
+  // salary and a different score. But `savedLineups` stores a bare id array and
+  // `lineupKey` sorts it, so the SAVE path cannot hold both: the second one is
+  // dropped as a duplicate and the board comes up short of the target. Rather
+  // than let the selector spend slots on lineups that evaporate on save,
+  // collapse to one entry per SIX here — `ranked` is already sorted by how many
+  // sims wanted it, so the survivor is the captain the sims voted for most, and
+  // the losers' counts are folded in so candidate mass is not lost.
+  if(SD){
+    const _six=new Map(); let _drop=0;
+    for(const e of ranked){
+      const k=e.lineup.map(p=>p.id).sort().join('|');
+      const prev=_six.get(k);
+      if(prev){ prev.count+=(e.count||0); _drop++; }
+      else _six.set(k, e);
+    }
+    if(_drop){
+      ranked.length=0; for(const e of _six.values()) ranked.push(e);
+      ranked.sort((a,b)=>b.count-a.count);
+      log(`  (${_drop.toLocaleString()} candidate(s) were the same six under a different captain — kept the captain the sims chose most, since saved lineups are identified by their players)`);
+    }
+  }
   if(!ranked.length){
     const anyRule = stackRules.stackN||stackRules.bringBack||stackRules.noRbVsDst;
     alert(anyRule
@@ -18811,7 +19935,9 @@ async function runNflSimGen(){
       : 'No legal lineups were built — check that the pool has enough players at each position under the salary cap.');
     done(); return;
   }
-  if(ruleMisses) log(`  ⚠ ${ruleMisses.toLocaleString()} sim(s) had no rule-compliant roster — those sims contributed no candidate.`);
+  if(ruleMisses) log(SD
+    ? `  ⚠ ${ruleMisses.toLocaleString()} sim(s) had no legal 6-man roster (both teams, under the cap, out of the Captain/Flex pools) — those sims contributed no candidate.`
+    : `  ⚠ ${ruleMisses.toLocaleString()} sim(s) had no rule-compliant roster — those sims contributed no candidate.`);
   // Never ship a lineup that violates the rules the user set.
   if(!SD){
     const before=ranked.length;
@@ -18842,7 +19968,9 @@ async function runNflSimGen(){
       genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, oosParity:1,
       // Field frame = full slate (same doctrine as UFC/NASCAR/PGA): the modeled
       // field rosters hidden players too — simScoresById covers all of simPool.
-      fieldPool: simPool,
+      // OUT players are the one exception: they are 0% owned, because the rest
+      // of the field swaps a scratch out of its lineups too.
+      fieldPool: simPool.filter(p=>!nflIsOut(slate,p.id)),
       // Dominance repair is a CLASSIC pass: it swaps a lineup's weakest slot
       // for a higher-mean affordable player under a positional guard. On
       // Showdown there is no position to guard, the captain's price is 1.5×
@@ -18850,11 +19978,14 @@ async function runNflSimGen(){
       // changes the lineup's identity rather than repairing it. Off until it
       // is written captain-aware — the six-man candidate set is per-sim
       // optimals over a single game, which is not where fluke slots live.
-      sharpShare:0.15, se:_se, dominanceRepair:!SD, maxSal, stackRules});
+      // Min Salary. Every other sport passes this; NFL did not, so dominance
+      // repair ran with `minSalC = 0` and its floor guard was dead code — the
+      // repaired lineup could land under the floor the user typed.
+      sharpShare:0.15, se:_se, dominanceRepair:!SD, maxSal, minSal, stackRules});
     if(out===null && window._genCancelled) log('Cancelled.');
   } else {
     out = await runPgaSimScoreSelect({slate, pool, ranked, simScoresById, simsDone, target, maxExpPct, overrides,
-      rosterSize:9, unitLabel:'players'});
+      rosterSize: SD ? 6 : 9, unitLabel:'players'});
     if(out===null){ if(window._genCancelled) log('Cancelled.'); done(); return; }
   }
 
@@ -20791,7 +21922,7 @@ function toggleSavedDetails(i, btn){
   const ids=(slate.savedLineups||[])[i]; if(!ids) return;
   const SDs=isShowdown(slate);
   const cptId=SDs ? sdLineupCaptain(slate, ids) : null;
-  const players=(SDs ? sdAssignSlots(slate, ids) : ids).map(id=>playerById(slate,id)).filter(Boolean);
+  const players=(SDs ? sdAssignSlots(slate, ids, cptId) : ids).map(id=>playerById(slate,id)).filter(Boolean);
   // The live context belongs to whichever slate was simmed last; a saved
   // lineup from another slate must not be described by it.
   const ctx=window._lastSimCtx;
@@ -20905,8 +22036,16 @@ function hbContest(slate){
     const fee=Math.max(0.01, parseFloat(ev.fee)||20);
     const payout=buildPayoutFn({fieldSize:F, fee, preset:ev.preset||'gpp', custom:ev.custom});
     // buildPayoutFn doesn't report how deep it pays, so find it once by
-    // scanning — the tables are contiguous, so a long dry run ends it.
-    let paid=0; for(let r=1;r<=F;r++){ if(payout.at(r)>0) paid=r; else if(paid>0 && r-paid>5000) break; }
+    // scanning — the tables are contiguous, so a long dry run ends it. MEMOIZED:
+    // the scan is ~2ms at F=150,000 and renderSaved prices every saved lineup
+    // through here, so an un-cached scan cost hundreds of ms per repaint.
+    const _pk=[F, fee, ev.preset||'gpp', String(ev.custom||'')].join('|');
+    let paid;
+    if(slate._hbPaidMemo && slate._hbPaidMemo.k===_pk) paid=slate._hbPaidMemo.v;
+    else {
+      paid=0; for(let r=1;r<=F;r++){ if(payout.at(r)>0) paid=r; else if(paid>0 && r-paid>5000) break; }
+      slate._hbPaidMemo={k:_pk, v:paid};
+    }
     return {key:'custom', name:'Custom (Auto-Gen EV settings)', fieldSize:F, fee, payout:payout.at, paid};
   }
   const rec=HB_EV_PRESETS.find(p=>p.key===key); if(!rec) return null;
@@ -20967,7 +22106,12 @@ function hbField(slate, ctx, contest){
   const hand=(ctx.evField && ctx.evField.sd===SD && ctx.evField.fieldSize===contest.fieldSize)
     ? ctx.evField : null;
   const key=[ctx.ts, ctx.simsDone, contest.key, contest.fieldSize, SD?'sd':'cl',
-             nSharp, hand?'gen':'own'].join('|');
+             nSharp, hand?'gen':'own',
+             // The sampling cap is part of the field's identity (see _fCap).
+             slate._genMaxSal||'',
+             // Marking a player OUT changes who the modeled field can roster,
+             // so the cached field has to be rebuilt when the list changes.
+             nflOutIds(slate).slice().sort().join(',')].join('|');
   const cur=window._hbField;
   if(cur && cur.key===key) return cur;
   // Field frame = the FULL slate, not the curated pool: the modeled opponents
@@ -20976,10 +22120,20 @@ function hbField(slate, ctx, contest){
   // The handed-over field indexes ITS pool positionally, so it is usable only
   // if every one of those players is still on the slate and still scored.
   let reuse=hand;
-  let pool=(slate.players||[]).filter(p=>ctx.simScoresById[p.id]);
+  // OUT players are dropped from the field frame: they are 0% owned (everyone
+  // else swaps a scratch out too), which is exactly "never drawn by a modeled
+  // opponent" — and dropping them beats writing a 0 into the ownership vector,
+  // where the samplers' Math.max(0.2, own) floor would put them back.
+  const _outF=nflOutSet(slate);
+  let pool=(slate.players||[]).filter(p=>ctx.simScoresById[p.id] && !_outF.has(p.id));
   if(reuse){
     const hp=reuse.ids.map(id=>playerById(slate,id));
-    if(hp.every(p=>p && ctx.simScoresById[p.id])) pool=hp; else reuse=null;
+    // …and it must not hold anyone marked OUT SINCE the run. The handed-over
+    // frame is positional, so there is no way to drop one man from it — a
+    // scratch appearing in it means the whole frame is stale and the builder
+    // has to sample its own field (which does apply the OUT filter above).
+    const outStale = reuse.ids.some(id=>_outF.has(id));
+    if(!outStale && hp.every(p=>p && ctx.simScoresById[p.id])) pool=hp; else reuse=null;
   }
   if(pool.length < (SD?6:9)) return null;
   const idxById=new Map(pool.map((p,i)=>[p.id,i]));
@@ -20994,10 +22148,15 @@ function hbField(slate, ctx, contest){
     scenarios=evOwnScenarios(baseOwn, KK, EV_SCEN_SIGMA);
     const cptBase=SD ? hbCptTargets(pool) : null;
     cptScen=SD ? scenarios.map(s=>evCptScenario(cptBase, s, baseOwn)) : null;
+    // Same cap the generator hands its field sampler (ctx.maxSal || SALARY_CAP).
+    // A user who dials Max Salary below the DK cap was otherwise getting a
+    // builder field drawn under a different constraint than the generator's.
+    const _fCap=(Number.isFinite(slate._genMaxSal) && slate._genMaxSal>0)
+      ? Math.min(SALARY_CAP, slate._genMaxSal) : SALARY_CAP;
     const opts=SD
-      ? {showdown:true, cap:SALARY_CAP}
+      ? {showdown:true, cap:_fCap}
       : {slots:SPORT_CFG.nfl.slots, flexOk:SPORT_CFG.nfl.flex, posOf:nflPosOf,
-         cap:SALARY_CAP, floor:Math.round(SALARY_CAP*0.94),
+         cap:_fCap, floor:Math.round(_fCap*0.94),
          stackModel:Object.assign({}, NFL_FIELD_STACK, slate._nflFieldStack||{})};
     // The sharp slice, translated into this pool's index frame. A candidate the
     // current pool can't express (a player dropped since the run) is skipped
@@ -21197,7 +22356,13 @@ function hbVsFieldHint(players, cptId){
     const p=playerById(slate,cptId); if(!p) return '';
     const rate=F.cptRate.get(cptId)||0;
     const tag=rate>=20?'field-heavy':rate>=8?'in line with the field':'contrarian';
-    return `captain <em>${esc(p.name)}</em> is ${rate.toFixed(0)}% of the modeled field — ${tag}`;
+    // Same gate hbCptTargets uses. When no CPT Own% is published the captain
+    // marginal is a PRIOR (flex own × sim ceiling), not a measurement — the
+    // generator says so in its run log and this card must too, because the
+    // captain distribution IS the showdown field model.
+    const noCptOwn=!(slate.players||[]).some(x=>{ const c=parseFloat(x.cptOwn); return Number.isFinite(c) && c>0; });
+    return `captain <em>${esc(p.name)}</em> is ${rate.toFixed(0)}% of the modeled field — ${tag}`
+      + (noCptOwn ? ` <span style="opacity:.7">(no CPT Own% on this slate — field captains modeled from a prior)</span>` : '');
   }
   const mine=players.reduce((s,p)=>s+(isShowdown(slate)?sdOwnOf(p,p.id===cptId):(parseFloat(p.own)||0)),0);
   const d=mine-F.ownAvg;
@@ -21250,14 +22415,21 @@ function renderPreviewLineupsList(){
   if(previewSortMode && previewSortMode !== 'default'){
     const dir = previewSortDir === 'asc' ? 1 : -1; // desc = -1 (b-a), asc = 1 (a-b)
     allLineups = [...allLineups].sort((a, b) => {
+      // Match the number printed on the card: showdown scores and projects the
+      // captain at 1.5× (see the ownTotal / sal / proj block below). Sorting on
+      // the un-multiplied total put a different lineup on top than the one the
+      // cards showed as best.
+      const SDs = isShowdown(slate);
+      const cOf = l => SDs ? (l._sdCaptain || sdCaptainId(slate, l.map(p=>p.id))) : null;
+      const wOf = (l,p) => (SDs && p.id===cOf(l)) ? CPT_MULT : 1;
       if(previewSortMode === 'sim'){
-        const sa = a.every(p=>p._simP50!=null) ? a.reduce((s,p)=>s+(p._simP50||0),0) : -Infinity;
-        const sb = b.every(p=>p._simP50!=null) ? b.reduce((s,p)=>s+(p._simP50||0),0) : -Infinity;
+        const sa = a.every(p=>p._simP50!=null) ? a.reduce((s,p)=>s+(p._simP50||0)*wOf(a,p),0) : -Infinity;
+        const sb = b.every(p=>p._simP50!=null) ? b.reduce((s,p)=>s+(p._simP50||0)*wOf(b,p),0) : -Infinity;
         return dir * (sa - sb);
       }
       if(previewSortMode === 'proj'){
-        const pa = a.reduce((s,p)=>s+(parseFloat(p.proj)||0),0);
-        const pb = b.reduce((s,p)=>s+(parseFloat(p.proj)||0),0);
+        const pa = a.reduce((s,p)=>s+(parseFloat(p.proj)||0)*wOf(a,p),0);
+        const pb = b.reduce((s,p)=>s+(parseFloat(p.proj)||0)*wOf(b,p),0);
         return dir * (pa - pb);
       }
       if(previewSortMode === 'rating'){
@@ -21364,8 +22536,6 @@ function filterPreviewByPlayer(pid){
 
 function renderPreviewExposure(){
   const slate=activeSlate();if(!slate)return;
-  const checks=document.querySelectorAll('.preview-check');
-  const filteredLineups=getFilteredLineups();
   const selectedLineups=previewLineups.filter((_,i)=>document.getElementById('pc'+i)?.checked);
   const total=selectedLineups.length;
   const el=document.getElementById('previewExposureList');
@@ -21373,11 +22543,23 @@ function renderPreviewExposure(){
 
   // Averages
   const hasProj=slate.columnMapping?.proj!=null, hasRtg=slate.columnMapping?.rating!=null;
-  const avgProj = hasProj ? (selectedLineups.reduce((s,l)=>s+l.reduce((s2,p)=>s2+(parseFloat(p.proj)||0),0),0)/total).toFixed(2) : null;
+  // Showdown: the captain is charged cptSalaryOf and scores 1.5×, exactly as
+  // every preview card beside this panel already renders him. Summing raw
+  // salaries here put the panel ~$2,600 under the cards on the seed, which
+  // reads as a cap bug and makes "Avg Salary" useless for judging spend.
+  const SDavg = isShowdown(slate);
+  const _cptCache = new Map();
+  const _cptOf = l => { if(!SDavg) return null;
+    if(_cptCache.has(l)) return _cptCache.get(l);
+    const c = l._sdCaptain || sdCaptainId(slate, l.map(p=>p.id));
+    _cptCache.set(l, c); return c; };
+  const _mul = (l,p) => (SDavg && p.id===_cptOf(l)) ? CPT_MULT : 1;
+  const avgProj = hasProj ? (selectedLineups.reduce((s,l)=>s+l.reduce((s2,p)=>s2+(parseFloat(p.proj)||0)*_mul(l,p),0),0)/total).toFixed(2) : null;
   const avgRtg = hasRtg ? (selectedLineups.reduce((s,l)=>s+l.filter(p=>p.rating!=null).reduce((s2,p)=>s2+(parseFloat(p.rating)||0),0),0)/total).toFixed(1) : null;
-  const avgSal = (selectedLineups.reduce((s,l)=>s+l.reduce((s2,p)=>s2+(p.salary||0),0),0)/total);
+  const avgSal = (selectedLineups.reduce((s,l)=>{const c=_cptOf(l);
+    return s+l.reduce((s2,p)=>s2+((SDavg&&p.id===c)?cptSalaryOf(p):(p.salary||0)),0);},0)/total);
   const hasSimScores = selectedLineups.some(l=>l.some(p=>p._simP50!=null));
-  const avgSim = hasSimScores ? (selectedLineups.reduce((s,l)=>s+l.reduce((s2,p)=>s2+(p._simP50||0),0),0)/total).toFixed(1) : null;
+  const avgSim = hasSimScores ? (selectedLineups.reduce((s,l)=>s+l.reduce((s2,p)=>s2+(p._simP50||0)*_mul(l,p),0),0)/total).toFixed(1) : null;
 
   const statsHTML = `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;padding:7px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;">
     <div style="font-family:'Bebas Neue',sans-serif;font-size:11px;letter-spacing:.8px;color:var(--muted);margin-bottom:2px;">Lineup Set Averages</div>
@@ -21593,6 +22775,11 @@ function addSelectedToSaved(){
   slate.savedLineups=slate.savedLineups||[];
   const existingKeys=new Set(slate.savedLineups.map(l=>lineupKey(l)));
   let added=0,skipped=0;
+  // A saved lineup is identified by its PLAYERS only (lineupKey sorts the ids
+  // and carries no captain), so on showdown "the same six with a different C"
+  // reads as a duplicate here even though it is a different DK entry. Count
+  // those separately: "1 skipped" with no explanation looks like a bug.
+  let cptSkipped=0;
   previewLineups.forEach((lineup,i)=>{
     // Look the checkbox up by its id (pc{originalIndex}) — a positional NodeList
     // walk breaks whenever a sort or filter is active, because the DOM order no
@@ -21601,7 +22788,11 @@ function addSelectedToSaved(){
     // unselected, matching what the user can actually see.
     if(!document.getElementById('pc'+i)?.checked)return;
     const key=lineupKey(lineup.map(p=>p.id));
-    if(existingKeys.has(key)){skipped++;return;}
+    if(existingKeys.has(key)){
+      skipped++;
+      if(isShowdown(slate) && lineup._sdCaptain) cptSkipped++;
+      return;
+    }
     existingKeys.add(key);
     const ids = lineup.map(p=>p.id);
     slate.savedLineups.push(ids);
@@ -21619,7 +22810,7 @@ function addSelectedToSaved(){
     added++;
   });
   save();closePreviewModal();renderSaved();renderExposure();renderPool();
-  showToast(`✓ Added ${added} lineups${skipped?` (${skipped} skipped)`:''}!`,'ok');
+  showToast(`✓ Added ${added} lineups${skipped?` (${skipped} skipped${cptSkipped?` — ${cptSkipped} the same six as a saved lineup with a different captain; saved lineups are identified by their players only`:''})`:''}!`,'ok');
   // switch to builder tab
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
@@ -21723,11 +22914,11 @@ function parseSlateTab(title){
 }
 function detectSportFromTab(title){
   const t = title.toLowerCase();
-  if(t.startsWith('ufc'))    return 'ufc';
-  if(t.startsWith('nascar')) return 'nascar';
-  if(t.startsWith('pga') || t.startsWith('golf')) return 'pga';
-  if(t.startsWith('nfl'))    return 'nfl';
-  // fallback — try to detect from keywords
+  // The prefix forms are exactly what parseSlateTab already decodes (including
+  // GOLF→pga and MMA→ufc, which the hand-rolled list below missed); the keyword
+  // sweep stays as the fallback for tabs with no "SPORT - " prefix at all.
+  const parsed = parseSlateTab(title);
+  if(parsed && parsed.sport) return parsed.sport;
   if(t.includes('ufc') || t.includes('mma'))    return 'ufc';
   if(t.includes('nascar') || t.includes('race')) return 'nascar';
   if(t.includes('pga') || t.includes('golf'))    return 'pga';
@@ -22001,6 +23192,10 @@ async function refreshFromSheet(){
     // shows, so a silent refresh would look like nothing happened.
     if(_gained.length) showToast(`↺ Refreshed — new column${_gained.length>1?'s':''}: ${_gained.join(', ')}`,'ok');
     else if(lateAdds) showToast(`↺ Refreshed + ${lateAdds} new player${lateAdds>1?'s':''} added`,'ok');
+    // The ordinary case — same columns, no late adds — used to say nothing at
+    // all beyond a 1.5s colour flash on the button, which reads as "the click
+    // didn't register".
+    else showToast(`↺ Refreshed ${dataRows.length} row${dataRows.length===1?'':'s'} from ${slate.sheetTab}`,'ok');
 
     imputeMissingRatings(slate);
     save();
@@ -22010,6 +23205,9 @@ async function refreshFromSheet(){
     if(btn){ btn.style.color='var(--green)'; setTimeout(()=>{ if(btn)btn.style.color='#34a853'; },1500); }
   } catch(e){
     if(btn){ btn.textContent='↺ Refresh'; btn.disabled=false; btn.style.color='var(--red)'; setTimeout(()=>{ if(btn)btn.style.color='#34a853'; },2000); }
+    // A failed refresh was console-only: the user saw a brief red flash and had
+    // no idea whether the data was stale.
+    showToast('↺ Refresh failed: '+(e && e.message ? e.message : e),'err');
     console.error('Sheet refresh failed:', e);
   }
 }
@@ -22104,10 +23302,12 @@ function processFile(file){
   document.getElementById('uploadFileName').textContent='📄 '+file.name;
   const reader=new FileReader();
   reader.onload=e=>{
-    const lines=e.target.result.trim().split('\n');
-    const parse=line=>{const res=[];let cur='',inQ=false;for(const ch of line){if(ch==='"'){inQ=!inQ;}else if(ch===','&&!inQ){res.push(cur.trim());cur='';}else cur+=ch;}res.push(cur.trim());return res;};
-    parsedCSV.headers=parse(lines[0]);
-    parsedCSV.rows=lines.slice(1).filter(l=>l.trim()).map(l=>parse(l));
+    // One CSV reader for the whole app: this used to carry a third private copy
+    // that split on '\n' only (leaving a \r glued to every last column on a
+    // Windows/DK export) and could not read a "" escape.
+    const lines=e.target.result.split(/\r?\n/).filter(l=>l.trim());
+    parsedCSV.headers=parseCsvLine(lines[0]).map(h=>h.replace(/^"|"$/g,'').trim());
+    parsedCSV.rows=lines.slice(1).map(parseCsvLine);
     colMapping={};
     // New-slate flow: the modal's sport select IS the right source here.
     applyAutoMap(parsedCSV.headers, colMapping, document.getElementById('slateSport')?.value||'');
@@ -22575,7 +23775,8 @@ function parseCsvLine(l){
   const cols=[]; let cur='', inQ=false;
   for(let i=0;i<l.length;i++){
     const c=l[i];
-    if(c==='"'){ inQ=!inQ; }
+    // "" inside a quoted field is one literal quote, not the end of the field.
+    if(c==='"'){ if(inQ && l[i+1]==='"'){ cur+='"'; i++; } else inQ=!inQ; }
     else if(c===','&&!inQ){ cols.push(cur.trim()); cur=''; }
     else cur+=c;
   }
@@ -22612,7 +23813,8 @@ function handleUpdatePoolFile(file){
     const lines = text.split(/\r?\n/).filter(l=>l.trim());
     if(!lines.length){ document.getElementById('updatePoolStatus').textContent='Empty file.'; return; }
     const dk = extractDkPlayerTable(text);
-    const headers = dk ? dk.headers : lines[0].split(',').map(h=>h.replace(/^"|"$/g,'').trim());
+    // A plain split(',') tore any quoted header containing a comma in half.
+    const headers = dk ? dk.headers : parseCsvLine(lines[0]).map(h=>h.replace(/^"|"$/g,'').trim());
     const rows = dk ? dk.rows : lines.slice(1).map(parseCsvLine).filter(r=>r.some(c=>c));
     updateParsedCSV = {headers, rows, dkKind: dk ? dk.kind : null};
 
@@ -22762,7 +23964,14 @@ function applyPoolUpdate(){
   //      not the same person and the row is left for the late-add pass.
   const _salOf = row => parseFloat((cm.salary!=null?row[cm.salary]||'':'').replace(/[^0-9.]/g,''))||0;
   const _nameOf = row => (cm.name!=null ? row[cm.name] : '').replace(/\s*\(\d+\)\s*/g,'').trim().toLowerCase();
-  const _teamOf = row => (cm.team!=null ? (row[cm.team]||'') : '').trim().toUpperCase();
+  // NFL abbreviations disagree across sources (WAS/WSH, JAX/JAC, LAR/LA), and
+  // the name+team key is exactly what separates two same-named players — a
+  // mismatch there dropped a whole roster to "unmatched". Other sports keep the
+  // raw uppercase form: a NASCAR "team" can be a car number, which nflTeamNorm
+  // would strip to nothing.
+  const _tmKey = t => (slate.sport==='nfl' && typeof nflTeamNorm==='function')
+    ? nflTeamNorm(t) : String(t==null?'':t).trim().toUpperCase();
+  const _teamOf = row => _tmKey(cm.team!=null ? (row[cm.team]||'') : '');
   const _idOf = row => {
     if(cm.id==null) return '';
     const raw = (row[cm.id]||'').trim();
@@ -22823,7 +24032,7 @@ function applyPoolUpdate(){
   // Update existing players
   slate.players.forEach(p=>{
     const key = (p.name||'').toLowerCase();
-    const pTeam = (p.team||'').trim().toUpperCase();
+    const pTeam = _tmKey(p.team);
     let g = null;
     if(hasIdCol) g = gById.get(String(p.id)) || (p.cptId ? gById.get(String(p.cptId)) : null) || null;
     if(!g && pTeam) g = gByNameTeam.get(key+'|'+pTeam) || null;
@@ -22923,7 +24132,13 @@ function applyPoolUpdate(){
   // presence flags everywhere except refreshFromSheet, which assumes the sheet
   // layout matches — keep sheet column order stable if you mix both workflows.
   ['proj','own','rating','start','opp','team','position','ml','itd','win','top3','top5','top10','top20','top30','top40','cut'].forEach(key=>{
-    if(cm[key]!=null) slate.columnMapping[key] = cm[key];
+    // A DraftKings file is an ENRICHMENT source, not a layout definition. Its
+    // indices describe DK's own nine columns; refreshFromSheet indexes the
+    // SHEET's rows with whatever is stored here, so overwriting team 3→7 and
+    // position 2→0 (measured) silently pointed the next refresh at SS Own and
+    // DFS ID. Let a DK file CLAIM a role nothing has claimed yet, never move one.
+    if(cm[key]!=null && (!updateParsedCSV.dkKind || slate.columnMapping[key]==null))
+      slate.columnMapping[key] = cm[key];
   });
   if(isShowdown(slate)) sdDedupePlayers(slate);
 
@@ -22932,7 +24147,14 @@ function applyPoolUpdate(){
   renderSlate();
   closeUpdatePoolModal();
 
-  const msg = `Updated ${matched} players${added?' + '+added+' new':''}.${unmatched?' '+unmatched+' unmatched (kept as-is).':''}`;
+  // This summary used to be computed into a variable that was never read, so
+  // the unmatched count — the one number that tells you the file was for the
+  // wrong slate or spells a team differently — never reached the user at all.
+  // The ⬆ DK CSV button reports its own result, so only the modal path speaks.
+  if(!updateParsedCSV.dkKind)
+    showToast(`Updated ${matched} player${matched===1?'':'s'}${added?' + '+added+' new':''}.` +
+              (unmatched?` ${unmatched} unmatched (kept as-is).`:''),
+              (matched===0 && unmatched)?'err':'ok');
   // Show a quick toast in the pool header
   const btn = document.getElementById('updatePoolBtn');
   const orig = btn.textContent;
@@ -23193,7 +24415,13 @@ function renderSimInputs(){
 
 loadFromStorage();
 loadHistory();
-if(slates.length)activeSlateId=slates[0].id;
+// Come back to the slate the user left on. save() only serializes `slates`, so
+// the active id lives in its own key; boot used to hard-select slates[0], which
+// threw anyone with more than one slate back to the first on every reload.
+if(slates.length){
+  let _a=null; try { _a=localStorage.getItem('dfs_active_slate'); } catch(e){}
+  activeSlateId = (_a && slates.some(s=>s.id===_a)) ? _a : slates[0].id;
+}
 renderTopBar();
 if(activeSlateId)renderSlate();
 
