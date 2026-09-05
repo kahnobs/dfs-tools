@@ -115,18 +115,25 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .hide-btn:hover{border-color:var(--border);color:var(--accent2);}
 .driver-row.is-hidden .hide-btn{color:var(--accent);}
 /* ── NFL game tiles (game-level env above the pool) ──────────────────────── */
-.nfl-game-tiles{display:flex;gap:8px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.015);flex-shrink:0;align-items:stretch;}
-.ngt{display:flex;align-items:center;gap:10px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2,rgba(255,255,255,.03));min-width:210px;}
-.ngt-side{display:flex;flex-direction:column;align-items:center;min-width:44px;line-height:1.15;}
-.ngt-team{font-family:'DM Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--text);}
-.ngt-side.fav .ngt-team{color:var(--accent);}
-.ngt-imp{font-family:'DM Mono',monospace;font-size:15px;font-weight:600;color:var(--green);margin-top:2px;}
-.ngt-n{font-size:9px;color:var(--muted);margin-top:2px;font-family:'DM Mono',monospace;}
-.ngt-mid{display:flex;flex-direction:column;align-items:center;gap:3px;padding:0 6px;border-left:1px solid var(--border);border-right:1px solid var(--border);}
-.ngt-ou,.ngt-spr{font-family:'DM Mono',monospace;font-size:11px;color:var(--text);white-space:nowrap;}
-.ngt-lbl{font-size:8px;color:var(--muted);letter-spacing:.6px;margin-right:5px;}
+/* Game tiles: one compact card per game — matchup line (favorite in gold,
+   implied totals in green) over the line + O/U. Click filters the pool to
+   that game; click again to clear. Tiles sort by total, highest first. */
+.nfl-game-tiles{display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.015);flex-shrink:0;align-items:stretch;}
+.ngt{display:flex;flex-direction:column;gap:3px;padding:6px 10px 5px;border:1px solid var(--border);border-radius:7px;background:var(--surface2,rgba(255,255,255,.03));min-width:150px;cursor:pointer;transition:border-color .12s,background .12s;user-select:none;}
+.ngt:hover{border-color:var(--muted);}
+.ngt.on{border-color:var(--accent);background:rgba(245,197,24,.07);}
+.ngt-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-family:'DM Mono',monospace;white-space:nowrap;}
+.ngt-team{font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--text);}
+.ngt-team.fav{color:var(--accent);}
+.ngt-imp{font-size:13px;font-weight:600;color:var(--green);}
+.ngt-imp.adj{color:var(--accent);}
+.ngt-side{display:flex;align-items:baseline;gap:5px;}
+.ngt-dash{color:var(--muted);font-size:10px;}
+.ngt-sub{font-size:9.5px;color:var(--muted);letter-spacing:.3px;}
+.ngt-sub b{color:var(--text);font-weight:500;}
 .ngt-note{font-size:10px;color:var(--muted);align-self:center;padding:0 4px;}
-@media (max-width:760px){ .nfl-game-tiles{padding:6px 8px;gap:6px;} .ngt{min-width:0;flex:1;padding:5px 8px;gap:6px;} .ngt-imp{font-size:13px;} }
+.ngt-clear{align-self:center;font-size:10px;color:var(--accent);background:none;border:1px solid rgba(245,197,24,.4);border-radius:5px;padding:3px 8px;cursor:pointer;font-family:'DM Sans',sans-serif;}
+@media (max-width:760px){ .nfl-game-tiles{padding:6px 8px;gap:5px;} .ngt{min-width:0;flex:1 1 140px;padding:5px 8px;} .ngt-imp{font-size:12px;} }
 /* A tile whose environment the Sim dashboard has moved: the number the sim will
    actually use is gold and the Vegas number it replaced stays visible (greyed)
    beside it, so an adjusted board never quietly hides the market. */
@@ -1800,9 +1807,15 @@ const cptSalaryOf = (p) => Number.isFinite(p?.cptSalary) ? p.cptSalary : Math.ro
 // completed to QB,2RB,3WR,TE,FLEX(RB/WR/TE),DST. Closed-form: QB≤1, DST≤1,
 // RB≤3, WR≤4, TE≤2, RB+WR+TE≤7, total≤9.
 function nflPosOf(p){
-  const raw = String(p?.position||'').toUpperCase().replace(/[^A-Z]/g,'');
-  if(/^(DST|DEF|D)$/.test(raw)) return 'DST';
-  if(/^(QB|RB|WR|TE|K|PK)$/.test(raw)) return raw === 'PK' ? 'K' : raw;
+  // DK's Classic salary file lists eligibility as "RB/FLEX", "WR/FLEX",
+  // "TE/FLEX" (and Showdown as "CPT"/"FLEX" in a separate column). The real
+  // position is the first token that isn't FLEX/CPT/UTIL — stripping the
+  // slash used to fuse "RB/FLEX" into "RBFLEX" and every skill player became "?".
+  const toks = String(p?.position||'').toUpperCase().split(/[^A-Z]+/).filter(t => t && !/^(FLEX|CPT|UTIL)$/.test(t));
+  for(const raw of toks){
+    if(/^(DST|DEF|D)$/.test(raw)) return 'DST';
+    if(/^(QB|RB|WR|TE|K|PK)$/.test(raw)) return raw === 'PK' ? 'K' : raw;
+  }
   return null;
 }
 
@@ -3674,8 +3687,11 @@ function getSortedPlayers(){
   const slate=activeSlate();if(!slate)return[];
   const q=document.getElementById('searchInput').value.toLowerCase();
   const ec=expCounts(slate);
+  const gf=slate.sport==='nfl' ? gameFilterTeams(slate) : null;
+  const TMK=t=>String(t||'').toUpperCase().replace(/[^A-Z]/g,'');
   return [...(slate.players||[])]
     .filter(p=>p.name.toLowerCase().includes(q))
+    .filter(p=>!gf || gf.has(TMK(p.team)))
     .sort((a,b)=>{
       const dir=(typeof sortDir!=="undefined"?sortDir:1);
       if(sortKey==='exp')return dir*((ec[b.id]||0)-(ec[a.id]||0));
@@ -3792,41 +3808,57 @@ function renderNflGameTiles(slate){
     const a=adjMap&&adjMap[TMK(t)];
     return (a && a.base!=null && Math.abs(a.implied-a.base)>=0.05) ? a : null;
   };
-  const tiles=games.map(g=>{
+  const activeKey=slate._gameFilter||null;
+  // Highest total first — the shootouts are what a DFS eye scans for.
+  const gameTotal=g=>{ const [x,y]=g.teams; return x.total??(y&&y.total)??((x.implied!=null&&y&&y.implied!=null)?x.implied+y.implied:0); };
+  const tiles=games.slice().sort((g1,g2)=>gameTotal(g2)-gameTotal(g1)).map(g=>{
     // Order: away/home is unknown from a salary sheet, so favorite on the left.
     const [a,b]=g.teams.length===2
       ? g.teams.slice().sort((x,y)=>(x.spread??0)-(y.spread??0))
-      : [g.teams[0], {team:g.teams[0].opp||'?',implied:g.teams[0].oppImplied,n:0,nActive:0,spread:g.teams[0].spread!=null?-g.teams[0].spread:null}];
+      : [g.teams[0], {team:g.teams[0].opp||'?',implied:g.teams[0].oppImplied,spread:g.teams[0].spread!=null?-g.teams[0].spread:null}];
     const total=a.total??b.total??((a.implied!=null&&b.implied!=null)?a.implied+b.implied:null);
     const spr=a.spread??(b.spread!=null?-b.spread:null);
     const impA=a.implied??(total!=null&&spr!=null?total/2-spr/2:null);
     const impB=b.implied??(total!=null&&spr!=null?total/2+spr/2:null);
     const fav=spr!=null&&spr!==0?(spr<0?a.team:b.team):null;
-    const sprTxt=spr==null?'PK':(spr===0?'PK':`${fav} ${spr<0?spr:-spr}`);
+    const sprTxt=spr==null||spr===0?'PK':`${fav} ${(spr<0?spr:-spr)}`;
     const aA=adjOf(a.team), aB=adjOf(b.team);
     const gAdj=!!(aA||aB);
-    // "was" numbers are the market ones; an unadjusted side keeps its Vegas
-    // total and gets no "was" (there is nothing it was).
     const shownA=aA?aA.implied:impA, shownB=aB?aB.implied:impB;
     const adjTotal=gAdj&&shownA!=null&&shownB!=null ? shownA+shownB : null;
-    const side=(t,imp,isFav,ad)=>`<div class="ngt-side${isFav?' fav':''}">
-        <div class="ngt-team">${t.team}</div>
-        <div class="ngt-imp${ad?' adj':''}" title="${ad?`Adjusted implied total (Vegas ${fmt1(ad.base)})`:'Implied team total'}">${fmt1(imp)}${ad?` <span class="ngt-was">· was ${fmt1(ad.base)}</span>`:''}</div>
-        <div class="ngt-n">${t.nActive||0}${t.n&&t.n!==t.nActive?`<span style="opacity:.5">/${t.n}</span>`:''} pl</div>
-      </div>`;
-    return `<div class="ngt${gAdj?' adj':''}" title="${gAdj?'Game environment as ADJUSTED on the Sim dashboard — the greyed numbers are Vegas':'Game environment from the odds sheet — the sim samples the score around these numbers'}">
-      ${gAdj?'<span class="ngt-chip" title="This game was moved on the Sim dashboard">⚙ adjusted</span>':''}
-      ${side(a,shownA,fav===a.team,aA)}
-      <div class="ngt-mid">
-        <div class="ngt-ou"><span class="ngt-lbl">O/U</span>${adjTotal!=null?`<span style="color:var(--accent)">${fmt1(adjTotal)}</span>${total!=null&&Math.abs(adjTotal-total)>=0.05?`<span class="ngt-was"> · was ${fmt1(total)}</span>`:''}`:fmt1(total)}</div>
-        <div class="ngt-spr"><span class="ngt-lbl">Line</span>${sprTxt}</div>
+    const imp=(v,ad)=>`<span class="ngt-imp${ad?' adj':''}" title="${ad?`Adjusted on the Sim tab (Vegas ${fmt1(ad.base)})`:'Implied team total'}">${fmt1(v)}</span>`;
+    const isOn=activeKey===g.key;
+    const tip=`${a.team} vs ${b.team} — ${gAdj?'adjusted on the Sim tab (Vegas: '+fmt1(impA)+' / '+fmt1(impB)+', O/U '+fmt1(total)+')':'from the odds sheet'}. Click to ${isOn?'show all games':'show only this game\'s players'}.`;
+    return `<div class="ngt${isOn?' on':''}${gAdj?' adj':''}" data-gkey="${g.key}" onclick="toggleGameFilter('${g.key}')" title="${tip}">
+      ${gAdj?'<span class="ngt-chip">⚙ adjusted</span>':''}
+      <div class="ngt-row">
+        <span class="ngt-side"><span class="ngt-team${fav===a.team?' fav':''}">${a.team}</span>${imp(shownA,aA)}</span>
+        <span class="ngt-dash">–</span>
+        <span class="ngt-side">${imp(shownB,aB)}<span class="ngt-team${fav===b.team?' fav':''}">${b.team}</span></span>
       </div>
-      ${side(b,shownB,fav===b.team,aB)}
+      <div class="ngt-row ngt-sub"><span><b>${sprTxt}</b></span><span>O/U <b${adjTotal!=null?' style="color:var(--accent)"':''}>${fmt1(adjTotal!=null?adjTotal:total)}</b></span></div>
     </div>`;
   }).join('');
   const noEnv=games.every(g=>g.teams.every(t=>t.total==null&&t.implied==null));
-  el.innerHTML=tiles+(noEnv?`<div class="ngt-note">No O/U / spread on this sheet — run the odds puller for real game environments (the sim falls back to a 44.5 total).</div>`:'');
+  el.innerHTML=tiles
+    +(activeKey?`<button class="ngt-clear" onclick="toggleGameFilter(null)" title="Show every game's players">✕ All games</button>`:'')
+    +(noEnv?`<div class="ngt-note">No O/U / spread on this sheet — run the odds puller for real game environments (the sim falls back to a 44.5 total).</div>`:'');
   el.style.display='flex';
+}
+// Click a game tile → the pool shows only that game's players (both teams).
+// Purely a view filter: it never touches hidden/pool membership or the sim.
+function toggleGameFilter(key){
+  const slate=activeSlate(); if(!slate) return;
+  slate._gameFilter = (key && slate._gameFilter!==key) ? key : null;
+  save(); renderPool();
+}
+function gameFilterTeams(slate){
+  const k=slate&&slate._gameFilter; if(!k) return null;
+  const g=nflGameEnvs(slate).find(x=>x.key===k);
+  if(!g){ slate._gameFilter=null; return null; }
+  const set=new Set(g.teams.map(t=>t.team));
+  g.teams.forEach(t=>{ if(t.opp) set.add(t.opp); });
+  return set;
 }
 
 function renderPool(){
