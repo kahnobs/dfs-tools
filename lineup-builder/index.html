@@ -281,6 +281,13 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .sd-view-toggle button.sd-vt-cpt.active{background:rgba(245,197,24,.16);color:var(--accent);}
 .sd-vt-n{font-family:'DM Mono',monospace;font-size:9.5px;opacity:.65;margin-left:5px;}
 .sd-pool-subrow{display:flex;align-items:center;gap:10px;padding:5px 10px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.02);flex-shrink:0;}
+/* Position filter (NFL): ALL / QB / RB / WR / TE / FLEX / DST (/ K on showdown). */
+.pos-filter-bar{display:flex;align-items:center;gap:4px;padding:5px 10px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.02);flex-shrink:0;overflow-x:auto;}
+.pos-filter-bar .pf-lbl{font-size:9.5px;color:var(--muted);letter-spacing:.5px;font-family:'DM Mono',monospace;margin-right:4px;}
+.pf-btn{background:none;border:1px solid var(--border);border-radius:5px;color:var(--muted);padding:2px 9px;font-size:10.5px;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;line-height:1.5;}
+.pf-btn:hover{color:var(--text);border-color:var(--muted);}
+.pf-btn.active{background:rgba(245,197,24,.16);color:var(--accent);border-color:rgba(245,197,24,.45);font-weight:600;}
+.pf-btn .pf-n{font-family:'DM Mono',monospace;font-size:9px;opacity:.7;margin-left:4px;}
 .sd-pool-sub{flex:1;min-width:120px;font-size:10px;color:var(--muted);}
 .sd-pool-actions{display:flex;gap:4px;}
 .sd-pool-actions button{background:none;border:1px solid var(--border);color:var(--muted);padding:2px 8px;border-radius:4px;font-size:10px;cursor:pointer;font-family:'DM Sans',sans-serif;}
@@ -1130,7 +1137,7 @@ html { overscroll-behavior-y: contain; }
 .hb-ev{margin:6px 0 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);padding:6px 7px;}
 .hb-ev-head{display:flex;align-items:center;gap:6px;margin-bottom:5px;}
 .hb-ev-lbl{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex:1;}
-.hb-ev-sel{flex:0 1 auto;min-width:0;max-width:68%;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:2px 4px;font-family:inherit;}
+.hb-ev-sel{flex:1 1 auto;min-width:0;max-width:46%;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:2px 4px;font-family:inherit;}
 .hb-ev-num{font-family:'DM Mono',monospace;font-size:17px;font-weight:600;line-height:1.1;}
 .hb-ev-num.pos{color:var(--green);} .hb-ev-num.neg{color:var(--red);}
 .hb-ev-sub{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-top:2px;}
@@ -1552,6 +1559,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
     <div id="nflGameTiles" class="nfl-game-tiles" style="display:none;"></div>
     <!-- Showdown only: one-line description of the active pool view + bulk actions. -->
     <!-- Showdown: Players / Captain toggle + the view's subtitle and pool actions, on one bar above the column headers -->
+    <div class="pos-filter-bar" id="posFilterBar" style="display:none;"></div>
     <div class="sd-pool-subrow" id="sdPoolSub" style="display:none;"><div class="sd-view-toggle" id="sdViewToggle"></div><div id="sdPoolSubBody" style="display:contents;"></div></div>
     <div class="col-headers" id="colHeaders"></div>
     <div id="groupEditBanner" style="display:none;flex-shrink:0;"></div>
@@ -1579,7 +1587,8 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
         <div class="hb-ev" id="hbEvBlock" style="display:none">
           <div class="hb-ev-head">
             <span class="hb-ev-lbl">Lineup</span>
-            <select class="hb-ev-sel" id="hbEvPreset" onchange="hbSetPreset(this.value)"></select>
+            <select class="hb-ev-sel" id="hbEvPreset" title="Contest format — sets the field size and the payout shape" onchange="hbSetPreset(this.value)"></select>
+            <select class="hb-ev-sel hb-ev-sel2" id="hbEvStakes" title="Stakes set the entry fee and how sharp the modeled field is" onchange="hbSetStakes(this.value)"></select>
           </div>
           <div class="hb-ev-body" id="hbEvBody"></div>
         </div>
@@ -2038,15 +2047,33 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
                   <span id="ufcEvEditToggle" onclick="toggleContestEvDetails()" style="cursor:pointer;font-size:10px;color:var(--purple);user-select:none;">▸ Edit contest details</span>
                 </div>
                 <div id="ufcEvDetails" style="display:none;padding:6px;border:1px solid var(--border);border-radius:5px;margin-bottom:6px;">
+                  <!-- CONTEST PICKER — the same two axes the Builder's lineup
+                       stats card uses. Picking here fills field size / fee /
+                       payout below AND sets the field model (sharp share +
+                       ownership temperature); editing those by hand flips this
+                       back to Custom. -->
+                  <div style="display:flex;gap:6px;margin-bottom:6px;">
+                    <div style="flex:1;min-width:0;">
+                      <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Format</div>
+                      <select id="ufcEvFormat" onchange="setContestPickerFromUI()"
+                        style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 4px;border-radius:4px;font-size:10px;font-family:'DM Sans',sans-serif;outline:none;text-overflow:ellipsis;"></select>
+                    </div>
+                    <div style="flex:1;min-width:0;">
+                      <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Stakes</div>
+                      <select id="ufcEvStakes" onchange="setContestPickerFromUI()"
+                        style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 4px;border-radius:4px;font-size:10px;font-family:'DM Sans',sans-serif;outline:none;text-overflow:ellipsis;"></select>
+                    </div>
+                  </div>
+                  <div id="ufcEvPickerNote" style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;"></div>
                   <div style="display:flex;gap:6px;margin-bottom:6px;">
                     <div style="flex:1;">
                       <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Field size</div>
-                      <input type="number" id="ufcEvField" value="10000" min="100" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.fieldSize=parseInt(this.value)||10000;save();}updateContestEvSummary();"
+                      <input type="number" id="ufcEvField" value="10000" min="100" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.fieldSize=parseInt(this.value)||10000;save();}contestManualEdit();updateContestEvSummary();"
                         style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
                     </div>
                     <div style="flex:1;">
                       <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Entry fee $</div>
-                      <input type="number" id="ufcEvFee" value="20" min="0.1" step="0.5" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.fee=parseFloat(this.value)||20;save();}updateContestEvSummary();"
+                      <input type="number" id="ufcEvFee" value="20" min="0.1" step="0.5" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.fee=parseFloat(this.value)||20;save();}contestManualEdit();updateContestEvSummary();"
                         style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
                     </div>
                   </div>
@@ -2059,7 +2086,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
                     </div>
                   </div>
                   <textarea id="ufcEvCustom" placeholder="Paste DK payout table, e.g.&#10;1st $5,000.00&#10;2nd - 5th $1,000.00&#10;6th - 100th $40.00" spellcheck="false"
-                    onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.custom=this.value;save();}updateContestEvSummary();"
+                    onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.custom=this.value;save();}contestManualEdit();updateContestEvSummary();"
                     style="display:none;width:100%;min-height:56px;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-size:10px;font-family:'DM Mono',monospace;outline:none;margin-bottom:6px;"></textarea>
                   <button onclick="saveContestPreset()" title="Save the current field size / fee / payout structure as a contest for one-click reuse"
                     style="width:100%;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);color:var(--green);padding:5px 8px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;">💾 Save as contest</button>
@@ -4445,6 +4472,40 @@ function resetAllProj(){
 }
 
 
+// ── Position filter (NFL) ────────────────────────────────────────────────────
+// FLEX = everyone but QB (and K/DST), i.e. the RB/WR/TE pool that can fill the
+// flex slot. K only exists on showdown slates (Classic has no kicker slot).
+function nflPosMatch(f, p){
+  if(!f || f==='ALL') return true;
+  const pos=nflPosOf(p);
+  if(f==='FLEX') return pos==='RB'||pos==='WR'||pos==='TE';
+  return pos===f;
+}
+function setPosFilter(f){
+  const slate=activeSlate(); if(!slate) return;
+  slate._posFilter = (f && f!=='ALL') ? f : null;
+  save(); renderPool();
+}
+function renderPosFilterBar(slate){
+  const el=document.getElementById('posFilterBar'); if(!el) return;
+  if(!slate || slate.sport!=='nfl'){ el.style.display='none'; el.innerHTML=''; return; }
+  const cur=slate._posFilter||'ALL';
+  // Counts respect the search box and the game / team tile filter, not the
+  // position filter itself — the numbers say how many of each position are
+  // available in what you are already looking at.
+  const q=(document.getElementById('searchInput')?.value||'').toLowerCase();
+  const gf=gameFilterTeams(slate);
+  const hidden=slate.hiddenIds||[];
+  const base=(slate.players||[]).filter(p=>p.name.toLowerCase().includes(q) && (!gf||gf.has(nflTeamOf(p))) && !hidden.includes(p.id));
+  const hasK=base.some(p=>nflPosOf(p)==='K');
+  const tabs=[['ALL','All'],['QB','QB'],['RB','RB'],['WR','WR'],['TE','TE'],['FLEX','FLEX'],['DST','DST']];
+  if(hasK || isShowdown(slate)) tabs.push(['K','K']);
+  el.innerHTML=`<span class="pf-lbl">POS</span>`+tabs.map(([k,l])=>{
+    const n=base.filter(p=>nflPosMatch(k,p)).length;
+    return `<button class="pf-btn${cur===k?' active':''}" onclick="setPosFilter('${k}')" title="${k==='FLEX'?'RB / WR / TE — everyone who can fill the FLEX slot':k==='ALL'?'Every position':'Only '+l}">${l}<span class="pf-n">${n}</span></button>`;
+  }).join('');
+  el.style.display='flex';
+}
 function getSortedPlayers(){
   const slate=activeSlate();if(!slate)return[];
   const q=document.getElementById('searchInput').value.toLowerCase();
@@ -4453,6 +4514,7 @@ function getSortedPlayers(){
   return [...(slate.players||[])]
     .filter(p=>p.name.toLowerCase().includes(q))
     .filter(p=>!gf || gf.has(nflTeamOf(p)))
+    .filter(p=>slate.sport!=='nfl' || nflPosMatch(slate._posFilter, p))
     .sort((a,b)=>{
       const dir=(typeof sortDir!=="undefined"?sortDir:1);
       if(sortKey==='exp')return dir*((ec[b.id]||0)-(ec[a.id]||0));
@@ -4762,6 +4824,7 @@ function renderPool(){
   // Segmented control + sub-row. Both live outside #driverList (in the panel
   // header and just above the column headers), so they survive the early
   // "no players match" return below.
+  renderPosFilterBar(slate);
   const _vt=document.getElementById('sdViewToggle');
   const _sub=document.getElementById('sdPoolSub');
   const _subBody=document.getElementById('sdPoolSubBody');
@@ -4770,7 +4833,7 @@ function renderPool(){
       // "filtered" covers the game / team tile filters as well as the search box
       // — both narrow `players`, and both narrow what All on / All off act on.
       const _q=((document.getElementById('searchInput')?.value||'').trim())
-        || slate._gameFilter || slate._teamFilter || '';
+        || slate._gameFilter || slate._teamFilter || slate._posFilter || '';
       const _vis=players.filter(p=>!hidden.includes(p.id));
       const _n=m=>_vis.filter(p=>m==='cpt'?sdCptEligible(slate,p.id):sdFlexEligible(slate,p.id)).length;
       const _btn=(m,lbl,tip)=>`<button class="sd-vt-btn${m==='cpt'?' sd-vt-cpt':''}${sdView===m?' active':''}" data-view="${m}" onclick="sdSetPoolView('${m}')" title="${tip}">${lbl}<span class="sd-vt-n">(${_n(m)}/${_vis.length} in pool${_q?', filtered':''})</span></button>`;
@@ -8381,6 +8444,9 @@ function setNascarTrack(type, btn){
 
 function setUfcEvPreset(key, btn){
   const s=activeSlate(); if(s){ s._ufcEv=s._ufcEv||{}; s._ufcEv.preset=key; save(); }
+  // Choosing a payout structure by hand overrides the picked format's generated
+  // curve, so the contest is no longer one of the sixteen — flip to Custom.
+  if(typeof contestManualEdit==='function') contestManualEdit();
   document.querySelectorAll('#ufcEvBlock .nascar-track-btn').forEach(b=>b.classList.remove('active'));
   if(btn) btn.classList.add('active');
   const ta=document.getElementById('ufcEvCustom');
@@ -9977,7 +10043,11 @@ function saveContestPreset(){
   const name=`${tag}${kind} $${fee} × ${F.toLocaleString()}${suffix}`;
   const presets=loadContestPresets();
   const existing=presets.find(p=>p.name===name);
-  const rec={id:existing?existing.id:uid(), sport:s.sport||null, name, fee, fieldSize:F, preset, custom};
+  // Carry the single-entry flag and the picker label, so a reloaded record
+  // keeps its format (and therefore its field model) instead of being
+  // re-guessed from field size alone — an SE contest used to come back as MME.
+  const rec={id:existing?existing.id:uid(), sport:s.sport||null, name, fee, fieldSize:F, preset, custom,
+             se:!!ev.se, contest:(s._contest&&s._contest.format)?{format:s._contest.format, stakes:s._contest.stakes}:null};
   if(existing) Object.assign(existing, rec); else presets.push(rec);
   storeContestPresets(presets);
   localStorage.setItem('dfs_last_contest_preset', rec.id);
@@ -10014,8 +10084,25 @@ function applyContestPreset(id, silent){
     const b=document.getElementById(bid); if(b) b.classList.toggle('active', rec.preset===k);
   });
   const sel=document.getElementById('ufcEvSaved'); if(sel) sel.value=id;
+  // Label the library contest on the two axes where it is obvious (single
+  // entry vs multi, ≥20k entries = large, fee band = stakes). exact:false, so
+  // the record's OWN field size / fee / payout table stay authoritative — the
+  // label only drives the field model and what the pickers display.
+  const lbl=contestLabelForRec(rec);
+  if(lbl){
+    s._contest=lbl;
+    const _cs=contestSettings(s);
+    s._ufcEv=Object.assign({}, s._ufcEv, {sharpShare:_cs.sharpShare, ownTemp:_cs.ownTemp});
+    if(contestFormat(hbPresetKey(s))) s._hbEvPreset=lbl.format;
+  } else {
+    delete s._contest;
+    if(contestFormat(hbPresetKey(s))) s._hbEvPreset='custom';
+  }
+  save();
+  syncContestPickerUI();
   toggleContestEvDetails(false);
   updateContestEvSummary();
+  if(typeof renderHbEv==='function') renderHbEv();
   if(!silent) showToast(`✓ Applied "${rec.name}"`,'ok');
 }
 function toggleContestEvDetails(force){
@@ -10044,7 +10131,7 @@ function updateContestEvSummary(){
   const ev=s._ufcEv||{};
   const F=Math.max(10, parseInt(ev.fieldSize)||10000);
   const fee=Math.max(0.01, parseFloat(ev.fee)||20);
-  const payout=buildPayoutFn({fieldSize:F, fee, preset:ev.preset||'gpp', custom:ev.custom});
+  const payout=contestPayoutFn(s, F, fee);
   let pool=0, lastPaid=0;
   // Payout tables are contiguous — once we're well past the last paid rank,
   // stop scanning (guards the UI against a typo'd 10-million field size).
@@ -10299,6 +10386,7 @@ function restoreContestEvUI(slate){
       && (p.preset!=='custom' || String(p.custom||'').trim()===String(ev.custom||'').trim()));
     if(match){ slate._ufcEv=Object.assign({}, ev, {contestId:match.id}); save(); }
   }
+  syncContestPickerUI();
   renderContestPresetSelect();
   if(ev.fieldSize==null && ev.preset==null){
     // Fresh slate: auto-apply the last-used contest, but only if it belongs
@@ -10864,6 +10952,245 @@ function beatersEstimate(beating, tied, sampleN, arr, t, F, refine){
 // blend and a single as-projected draw sits above that. These constants are the
 // contract between the two surfaces; see the long doctrine comments inside
 // runUFCContestEV for why each value is what it is.
+// ── THE CONTEST PICKER: TWO AXES, ONE SOURCE OF TRUTH (2026-09-05) ─────────
+// A contest is described by a FORMAT (who you are playing against and what the
+// payout curve looks like) and a STAKES level (how sharp that field is). Both
+// surfaces that price a lineup — the Auto-Gen Contest-EV block and the hand
+// builder's stats card — read the SAME pair off `slate._contest`, so a lineup
+// prices identically wherever you look at it.
+//
+//   slate._contest = {format, stakes, exact}
+//     exact:true  → fieldSize/fee come from the tables below (the picker)
+//     exact:false → the pair is a LABEL for a contest picked from the built-in
+//                   library or typed by hand; fieldSize/fee/payout stay on
+//                   slate._ufcEv, but the stakes label still drives the field
+//                   model (sharp share + ownership temperature).
+//   Derived onto slate._ufcEv: fieldSize, fee, preset, se, sharpShare, ownTemp.
+//
+// ── TUNABLE ASSUMPTIONS ────────────────────────────────────────────────────
+// FORMAT → field size + payout shape. `firstShare` is 1st place's cut of the
+// prize pool and `paidFrac` the share of entries that cash; hbBuildPayout
+// generates the curve from those two numbers and solves the floor so the tiers
+// sum to entries × fee × HB_PAYOUT_RATIO. These are SHAPE ARCHETYPES fitted by
+// eye to recurring DK contests, not measurements of one specific contest — a
+// mass-multi-entry monster is more top-heavy and pays a shallower fraction than
+// a single-entry field, and single-entry fields spread the pool wider because
+// nobody is firing 150 bullets at 1st.
+//   MME large  150,000  1st 20%  pays 22%   (Milly-Maker shaped)
+//   MME small    8,000  1st 15%  pays 22%
+//   SE  large   25,000  1st 12%  pays 25%
+//   SE  small    4,000  1st 10%  pays 25%
+// STAKES → entry fee + FIELD MODEL. `sharpShare` is the fraction of modeled
+// entries drawn from our own candidate pool (i.e. playing like optimizers)
+// rather than from the Own% column; `ownTemp` is an exponent applied to the
+// Own% weights before they are normalized — below 1 the field is flatter and
+// noisier (micro-stakes entrants are not all on the same chalk), above 1 it is
+// more concentrated on the projected plays. MME formats add
+// CONTEST_MME_SHARP_BONUS to the sharp share (multi-entry contests are where
+// the mass-entry professionals live), capped at CONTEST_SHARP_CAP.
+//   Micro  <$1    $0.50    5% sharp   temp 0.85
+//   Low    $1-10  $5      10% sharp   temp 1.00
+//   Mid    $10-50 $25     20% sharp   temp 1.05
+//   High   $50+   $100    35% sharp   temp 1.10
+// None of the eight rows is a measurement. They are the knobs to turn when a
+// real contest's realized field is measured; nothing else in the engine should
+// hard-code a sharp share or an ownership exponent again.
+const CONTEST_FORMATS = [
+  {key:'se_mini',   name:'SE mini',   desc:'Single-entry, mini field (500–1,000)', fieldSize:750, firstShare:0.12, paidFrac:0.23, se:true, mme:false},
+  {key:'se_small',  name:'SE small',  desc:'Single-entry, small field',  fieldSize:4000,   firstShare:0.10, paidFrac:0.25, se:true,  mme:false},
+  {key:'se_large',  name:'SE large',  desc:'Single-entry, large field',  fieldSize:25000,  firstShare:0.12, paidFrac:0.25, se:true,  mme:false},
+  {key:'mme_small', name:'MME small', desc:'Multi-entry (20/150-max), small field', fieldSize:8000,   firstShare:0.15, paidFrac:0.22, se:false, mme:true},
+  {key:'mme_large', name:'MME large', desc:'Multi-entry (20/150-max), large field', fieldSize:150000, firstShare:0.20, paidFrac:0.22, se:false, mme:true},
+];
+const CONTEST_STAKES = [
+  {key:'micro', name:'Micro', desc:'under $1',  fee:0.50, sharpShare:0.05, ownTemp:0.85},
+  {key:'low',   name:'Low',   desc:'$1-10',     fee:5,    sharpShare:0.10, ownTemp:1.00},
+  {key:'mid',   name:'Mid',   desc:'$10-50',    fee:25,   sharpShare:0.20, ownTemp:1.05},
+  {key:'high',  name:'High',  desc:'$50+',      fee:100,  sharpShare:0.35, ownTemp:1.10},
+];
+const CONTEST_MME_SHARP_BONUS = 0.05;   // multi-entry fields carry more optimizers
+const CONTEST_SHARP_CAP = 0.40;         // never model the field as more than 40% sharp
+const CONTEST_DEFAULT_STAKES = 'mid';
+function contestFormat(k){ return CONTEST_FORMATS.find(f=>f.key===k)||null; }
+// "MME large · 150k" — short enough to survive a 160px select on a phone.
+function contestFormatLabel(f){ return `${f.name} · ${f.fieldSize>=1000?Math.round(f.fieldSize/1000)+'k':f.fieldSize}`; }
+function contestStake(k){ return CONTEST_STAKES.find(x=>x.key===k)||null; }
+function contestSharpFor(F, S){
+  return Math.min(CONTEST_SHARP_CAP, S.sharpShare + (F.mme?CONTEST_MME_SHARP_BONUS:0));
+}
+// Legacy hand-builder preset keys, mapped onto the two axes so a stored slate
+// keeps pricing against something recognizable.
+const HB_LEGACY_PRESETS = {
+  large:  {format:'mme_large', stakes:'mid'},
+  single: {format:'se_large',  stakes:'mid'},
+  high:   {format:'mme_small', stakes:'high'},
+};
+// The live contest description, or null when this slate has never picked one
+// (in which case every caller falls back to the historic constants).
+function contestSettings(slate){
+  if(!slate) return null;
+  const c = slate._contest;
+  if(!c || !c.format) return null;
+  const F = contestFormat(c.format); if(!F) return null;
+  const S = contestStake(c.stakes) || contestStake(CONTEST_DEFAULT_STAKES);
+  const exact = c.exact !== false;
+  const ev = slate._ufcEv || {};
+  const fieldSize = exact ? F.fieldSize : Math.max(10, parseInt(ev.fieldSize)||F.fieldSize);
+  const fee       = exact ? S.fee       : Math.max(0.01, parseFloat(ev.fee)||S.fee);
+  return {format:F.key, stakes:S.key, formatName:F.name, stakesName:S.name,
+          fieldSize, fee, firstShare:F.firstShare, paidFrac:F.paidFrac, se:F.se, exact,
+          sharpShare:contestSharpFor(F,S), ownTemp:S.ownTemp,
+          key:F.key+'|'+S.key+(exact?'':'|lib'),
+          label:`${F.name} · ${S.name} stakes`};
+}
+// The two field-model numbers, with the historic defaults when no contest has
+// been picked. EVERY call site that used to hard-code 0.15 reads these.
+function contestSharpShare(slate){
+  const cs = contestSettings(slate);
+  return cs ? cs.sharpShare : EV_SHARP_SHARE;
+}
+function contestOwnTemp(slate){
+  const cs = contestSettings(slate);
+  return cs ? cs.ownTemp : 1;
+}
+// OWNERSHIP TEMPERATURE. own_i^T renormalized to the SAME total ownership
+// budget, applied to the Own% weight vector before the samplers see it (and
+// before the ownership-error scenarios are drawn off it, so scenario 0 is the
+// tempered projection). T<1 flattens the field's chalk, T>1 concentrates it.
+// This is the one clean seam for it: both samplers re-fit their realized
+// marginals back to whatever target vector they are handed, so an exponent
+// applied inside the draw would simply be calibrated away — applied to the
+// TARGET it is exactly "this field plays the chalk harder/softer than the
+// column says".
+function evOwnTemper(base, temp){
+  if(!base || !(temp>0) || Math.abs(temp-1)<1e-9) return base;
+  if(!base.some(v=>v>0)) return base;   // nothing to reshape — keep the zeros rather than inventing a uniform budget
+  const budget = base.reduce((a,b)=>a+b,0)||1;
+  const raw = base.map(v=>Math.pow(Math.max(1e-6, v), temp));
+  const s2 = raw.reduce((a,b)=>a+b,0)||1;
+  return raw.map(v=>Math.max(0.1, v*budget/s2));
+}
+// THE payout curve for whatever contest this slate is set to. An EXACT picked
+// contest gets the GENERATED curve (hbBuildPayout, from the format's
+// firstShare/paidFrac at the stakes' fee) — that is what makes the builder's
+// number and the generator's number the same number. Everything else (a
+// contest from the built-in library, or hand-typed field/fee/tiers) keeps
+// buildPayoutFn and its own table.
+function contestPayoutFn(slate, F, fee){
+  const cs=contestSettings(slate);
+  if(cs && cs.exact && F===cs.fieldSize && Math.abs(fee-cs.fee)<1e-9){
+    const rec=contestPayoutRec(cs.format, cs.stakes);
+    if(rec) return hbBuildPayout(rec);
+  }
+  const ev=(slate&&slate._ufcEv)||{};
+  return buildPayoutFn({fieldSize:F, fee, preset:ev.preset||'gpp', custom:ev.custom});
+}
+function contestFeeStr(fee){ return fee<1 ? '$'+(+fee).toFixed(2) : '$'+(+(+fee).toFixed(2)).toLocaleString(); }
+// Map a contest from the built-in / saved library onto the two axes. Field
+// size and fee stay whatever the library record says (exact:false) — the label
+// exists so the picker can show something truthful and so the stakes level
+// still drives the field model.
+function contestLabelForRec(rec){
+  if(!rec || !(rec.fieldSize>0)) return null;
+  // A record saved from the picker remembers its own label.
+  if(rec.contest && rec.contest.format && contestFormat(rec.contest.format) && CONTEST_STAKES.some(x=>x.key===rec.contest.stakes))
+    return {format:rec.contest.format, stakes:rec.contest.stakes, exact:false};
+  const fee = parseFloat(rec.fee)||0;
+  const stakes = fee<1 ? 'micro' : fee<10 ? 'low' : fee<50 ? 'mid' : 'high';
+  const large = rec.fieldSize >= 20000;
+  const mini  = rec.fieldSize < 2000;
+  const format = rec.se ? (large?'se_large':mini?'se_mini':'se_small') : (large?'mme_large':'mme_small');
+  return {format, stakes, exact:false};
+}
+// Write the picked contest onto the slate — _contest plus the derived _ufcEv
+// fields the generator reads — and mirror it into whatever inputs are on
+// screen. THE one writer; nothing else should assemble _contest by hand.
+function setSlateContest(slate, format, stakes, exact){
+  if(!slate) return null;
+  const F = contestFormat(format); if(!F) return null;
+  const S = contestStake(stakes) || contestStake(CONTEST_DEFAULT_STAKES);
+  slate._contest = {format:F.key, stakes:S.key, exact:exact!==false};
+  const cs = contestSettings(slate);
+  const ev = Object.assign({}, slate._ufcEv);
+  if(cs.exact){
+    ev.fieldSize = cs.fieldSize;
+    ev.fee = cs.fee;
+    ev.preset = 'gpp';
+    ev.custom = '';
+    ev.se = !!cs.se;
+    delete ev.contestId;
+  }
+  ev.sharpShare = cs.sharpShare;
+  ev.ownTemp = cs.ownTemp;
+  slate._ufcEv = ev;
+  if(typeof save==='function') save();
+  return cs;
+}
+// The user typed a field size / fee by hand: the pair no longer describes a
+// picked contest, so BOTH surfaces fall back to "Custom" together.
+function contestManualEdit(){
+  const s = (typeof activeSlate==='function') ? activeSlate() : null;
+  if(!s) return;
+  delete s._contest;
+  if(s._hbEvPreset && contestFormat(hbPresetKey(s))) s._hbEvPreset = 'custom';
+  if(s._ufcEv){ delete s._ufcEv.sharpShare; delete s._ufcEv.ownTemp; }
+  if(typeof save==='function') save();
+  syncContestPickerUI();
+  if(typeof renderHbEv==='function') renderHbEv();
+}
+// Repaint both pickers (Auto-Gen + hand builder) from slate._contest.
+function syncContestPickerUI(){
+  const s = (typeof activeSlate==='function') ? activeSlate() : null;
+  const cs = s ? contestSettings(s) : null;
+  const fs = document.getElementById('ufcEvFormat');
+  if(fs){
+    fs.innerHTML = CONTEST_FORMATS.map(f=>`<option value="${f.key}">${contestFormatLabel(f)}</option>`).join('')
+      + '<option value="">Custom</option>';
+    fs.value = cs ? cs.format : '';
+  }
+  const st = document.getElementById('ufcEvStakes');
+  if(st){
+    st.innerHTML = CONTEST_STAKES.map(x=>`<option value="${x.key}">${x.name} · ${contestFeeStr(x.fee)}</option>`).join('');
+    st.value = cs ? cs.stakes : CONTEST_DEFAULT_STAKES;
+    st.disabled = !cs;
+  }
+  const note = document.getElementById('ufcEvPickerNote');
+  if(note){
+    note.textContent = cs
+      ? (cs.exact ? '' : 'Library contest, labeled ')
+        + `${cs.label} — ${cs.fieldSize.toLocaleString()} × ${contestFeeStr(cs.fee)}, ${Math.round(cs.sharpShare*100)}% of the field modeled as optimizers`
+        + (cs.exact ? '' : ' (the contest table below is authoritative; the label only sets the field model — re-pick a format for the standard shape)')
+      : 'Custom — field size, fee and payout below define the contest; the field is modeled at the default 15% sharp share.';
+  }
+  if(typeof renderHbEvHeader==='function') renderHbEvHeader();
+}
+// Auto-Gen picker → slate. Called by both selects.
+function setContestPickerFromUI(){
+  const s = (typeof activeSlate==='function') ? activeSlate() : null; if(!s) return;
+  const fmt = (document.getElementById('ufcEvFormat')||{}).value || '';
+  const stk = (document.getElementById('ufcEvStakes')||{}).value || CONTEST_DEFAULT_STAKES;
+  if(!fmt){
+    delete s._contest;
+    if(s._ufcEv){ delete s._ufcEv.sharpShare; delete s._ufcEv.ownTemp; }
+    if(contestFormat(hbPresetKey(s))) s._hbEvPreset='custom';
+    save();
+  } else {
+    setSlateContest(s, fmt, stk, true);
+    if(hbPresetKey(s)!=='off') s._hbEvPreset = fmt;
+    save();
+    const evF=document.getElementById('ufcEvField'); if(evF) evF.value=s._ufcEv.fieldSize;
+    const evFee=document.getElementById('ufcEvFee'); if(evFee) evFee.value=s._ufcEv.fee;
+    const evC=document.getElementById('ufcEvCustom'); if(evC){ evC.value=''; evC.style.display='none'; }
+    [['gpp','ufcEvPresetGpp'],['double','ufcEvPresetDouble'],['custom','ufcEvPresetCustom']].forEach(([k,bid])=>{
+      const b=document.getElementById(bid); if(b) b.classList.toggle('active', k==='gpp');
+    });
+    const sel=document.getElementById('ufcEvSaved'); if(sel) sel.value='';
+  }
+  syncContestPickerUI();
+  if(typeof updateContestEvSummary==='function') updateContestEvSummary();
+  if(typeof renderHbEv==='function') renderHbEv();
+  if(typeof renderSaved==='function') renderSaved();
+}
 const EV_SCEN_K = 5;          // ownership scenarios per field model
 const EV_SCEN_SIGMA = 0.55;   // budget-preserving lognormal ownership error
 const EV_ROBUST_RHO = 0.5;    // weight on the worst scenario in the blend
@@ -11003,7 +11330,7 @@ async function runUFCContestEV(ctx){
   const cfg  = slate._ufcEv||{};
   const F    = Math.max(target, parseInt(cfg.fieldSize)||10000);
   const fee  = parseFloat(cfg.fee)||20;
-  const payout = buildPayoutFn({fieldSize:F, fee, preset:cfg.preset||'gpp', custom:cfg.custom});
+  const payout = contestPayoutFn(slate, F, fee);
   const tick = ()=>new Promise(r=>setTimeout(r,0));
   // ── LEVERAGE-YIELD WORLD WEIGHTING (UFC, 2026-08-04) ──────────────────────
   // Where to take leverage stances is not a taste dial — it is a computable
@@ -11197,7 +11524,12 @@ async function runUFCContestEV(ctx){
   // field-side (ownership scenarios, field sampling, dup counts, stance
   // excess/deficit baselines, score frame) now runs on ctx.fieldPool — the
   // full slate — while curation keeps restricting OUR candidates only.
-  const baseOwn = fieldPool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
+  // OWNERSHIP TEMPERATURE (see evOwnTemper): the stakes level says how hard
+  // this field plays the chalk. Applied to the target vector BEFORE the
+  // scenarios are drawn, so scenario 0 is the tempered projection and the hand
+  // builder's identical call produces the identical field.
+  const _ownTemp = (ctx.ownTemp>0) ? ctx.ownTemp : 1;
+  const baseOwn = evOwnTemper(fieldPool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2)), _ownTemp);
   const ownById = {}; fieldPool.forEach((p,i)=>{ ownById[p.id]=baseOwn[i]; });
   // ── SHOWDOWN CAPTAIN OWNERSHIP ────────────────────────────────────────────
   // baseOwn above is FLEX ownership (p.own means exactly that on a showdown
@@ -11229,6 +11561,9 @@ async function runUFCContestEV(ctx){
       _sdCptBase = raw.map(v=>Math.max(0.02, v*100/s0));
     }
   }
+  // Captains get the same temperature — it is a statement about the field, not
+  // about one slot.
+  if(_SD && _sdCptBase) _sdCptBase = evOwnTemper(_sdCptBase, _ownTemp);
   // A captain target for one ownership scenario: scale each player's captain
   // number by the same relative perturbation the scenario applied to his flex
   // number (ownership error is a property of the projection, not of the slot),
@@ -11291,7 +11626,17 @@ async function runUFCContestEV(ctx){
     if(asIdx.length && totW>0) sharpPool={asIdx, totW};
   };
   rebuildSharpPool();
-  if(sharpPool) log(`Field realism: ${Math.round(sharpShare*100)}% of modeled entries play like optimizers (drawn from the candidate pool), not Own% chalk.`);
+  // The field model in one sentence: which contest was picked, how big and how
+  // expensive it is, and how much of it is modeled as optimizers rather than
+  // Own% chalk. Always logged — "no sharp slice" is itself a fact about the run.
+  {
+    const _cs = contestSettings(slate);
+    log(`Field realism: ${_cs ? _cs.label : 'Custom contest'} — ${F.toLocaleString()} × ${contestFeeStr(fee)}, `
+      + `${Math.round(sharpShare*100)}% of entries modeled as optimizers`
+      + (sharpPool ? ' (drawn from the candidate pool), not Own% chalk.'
+                   : ' — but no candidate pool was available, so the field is pure Own% chalk.')
+      + (_ownTemp!==1 ? ` Ownership temperature ${_ownTemp.toFixed(2)} (${_ownTemp<1?'flatter':'more concentrated'} than the projected column).` : ''));
+  }
 
   const NF = 2000;
   // The sampled field stands in for F real entries, so sampling MORE lineups
@@ -12709,7 +13054,9 @@ async function runUFCContestEV(ctx){
       }));
     }
     window._lastSimCtx.evField = {
-      sd: _SD, fieldSize: F, fee, K,
+      // The field-model parameters are part of the frame's identity: the hand
+      // builder may only reuse this draw when it is pricing the SAME contest.
+      sd: _SD, fieldSize: F, fee, K, sharpShare, ownTemp:_ownTemp,
       ids: fieldPool.map(p=>p.id),
       fields: fields.map(f=>f.map(l=>l.slice())),
       scenarios: scenarios.map(v=>Array.from(v)),
@@ -14430,7 +14777,7 @@ async function runPgaSimGen(){
       if(_tot > 0) for(const e of ranked){ if(e._pivot) continue;
         for(const p of e.lineup) _appGen[p.id] = (_appGen[p.id]||0) + (e.count||1)/_tot; }
     }
-    out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, appearRate:_appGen, oosParity:1, sharpShare:0.15, se:_se, dominanceRepair:true, maxSal,
+    out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, appearRate:_appGen, oosParity:1, sharpShare:contestSharpShare(slate), ownTemp:contestOwnTemp(slate), se:_se, dominanceRepair:true, maxSal,
       // Field frame = full slate (same doctrine as UFC/NASCAR): the modeled
       // opponents roster hidden golfers too — simScoresById is already keyed
       // for the whole simPool, so the field sampler always has real scores.
@@ -14677,7 +15024,7 @@ async function runUFCSimGenInner(){
       // Field frame: the modeled 47.5k opponents play the FULL slate — hidden
       // fighters carry sims + Own%, and stance baselines use full-slate rates.
       fieldPool: fullPool, appearRateField: appearRateFull || appearRate,
-      oosParity:1, sharpShare:0.15, se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:false, maxSal, minSal});
+      oosParity:1, sharpShare:contestSharpShare(slate), ownTemp:contestOwnTemp(slate), se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:false, maxSal, minSal});
     if(out === null && window._genCancelled) log('Cancelled.');
     document.getElementById('genBtn').disabled = false;
     cancelBtn?.remove();
@@ -16767,7 +17114,7 @@ async function runNascarSimGen(){
     const out = await runUFCContestEV({slate, pool: evPool, ranked: rankedNas, simScoresById: simScoresByIdNas,
       totalSims: simsDone2, genSims: Math.ceil(simsDone2/2), target, maxExpPct, overrides,
       fieldPool: fullField,
-      oosParity:1, sharpShare:0.15, se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:true, maxSal, minSal});
+      oosParity:1, sharpShare:contestSharpShare(slate), ownTemp:contestOwnTemp(slate), se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:true, maxSal, minSal});
     if(out===null && window._genCancelled) log('Cancelled.');
     done(); return;
   }
@@ -20494,7 +20841,7 @@ async function runNflSimGen(){
       // Min Salary. Every other sport passes this; NFL did not, so dominance
       // repair ran with `minSalC = 0` and its floor guard was dead code — the
       // repaired lineup could land under the floor the user typed.
-      sharpShare:0.15, se:_se, dominanceRepair:!SD, maxSal, minSal, stackRules});
+      sharpShare:contestSharpShare(slate), ownTemp:contestOwnTemp(slate), se:_se, dominanceRepair:!SD, maxSal, minSal, stackRules});
     if(out===null && window._genCancelled) log('Cancelled.');
   } else {
     out = await runPgaSimScoreSelect({slate, pool, ranked, simScoresById, simsDone, target, maxExpPct, overrides,
@@ -22482,11 +22829,24 @@ function toggleSavedDetails(i, btn){
 const HB_HEAD_SHAPE = [1, .20, .10, .075, .05, .035, .028, .022, .017, .012];
 const HB_TAIL_ALPHA = 1.15;      // deep-tier decay exponent
 const HB_PAYOUT_RATIO = 0.842;   // prize pool / entry dollars (DK reference)
-const HB_EV_PRESETS = [
-  {key:'large',  name:'Large-field GPP',  fieldSize:150000, fee:20,  firstShare:0.20, paidFrac:0.22},
-  {key:'single', name:'Single-entry GPP', fieldSize:25000,  fee:20,  firstShare:0.12, paidFrac:0.25},
-  {key:'high',   name:'High-stakes GPP',  fieldSize:2500,   fee:500, firstShare:0.15, paidFrac:0.20},
-];
+// The three fixed archetypes this used to hold (Large-field / Single-entry /
+// High-stakes GPP) are gone: the contest is now picked on two axes and the
+// payout record is GENERATED from CONTEST_FORMATS × CONTEST_STAKES. Cached per
+// combination — hbBuildPayout memoizes on the record it is handed, and
+// renderSaved prices every saved lineup through here on each repaint.
+const _hbPayoutRecs = new Map();
+function contestPayoutRec(format, stakes){
+  const F=contestFormat(format), S=contestStake(stakes)||contestStake(CONTEST_DEFAULT_STAKES);
+  if(!F) return null;
+  const k=F.key+'|'+S.key;
+  let rec=_hbPayoutRecs.get(k);
+  if(!rec){
+    rec={key:k, name:`${F.name} · ${S.name}`, fieldSize:F.fieldSize, fee:S.fee,
+         firstShare:F.firstShare, paidFrac:F.paidFrac};
+    _hbPayoutRecs.set(k, rec);
+  }
+  return rec;
+}
 function hbBuildPayout(rec){
   if(rec._payout) return rec._payout;
   const F=rec.fieldSize, fee=rec.fee;
@@ -22498,22 +22858,32 @@ function hbBuildPayout(rec){
   // Total paid to ranks 10..paid for a given floor m. Closed form: the power
   // piece runs to the crossover rank where the curve drops to m, the rest is
   // flat at m. Monotone increasing in m, so one bisection lands it.
+  // The head places are floored at m as well (a mini field's min-cash can sit
+  // above what the power curve gives rank 6), so the head's contribution is a
+  // function of m too.
+  const headTot=m=>head.reduce((a,b)=>a+Math.max(m,b),0);
   const tailTot=(m,A)=>{
+    if(m>=A) return m*(paid-10);                   // flat from rank 11 on
     const rStar=Math.min(paid, 10*Math.pow(A/Math.max(1e-9,m), 1/HB_TAIL_ALPHA));
     let s=A*10/(HB_TAIL_ALPHA-1)*(1-Math.pow(rStar/10, 1-HB_TAIL_ALPHA));
     if(paid>rStar) s+=m*(paid-rStar);
     return s;
   };
-  const need=pool-headSum;
-  let lo=0, hi=a10, m=a10*0.5;
-  for(let it=0; it<80; it++){ m=(lo+hi)/2; if(tailTot(m,a10)<need) lo=m; else hi=m; }
+  // Small fields (an SE mini at 750 entries pays ~170 places) cannot absorb
+  // the pool below rank 10's power-curve prize, so the floor is allowed to
+  // rise above a10 into a flat min-cash region — that is what DK's small-SE
+  // structures look like (1st ≈12%, then a wide flat band at ~2–3× the fee)
+  // — instead of scaling 1st place up to 28% of the pool.
+  let lo=0, hi=Math.max(a10, pool/Math.max(1,paid)), m=a10*0.5;
+  for(let it=0; it<80; it++){ m=(lo+hi)/2; if(headTot(m)+tailTot(m,a10)<pool) lo=m; else hi=m; }
   m=(lo+hi)/2;
+  head=head.map(v=>Math.max(m,v));
   // If even a floor at rank 10's prize can't absorb the pool (a very shallow
   // paid count against a small head share), the bisection pins at a10 and the
   // curve is short. Scaling the WHOLE curve by one factor fixes the pool
   // exactly and preserves the shape — the 1st-place share is what gives, which
   // is the right thing to trade for an honest prize pool.
-  const tot=headSum+tailTot(m,a10);
+  const tot=head.reduce((a,b)=>a+b,0)+tailTot(m,a10);
   if(tot>0 && Math.abs(tot-pool)>pool*1e-6){
     const k=pool/tot; head=head.map(v=>v*k); a10*=k; m*=k;
   }
@@ -22532,7 +22902,23 @@ function hbBuildPayout(rec){
     desc:`${rec.name}: $${Math.round(head[0]).toLocaleString()} to 1st, min cash $${m<10?m.toFixed(2):Math.round(m).toLocaleString()}, paying through ${paid.toLocaleString()} of ${F.toLocaleString()}`};
   return rec._payout;
 }
-// The live contest for this slate: one of the three archetypes, or "Custom…",
+// The builder's FORMAT selector value, normalized: 'off', 'custom', or one of
+// the CONTEST_FORMATS keys. Stored slates carrying a pre-picker value
+// ('large' / 'single' / 'high') read through the legacy map.
+function hbPresetKey(slate){
+  if(!slate) return 'off';
+  const v=slate._hbEvPreset||'off';
+  if(v==='off'||v==='custom') return v;
+  if(HB_LEGACY_PRESETS[v]) return HB_LEGACY_PRESETS[v].format;
+  return contestFormat(v) ? v : 'off';
+}
+function hbStakesKey(slate){
+  if(!slate) return CONTEST_DEFAULT_STAKES;
+  if(slate._contest && contestStake(slate._contest.stakes)) return slate._contest.stakes;
+  const leg=HB_LEGACY_PRESETS[slate._hbEvPreset||''];
+  return leg ? leg.stakes : CONTEST_DEFAULT_STAKES;
+}
+// The live contest for this slate: the picked format × stakes, or "Custom…",
 // which reuses whatever the Auto-Gen Contest-EV block is configured with (so
 // the number in the builder and the number the generator optimizes are the
 // same number). Returns null when EV is off.
@@ -22541,9 +22927,19 @@ function hbContest(slate){
   // evFieldOptsFor — the same one runUFCContestEV uses — so a UFC roster is
   // drawn against a UFC field, not the NFL positional one.
   if(!slate) return null;
-  const key=slate._hbEvPreset || 'off';
+  const key=hbPresetKey(slate);
   if(key==='off') return null;
+  // A format is picked but the slate has no _contest yet (a legacy
+  // '_hbEvPreset' or a slate written before the picker existed) — adopt the
+  // mapped pair so BOTH surfaces agree from the first render.
+  if(key!=='custom' && !(slate._contest && slate._contest.format===key)){
+    setSlateContest(slate, key, hbStakesKey(slate), true);
+  }
   if(key==='custom'){
+    // Even a custom contest gets a field model: the stakes LABEL (from the
+    // picker or mapped off the built-in library entry) still says how sharp
+    // the field is. Falls back to the historic constants when nothing is set.
+    const _cs=contestSettings(slate);
     const ev=slate._ufcEv||{};
     const F=Math.max(10, parseInt(ev.fieldSize)||10000);
     const fee=Math.max(0.01, parseFloat(ev.fee)||20);
@@ -22559,11 +22955,39 @@ function hbContest(slate){
       paid=0; for(let r=1;r<=F;r++){ if(payout.at(r)>0) paid=r; else if(paid>0 && r-paid>5000) break; }
       slate._hbPaidMemo={k:_pk, v:paid};
     }
-    return {key:'custom', name:'Custom (Auto-Gen EV settings)', fieldSize:F, fee, payout:payout.at, paid};
+    return {key:'custom|'+(_cs?_cs.key:'-'), name:'Custom (Auto-Gen settings)',
+            fieldSize:F, fee, payout:payout.at, paid,
+            format:_cs?_cs.format:null, stakes:_cs?_cs.stakes:null,
+            sharpShare:_cs?_cs.sharpShare:EV_SHARP_SHARE, ownTemp:_cs?_cs.ownTemp:1,
+            desc:`Custom (Auto-Gen settings): ${F.toLocaleString()} × ${contestFeeStr(fee)}, paying through ${paid.toLocaleString()}`};
   }
-  const rec=HB_EV_PRESETS.find(p=>p.key===key); if(!rec) return null;
+  const cs=contestSettings(slate); if(!cs) return null;
+  // A contest picked from the built-in library keeps ITS field size, fee and
+  // payout table (exact:false) — the format/stakes pair is only a label there,
+  // and the payout has to come from _ufcEv exactly as the custom branch does.
+  if(!cs.exact){
+    const ev=slate._ufcEv||{};
+    const payout=buildPayoutFn({fieldSize:cs.fieldSize, fee:cs.fee, preset:ev.preset||'gpp', custom:ev.custom});
+    const _pk=[cs.fieldSize, cs.fee, ev.preset||'gpp', String(ev.custom||'')].join('|');
+    let paid;
+    if(slate._hbPaidMemo && slate._hbPaidMemo.k===_pk) paid=slate._hbPaidMemo.v;
+    else {
+      paid=0; for(let r=1;r<=cs.fieldSize;r++){ if(payout.at(r)>0) paid=r; else if(paid>0 && r-paid>5000) break; }
+      slate._hbPaidMemo={k:_pk, v:paid};
+    }
+    return {key:cs.key, name:cs.label, fieldSize:cs.fieldSize, fee:cs.fee, payout:payout.at, paid,
+            format:cs.format, stakes:cs.stakes, sharpShare:cs.sharpShare, ownTemp:cs.ownTemp,
+            desc:`${cs.label}: ${cs.fieldSize.toLocaleString()} × ${contestFeeStr(cs.fee)}, paying through ${paid.toLocaleString()}`};
+  }
+  const rec=contestPayoutRec(cs.format, cs.stakes); if(!rec) return null;
   const pay=hbBuildPayout(rec);
-  return {key:rec.key, name:rec.name, fieldSize:rec.fieldSize, fee:rec.fee, payout:pay.at, paid:pay.paid, desc:pay.desc};
+  return {key:cs.key, name:cs.label, fieldSize:cs.fieldSize, fee:cs.fee, payout:pay.at, paid:pay.paid,
+          format:cs.format, stakes:cs.stakes, sharpShare:cs.sharpShare, ownTemp:cs.ownTemp,
+          desc:`${cs.label} — ${cs.fieldSize.toLocaleString()} × ${contestFeeStr(cs.fee)}: `
+             + `$${Math.round(pay.first).toLocaleString()} to 1st, min cash `
+             + `$${pay.minCash<10?pay.minCash.toFixed(2):Math.round(pay.minCash).toLocaleString()}, `
+             + `paying through ${pay.paid.toLocaleString()} (${Math.round(100*pay.paid/cs.fieldSize)}%), `
+             + `${Math.round(cs.sharpShare*100)}% of the field modeled as optimizers`};
 }
 // The sim context, but only if it describes THIS slate — a context left over
 // from another slate would price this roster with the wrong players' scores.
@@ -22594,8 +23018,10 @@ function hbCptTargets(pool){
 // strided to HB_MAX_SIMS: the build is O(N × sims) and 600 held-out worlds
 // already resolve win/cash rates to well under a tenth of a point.
 const HB_MAX_SIMS = 600;
-// Fraction of the modeled field that plays like an optimizer rather than like
-// the Own% column — the same 0.15 runNflSimGen hands runUFCContestEV.
+// FALLBACK fraction of the modeled field that plays like an optimizer rather
+// than like the Own% column. Live runs take this from CONTEST_STAKES via
+// contestSharpShare(slate); this constant is only what a slate with no picked
+// contest gets, and is the historic value both surfaces used to hard-code.
 const EV_SHARP_SHARE = 0.15;
 // ── ONE FIELD MODEL FOR BOTH SURFACES (2026-09-04) ──────────────────────────
 // This used to build a SINGLE field from the as-projected ownership column,
@@ -22619,9 +23045,19 @@ function hbField(slate, ctx, contest){
   // optimized against — see the handoff note in runUFCContestEV. Anything else
   // (a different preset, a Sim-Score run that never built a field) samples
   // fresh below.
-  const hand=(ctx.evField && ctx.evField.sd===SD && ctx.evField.fieldSize===contest.fieldSize)
+  // The generator's own draw is reusable only when it modeled the SAME field:
+  // same shape, same size, and same field-model parameters (a different stakes
+  // level is a different field even at the same entry count).
+  const _sharp=(contest.sharpShare!=null)?contest.sharpShare:EV_SHARP_SHARE;
+  const _temp=(contest.ownTemp>0)?contest.ownTemp:1;
+  const hand=(ctx.evField && ctx.evField.sd===SD && ctx.evField.fieldSize===contest.fieldSize
+              && (ctx.evField.sharpShare==null || Math.abs(ctx.evField.sharpShare-_sharp)<1e-9)
+              && (ctx.evField.ownTemp==null || Math.abs(ctx.evField.ownTemp-_temp)<1e-9))
     ? ctx.evField : null;
   const key=[ctx.ts, ctx.simsDone, contest.key, contest.fieldSize, SD?'sd':'cl',
+             // format/stakes are IN contest.key, but the two derived field
+             // numbers are what actually shape the draw — key on them too.
+             _sharp, _temp,
              nSharp, hand?'gen':'own',
              // The sampling cap is part of the field's identity (see _fCap).
              slate._genMaxSal||'',
@@ -22662,9 +23098,11 @@ function hbField(slate, ctx, contest){
     idx=reuse.simIdx;
   } else {
     // Same floor the generator's baseOwn uses. On showdown p.own IS flex own.
-    const baseOwn=pool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2));
+    // Same ownership temperature too — the stakes level is a property of the
+    // contest, and runUFCContestEV applies it at the identical point.
+    const baseOwn=evOwnTemper(pool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2)), _temp);
     scenarios=evOwnScenarios(baseOwn, KK, EV_SCEN_SIGMA);
-    const cptBase=SD ? hbCptTargets(pool) : null;
+    const cptBase=SD ? evOwnTemper(hbCptTargets(pool), _temp) : null;
     cptScen=SD ? scenarios.map(s=>evCptScenario(cptBase, s, baseOwn)) : null;
     // Same cap the generator hands its field sampler (ctx.maxSal || SALARY_CAP).
     // A user who dials Max Salary below the DK cap was otherwise getting a
@@ -22696,7 +23134,7 @@ function hbField(slate, ctx, contest){
       const f=(drawn||{}).field;
       if(!f || !f.length) return null;
       if(totW>0){
-        const ns=Math.floor(f.length*EV_SHARP_SHARE);
+        const ns=Math.floor(f.length*_sharp);
         for(let j=0;j<ns;j++){
           let r=Math.random()*totW, pick=sharp[0];
           for(const x of sharp){ r-=x.w; if(r<=0){ pick=x; break; } }
@@ -22851,10 +23289,48 @@ function hbPct(v){
   if(v>=0.001) return v.toFixed(3);
   return '~0';   // a real number, but not one worth six leading zeros
 }
+// The builder's FORMAT selector. Picking a format writes the SAME
+// slate._contest / slate._ufcEv the Auto-Gen picker writes, so the generator
+// and the card quote one contest. Legacy values ('large'/'single'/'high') are
+// accepted and mapped.
 function hbSetPreset(v){
   const s=activeSlate(); if(!s) return;
-  s._hbEvPreset=v; save();
+  const leg=HB_LEGACY_PRESETS[v];
+  const fmt=leg?leg.format:v;
+  if(contestFormat(fmt)){
+    setSlateContest(s, fmt, leg?leg.stakes:hbStakesKey(s), true);
+    s._hbEvPreset=fmt;
+  } else {
+    s._hbEvPreset=(v==='custom')?'custom':'off';
+  }
+  save();
+  syncContestEvInputs();
   renderHbEv(); renderSaved();
+}
+// The builder's STAKES selector — same write, other axis.
+function hbSetStakes(v){
+  const s=activeSlate(); if(!s) return;
+  const fmt=hbPresetKey(s);
+  if(!contestFormat(fmt)) return;
+  setSlateContest(s, fmt, v, true);
+  save();
+  syncContestEvInputs();
+  renderHbEv(); renderSaved();
+}
+// Mirror slate._ufcEv into the Auto-Gen Contest-EV inputs (they are on another
+// tab, so they exist but are not visible when the builder writes them).
+function syncContestEvInputs(){
+  const s=activeSlate(); if(!s) return;
+  const ev=s._ufcEv||{};
+  const evF=document.getElementById('ufcEvField'); if(evF && ev.fieldSize!=null) evF.value=ev.fieldSize;
+  const evFee=document.getElementById('ufcEvFee'); if(evFee && ev.fee!=null) evFee.value=ev.fee;
+  const evC=document.getElementById('ufcEvCustom'); if(evC){ evC.value=ev.custom||''; evC.style.display=(ev.preset==='custom')?'block':'none'; }
+  [['gpp','ufcEvPresetGpp'],['double','ufcEvPresetDouble'],['custom','ufcEvPresetCustom']].forEach(([k,bid])=>{
+    const b=document.getElementById(bid); if(b) b.classList.toggle('active', (ev.preset||'gpp')===k);
+  });
+  const sel=document.getElementById('ufcEvSaved'); if(sel) sel.value=ev.contestId||'';
+  syncContestPickerUI();
+  if(typeof updateContestEvSummary==='function') updateContestEvSummary();
 }
 function hbGotoAutogen(){
   const tabs=[...document.querySelectorAll('.tab')];
@@ -22910,20 +23386,39 @@ function hbSimComposite(players, cptId){
   if(!players.every(p=>p && ctx.simScoresById[p.id])) return null;
   return lineupSimComposite(players, ctx.simScoresById, _detailSimIdx(ctx.simsDone), cptId);
 }
+// The card header's two selects: FORMAT (Off / the four formats / Custom) and
+// STAKES (disabled unless a format is picked — Off prices nothing and Custom
+// takes its field model from whatever the Auto-Gen block is set to).
+function renderHbEvHeader(){
+  const slate=(typeof activeSlate==='function')?activeSlate():null; if(!slate) return;
+  const cur=hbPresetKey(slate);
+  const sel=document.getElementById('hbEvPreset');
+  if(sel){
+    const opts=[{key:'off',name:'Off'}].concat(
+      CONTEST_FORMATS.map(f=>({key:f.key, name:contestFormatLabel(f)})),
+      [{key:'custom',name:'Custom (Auto-Gen)'}]);
+    const want=opts.map(o=>`<option value="${o.key}"${o.key===cur?' selected':''}>${esc(o.name)}</option>`).join('');
+    if(sel.innerHTML!==want) sel.innerHTML=want;
+    sel.value=cur;
+  }
+  const st=document.getElementById('hbEvStakes');
+  if(st){
+    const on=!!contestFormat(cur);
+    const sk=hbStakesKey(slate);
+    const want=CONTEST_STAKES.map(x=>`<option value="${x.key}"${x.key===sk?' selected':''}>${esc(x.name)} · ${contestFeeStr(x.fee)}</option>`).join('');
+    if(st.innerHTML!==want) st.innerHTML=want;
+    st.value=sk;
+    st.disabled=!on;
+    st.title=on?'Stakes set the entry fee and how sharp the modeled field is':'Pick a contest format to set the stakes';
+  }
+}
 function renderHbEv(){
   const el=document.getElementById('hbEvBlock'); if(!el) return;
   const slate=activeSlate();
   if(!slate){ el.style.display='none'; return; }
   el.style.display='';
-  const cur=slate._hbEvPreset||'off';
-  const sel=document.getElementById('hbEvPreset');
-  if(sel){
-    const opts=[{key:'off',name:'Off'}].concat(
-      HB_EV_PRESETS.map(p=>({key:p.key, name:`${p.name} · $${p.fee} × ${p.fieldSize.toLocaleString()}`})),
-      [{key:'custom',name:'Custom (Auto-Gen EV)'}]);
-    sel.innerHTML=opts.map(o=>`<option value="${o.key}"${o.key===cur?' selected':''}>${esc(o.name)}</option>`).join('');
-    sel.value=cur;
-  }
+  renderHbEvHeader();
+  const cur=hbPresetKey(slate);
   const body=document.getElementById('hbEvBody'); if(!body) return;
 
   const ids=slate.currentLineup||[];
