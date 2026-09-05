@@ -1201,8 +1201,8 @@ function fightRow(pair){
   }else if(!A&&B){A=B;B=null;}
   const dA=A?A.diff:0,dB=B?B.diff:0;
   const sweat=Math.max(Math.abs(dA),Math.abs(dB));
-  const best=(!B)?A:(!A)?B:(dA>=dB?A:B);
-  const other=best===A?B:A;
+  let best=(!B)?A:(!A)?B:(dA>=dB?A:B);
+  let other=best===A?B:A;
 
   // Result inference (clearly a heuristic — see the legend). Only fires when the
   // sidecar carries FPTS and one corner is decisively ahead; DK's MMA win bonus
@@ -1231,15 +1231,28 @@ function fightRow(pair){
     text='You&rsquo;re over the field on <b>both</b> corners ('+esc(A.name)+' '+pct(A.mine)+' vs '+pct(A.field)+', '
       +esc(B.name)+' '+pct(B.mine)+' vs '+pct(B.field)+') — you gain on any decisive result, most on <b>'+esc(best.name)+'</b>.';
   }else if(bothUnder){
-    cls='bust';tag='Need a bust';
-    const chalk=(A.field>=B.field)?A:B;
-    text='<b>Need this fight to BUST</b> — you&rsquo;re under the field on both corners ('+esc(A.name)+' '+pct(A.mine)
-      +' vs field '+pct(A.field)+', '+esc(B.name)+' '+pct(B.mine)+' vs field '+pct(B.field)+'). ';
-    if(best.mine>0){
-      text+='Least-bad outcome: <b>'+esc(best.name)+'</b> wins — you at least hold '+pct(best.mine)+' there'
-        +(best.win!=null&&best.win<0.5?' and he&rsquo;s the dog, so the field loses its chalk':'')+'.';
+    // A bust spot still has a rooting interest. The favourite winning — and
+    // winning quietly — is the outcome most likely to keep BOTH corners out of
+    // the optimal, so the favourite is the default root; the exception is when
+    // you actually hold meaningfully more of one corner than the other, in
+    // which case you root for the corner you own.
+    cls='bust';
+    const fav=(A.win!=null&&B.win!=null)?(A.win>=B.win?A:B):((A.field>=B.field)?A:B);
+    const dog=fav===A?B:A;
+    const closeCall=Math.abs(dA-dB)<=LEV_MEANINGFUL;
+    const root=(A.mine===0&&B.mine===0)?fav:(closeCall?fav:best);
+    best=root; other=root===A?B:A;
+    tag='Root for '+root.name+' · bust spot';
+    const favTxt=root===fav?'the favourite':'the underdog';
+    text='<b>Root for '+esc(root.name)+'</b> — this is a <b>bust spot</b>: you&rsquo;re under the field on both corners ('
+      +esc(A.name)+' '+pct(A.mine)+' vs field '+pct(A.field)+', '+esc(B.name)+' '+pct(B.mine)+' vs field '+pct(B.field)+'). ';
+    if(root.mine>0){
+      text+='You hold '+pct(root.mine)+' of him vs '+pct(other.mine)+' of '+esc(other.name)+', so he&rsquo;s your side';
+      if(root===fav)text+=' — and as '+favTxt+(root.win!=null?' ('+pct(root.win*100)+')':'')+' a win by decision is the field&rsquo;s worst case';
+      text+='.';
     }else{
-      text+='You&rsquo;re on neither, so root for the chalk — <b>'+esc(chalk.name)+'</b> at '+pct(chalk.field)+' field — to lose.';
+      text+='You&rsquo;re on neither, so you want '+favTxt+(root.win!=null?' ('+pct(root.win*100)+')':'')
+        +' to win <b>quietly</b> — a decision with no finish keeps both corners out of the optimal lineup.';
     }
   }else{
     const strong=Math.abs(best.diff)>=LEV_STRONG||(best.ratio!=null&&best.ratio!==Infinity&&best.ratio>=1.5)||best.ratio===Infinity;
@@ -1326,7 +1339,7 @@ function fightCard(r){
   const A=r.A,B=r.B;
   // One bar scale for the whole bout so the two corners are visually comparable.
   const cap=Math.max(1,A?A.field:0,A?A.mine:0,B?B.field:0,B?B.mine:0);
-  const rootName=(r.cls==='root'||r.cls==='lean'||r.cls==='both')?r.best.name:null;
+  const rootName=(r.cls==='root'||r.cls==='lean'||r.cls==='both'||(r.cls==='bust'&&/bust spot$/.test(r.tag)))?r.best.name:null;
   const doneBadge=r.status
     ? '<span class="badge b-gray">'
       +(r.status.winner?'done · '+esc(r.status.winner)+' won':'scored · winner unclear')+'</span>'
