@@ -296,6 +296,142 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .sdash-outbtn:hover{opacity:1;filter:none;border-color:var(--border);}
 .sdash-outbtn.on{opacity:1;filter:none;color:var(--red);border-color:rgba(239,68,68,.45);}
 .sdash-auto-tag{font-size:8px;color:var(--red);border:1px solid rgba(239,68,68,.4);border-radius:3px;padding:0 3px;margin-left:4px;white-space:nowrap;}
+/* ── Sim tab: game grid + detail panel ───────────────────────────────────────
+   A 13-game main slate rendered as thirteen stacked per-game editors is a
+   kilometre of scrolling, so the tab is now two levels: a compact grid of game
+   tiles (Level 1) and ONE open game's full editor (Level 2). The tile carries
+   the two controls a user actually reaches for while scanning — Total and
+   Spread — so re-scaling a game never requires opening it. Showdown skips the
+   grid entirely: with one game there is nothing to navigate. */
+.sdash-split{display:flex;gap:12px;align-items:flex-start;}
+.sdash-gridcol{flex:1 1 auto;min-width:0;}
+.sdash-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:8px;}
+.sdash-win{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:12px 0 6px;padding-bottom:3px;border-bottom:1px solid var(--border);font-family:'DM Mono',monospace;}
+.sdash-win:first-child{margin-top:0;}
+.sdg{position:relative;display:flex;flex-direction:column;gap:4px;padding:8px 10px 7px;border:1px solid var(--border);border-radius:8px;background:var(--surface2,rgba(255,255,255,.03));cursor:pointer;transition:border-color .12s,background .12s;user-select:none;min-width:0;}
+.sdg:hover{border-color:var(--muted);}
+.sdg.adj{border-color:rgba(245,197,24,.4);}
+.sdg.on{border-color:var(--accent);background:rgba(245,197,24,.07);}
+.sdg-hdr{display:flex;align-items:baseline;justify-content:space-between;gap:6px;font-family:'DM Mono',monospace;white-space:nowrap;}
+.sdg-side{display:flex;align-items:baseline;gap:5px;min-width:0;}
+.sdg-team{font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--text);}
+.sdg-team.fav{color:var(--accent);}
+.sdg-imp{font-size:13px;font-weight:600;color:var(--green);font-variant-numeric:tabular-nums;}
+.sdg-imp.adj{color:var(--accent);}
+.sdg-dash{color:var(--muted);font-size:10px;}
+.sdg-sliders{display:flex;flex-direction:column;gap:1px;cursor:default;}
+.sdg-srow{display:grid;grid-template-columns:36px 1fr 62px;align-items:center;gap:6px;}
+.sdg-slbl{font-size:9px;color:var(--muted);}
+.sdg-sval{font-family:'DM Mono',monospace;font-size:9.5px;color:var(--text);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;}
+.sdg .sdash-range{height:12px;}
+.sdg-sub{display:flex;align-items:center;gap:7px;font-size:9.5px;color:var(--muted);font-family:'DM Mono',monospace;letter-spacing:.3px;white-space:nowrap;}
+.sdg-sub b{color:var(--text);font-weight:500;}
+.sdg-chip{position:absolute;top:-7px;right:8px;font-size:8px;letter-spacing:.4px;padding:1px 5px;border-radius:8px;background:rgba(245,197,24,.14);color:var(--accent);border:1px solid rgba(245,197,24,.4);white-space:nowrap;}
+.sdg-outchip{margin-left:auto;font-size:8.5px;color:var(--red);border:1px solid rgba(239,68,68,.4);border-radius:8px;padding:0 5px;white-space:nowrap;}
+.sdg-cap{font-size:9px;color:var(--accent);letter-spacing:.2px;white-space:normal;}
+/* Level 2. Given the room the panel sits BESIDE the grid and the two scroll
+   independently; when there isn't room it REPLACES the grid and gets a sticky
+   "← All games" bar. The breakpoint is a CONTAINER query, not a viewport one,
+   because the Sim tab lives in the right rail (#mainLayout's second column,
+   380–520px depending on window width) — a viewport rule would put a two-column
+   split inside a 440px rail on a 1400px monitor. 760px is where a 40/60 split
+   still leaves the editor's 118px-label slider rows room to breathe. */
+.sdash-detail{flex:1 1 0;min-width:0;}
+.sdash-dhdr{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:5px 0 7px;margin-bottom:6px;background:var(--surface);border-bottom:1px solid var(--border);}
+.sdash-dtitle{font-family:'DM Mono',monospace;font-size:13px;font-weight:700;letter-spacing:.5px;margin-right:2px;}
+.sdash-dtitle .muted{color:var(--muted);font-weight:400;font-size:10px;}
+.sdash-nav{background:none;border:1px solid var(--border);color:var(--muted);border-radius:5px;font-size:12px;line-height:1;padding:3px 7px;cursor:pointer;font-family:'DM Sans',sans-serif;}
+.sdash-nav:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}
+.sdash-nav:disabled{opacity:.35;cursor:default;}
+.sdash-dspacer{flex:1;}
+/* The panel takes focus so ArrowLeft/ArrowRight can walk the games, but it is a
+   region rather than a control — the app's global focus ring would draw a 2px
+   gold box around the whole editor every time a tile is clicked. */
+.sdash-detail:focus,.sdash-detail:focus-visible{outline:none;box-shadow:none;}
+.sdash-back{display:none;}
+.sdash-inacts{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 8px;font-size:10px;color:var(--muted);}
+.sdash-inact-lbl{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+.sdash-inact{display:inline-flex;align-items:center;gap:3px;border:1px solid rgba(239,68,68,.4);background:rgba(239,68,68,.08);color:var(--red);border-radius:10px;padding:1px 3px 1px 7px;font-size:10px;font-family:'DM Mono',monospace;}
+.sdash-inact button{background:none;border:none;color:inherit;cursor:pointer;font-size:10px;line-height:1;padding:1px 3px;opacity:.75;border-radius:8px;}
+.sdash-inact button:hover{opacity:1;background:rgba(239,68,68,.18);}
+.sdash-inact-hint{font-size:9.5px;color:var(--muted);opacity:.85;}
+/* Inside the panel the editor is the panel: drop the card frame (the panel has
+   its own) and the duplicated "DET vs NO" (the panel header already says it),
+   keeping the implied-total read-out that shares that row. */
+.sdash-detail .sdash-game{border:none;background:none;box-shadow:none;padding:0;margin:0;border-radius:0;}
+.sdash-detail .sdash-game-name{display:none;}
+.sdash-detail .sdash-game-imp{font-size:10.5px;}
+/* ── The Sim inputs modal ────────────────────────────────────────────────────
+   The board lived in the right rail (380–520px) and never fitted: its natural
+   shape is a grid of games next to ONE open game's editor. It is a pop-out now,
+   sized to the window, and #simDashPanel is still the content root so
+   renderSimDash and every sdash- selector are untouched. The card is a flex
+   column: the title / Reset all / presets header and the OUT note stay pinned
+   while the grid and the detail panel scroll inside it. */
+.sim-modal-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;
+  padding:14px 18px 16px;width:min(1520px,94vw);height:92vh;position:relative;
+  box-shadow:0 8px 32px rgba(0,0,0,.6);display:flex;flex-direction:column;overflow:hidden;}
+.sim-modal-x{position:absolute;top:10px;right:12px;background:none;border:none;color:var(--muted);
+  font-size:18px;line-height:1;cursor:pointer;z-index:6;padding:2px 4px;}
+.sim-modal-x:hover{color:var(--accent);}
+#simInputsModal #simDashPanel{flex:1;min-height:0;display:flex;flex-direction:column;}
+#simInputsModal .sdash-top{padding-right:26px;}      /* clear of the ✕ */
+#simInputsModal .sdash-dhdr{background:var(--panel);}  /* the card's ground, not the tab's */
+#simInputsModal .sdash-split{flex:1;min-height:0;align-items:stretch;}
+/* One scroll container per column — and, on a showdown slate (which renders the
+   single editor with no grid at all), the editor itself is that container. */
+#simInputsModal .sdash-gridcol,#simInputsModal .sdash-detail,
+#simInputsModal>.sim-modal-card>#simDashPanel>.sdash-game{
+  min-height:0;overflow-y:auto;overscroll-behavior:contain;}
+#simInputsModal>.sim-modal-card>#simDashPanel>.sdash-game{flex:1;}
+@media(max-width:760px){
+  .sim-modal-card{width:100vw;max-width:100vw;height:100vh;border:none;border-radius:0;padding:10px 10px 12px;}
+  /* On a phone the pinned title + blurb + preset row is a sixth of the screen.
+     Scroll the whole board instead and let the panel's own "← All games" bar be
+     the thing that stays put (it is sticky against this scroller). */
+  #simInputsModal #simDashPanel{display:block;overflow-y:auto;}
+  #simInputsModal .sdash-gridcol,#simInputsModal .sdash-detail,
+  #simInputsModal>.sim-modal-card>#simDashPanel>.sdash-game{overflow:visible;}
+}
+#simDashPanel{container-type:inline-size;container-name:sdash;}
+/* 1000px, not 760: below that a 55/45 split leaves the editor's 118px-label
+   slider rows too little room, and replacing the grid reads better. */
+@container sdash (min-width:1000px){
+  .sdash-split.open .sdash-gridcol{flex:0 0 55%;max-width:55%;}
+  /* One rule holds the two halves apart — without it the grid's last column and
+     the editor's first label read as one run of text. */
+  .sdash-split.open .sdash-detail{border-left:1px solid var(--border);padding-left:14px;}
+}
+@container sdash (max-width:999px){
+  .sdash-split.open .sdash-gridcol{display:none;}
+  /* The back bar costs the header a control's worth of width, so the reset
+     button loses its long form rather than wrapping the ✕ onto a second line. */
+  .sdash-rlong{display:none;}
+  .sdash-back{display:inline-block;background:none;border:1px solid var(--border);color:var(--accent);border-radius:5px;font-size:11px;padding:3px 8px;cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap;}
+}
+@container sdash (max-width:470px){
+  /* One tile per row rather than two 225px ones — the Total/Spread pair needs
+     the width more than the grid needs a second column. */
+  .sdash-grid{grid-template-columns:1fr;}
+}
+/* ── The two launchers ─────────────────────────────────────────────────────── */
+.sim-open-btn{display:inline-flex;align-items:center;gap:5px;background:none;border:1px solid var(--border);
+  color:var(--muted);border-radius:6px;font-size:11px;font-weight:600;padding:4px 9px;cursor:pointer;
+  font-family:'DM Sans',sans-serif;white-space:nowrap;transition:border-color .12s,color .12s,background .12s;}
+.sim-open-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim);}
+.sim-open-btn.armed{border-color:rgba(245,197,24,.45);color:var(--accent);}
+.sim-open-badge{font-family:'DM Mono',monospace;font-size:8.5px;letter-spacing:.3px;padding:0 5px;
+  border-radius:8px;background:rgba(245,197,24,.14);color:var(--accent);border:1px solid rgba(245,197,24,.4);}
+.sim-open-badge.out{background:rgba(239,68,68,.12);color:var(--red);border-color:rgba(239,68,68,.4);}
+.ngt-simbtn{align-self:center;margin-left:2px;}
+@media(max-width:520px){
+  .sdash-top{flex-direction:column;}
+  .sdash-actions{align-items:flex-start;width:100%;}
+  .sdash-presets select{max-width:130px;}
+  .sdash-row{grid-template-columns:84px 1fr 74px;}
+  .sdash-prow{grid-template-columns:minmax(70px,1.1fr) 1fr 52px 44px 18px 20px 18px;gap:4px;}
+  .sdash-autolean{margin-left:88px;}
+}
 .sd-pool-btn{opacity:1;font-size:11px;}
 .sd-pool-btn.on{color:var(--green);}
 .sd-pool-btn.off{color:var(--muted);}
@@ -994,7 +1130,7 @@ html { overscroll-behavior-y: contain; }
 .hb-ev{margin:6px 0 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);padding:6px 7px;}
 .hb-ev-head{display:flex;align-items:center;gap:6px;margin-bottom:5px;}
 .hb-ev-lbl{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;flex:1;}
-.hb-ev-sel{flex:0 0 auto;max-width:62%;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:2px 4px;font-family:inherit;}
+.hb-ev-sel{flex:0 1 auto;min-width:0;max-width:68%;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:2px 4px;font-family:inherit;}
 .hb-ev-num{font-family:'DM Mono',monospace;font-size:17px;font-weight:600;line-height:1.1;}
 .hb-ev-num.pos{color:var(--green);} .hb-ev-num.neg{color:var(--red);}
 .hb-ev-sub{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-top:2px;}
@@ -1003,6 +1139,20 @@ html { overscroll-behavior-y: contain; }
 .hb-ev-hint em{color:var(--accent2);font-style:normal;}
 .hb-ev-note{font-size:10px;color:var(--muted);line-height:1.4;}
 .hb-ev-pend{font-family:'DM Mono',monospace;font-size:14px;color:var(--muted);}
+/* LINEUP STATS CARD (2026-09-05) — one card for the roster being built: Proj /
+   Value / Own% always, Sim once a sim exists, Win% + Contest EV once a contest
+   is picked. A compact grid so it never scrolls sideways at 390px. */
+.hbst-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;}
+.hbst{background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:4px 6px;min-width:0;}
+.hbst.lit{border-color:rgba(245,197,24,.22);background:rgba(245,197,24,.05);}
+.hbst-l{font-family:'DM Mono',monospace;font-size:8px;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.hbst-v{font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:var(--text);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}
+.hbst-v.gold{color:var(--accent);}
+.hbst-v.pos{color:var(--green);}
+.hbst-v.neg{color:var(--red);}
+.hbst-v.dim{color:var(--muted);font-size:12px;font-weight:500;}
+.hbst-v .u{font-size:9px;opacity:.65;font-weight:400;}
+.hbst-grid > .hbst:last-child:nth-child(3n+1){grid-column:1 / -1;}
 .hb-ev-pend span{font-size:10px;}
 .hb-ev-go{margin-left:6px;background:var(--surface);border:1px solid var(--border);color:var(--accent);border-radius:4px;font-size:9px;padding:2px 6px;cursor:pointer;font-family:inherit;}
 .hb-ev-go:hover{border-color:var(--accent);}
@@ -1357,6 +1507,21 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
       </div>
     </div>
 
+    <!-- SIM INPUTS — the game/team/player-share board behind the NFL sim.
+         It used to be a tab in the right rail, which is 380–520px wide: the
+         board's natural shape is a grid of games beside one open game's editor,
+         and that never had room there. As a modal it gets the whole window, and
+         the @container query on #simDashPanel resolves to the side-by-side
+         layout on its own. #simDashPanel is still the content root, so
+         renderSimDash and every sdash- selector are unchanged. -->
+    <div id="simInputsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9010;align-items:center;justify-content:center;backdrop-filter:blur(2px);"
+      onclick="if(event.target===this)closeSimInputsModal()">
+      <div class="sim-modal-card">
+        <button onclick="closeSimInputsModal()" class="sim-modal-x" title="Close (Esc)">✕</button>
+        <div id="simDashPanel"></div>
+      </div>
+    </div>
+
     <!-- DK ENTRIES — fill DraftKings' entries file from the saved lineups -->
     <div id="dkEntriesModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9000;align-items:center;justify-content:center;backdrop-filter:blur(2px);">
       <div style="background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:24px;width:min(760px,96vw);max-height:90vh;overflow-y:auto;position:relative;box-shadow:0 8px 32px rgba(0,0,0,.6)">
@@ -1402,7 +1567,6 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
       <div class="tab" onclick="switchTab('history',this)">History</div>
       <div class="tab" onclick="switchTab('autogen',this)">Auto-Gen</div>
       <div class="tab" id="tab-btn-siminputs" style="display:none;" onclick="switchTab('siminputs',this)">Odds</div>
-      <div class="tab" id="tab-btn-simdash" style="display:none;" onclick="switchTab('simdash',this)" title="Game / team / player-share inputs behind the NFL sim">Sim</div>
     </div>
 
     <!-- BUILDER -->
@@ -1410,7 +1574,15 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
       <div class="current-lineup">
         <div class="section-title" id="lineupTitle">Current Lineup</div>
         <div class="lineup-slots" id="lineupSlots"></div>
-        <div class="lineup-totals" id="lineupTotals"></div>
+        <!-- Everything we can compute for the roster being built. Rendered by
+             renderHbEv() for EVERY sport; the salary bar sits under it. -->
+        <div class="hb-ev" id="hbEvBlock" style="display:none">
+          <div class="hb-ev-head">
+            <span class="hb-ev-lbl">Lineup</span>
+            <select class="hb-ev-sel" id="hbEvPreset" onchange="hbSetPreset(this.value)"></select>
+          </div>
+          <div class="hb-ev-body" id="hbEvBody"></div>
+        </div>
         <div class="salary-block">
           <div class="sal-row">
             <span class="sal-used" id="salUsed">$0 used</span>
@@ -1421,15 +1593,6 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
         </div>
         <!-- LATE SWAP: shown while a DK entry is loaded here for hand-tuning. -->
         <div id="lsEditBar" style="display:none;"></div>
-        <!-- Contest EV for the lineup being built by hand. NFL only, hidden
-             until renderHbEv decides the slate qualifies. -->
-        <div class="hb-ev" id="hbEvBlock" style="display:none">
-          <div class="hb-ev-head">
-            <span class="hb-ev-lbl">Contest EV</span>
-            <select class="hb-ev-sel" id="hbEvPreset" onchange="hbSetPreset(this.value)"></select>
-          </div>
-          <div class="hb-ev-body" id="hbEvBody"></div>
-        </div>
         <div class="action-btns">
           <button class="btn btn-md btn-ghost btn-clear" onclick="clearLineup()">Clear</button>
           <button class="btn btn-md btn-primary btn-save" id="saveBtn" onclick="saveLineup()" disabled>Save Lineup</button>
@@ -1682,6 +1845,14 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
 
           <div class="autogen-section" id="nflSection" style="display:none;">
             <div class="autogen-section-title">NFL Simulation</div>
+            <!-- The board that feeds this sim (game totals, spreads, team lean,
+                 every player's share, the OUT list) is a pop-out — it needs the
+                 whole window, not a 440px rail. Badge says when it is off the
+                 market so nobody generates against adjustments they forgot. -->
+            <div style="margin-bottom:7px;">
+              <button class="sim-open-btn" id="autogenSimInputsBtn" onclick="openSimInputsModal()"
+                title="Game totals, spreads, team lean and every player's share of his team — the inputs this simulation runs on">⚙ Sim inputs</button>
+            </div>
             <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">Simulates each game outside-in: the consensus total and spread set the game's score, that score sets each team's yardage and pass/run script, and every player's prop line rides those team factors. Stack and bring-back correlation come out of that structure — a QB and his WR share the same team draw. Needs Team + Position; O/U, Spread and TmTot (from the odds puller) make the game environments real.</div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
               <span class="setting-label">Simulations</span>
@@ -1955,10 +2126,6 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
       </div>
     </div>
 
-    <!-- SIM INPUTS TAB -->
-    <div class="tab-content" id="tab-simdash" style="overflow-y:auto;padding:10px 12px;">
-      <div id="simDashPanel"></div>
-    </div>
     <div class="tab-content" id="tab-siminputs" style="overflow-y:auto;padding:12px;">
       <div style="margin-bottom:10px;">
         <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:6px;">Compare Fighters <span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);font-weight:400;">up to 3</span></div>
@@ -3609,8 +3776,9 @@ function restoreHistoryInputs(id){
   slate._simAdj = nflAdjClone(set.adj);
   if(nflOutIds(slate).length || (slate._simAdj && Object.values(slate._simAdj.players||{}).some(a=>a&&a.auto==='out'))) nflRedistributeOut(slate);
   save();
-  const btn=document.getElementById('tab-btn-simdash');
-  if(btn && btn.style.display!=='none') switchTab('simdash', btn); else renderSimDash();
+  // Show the restored board rather than just announcing it: the inputs are a
+  // pop-out now, so "open the Sim tab" became "open the modal".
+  if(slate.sport==='nfl' && typeof openSimInputsModal==='function') openSimInputsModal(); else renderSimDash();
   if(typeof renderNflGameTiles === 'function') renderNflGameTiles(slate);
   if(typeof renderPool==='function') renderPool();
   showToast(`✓ Restored inputs — ${nflAdjSummary(slate._simAdj)}`,'ok');
@@ -4457,8 +4625,15 @@ function renderNflGameTiles(slate){
     </div>`;
   }).join('');
   const noEnv=games.every(g=>g.teams.every(t=>t.total==null&&t.implied==null));
+  // The tiles ARE the game environment, so the button that lets you change it
+  // belongs at the end of the same strip — that is where the eye already is
+  // when a total looks wrong. Same badge as the Auto-Gen launcher.
+  const simBtn = `<button class="sim-open-btn ngt-simbtn${(typeof simInputsBadgeHtml==='function'&&simInputsBadgeHtml(slate))?' armed':''}"
+      onclick="event.stopPropagation();openSimInputsModal()"
+      title="Open the simulation inputs: game totals, spreads, team lean and every player's share">⚙ Sim inputs${typeof simInputsBadgeHtml==='function'?simInputsBadgeHtml(slate):''}</button>`;
   el.innerHTML=tiles
     +((activeKey||activeTeam)?`<button class="ngt-clear" onclick="toggleGameFilter(null)" title="Show every player">✕ ${activeTeam?activeTeam+' only':'All games'}</button>`:'')
+    +simBtn
     +(noEnv?`<div class="ngt-note">No O/U / spread on this sheet — run the odds puller for real game environments (the sim falls back to a 44.5 total).</div>`:'');
   el.style.display='flex';
 }
@@ -5047,17 +5222,6 @@ function renderLineup(){
     }
     slots.innerHTML=rows.join('');
     const sel=current.map(id=>playerById(slate,id)).filter(Boolean);
-    const has=sel.length>0;
-    const hasProj=slate.columnMapping?.proj!=null,hasRtg=slate.columnMapping?.rating!=null;
-    const pills=[];
-    if(hasProj){
-      // Project the captain at 1.5× so the total reflects the real lineup.
-      const cptP=playerById(slate,cpt);
-      const tot=sel.reduce((s,p)=>s+(parseFloat(p.proj)||0)*(p===cptP?CPT_MULT:1),0);
-      pills.push(`<div class="total-pill${has?' lit':''}"><div class="total-label">Total Proj</div><div class="total-value${has?' lit':''}">${has?tot.toFixed(2):'—'}</div></div>`);
-    }
-    if(hasRtg)pills.push(`<div class="total-pill${has?' lit':''}"><div class="total-label">Total Rtg</div><div class="total-value${has?' lit':''}">${has?sel.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0).toFixed(1):'—'}</div></div>`);
-    document.getElementById('lineupTotals').innerHTML=pills.join('');
     const used=sdSalary(slate,current);
     const remSal=SALARY_CAP-used,slotsLeft=6-sel.length,pct=Math.min((used/SALARY_CAP)*100,100);
     document.getElementById('salUsed').textContent=fmt(used)+' used';
@@ -5111,12 +5275,6 @@ function renderLineup(){
   }
   slots.innerHTML=rows.join('');
   const sel=current.map(id=>playerById(slate,id)).filter(Boolean);
-  const has=sel.length>0;
-  const hasProj=slate.columnMapping?.proj!=null,hasRtg=slate.columnMapping?.rating!=null;
-  const pills=[];
-  if(hasProj)pills.push(`<div class="total-pill${has?' lit':''}"><div class="total-label">Total Proj</div><div class="total-value${has?' lit':''}">${has?sel.reduce((s,p)=>s+(parseFloat(p.proj)||0),0).toFixed(2):'—'}</div></div>`);
-  if(hasRtg)pills.push(`<div class="total-pill${has?' lit':''}"><div class="total-label">Total Rtg</div><div class="total-value${has?' lit':''}">${has?sel.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0).toFixed(1):'—'}</div></div>`);
-  document.getElementById('lineupTotals').innerHTML=pills.join('');
   const used=sel.reduce((s,p)=>s+(p.salary||0),0);
   const remSal=SALARY_CAP-used,slotsLeft=size-sel.length,pct=Math.min((used/SALARY_CAP)*100,100);
   document.getElementById('salUsed').textContent=fmt(used)+' used';
@@ -5171,6 +5329,28 @@ function saveLineup(){
     if(cid){ slate._lineupMeta=slate._lineupMeta||{}; slate._lineupMeta[key]=Object.assign({},slate._lineupMeta[key]||{},{sdCaptain:cid}); }
     slate.sdCaptain=null;
   }
+  // The card above the button just quoted a Sim score and a Contest EV for this
+  // roster; the saved card reads _lineupMeta, so write them down or the same
+  // lineup shows two different (or zero) numbers a second later. Generated
+  // lineups come through addSelectedToSaved, which writes the same three keys.
+  try{
+    const _SDs=isShowdown(slate);
+    const _cid=_SDs?sdCaptainId(slate,current):null;
+    const _pl=(_SDs?sdAssignSlots(slate,current,_cid):current).map(id=>playerById(slate,id)).filter(Boolean);
+    const _sc=(typeof hbSimComposite==='function')?hbSimComposite(_pl,_cid):null;
+    const _ev=(typeof hbPriceLineup==='function')?(hbPriceLineup(_pl,_cid)||{}).evPct:null;
+    if(_sc!=null || (_ev!=null && isFinite(_ev))){
+      slate._lineupMeta=slate._lineupMeta||{};
+      slate._lineupMeta[key]=Object.assign({}, slate._lineupMeta[key]||{}, {
+        simAvg:  _sc!=null?_sc.toFixed(1):(slate._lineupMeta[key]||{}).simAvg||null,
+        simWinAvg:_sc!=null?_sc.toFixed(1):(slate._lineupMeta[key]||{}).simWinAvg||null,
+        // Left NULL on purpose when a contest is off: renderSaved prices a
+        // meta-less lineup live through hbPriceLineup, which keeps the chip in
+        // step with the contest selector instead of freezing yesterday's pick.
+        evPct: null,
+      });
+    }
+  }catch(e){}
   slate.savedLineups.push([...current]);
   showToast('✓ Lineup #'+slate.savedLineups.length+' saved!','ok');
   clearLineup();renderSaved();renderExposure();
@@ -10733,27 +10913,21 @@ function evRobustAgg(sum, cnt, K, rho){
 
 // Contest-EV candidate evaluation + portfolio selection. Handles its own
 // history/preview; returns null on cancel.
-async function runUFCContestEV(ctx){
-  const {slate, pool, ranked, simScoresById, totalSims, target, maxExpPct, overrides} = ctx;
-  // Field frame = full slate when the caller provides it (see the note at the
-  // ownership-scenario block): the modeled field ignores the user's curation.
-  const fieldPool = (ctx.fieldPool && ctx.fieldPool.length >= pool.length) ? ctx.fieldPool : pool;
-  const genSims = ctx.genSims || totalSims;  // # of generation sims (PGA uses even sims only)
-  // Roster shape. Everything below was written for 6-man positionless lineups;
-  // NFL passes its 9 named slots through and the field sampler builds legal
-  // positional rosters instead. 6-man sports leave _fieldOpts null and take
-  // the identical code path they always did.
-  // SHOWDOWN (NFL Captain Mode) is neither of the two shapes above: 6 players,
-  // 1 CPT + 5 FLEX, no positional slots at all, and a captain who costs and
-  // scores 1.5×. Every captain-aware branch below is gated on this one flag, so
-  // Classic/UFC/PGA/NASCAR take the code path they always did.
-  const _SD = slate.sport === 'nfl' && typeof isShowdown === 'function' && isShowdown(slate);
-  const _rosterN  = _SD ? 6 : ((SPORT_CFG[slate.sport] && SPORT_CFG[slate.sport].size) || 6);
-  const _fieldOpts = _SD
-    ? { showdown: true, cap: ctx.maxSal || SALARY_CAP }
+// ── FIELD-SAMPLER OPTIONS, ONE DEFINITION (2026-09-05) ──────────────────────
+// runUFCContestEV and the hand builder's `hbField` must describe the SAME
+// opponent field or their EVs are not comparable. This used to be an inline
+// expression inside runUFCContestEV with a hand-copied NFL-only echo in
+// hbField; both call this now. `cap` is the generator's ctx.maxSal — note that
+// the positionless branch deliberately does NOT take it (the historic
+// behaviour: UFC/PGA/NASCAR fields are drawn under the full DK cap).
+function evFieldOptsFor(slate, SD, cap){
+  const _SD = !!SD;
+  const CAP = cap || SALARY_CAP;
+  return _SD
+    ? { showdown: true, cap: CAP }
     : (slate.sport === 'nfl')
     ? { slots: SPORT_CFG.nfl.slots, flexOk: SPORT_CFG.nfl.flex, posOf: nflPosOf,
-        cap: ctx.maxSal || SALARY_CAP, floor: Math.round((ctx.maxSal || SALARY_CAP) * 0.94),
+        cap: CAP, floor: Math.round((CAP) * 0.94),
         // Model the field as STACKED at measured Milly Maker rates — see
         // NFL_FIELD_STACK. Without this the field looks more diverse than it
         // is, understating duplication on stacked builds (i.e. yours).
@@ -10807,6 +10981,24 @@ async function runUFCContestEV(ctx){
         // PGA/NFL keep the historic $47,000 default.
         (slate.sport==='ufc'    ? { floor: 49500 } :
          slate.sport==='nascar' ? { floor: 49200 } : null));
+}
+async function runUFCContestEV(ctx){
+  const {slate, pool, ranked, simScoresById, totalSims, target, maxExpPct, overrides} = ctx;
+  // Field frame = full slate when the caller provides it (see the note at the
+  // ownership-scenario block): the modeled field ignores the user's curation.
+  const fieldPool = (ctx.fieldPool && ctx.fieldPool.length >= pool.length) ? ctx.fieldPool : pool;
+  const genSims = ctx.genSims || totalSims;  // # of generation sims (PGA uses even sims only)
+  // Roster shape. Everything below was written for 6-man positionless lineups;
+  // NFL passes its 9 named slots through and the field sampler builds legal
+  // positional rosters instead. 6-man sports leave _fieldOpts null and take
+  // the identical code path they always did.
+  // SHOWDOWN (NFL Captain Mode) is neither of the two shapes above: 6 players,
+  // 1 CPT + 5 FLEX, no positional slots at all, and a captain who costs and
+  // scores 1.5×. Every captain-aware branch below is gated on this one flag, so
+  // Classic/UFC/PGA/NASCAR take the code path they always did.
+  const _SD = slate.sport === 'nfl' && typeof isShowdown === 'function' && isShowdown(slate);
+  const _rosterN  = _SD ? 6 : ((SPORT_CFG[slate.sport] && SPORT_CFG[slate.sport].size) || 6);
+  const _fieldOpts = evFieldOptsFor(slate, _SD, ctx.maxSal);
   const minOverrides = slate.playerMinOverrides||{};
   const cfg  = slate._ufcEv||{};
   const F    = Math.max(target, parseInt(cfg.fieldSize)||10000);
@@ -12502,7 +12694,20 @@ async function runUFCContestEV(ctx){
   // sims they were scored on. The builder reuses it whenever it is pricing the
   // same contest, and re-samples its own when it isn't. NFL only — the other
   // sports have no hand-builder EV card.
-  if(slate.sport==='nfl' && window._lastSimCtx && window._lastSimCtx.slateId===slate.id){
+  // 2026-09-05: no longer NFL-only. The hand-builder card prices UFC / PGA /
+  // NASCAR too, and it reuses this frame for exactly the same reason.
+  if(window._lastSimCtx && window._lastSimCtx.slateId===slate.id){
+    // The 15% sharp slice is part of the field model. NFL publishes its own
+    // copy before calling in; every other sport gets it here so the builder's
+    // re-sampled field (a different preset) is still the generator's field
+    // model rather than pure Own% chalk.
+    if(!window._lastSimCtx.sharpCands && ranked && ranked.length){
+      window._lastSimCtx.sharpCands = ranked.slice(0,300).map(e=>({
+        ids: e.lineup.map(p=>p.id),
+        cpt: e.lineup._sdCaptain!=null ? e.lineup._sdCaptain : null,
+        w: Math.max(1, e.count||1),
+      }));
+    }
     window._lastSimCtx.evField = {
       sd: _SD, fieldSize: F, fee, K,
       ids: fieldPool.map(p=>p.id),
@@ -13998,6 +14203,12 @@ async function runPgaSimGen(){
   const simScoresById={};
   simPool.forEach((p,i)=>{ simScoresById[p.id]=simScores[i]; });
   const poolScores=pool.map(p=>simScoresById[p.id]);
+  // HAND-BUILDER HANDOFF (2026-09-05): the per-sim scores stay reachable after
+  // the run so the Builder's lineup card can score and price a hand-typed
+  // roster with the same numbers the generator used. Same shape runNflSimGen
+  // publishes; runUFCContestEV hangs `evField` and `sharpCands` off it.
+  window._lastSimCtx = {simScoresById, simsDone, sport:'pga', sd:false, slateId:slate.id, ts:Date.now()};
+  if(typeof renderHbEv==='function') renderHbEv();   // the builder's stats card can now score/price
 
   // Candidates: unique ex-post optimal lineups, one per simulated tournament
   log('Computing per-sim optimal lineups…');
@@ -14367,6 +14578,12 @@ async function runUFCSimGenInner(){
   const {ranked, medianScoreById, compositeScoreById, distById, winProb, appearRate, appearRateFull, totalSims, genSims, simScoresById} = await runUFCSimsNew(
     fullPool, pool, numSims, maxSal, groups, ufcNoOpposeGlobal, minSal, _evOn
   );
+  // HAND-BUILDER HANDOFF (2026-09-05): the per-sim scores stay reachable after
+  // the run so the Builder's lineup card can score and price a hand-typed
+  // roster with the same numbers the generator used. Same shape runNflSimGen
+  // publishes; runUFCContestEV hangs `evField` and `sharpCands` off it.
+  if(simScoresById) window._lastSimCtx = {simScoresById, simsDone:totalSims, sport:'ufc', sd:false, slateId:slate.id, ts:Date.now()};
+  if(typeof renderHbEv==='function') renderHbEv();   // the builder's stats card can now score/price
 
   // Min% overrides are enforced by enforceMinExposure, which only runs on the
   // Contest-EV path (and in NASCAR/PGA autogen). The UFC heuristic selector
@@ -16158,6 +16375,16 @@ async function runNascarSimGen(){
     r.player._simT5  = r.t5Pct  ?? null;
     r.player._simT10 = r.t10Pct ?? null;
   });
+  // HAND-BUILDER HANDOFF (2026-09-05): the per-sim scores stay reachable after
+  // the run so the Builder's lineup card can score and price a hand-typed
+  // roster with the same numbers the generator used. Same shape runNflSimGen
+  // publishes; runUFCContestEV hangs `evField` and `sharpCands` off it.
+  {
+    const _ssb={};
+    fullField.forEach((p,i)=>{ if(simScoreArrays[i]) _ssb[p.id]=simScoreArrays[i]; });
+    window._lastSimCtx = {simScoresById:_ssb, simsDone:simTopScorer.length, sport:'nascar', sd:false, slateId:slate.id, ts:Date.now()};
+  if(typeof renderHbEv==='function') renderHbEv();   // the builder's stats card can now score/price
+  }
   // Full sim outcomes are now attached — enable the ⬇ Sim CSV export.
   window._nasSimReady = true;
   { const xb=document.getElementById('simCsvBtn'); if(xb) xb.style.display=''; }
@@ -18304,7 +18531,10 @@ function nflClampImplied(v){ return Math.max(NFL_IMPLIED_MIN, Math.min(NFL_IMPLI
 function simDashCommit(){
   save();
   renderSimDash();
+  // renderNflGameTiles also redraws the tile-strip launcher and its badge; the
+  // Auto-Gen launcher lives in a different panel, so it is refreshed by hand.
   if(typeof renderNflGameTiles === 'function') renderNflGameTiles(activeSlate());
+  if(typeof refreshSimDashLaunchers === 'function') refreshSimDashLaunchers();
 }
 // True when a stored team total is sitting on a clamp boundary — i.e. the
 // Total/Spread pair the user dialled in asked for more (or less) than the model
@@ -18465,102 +18695,168 @@ function simDashToggle(id){
   el.style.display = open ? '' : 'none';
   const slate = activeSlate(); if(slate){ slate._simDashOpen = slate._simDashOpen || {}; slate._simDashOpen[id] = open; save(); }
 }
+// ── The Sim inputs modal ─────────────────────────────────────────────────────
+// The board was a tab in the right rail until 2026-09-05; it is a pop-out now,
+// reached from the Auto-Gen settings block and from the pool's game-tile strip.
+function simInputsModalOpen(){
+  const m = document.getElementById('simInputsModal');
+  return !!(m && m.style.display === 'flex');
+}
+function openSimInputsModal(){
+  const slate = activeSlate();
+  if(!slate || slate.sport !== 'nfl'){ showToast('The simulation inputs are for NFL slates.','err'); return; }
+  const m = document.getElementById('simInputsModal'); if(!m) return;
+  m.style.display = 'flex';
+  renderSimDash();
+}
+function closeSimInputsModal(){
+  const m = document.getElementById('simInputsModal'); if(m) m.style.display = 'none';
+  // The pool's game tiles carry the ⚙ adjusted chip and the adjusted implied
+  // totals, and the launcher buttons carry the count badge — everything the
+  // modal may have changed is visible out here, so repaint on the way out.
+  if(typeof renderPool === 'function') renderPool();
+  refreshSimDashLaunchers();
+}
+// Esc closes it, like every other modal in the app. Registered once, at the
+// document level. The Sim pop-out sits above the DK Entries modal (z 9010 vs
+// 9000), so it is always the one Esc closes first.
+document.addEventListener('keydown', function(ev){
+  if(ev.key !== 'Escape' || !simInputsModalOpen()) return;
+  closeSimInputsModal();
+});
+// One badge, two launchers: "N adjustments" and/or "N out", or nothing at all
+// when the board is still at Vegas.
+function simInputsBadgeHtml(slate){
+  if(!slate) return '';
+  const n = (typeof nflSimAdjCount === 'function') ? nflSimAdjCount(slate) : 0;
+  const nOut = (typeof nflOutSet === 'function') ? nflOutSet(slate).size : 0;
+  let h = '';
+  if(n) h += `<span class="sim-open-badge" title="${n} adjustment${n>1?'s':''} on the board">${n} adj</span>`;
+  if(nOut) h += `<span class="sim-open-badge out" title="${nOut} player${nOut>1?'s':''} marked OUT">⛔ ${nOut}</span>`;
+  return h;
+}
+// The Auto-Gen launcher lives outside every render path the board touches, so
+// it gets its own repaint. (The tile-strip one rides renderNflGameTiles.)
+function refreshSimDashLaunchers(){
+  const slate = activeSlate();
+  const nfl = !!(slate && slate.sport === 'nfl');
+  const btn = document.getElementById('autogenSimInputsBtn'); if(!btn) return;
+  btn.style.display = nfl ? '' : 'none';
+  if(!nfl) return;
+  const badge = simInputsBadgeHtml(slate);
+  btn.innerHTML = '⚙ Sim inputs' + badge;
+  btn.classList.toggle('armed', !!badge);
+}
+// Called on every slate switch / full re-render. Named for the tab it replaced
+// so the existing call sites did not have to move.
 function refreshSimDashTab(){
   const slate = activeSlate();
-  const btn = document.getElementById('tab-btn-simdash');
-  if(btn) btn.style.display = (slate && slate.sport === 'nfl') ? '' : 'none';
-  if(document.getElementById('tab-simdash')?.classList.contains('active')) renderSimDash();
-}
-function renderSimDash(){
-  const el = document.getElementById('simDashPanel'); if(!el) return;
-  const slate = activeSlate();
-  if(!slate || slate.sport !== 'nfl'){ el.innerHTML = '<div class="no-data" style="margin-top:40px">The simulation dashboard is for NFL slates.</div>'; return; }
-  const pool = (slate.players||[]).filter(p => p.salary > 0);
-  // OUT: the auto entries and the "who moved what" ledger are rebuilt lazily if
-  // this slate came back from storage (or a preset) without them. This has to
-  // happen BEFORE `adj` is captured below — nflRedistributeOut may create
-  // slate._simAdj from scratch, and a local captured first would be a detached
-  // empty object the redistribution never reaches, so the whole board would
-  // render at market shares with no auto tags.
-  const _dashOut = nflOutSet(slate);
-  if(_dashOut.size && !slate._outMoves) nflRedistributeOut(slate);
-  // Base entries (market) and adjusted entries (dashboard applied) side by side.
-  const adj = slate._simAdj || {teams:{}, players:{}};
-  const saved = slate._simAdj; slate._simAdj = null;
-  // The market baseline needs the OUT zeroing BYPASSED as well as the dashboard
-  // suppressed. Nulling _simAdj does not stop buildNflSimInputs blanking a
-  // scratched player's props, and `model`'s team totals are what this panel
-  // displays and what every player's mean is a share OF — without the bypass a
-  // team's receiving yards, and every teammate's mean with them, came out short
-  // by the OUT player's share, while the sim (whose model is built from the
-  // market entries, before the zeroing) ran the full total. Also skip the DST
-  // calibration: this build is read for shares and team totals only.
-  window._nflOutBypass = true;
-  let base;
-  try { base = buildNflSimInputs(pool, {skipDstCal:true}); }
-  finally { window._nflOutBypass = false; slate._simAdj = saved; }
-  const cur = buildNflSimInputs(pool);
-  const model = nflShareModel(slate, pool, base.entries);
-  const hidden = new Set(slate.hiddenIds||[]);
-  const _outMoveFor = new Map();
-  for(const mv of (slate._outMoves||[])) for(const t of mv.to)
-    _outMoveFor.set(t.id + '|' + mv.stat, String(mv.outName||'').split(' ').slice(-1)[0]);
-  for(const mv of (slate._outMoves||[])) _outMoveFor.set(mv.outId + '|' + mv.stat, String(mv.outName||'').split(' ').slice(-1)[0]);
-  const nAdj = nflSimAdjCount(slate);
-  const open = slate._simDashOpen || {};
-  const pct = v => (Math.round(v*1000)/10).toFixed(1);
-  const fmt1 = v => (Math.round(v*10)/10).toString();
-  // Sliders commit on release (onchange); while dragging only the label
-  // next to the slider updates, so the panel isn't re-rendered mid-drag.
-  const rng = (id, val, min, max, step, onchange, cls='', suf='') =>
-    `<input type="range" class="sdash-range ${cls}" id="${id}" min="${min}" max="${max}" step="${step}" value="${val}" data-suf="${suf}"
-       oninput="this.nextElementSibling.textContent=this.value+this.dataset.suf" onchange="${onchange}">`;
-  let html = `<div class="sdash-top">
-    <div>
-      <div class="sdash-title">Simulation Inputs</div>
-      <div class="sdash-sub">Vegas is the baseline. Drag a game to re-scale every player on both sides; drag a player to move his share and rebalance his teammates.${nAdj?` <b style="color:var(--accent)">${nAdj} adjustment${nAdj>1?'s':''} active</b> — re-run the sim to apply.`:''}</div>
-    </div>
-    <div class="sdash-actions">
-      <button class="sdash-btn${nAdj?' warn':''}" onclick="simDashReset('all')" ${nAdj?'':'disabled'}>↺ Reset all to Vegas</button>
-      <div class="sdash-presets">
-        <button class="sdash-btn" id="sdashSavePreset" onclick="simDashSavePreset()" ${nAdj?'':'disabled'} title="Store the current board under a name you can come back to">＋ Save as preset…</button>
-        ${(()=>{ const pres = Object.entries(simDashPresets(slate)).sort((a,b)=>(b[1].ts||0)-(a[1].ts||0));
-          if(!pres.length) return '<span style="font-size:10px;color:var(--muted)">no presets yet</span>';
-          const sel = slate._simDashPreset;
-          return `<select id="sdashPresetSel" title="Saved adjustment sets for this slate">
-              ${pres.map(([nm,p])=>`<option value="${esc(nm)}"${nm===sel?' selected':''}>${esc(nm)} — ${esc(nflAdjSummary(p.adj))}</option>`).join('')}
-            </select>
-            <button class="sdash-btn" onclick="simDashApplyPreset()" title="Replace the board with this preset">Apply</button>
-            <button class="sdash-btn" onclick="simDashDeletePreset()" title="Delete this preset">✕</button>`;
-        })()}
-      </div>
-    </div>
-  </div>`;
-  // The OUT summary sits at the very top of the board: it is the one change on
-  // this panel the user did not make with a slider, so it has to announce itself.
-  {
-    const lines = nflOutSummaryLines(slate);
-    if(lines.length) html += `<div class="sdash-out-note" id="sdashOutNote">${lines.map(l=>esc(l)).join('<br>')}
-      <div style="font-family:'DM Sans',sans-serif;color:var(--muted);font-size:10px;margin-top:3px;">Team totals are unchanged — the offense still runs its plays. Every ⛔ share below can be overridden by hand.</div></div>`;
+  refreshSimDashLaunchers();
+  // A non-NFL slate has no board at all — close the pop-out rather than leave
+  // an NFL panel floating over a golf slate.
+  if(!(slate && slate.sport === 'nfl') && simInputsModalOpen()){
+    const m = document.getElementById('simInputsModal'); if(m) m.style.display = 'none';
+  } else if(simInputsModalOpen()){
+    // Slate changed underneath an open board (switchSlate): the panel is
+    // wired to activeSlate(), so a stale grid would write the OLD slate's
+    // team keys into the NEW slate's _simAdj. Re-render for the new slate,
+    // with no game open (its keys belong to the other slate).
+    if(slate._simDashGame && !nflGameEnvs(slate).some(g=>g.key===slate._simDashGame)) slate._simDashGame=null;
+    renderSimDash();
   }
-  if(!cur.games.length){ el.innerHTML = html + '<div class="no-data">No Team column — the sim needs teams (and O/U + spread from the odds puller) to build games.</div>'; return; }
-
-  for(const g of cur.games){
-    const names = Object.keys(g.teams);
-    const bg = base.games.find(x => x.key === g.key) || g;
-    // Favorite (by base implied) on the left; margin = A − B.
-    const [A, B] = names.length === 2 ? names.slice().sort((x,y) => (bg.teams[y].implied) - (bg.teams[x].implied)) : [names[0], null];
-    // Read the slider state straight off the two builds we already have rather
-    // than calling simDashGameState — that helper rebuilds the whole input set,
-    // and doing it once per game turned a slider release into a dozen full
-    // rebuilds of the slate.
-    const gs = B ? (() => {
-      const ta = cur.teamInfo.get(A), tb = cur.teamInfo.get(B);
-      const ia = ta ? ta.implied : 22, ib = tb ? tb.implied : 22;
-      const ba = ta ? ta.baseImplied : ia, bb = tb ? tb.baseImplied : ib;
-      return { total: ia + ib, margin: ia - ib, baseTotal: ba + bb, baseMargin: ba - bb, ia, ib, ba, bb };
-    })() : null;
-    const gAdj = names.some(t => adj.teams[t] && Number.isFinite(adj.teams[t].implied));
+}
+// ── Level 1/2 shared: which side is which, and the slider state ──────────────
+// The compact tile and the full editor need the same three things and they must
+// agree to the digit, so they read them from one place.
+function simDashSides(ctx, g){
+  const { base, cur, adj } = ctx;
+  const names = Object.keys(g.teams);
+  const bg = base.games.find(x => x.key === g.key) || g;
+  // Favorite (by base implied) on the left; margin = A − B.
+  const [A, B] = names.length === 2 ? names.slice().sort((x,y) => (bg.teams[y].implied) - (bg.teams[x].implied)) : [names[0], null];
+  // Read the slider state straight off the two builds we already have rather
+  // than calling simDashGameState — that helper rebuilds the whole input set,
+  // and doing it once per game turned a slider release into a dozen full
+  // rebuilds of the slate.
+  const gs = B ? (() => {
+    const ta = cur.teamInfo.get(A), tb = cur.teamInfo.get(B);
+    const ia = ta ? ta.implied : 22, ib = tb ? tb.implied : 22;
+    const ba = ta ? ta.baseImplied : ia, bb = tb ? tb.baseImplied : ib;
+    return { total: ia + ib, margin: ia - ib, baseTotal: ba + bb, baseMargin: ba - bb, ia, ib, ba, bb };
+  })() : null;
+  const gAdj = names.some(t => adj.teams[t] && Number.isFinite(adj.teams[t].implied));
+  return { names, A, B, gs, gAdj };
+}
+// Everything about a game that is a FACT rather than a number: who is out, and
+// how many hand-set shares it carries. Walked off cur.entries because entries
+// and `pool` are index-parallel (the DST row already relies on that), so a tile
+// costs one pass over the pool and never a second buildNflSimInputs.
+function simDashGameFacts(ctx, names){
+  const { cur, pool, adj, dashOut } = ctx;
+  const set = new Set(names);
+  const outs = []; let nShare = 0;
+  for(let i = 0; i < cur.entries.length; i++){
+    const e = cur.entries[i]; if(!e || !set.has(e.team)) continue;
+    const p = pool[i]; if(!p) continue;
+    if(dashOut.has(p.id)) outs.push(p);
+    const a = adj.players[p.id];
+    if(a && a.auto !== 'out' && NFL_SHARE_STATS.some(st => Number.isFinite(a[st.key]))) nShare++;
+  }
+  return { outs, nShare };
+}
+// ── Level 1: one compact game tile ───────────────────────────────────────────
+// Implied totals (favourite in gold, like the pool tiles), the Total and Spread
+// sliders wired to the SAME simDashSetGame handlers the editor uses, and the two
+// chips that say somebody has been here — ⚙ for adjustments, ⛔ N for scratches.
+// Clicking anywhere but the sliders opens the game in the detail panel.
+function simDashTileHtml(ctx, g, isOpen){
+  const { adj, fmt1, rng } = ctx;
+  const { names, A, B, gs, gAdj } = simDashSides(ctx, g);
+  const facts = simDashGameFacts(ctx, names);
+  const bits = [];
+  for(const t of names){
+    const v = adj.teams[t]; if(!v) continue;
+    const parts = [];
+    if(Number.isFinite(v.implied)) parts.push(`${Math.round(v.implied*10)/10} pts`);
+    if(v.lean) parts.push(`lean ${v.lean>0?'+':''}${Math.round(v.lean*100)}%`);
+    if(parts.length) bits.push(`${t} ${parts.join(' ')}`);
+  }
+  if(facts.nShare) bits.push(`${facts.nShare} player share${facts.nShare>1?'s':''}`);
+  const chipOn = bits.length > 0;
+  const impOf = (t, v) => `<span class="sdg-imp${adj.teams[t]&&Number.isFinite(adj.teams[t].implied)?' adj':''}">${fmt1(v)}</span>`;
+  const fav = gs ? (gs.ia > gs.ib ? A : (gs.ib > gs.ia ? B : null)) : null;
+  const sprTxt = gs ? `${gs.margin>0?A:gs.margin<0?B:'PK'}${gs.margin?' '+(-Math.abs(gs.margin)).toFixed(1):''}` : '—';
+  const caps = [A, B].filter(Boolean).map(t => ({ t, cap: nflImpliedCapped(adj.teams[t]) })).filter(x => x.cap);
+  const tip = `${A}${B?' vs '+B:''}${g._kick&&g._kick.label?' · '+g._kick.label:''} — ${chipOn?'adjusted: '+bits.join(', '):'at the market'}. Click to open the full editor; drag a slider right here to re-scale the game.`;
+  return `<div class="sdg${isOpen?' on':''}${chipOn?' adj':''}" data-gkey="${esc(g.key)}" onclick="simDashOpenGame('${esc(g.key)}')" title="${esc(tip)}">
+    ${chipOn?`<span class="sdg-chip">⚙ adjusted</span>`:''}
+    <div class="sdg-hdr">
+      <span class="sdg-side"><span class="sdg-team${fav===A?' fav':''}">${A}</span>${impOf(A, gs?gs.ia:(g.teams[A]?g.teams[A].implied:0))}</span>
+      ${B?`<span class="sdg-dash">–</span><span class="sdg-side">${impOf(B, gs.ib)}<span class="sdg-team${fav===B?' fav':''}">${B}</span></span>`:''}
+    </div>
+    ${gs?`<div class="sdg-sliders" onclick="event.stopPropagation()">
+      <div class="sdg-srow"><span class="sdg-slbl">Total</span>${rng('sdgT_'+g.key, gs.total.toFixed(1), 28, 68, 0.5, `simDashSetGame('${A}','${B}','total',this.value)`)}<span class="sdg-sval">${gs.total.toFixed(1)}</span></div>
+      <div class="sdg-srow"><span class="sdg-slbl">Spread</span>${rng('sdgS_'+g.key, gs.margin.toFixed(1), -21, 21, 0.5, `simDashSetGame('${A}','${B}','spread',this.value)`)}<span class="sdg-sval">${sprTxt}</span></div>
+    </div>`:''}
+    <div class="sdg-sub">
+      <span>O/U <b>${gs?gs.total.toFixed(1):'—'}</b></span>
+      <span><b>${sprTxt}</b></span>
+      ${facts.outs.length?`<span class="sdg-outchip" title="${esc(facts.outs.map(p=>p.name).join(', '))} marked OUT">⛔ ${facts.outs.length}</span>`:''}
+    </div>
+    ${caps.length?`<div class="sdg-cap">⚠ ${caps.map(x=>`${x.t} capped at ${x.cap==='max'?NFL_IMPLIED_MAX:NFL_IMPLIED_MIN}`).join(' · ')}</div>`:''}
+  </div>`;
+}
+// ── Level 2: one game's full editor ──────────────────────────────────────────
+// Exactly what renderSimDash used to emit inside its per-game loop — the
+// Total/Spread rows, both team editors with the lean slider, the DST line and
+// every share accordion with its ⛔ toggles. It is a function now so the grid
+// can render precisely one of them instead of all thirteen; a showdown slate
+// calls it directly with its single game and sees no grid at all.
+function simDashGameHtml(ctx, g){
+  const { adj, cur, model, hidden, pool, open, pct, fmt1, rng } = ctx;
+  const _dashOut = ctx.dashOut, _outMoveFor = ctx.outMoveFor;
+  let html = '';
+    const { names, A, B, gs, gAdj } = simDashSides(ctx, g);
     html += `<div class="sdash-game${gAdj?' adj':''}">
       <div class="sdash-game-hdr">
         <div class="sdash-game-name">${A}${B?` <span class="muted">vs</span> ${B}`:''}</div>
@@ -18710,8 +19006,224 @@ function renderSimDash(){
       html += `</div></div>`;
     }
     html += `</div>`;
+  return html;
+}
+// The grid reads like a main slate: kickoff window first (the 1:00 games, then
+// the late window, then primetime), highest total first inside a window. Same
+// ordering renderNflGameTiles uses above the pool, so the two surfaces list the
+// slate identically; with no kickoff data it is purely total-desc and no window
+// headers are drawn at all.
+function simDashOrderedGames(slate, games){
+  const kick = new Map();
+  try { for(const ge of nflGameEnvs(slate)) kick.set(ge.key, ge); } catch(e){}
+  const kickMins = g => { const k = (kick.get(g.key)||{}).kickMins; return (k == null) ? 1e9 : k; };
+  const dateKey = g => { const d = (kick.get(g.key)||{}).kickDate || '';
+    const m = d.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    return m ? `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}` : d; };
+  const tot = g => Object.values(g.teams).reduce((s,ti)=>s+(Number.isFinite(ti.implied)?ti.implied:0), 0);
+  const anyKick = games.some(g => kickMins(g) < 1e9);
+  const out = games.slice().sort((g1,g2)=>{
+    if(anyKick){
+      const d1 = dateKey(g1), d2 = dateKey(g2); if(d1 !== d2) return d1 < d2 ? -1 : 1;
+      const k1 = kickMins(g1), k2 = kickMins(g2); if(k1 !== k2) return k1 - k2;
+    }
+    return tot(g2) - tot(g1);
+  });
+  const dates = new Set(out.map(dateKey));
+  out.forEach(g => { const ge = kick.get(g.key) || null;
+    g._kick = ge ? { mins: ge.kickMins, label: ge.kickLabel, date: ge.kickDate,
+                     win: dateKey(g) + '|' + (ge.kickMins == null ? '' : ge.kickMins) } : null; });
+  return { games: out, anyKick, multiDate: dates.size > 1 };
+}
+// ── Which game is open ───────────────────────────────────────────────────────
+// Persisted on the slate as `_simDashGame` — deliberately NOT inside
+// `_simDashOpen`, which is already the accordion expand map keyed by element id.
+// A slider commit re-renders the whole tab, so without this every drag would
+// throw the user back to the grid.
+let _sdashOrder = [];          // grid order of game keys, for ‹ / › and the arrows
+let _sdashFocus = false;       // focus the panel after THIS render only
+let _sdashScroll = { key: null, panel: 0, grid: 0 };
+function simDashOpenGame(key){
+  const slate = activeSlate(); if(!slate) return;
+  slate._simDashGame = key; _sdashFocus = true;
+  save(); renderSimDash();
+}
+function simDashCloseGame(){
+  const slate = activeSlate(); if(!slate) return;
+  slate._simDashGame = null; save(); renderSimDash();
+}
+// ‹ / › (and ArrowLeft / ArrowRight while the panel has focus) walk the GRID
+// order, which is the order the user is looking at, not the raw game list.
+function simDashStepGame(dir){
+  const slate = activeSlate(); if(!slate || !_sdashOrder.length) return;
+  const i = _sdashOrder.indexOf(slate._simDashGame);
+  const n = (i < 0 ? 0 : i + dir);
+  if(n < 0 || n >= _sdashOrder.length) return;
+  simDashOpenGame(_sdashOrder[n]);
+}
+function simDashPanelKey(ev){
+  if(!ev || (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight')) return;
+  // Arrow keys inside a slider or a select belong to that control.
+  const t = ev.target && ev.target.tagName;
+  if(t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA') return;
+  ev.preventDefault();
+  simDashStepGame(ev.key === 'ArrowRight' ? 1 : -1);
+}
+function renderSimDash(){
+  const el = document.getElementById('simDashPanel'); if(!el) return;
+  const slate = activeSlate();
+  if(!slate || slate.sport !== 'nfl'){ el.innerHTML = '<div class="no-data" style="margin-top:40px">The simulation dashboard is for NFL slates.</div>'; return; }
+  const pool = (slate.players||[]).filter(p => p.salary > 0);
+  // OUT: the auto entries and the "who moved what" ledger are rebuilt lazily if
+  // this slate came back from storage (or a preset) without them. This has to
+  // happen BEFORE `adj` is captured below — nflRedistributeOut may create
+  // slate._simAdj from scratch, and a local captured first would be a detached
+  // empty object the redistribution never reaches, so the whole board would
+  // render at market shares with no auto tags.
+  const _dashOut = nflOutSet(slate);
+  if(_dashOut.size && !slate._outMoves) nflRedistributeOut(slate);
+  // Base entries (market) and adjusted entries (dashboard applied) side by side.
+  const adj = slate._simAdj || {teams:{}, players:{}};
+  const saved = slate._simAdj; slate._simAdj = null;
+  // The market baseline needs the OUT zeroing BYPASSED as well as the dashboard
+  // suppressed. Nulling _simAdj does not stop buildNflSimInputs blanking a
+  // scratched player's props, and `model`'s team totals are what this panel
+  // displays and what every player's mean is a share OF — without the bypass a
+  // team's receiving yards, and every teammate's mean with them, came out short
+  // by the OUT player's share, while the sim (whose model is built from the
+  // market entries, before the zeroing) ran the full total. Also skip the DST
+  // calibration: this build is read for shares and team totals only.
+  window._nflOutBypass = true;
+  let base;
+  try { base = buildNflSimInputs(pool, {skipDstCal:true}); }
+  finally { window._nflOutBypass = false; slate._simAdj = saved; }
+  const cur = buildNflSimInputs(pool);
+  const model = nflShareModel(slate, pool, base.entries);
+  const hidden = new Set(slate.hiddenIds||[]);
+  const _outMoveFor = new Map();
+  for(const mv of (slate._outMoves||[])) for(const t of mv.to)
+    _outMoveFor.set(t.id + '|' + mv.stat, String(mv.outName||'').split(' ').slice(-1)[0]);
+  for(const mv of (slate._outMoves||[])) _outMoveFor.set(mv.outId + '|' + mv.stat, String(mv.outName||'').split(' ').slice(-1)[0]);
+  const nAdj = nflSimAdjCount(slate);
+  const open = slate._simDashOpen || {};
+  const pct = v => (Math.round(v*1000)/10).toFixed(1);
+  const fmt1 = v => (Math.round(v*10)/10).toString();
+  // Sliders commit on release (onchange); while dragging only the label
+  // next to the slider updates, so the panel isn't re-rendered mid-drag.
+  const rng = (id, val, min, max, step, onchange, cls='', suf='') =>
+    `<input type="range" class="sdash-range ${cls}" id="${id}" min="${min}" max="${max}" step="${step}" value="${val}" data-suf="${suf}"
+       oninput="this.nextElementSibling.textContent=this.value+this.dataset.suf" onchange="${onchange}">`;
+  let html = `<div class="sdash-top">
+    <div>
+      <div class="sdash-title">Simulation Inputs</div>
+      <div class="sdash-sub">Vegas is the baseline. Drag a game to re-scale every player on both sides; drag a player to move his share and rebalance his teammates.${nAdj?` <b style="color:var(--accent)">${nAdj} adjustment${nAdj>1?'s':''} active</b> — re-run the sim to apply.`:''}</div>
+    </div>
+    <div class="sdash-actions">
+      <button class="sdash-btn${nAdj?' warn':''}" onclick="simDashReset('all')" ${nAdj?'':'disabled'}>↺ Reset all to Vegas</button>
+      <div class="sdash-presets">
+        <button class="sdash-btn" id="sdashSavePreset" onclick="simDashSavePreset()" ${nAdj?'':'disabled'} title="Store the current board under a name you can come back to">＋ Save as preset…</button>
+        ${(()=>{ const pres = Object.entries(simDashPresets(slate)).sort((a,b)=>(b[1].ts||0)-(a[1].ts||0));
+          if(!pres.length) return '<span style="font-size:10px;color:var(--muted)">no presets yet</span>';
+          const sel = slate._simDashPreset;
+          return `<select id="sdashPresetSel" title="Saved adjustment sets for this slate">
+              ${pres.map(([nm,p])=>`<option value="${esc(nm)}"${nm===sel?' selected':''}>${esc(nm)} — ${esc(nflAdjSummary(p.adj))}</option>`).join('')}
+            </select>
+            <button class="sdash-btn" onclick="simDashApplyPreset()" title="Replace the board with this preset">Apply</button>
+            <button class="sdash-btn" onclick="simDashDeletePreset()" title="Delete this preset">✕</button>`;
+        })()}
+      </div>
+    </div>
+  </div>`;
+  // The OUT summary sits at the very top of the board: it is the one change on
+  // this panel the user did not make with a slider, so it has to announce itself.
+  {
+    const lines = nflOutSummaryLines(slate);
+    if(lines.length) html += `<div class="sdash-out-note" id="sdashOutNote">${lines.map(l=>esc(l)).join('<br>')}
+      <div style="font-family:'DM Sans',sans-serif;color:var(--muted);font-size:10px;margin-top:3px;">Team totals are unchanged — the offense still runs its plays. Every ⛔ share below can be overridden by hand.</div></div>`;
+  }
+  if(!cur.games.length){ el.innerHTML = html + '<div class="no-data">No Team column — the sim needs teams (and O/U + spread from the odds puller) to build games.</div>'; return; }
+
+  // ── Level 1 (grid) vs Level 2 (detail panel) ───────────────────────────────
+  // Everything the two renderers need, gathered once. `base` and `cur` are the
+  // two buildNflSimInputs calls this function already made — a tile must never
+  // trigger a third, which is why the per-game helpers take this context object
+  // instead of rebuilding the model per game.
+  const ctx = { slate, base, cur, adj, model, hidden, pool, open, pct, fmt1, rng,
+                dashOut: _dashOut, outMoveFor: _outMoveFor };
+  const ord = simDashOrderedGames(slate, cur.games);
+  _sdashOrder = ord.games.map(g => g.key);
+  // Showdown (or any single-game slate) has nothing to navigate: render the one
+  // editor straight into the tab, exactly as it was before the grid existed.
+  if(ord.games.length < 2){
+    for(const g of ord.games) html += simDashGameHtml(ctx, g);
+    el.innerHTML = html;
+    return;
+  }
+  const openKey = _sdashOrder.indexOf(slate._simDashGame) >= 0 ? slate._simDashGame : null;
+  if(slate._simDashGame && !openKey) slate._simDashGame = null;   // that game left the slate
+  // The grid, grouped under thin kickoff-window headers when the sheet carries
+  // times. A game with no kickoff just joins whatever group is open.
+  let grid = '', lastWin = null;
+  for(const g of ord.games){
+    if(ord.anyKick && g._kick && g._kick.win !== lastWin){
+      if(lastWin !== null) grid += '</div>';
+      lastWin = g._kick.win;
+      const lbl = g._kick.label || 'Kickoff TBD';
+      grid += `<div class="sdash-win">${esc(ord.multiDate && g._kick.date ? g._kick.date + ' · ' + lbl : lbl)}</div><div class="sdash-grid">`;
+    } else if(lastWin === null){ lastWin = '#'; grid += '<div class="sdash-grid">'; }
+    grid += simDashTileHtml(ctx, g, g.key === openKey);
+  }
+  if(lastWin !== null) grid += '</div>';
+
+  let detail = '';
+  if(openKey){
+    const g = ord.games.find(x => x.key === openKey);
+    const { names, A, B } = simDashSides(ctx, g);
+    const facts = simDashGameFacts(ctx, names);
+    const i = _sdashOrder.indexOf(openKey);
+    const anyWork = names.some(t => adj.teams[t]) || facts.nShare > 0;
+    // The Inactives strip is the one place the scratches on THIS game are
+    // listed together — the ⛔ toggles are scattered down the accordions, so
+    // undoing one meant hunting for the row that produced it.
+    const inacts = facts.outs.length
+      ? facts.outs.map(p => `<span class="sdash-inact" title="${esc(p.name)} is OUT — his market share went to his teammates">${esc(p.name)}<button onclick="toggleOut('${p.id}',event)" title="Put ${esc(p.name)} back in">✕</button></span>`).join('')
+        + `<span class="sdash-inact-hint">⛔ on any row below marks another one out</span>`
+      : `<span class="sdash-inact-hint">nobody — ⛔ on any row below marks a player out</span>`;
+    detail = `<div class="sdash-detail" id="sdashDetail" data-gkey="${esc(openKey)}" tabindex="0" onkeydown="simDashPanelKey(event)">
+      <div class="sdash-dhdr">
+        <button class="sdash-back" onclick="simDashCloseGame()" title="Back to every game">← All games</button>
+        <div class="sdash-dtitle">${A}${B?` <span class="muted">vs</span> ${B}`:''}</div>
+        <button class="sdash-nav" id="sdashPrev" onclick="simDashStepGame(-1)"${i<=0?' disabled':''} title="Previous game (←)">‹</button>
+        <button class="sdash-nav" id="sdashNext" onclick="simDashStepGame(1)"${i>=_sdashOrder.length-1?' disabled':''} title="Next game (→)">›</button>
+        <div class="sdash-dspacer"></div>
+        <button class="sdash-btn${anyWork?' warn':''}" id="sdashResetGame" onclick="simDashReset('game','${names.join('@')}')"${anyWork?'':' disabled'} title="Put this game's team totals back to Vegas">↺ Reset <span class="sdash-rlong">this </span>game<span class="sdash-rlong"> to Vegas</span></button>
+        <button class="sdash-nav" onclick="simDashCloseGame()" title="Close this game">✕</button>
+      </div>
+      <div class="sdash-inacts"><span class="sdash-inact-lbl">Inactives</span>${inacts}</div>
+      ${simDashGameHtml(ctx, g)}
+    </div>`;
+  }
+  html += `<div class="sdash-split${openKey?' open':''}">
+    <div class="sdash-gridcol" id="sdashGridCol">${grid}</div>
+    ${detail}
+  </div>`;
+  // Continuity across the re-render every slider commit causes. The positions
+  // are read off the LIVE elements a beat before they are thrown away rather
+  // than tracked by a scroll listener: a listener fires asynchronously, so a
+  // commit that lands in the same task as the scroll would re-render against a
+  // stale number. The panel's position is keyed by the game it was showing, so
+  // stepping to a different game correctly starts at the top.
+  {
+    const _old = document.getElementById('sdashDetail'), _oldGrid = document.getElementById('sdashGridCol');
+    if(_old || _oldGrid) _sdashScroll = { key: _old ? _old.dataset.gkey : null,
+      panel: _old ? _old.scrollTop : 0, grid: _oldGrid ? _oldGrid.scrollTop : 0 };
   }
   el.innerHTML = html;
+  const _dp = document.getElementById('sdashDetail'), _gc = document.getElementById('sdashGridCol');
+  if(_gc && _sdashScroll.grid) _gc.scrollTop = _sdashScroll.grid;
+  if(_dp && _sdashScroll.key === openKey && _sdashScroll.panel) _dp.scrollTop = _sdashScroll.panel;
+  if(_dp && _sdashFocus){ try { _dp.focus({preventScroll:true}); } catch(e){ _dp.focus(); } }
+  _sdashFocus = false;
 }
 
 // One sim of every game → { [team]: {score, oppScore, implied, yardF, passF, rushF} }
@@ -19843,6 +20355,7 @@ async function runNflSimGen(){
   // time and the arrays are the ones the run already allocated, so this costs
   // nothing beyond holding them; the next run clears it above.
   window._lastSimCtx = {simScoresById, simsDone, sport:'nfl', sd:SD, slateId:slate.id, ts:Date.now()};
+  if(typeof renderHbEv==='function') renderHbEv();   // the builder's stats card can now score/price
 
   // ── Stacking rules ────────────────────────────────────────────────────────
   const stackRules = {
@@ -22024,10 +22537,10 @@ function hbBuildPayout(rec){
 // the number in the builder and the number the generator optimizes are the
 // same number). Returns null when EV is off.
 function hbContest(slate){
-  // NFL only — the field samplers below are the NFL/showdown ones. Guarded
-  // here as well as in the UI so a stray `_hbEvPreset` can never route another
-  // sport's roster through the classic positional sampler.
-  if(!slate || slate.sport!=='nfl') return null;
+  // EVERY sport (2026-09-05). hbField below picks the sampler by sport through
+  // evFieldOptsFor — the same one runUFCContestEV uses — so a UFC roster is
+  // drawn against a UFC field, not the NFL positional one.
+  if(!slate) return null;
   const key=slate._hbEvPreset || 'off';
   if(key==='off') return null;
   if(key==='custom'){
@@ -22097,6 +22610,9 @@ const EV_SHARP_SHARE = 0.15;
 function hbField(slate, ctx, contest){
   const N=Math.max(200, Math.min(2000, contest.fieldSize));
   const SD=isShowdown(slate);
+  // Roster shape comes from the slate, not from a hard-coded 6/9: UFC and
+  // NASCAR are 6, PGA is 6, NFL classic 9, showdown 6.
+  const rosterN=SD?6:rosterSize(slate);
   const K=EV_SCEN_K;
   const nSharp=(ctx.sharpCands||[]).length;
   // Reuse the generator's OWN field whenever this is the same contest it
@@ -22111,7 +22627,9 @@ function hbField(slate, ctx, contest){
              slate._genMaxSal||'',
              // Marking a player OUT changes who the modeled field can roster,
              // so the cached field has to be rebuilt when the list changes.
-             nflOutIds(slate).slice().sort().join(',')].join('|');
+             nflOutIds(slate).slice().sort().join(','),
+             // Two sports read a live checkbox for the field's no-oppose rule.
+             slate.sport, rosterN].join('|');
   const cur=window._hbField;
   if(cur && cur.key===key) return cur;
   // Field frame = the FULL slate, not the curated pool: the modeled opponents
@@ -22135,7 +22653,7 @@ function hbField(slate, ctx, contest){
     const outStale = reuse.ids.some(id=>_outF.has(id));
     if(!outStale && hp.every(p=>p && ctx.simScoresById[p.id])) pool=hp; else reuse=null;
   }
-  if(pool.length < (SD?6:9)) return null;
+  if(pool.length < rosterN) return null;
   const idxById=new Map(pool.map((p,i)=>[p.id,i]));
   const KK=reuse ? (reuse.K||K) : K;
   let scenarios, cptScen, fields, idx;
@@ -22153,11 +22671,8 @@ function hbField(slate, ctx, contest){
     // builder field drawn under a different constraint than the generator's.
     const _fCap=(Number.isFinite(slate._genMaxSal) && slate._genMaxSal>0)
       ? Math.min(SALARY_CAP, slate._genMaxSal) : SALARY_CAP;
-    const opts=SD
-      ? {showdown:true, cap:_fCap}
-      : {slots:SPORT_CFG.nfl.slots, flexOk:SPORT_CFG.nfl.flex, posOf:nflPosOf,
-         cap:_fCap, floor:Math.round(_fCap*0.94),
-         stackModel:Object.assign({}, NFL_FIELD_STACK, slate._nflFieldStack||{})};
+    // ONE definition, shared with runUFCContestEV (see evFieldOptsFor).
+    const opts=evFieldOptsFor(slate, SD, _fCap);
     // The sharp slice, translated into this pool's index frame. A candidate the
     // current pool can't express (a player dropped since the run) is skipped
     // rather than scored short; showdown entries must carry their captain in
@@ -22165,7 +22680,7 @@ function hbField(slate, ctx, contest){
     const sharp=[];
     for(const c of (ctx.sharpCands||[])){
       let ii=c.ids.map(id=>idxById.get(id));
-      if(ii.length!==(SD?6:9) || ii.some(x=>x==null)) continue;
+      if(ii.length!==rosterN || ii.some(x=>x==null)) continue;
       if(SD){
         const ci=(c.cpt!=null)?idxById.get(c.cpt):null;
         if(ci==null) continue;
@@ -22365,46 +22880,139 @@ function hbVsFieldHint(players, cptId){
       + (noCptOwn ? ` <span style="opacity:.7">(no CPT Own% on this slate — field captains modeled from a prior)</span>` : '');
   }
   const mine=players.reduce((s,p)=>s+(isShowdown(slate)?sdOwnOf(p,p.id===cptId):(parseFloat(p.own)||0)),0);
+  if(!(F.ownAvg>0)) return '';
   const d=mine-F.ownAvg;
   return `${mine.toFixed(0)}% total ownership vs the field's ${F.ownAvg.toFixed(0)}% — <em>${d>=3?'chalkier':d<=-3?'more contrarian':'about as owned'}</em> than the average entry`;
+}
+// The lineup stats card. ONE card under the roster, for every sport, holding
+// everything this app can say about the six (or nine) players you just typed:
+//   Proj / Value / Own%   — arithmetic on the slate's own columns, always on
+//   Sim                   — the SAME statistic the saved cards print under
+//                           "Sim" (lineupSimComposite = 0.6·p80 + 0.4·mean over
+//                           the held-out sims), once a sim has been run here
+//   Win% / Contest EV     — hbPriceLineup against the modeled field, once a
+//                           contest is selected in the header
+// Cells that need a complete roster print "— (n/N)" instead of a number.
+// There is deliberately NO contest-free win metric: `simWinRate` on a generated
+// lineup is "share of sims in which this was the ex-post optimal", which is a
+// property of the generator's search, not of the lineup, and `simWinAvg` is a
+// score, not a probability. Inventing a third one would be a lie.
+function hbStatCell(label, value, cls, title){
+  return `<div class="hbst${cls&&cls.indexOf('lit')>=0?' lit':''}"${title?` title="${esc(title)}"`:''}>`
+    + `<div class="hbst-l">${esc(label)}</div>`
+    + `<div class="hbst-v ${cls||''}">${value}</div></div>`;
+}
+// Sim composite for an arbitrary roster — matches _lineupMeta.simWinAvg, which
+// is what the saved cards and the saved-panel Sim sort read.
+function hbSimComposite(players, cptId){
+  const ctx=hbSimCtx(); if(!ctx) return null;
+  if(!players || !players.length) return null;
+  if(!players.every(p=>p && ctx.simScoresById[p.id])) return null;
+  return lineupSimComposite(players, ctx.simScoresById, _detailSimIdx(ctx.simsDone), cptId);
 }
 function renderHbEv(){
   const el=document.getElementById('hbEvBlock'); if(!el) return;
   const slate=activeSlate();
-  // NFL only: the field samplers below are the NFL/showdown ones, and the
-  // other sports already price themselves inside the generator.
-  if(!slate || slate.sport!=='nfl'){ el.style.display='none'; return; }
+  if(!slate){ el.style.display='none'; return; }
   el.style.display='';
   const cur=slate._hbEvPreset||'off';
   const sel=document.getElementById('hbEvPreset');
   if(sel){
     const opts=[{key:'off',name:'Off'}].concat(
       HB_EV_PRESETS.map(p=>({key:p.key, name:`${p.name} · $${p.fee} × ${p.fieldSize.toLocaleString()}`})),
-      [{key:'custom',name:'Custom… (Auto-Gen EV settings)'}]);
+      [{key:'custom',name:'Custom (Auto-Gen EV)'}]);
     sel.innerHTML=opts.map(o=>`<option value="${o.key}"${o.key===cur?' selected':''}>${esc(o.name)}</option>`).join('');
     sel.value=cur;
   }
   const body=document.getElementById('hbEvBody'); if(!body) return;
-  if(cur==='off'){ body.innerHTML='<div class="hb-ev-note">Pick a contest to price the lineup you\'re building.</div>'; return; }
-  if(!hbSimCtx()){
-    body.innerHTML='<div class="hb-ev-note">Run a sim (Auto-Gen) to price lineups'
-      +'<button class="hb-ev-go" onclick="hbGotoAutogen()">Auto-Gen →</button></div>';
-    return;
-  }
+
   const ids=slate.currentLineup||[];
-  const SD=isShowdown(slate), need=SD?6:9;
-  const done=SD ? sdComplete(slate,ids) : nflComplete(nflCounts(slate,ids));
-  if(!done){ body.innerHTML=`<div class="hb-ev-pend" id="hbEvVal">— <span>(${ids.length}/${need})</span></div>`; return; }
+  const SD=isShowdown(slate), need=rosterSize(slate);
   const cptId=SD?sdCaptainId(slate,ids):null;
   const players=(SD?sdAssignSlots(slate,ids):ids).map(id=>playerById(slate,id)).filter(Boolean);
-  const r=hbPriceLineup(players, cptId);
-  if(!r){ body.innerHTML='<div class="hb-ev-note">Can\'t price this lineup — someone in it wasn\'t in the last sim run.</div>'; return; }
-  const sign=r.evPct>=0?'+':'';
-  body.innerHTML=`<div class="hb-ev-num ${r.evPct>=0?'pos':'neg'}" id="hbEvVal" title="${esc(r.contest.desc||r.contest.name)} · ${r.nSims} held-out sims vs ${r.fieldN.toLocaleString()} modeled entries">EV ${sign}${r.evPct.toFixed(0)}%</div>`
-    +`<div class="hb-ev-sub" id="hbEvSub">Win <b>${hbPct(r.winPct)}%</b> · Cash <b>${r.cashPct.toFixed(0)}%</b> · Med finish top <b>${r.medPctl.toFixed(0)}%</b>${r.dups>=0.5?` · dupes <b>${r.dups.toFixed(0)}</b>`:''}</div>`
-    +`<div class="hb-ev-hint">${hbVsFieldHint(players, cptId)}</div>`;
-}
+  const done=SD ? sdComplete(slate,ids)
+                : isNfl(slate) ? nflComplete(nflCounts(slate,ids))
+                : players.length===need;
+  const has=players.length>0;
+  // A rostered player who has since been marked OUT is worth 0 — say so
+  // loudly rather than quietly pricing him as live.
+  const outSet=(isNfl(slate) && typeof nflOutSet==='function') ? nflOutSet(slate) : new Set();
+  const outHere=players.filter(p=>outSet.has(p.id));
+  const w=p=>outSet.has(p.id)?0:((SD && cptId && p.id===cptId)?CPT_MULT:1);
+  const hasProj=slate.columnMapping?.proj!=null, hasRtg=slate.columnMapping?.rating!=null;
+  const hasOwn=slate.columnMapping?.own!=null;
+  const sal=SD?sdSalary(slate,ids):players.reduce((t,p)=>t+(p.salary||0),0);
+  const proj=players.reduce((t,p)=>t+(parseFloat(p.proj)||0)*w(p),0);
+  const pend=`— <span class="u">(${players.length}/${need})</span>`;
 
+  const cells=[];
+  if(hasProj) cells.push(hbStatCell('Proj', has?proj.toFixed(2):'—', has?'gold lit':'dim'));
+  if(hasProj) cells.push(hbStatCell('Value', (has&&sal>0)?`${(proj/(sal/1000)).toFixed(2)}<span class="u"> /$1k</span>`:'—',
+    (has&&sal>0)?'':'dim', 'Projected points per $1,000 of salary'));
+  if(hasRtg){
+    const rtg=players.filter(p=>p.rating!=null).reduce((t,p)=>t+(parseFloat(p.rating)||0),0);
+    cells.push(hbStatCell('Rtg', has?rtg.toFixed(1):'—', has?'':'dim'));
+  }
+  cells.push(hasOwn
+    ? hbStatCell('Own%', has?`${players.reduce((t,p)=>t+(SD?sdOwnOf(p,p.id===cptId):(parseFloat(p.own)||0)),0).toFixed(1)}%`:'—', has?'':'dim',
+        SD?'Captain charged at his CPT Own%, the other five at flex Own%':'Sum of the roster’s ownership')
+    : hbStatCell('Own%','—','dim','No Own% column mapped on this slate'));
+
+  const ctx=hbSimCtx();
+  // Sim: needs the whole roster (a 4-man partial composite is not comparable
+  // with anything else on the screen) and a sim run for THIS slate.
+  let simTxt, simCls='', simTitle='';
+  const blocked=outHere.length>0;   // the last run still scored him as live
+  if(!ctx){ simTxt='—'; simCls='dim'; simTitle='Run a sim on the Auto-Gen tab to score this roster'; }
+  else if(blocked){ simTxt='—'; simCls='dim'; simTitle='A rostered player is OUT — swap him out to score this lineup'; }
+  else if(!done){ simTxt=pend; simCls='dim'; }
+  else {
+    const sc=hbSimComposite(players, cptId);
+    if(sc==null){ simTxt='—'; simCls='dim'; simTitle='Someone in this lineup was not in the last sim run'; }
+    else { simTxt=sc.toFixed(1); simCls='lit'; simTitle=`Ceiling-weighted sim score (0.6·p80 + 0.4·mean) over ${_detailSimIdx(ctx.simsDone).length} held-out sims — the same number the saved cards show under "Sim"`; }
+  }
+  cells.push(hbStatCell('Sim', simTxt, simCls, simTitle));
+
+  const priced=(cur!=='off' && ctx && done && !blocked) ? hbPriceLineup(players, cptId) : null;
+  // Order matters: "— (4/6)" is a more useful answer than a bare dash even when
+  // the contest is Off, so the roster test comes before the contest test.
+  if(!ctx){
+    cells.push(hbStatCell('Win%','—','dim'));
+    cells.push(`<div class="hbst" id="hbEvVal"><div class="hbst-l">EV</div><div class="hbst-v dim">—</div></div>`);
+  } else if(!done){
+    cells.push(hbStatCell('Win%', pend, 'dim'));
+    cells.push(`<div class="hbst" id="hbEvVal"><div class="hbst-l">EV</div><div class="hbst-v dim">${pend}</div></div>`);
+  } else if(cur==='off'){
+    cells.push(hbStatCell('Win%','—','dim','Pick a contest to model the field'));
+    cells.push(`<div class="hbst" id="hbEvVal"><div class="hbst-l">EV</div><div class="hbst-v dim">—</div></div>`);
+  } else if(!priced){
+    cells.push(hbStatCell('Win%','—','dim'));
+    cells.push(`<div class="hbst" id="hbEvVal"><div class="hbst-l">EV</div><div class="hbst-v dim">—</div></div>`);
+  } else {
+    const sign=priced.evPct>=0?'+':'';
+    cells.push(hbStatCell('Win%', `${hbPct(priced.winPct)}<span class="u">%</span>`, 'lit',
+      `Chance this exact roster is the top score among ${priced.contest.fieldSize.toLocaleString()} entries`));
+    cells.push(`<div class="hbst lit" id="hbEvVal" title="${esc(priced.contest.desc||priced.contest.name)} · ${priced.nSims} held-out sims vs ${priced.fieldN.toLocaleString()} modeled entries">`
+      +`<div class="hbst-l">EV</div><div class="hbst-v ${priced.evPct>=0?'pos':'neg'}">${sign}${priced.evPct.toFixed(0)}<span class="u">%</span></div></div>`);
+  }
+
+  let out=`<div class="hbst-grid">${cells.join('')}</div>`;
+  if(outHere.length){
+    out+=`<div class="hb-ev-note" style="margin-top:5px;color:var(--red)">⛔ ${esc(outHere.map(p=>p.name).join(', '))} ${outHere.length===1?'is':'are'} marked OUT — scored at 0 here; swap ${outHere.length===1?'him':'them'} out before saving.</div>`;
+  }
+  if(!ctx){
+    out+='<div class="hb-ev-note" style="margin-top:5px">Run a sim (Auto-Gen) to price lineups'
+      +'<button class="hb-ev-go" onclick="hbGotoAutogen()">Auto-Gen →</button></div>';
+  } else if(cur==='off'){
+    out+='<div class="hb-ev-note" style="margin-top:5px">Pick a contest above for Win% and Contest EV.</div>';
+  } else if(done && !priced && !blocked){
+    out+='<div class="hb-ev-note" style="margin-top:5px">Can\'t price this lineup — someone in it wasn\'t in the last sim run.</div>';
+  } else if(priced){
+    out+=`<div class="hb-ev-sub" id="hbEvSub" style="margin-top:5px">Win <b>${hbPct(priced.winPct)}%</b> · Cash <b>${priced.cashPct.toFixed(0)}%</b> · Med finish top <b>${priced.medPctl.toFixed(0)}%</b>${priced.dups>=0.5?` · dupes <b>${priced.dups.toFixed(0)}</b>`:''}</div>`
+      +`<div class="hb-ev-hint">${hbVsFieldHint(players, cptId)}</div>`;
+  }
+  body.innerHTML=out;
+}
 function renderPreviewLineupsList(){
   const slate=activeSlate();if(!slate)return;
   const hasProj=slate.columnMapping?.proj!=null,hasRtg=slate.columnMapping?.rating!=null;
@@ -22695,6 +23303,7 @@ function renderPreviewExposure(){
 
 function closePreviewModal(){
   document.getElementById('previewModal').classList.add('hidden');
+  if(typeof renderHbEv==='function') renderHbEv();   // sim / EV field may have changed during the run
   document.body.classList.remove('modal-open');
   const menu=document.getElementById('historyPickerMenu');
   if(menu) menu.style.display='none';
@@ -22848,13 +23457,18 @@ function renderProjEditList(){
 function switchTab(tab,el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');document.getElementById('tab-'+tab).classList.add('active');
+  if(tab==='simdash'){ openSimInputsModal(); return; }   // the Sim tab became a pop-out
+  const _tc=document.getElementById('tab-'+tab); if(!_tc) return;
+  if(el) el.classList.add('active'); _tc.classList.add('active');
   if(tab==='exposure')renderExposure();
+  if(tab==='builder' && typeof renderHbEv==='function') renderHbEv();
   if(tab==='groups')renderGroups();
   if(tab==='autogen'){renderGroupRulesSummary();}
   if(tab==='projections')renderProjEditList();
   if(tab==='history')renderHistory();
-  if(tab==='simdash')renderSimDash();
+  // 'simdash' is no longer a tab — the sim inputs are the #simInputsModal
+  // pop-out, opened by openSimInputsModal() from Auto-Gen and the game tiles.
+  if(tab==='autogen')refreshSimDashTab();
 }
 // renderPlayerExpList no longer exists — every click that reached renderAll
 // was throwing a ReferenceError after the panels drew (harmless-looking, but
