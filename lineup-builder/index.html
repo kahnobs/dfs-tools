@@ -1622,7 +1622,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
                 style="background:var(--surface2);border:1px solid var(--border);border-right:none;color:var(--muted);padding:4px 7px;border-radius:5px 0 0 5px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;outline:none;">
                 <option value="saved">Order saved</option>
                 <option value="proj">Proj</option>
-                <option value="sim">Sim</option>
+                <option value="sim" title="Sim = median lineup total across the sim">Sim</option>
                 <option value="win">Win%</option>
                 <option value="top5">Top5</option>
                 <option value="top10">Top10</option>
@@ -2328,7 +2328,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
     <div id="previewSortBar" style="display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
       <span style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;">SORT:</span>
       <button class="preview-sort-btn" data-sort="default" onclick="setPreviewSort('default',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--accent);background:rgba(245,197,24,.1);color:var(--accent);cursor:pointer;">Default</button>
-      <button class="preview-sort-btn" data-sort="sim" onclick="setPreviewSort('sim',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;">Sim</button>
+      <button class="preview-sort-btn" data-sort="sim" title="Sim = median lineup total across the sim" onclick="setPreviewSort('sim',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;">Sim</button>
       <button class="preview-sort-btn" data-sort="proj" onclick="setPreviewSort('proj',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;">Proj</button>
       <button class="preview-sort-btn" data-sort="rating" onclick="setPreviewSort('rating',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;">Rating</button>
       <button class="preview-sort-btn" data-sort="own" onclick="setPreviewSort('own',this)" style="font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;">Own%</button>
@@ -4857,6 +4857,8 @@ function renderPool(){
           const hint = cptScaled ? ' ×1.5' : '';
           const tip = f.key==='_simBoom'
             ? (isShowdown(slate) ? 'Boom: % of sims he is a top-3 scorer in the game' : 'Boom: % of sims he posts a top-N score at his position (QB/TE/DST top 2, RB top 4, WR top 6)')
+            : f.key==='_simP50'
+            ? (cptScaled ? '1.5× as captain. '+PLAYER_SIM_TIP : PLAYER_SIM_TIP)
             : SDcpt
             ? (cptScaled ? '1.5× as captain' : f.key==='own' ? 'Captain ownership' : 'Drag to reorder')
             : 'Drag to reorder';
@@ -5442,15 +5444,16 @@ function saveLineup(){
     if(cid){ slate._lineupMeta=slate._lineupMeta||{}; slate._lineupMeta[key]=Object.assign({},slate._lineupMeta[key]||{},{sdCaptain:cid}); }
     slate.sdCaptain=null;
   }
-  // The card above the button just quoted a Sim score and a Contest EV for this
-  // roster; the saved card reads _lineupMeta, so write them down or the same
-  // lineup shows two different (or zero) numbers a second later. Generated
-  // lineups come through addSelectedToSaved, which writes the same three keys.
+  // The card above the button just quoted a Sim score (the median lineup total,
+  // `hbLineupSim`) and a Contest EV for this roster; the saved card reads
+  // _lineupMeta, so write them down or the same lineup shows two different (or
+  // zero) numbers a second later. Generated lineups come through
+  // addSelectedToSaved, which writes the same key from the same function.
   try{
     const _SDs=isShowdown(slate);
     const _cid=_SDs?sdCaptainId(slate,current):null;
     const _pl=(_SDs?sdAssignSlots(slate,current,_cid):current).map(id=>playerById(slate,id)).filter(Boolean);
-    const _sc=(typeof hbSimComposite==='function')?hbSimComposite(_pl,_cid):null;
+    const _sc=(typeof hbLineupSim==='function')?hbLineupSim(_pl,_cid):null;
     const _ev=(typeof hbPriceLineup==='function')?(hbPriceLineup(_pl,_cid)||{}).evPct:null;
     if(_sc!=null || (_ev!=null && isFinite(_ev))){
       slate._lineupMeta=slate._lineupMeta||{};
@@ -5679,8 +5682,11 @@ function renderSaved(){
   const isUfc=slate.sport==='ufc';
   const pool=slate.players||[];
   const meta=slate._lineupMeta||{};
-  // A lineup carries a sim score only if its stored meta has a usable simWinAvg.
-  const anySim=lineups.some(l=>{const v=meta[lineupKey(l)]?.simWinAvg;return v!=null&&v!==''&&!isNaN(parseFloat(v));});
+  // A lineup carries a sim score if its stored meta has a usable simWinAvg OR
+  // this slate has a live sim context to compute the median from (see the
+  // liveSim below — a re-run refreshes every card, stored or not).
+  const anySim=!!slateSimCtx(slate)
+    || lineups.some(l=>{const v=meta[lineupKey(l)]?.simWinAvg;return v!=null&&v!==''&&!isNaN(parseFloat(v));});
   const anyEv=lineups.some(l=>{const v=meta[lineupKey(l)]?.evPct;return v!=null&&!isNaN(parseFloat(v));});
   // Only offer sort metrics that actually render on the cards, so the dropdown can't
   // advertise a metric (e.g. Sim) that no saved lineup has.
@@ -5726,8 +5732,15 @@ function renderSaved(){
     const proj=players.reduce((s,p)=>s+(parseFloat(p.proj)||0)*(SDl&&p.id===cptId?CPT_MULT:1),0);
     const rtg=players.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
     const lk=lineupKey(lineup);
+    // ONE lineup Sim (see lineupSimMedian). Prefer the LIVE median off the last
+    // sim run for this slate, so re-running the sim refreshes every saved card
+    // instead of freezing whatever the run that built it happened to store;
+    // fall back to the stored meta when there is no live context (page
+    // reloaded, another slate simmed) or someone wasn't in the run.
+    const liveSim=lineupSimLive(slate, players, cptId);
     const rawSim=meta[lk]?.simWinAvg??lineup._simWinAvg;
-    const simScore=(rawSim!=null&&rawSim!==''&&!isNaN(parseFloat(rawSim)))?parseFloat(rawSim):null;
+    const simScore=(liveSim!=null) ? liveSim
+                 : (rawSim!=null&&rawSim!==''&&!isNaN(parseFloat(rawSim)))?parseFloat(rawSim):null;
     const rawEv=meta[lk]?.evPct;
     const evPct=(rawEv!=null&&!isNaN(parseFloat(rawEv)))?parseFloat(rawEv):null;
     const winEq  =hasWin  ?players.reduce((s,p)=>s+(nascarMlToProb(p.win)||0),  0)*100:null;
@@ -5775,7 +5788,7 @@ function renderSaved(){
     const stats=[];
     if(hasProj)        stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Proj</span>${proj.toFixed(2)}</span>`);
     if(hasRtg)         stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Rtg</span>${rtg.toFixed(1)}</span>`);
-    if(simScore!=null) stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Sim</span>${simScore.toFixed(1)}</span>`);
+    if(simScore!=null) stats.push(`<span class="saved-stat" title="${esc(LINEUP_SIM_TIP)}"><span class="saved-stat-lbl">Sim</span>${simScore.toFixed(1)}</span>`);
     if(evPct!=null)    stats.push(`<span class="saved-stat" style="color:${evPct>=0?'var(--green)':'var(--red)'};"><span class="saved-stat-lbl" style="color:${evPct>=0?'var(--green)':'var(--red)'};opacity:.7;">EV</span>${evPct>=0?'+':''}${evPct.toFixed(0)}%</span>`);
     if(hbEv!=null)     stats.push(`<span class="saved-stat hb-ev-chip" style="color:${hbEv>=0?'var(--green)':'var(--red)'};" title="Priced live against the modeled field for the contest selected in the builder">
       <span class="saved-stat-lbl" style="color:${hbEv>=0?'var(--green)':'var(--red)'};opacity:.7;">EV</span>${hbEv>=0?'+':''}${hbEv.toFixed(0)}%</span>`);
@@ -5997,8 +6010,13 @@ function dkLineupList(slate){
     const players=(SD?sdAssignSlots(slate,l,cptId):l).map(id=>playerById(slate,id)).filter(Boolean);
     const sal=SD?sdSalary(slate,l,cptId):players.reduce((s,p)=>s+(p.salary||0),0);
     const proj=players.reduce((s,p)=>s+(parseFloat(p.proj)||0)*(SD&&p.id===cptId?CPT_MULT:1),0);
+    // Same ONE lineup Sim the saved cards print: live median off this slate's
+    // last run when there is one, stored meta otherwise. "Rank by Sim" in this
+    // modal must order the entries exactly as the saved list does.
+    const liveSim=lineupSimLive(slate, players, cptId);
     const rawSim=m.simWinAvg;
-    const sim=(rawSim!=null&&rawSim!==''&&!isNaN(parseFloat(rawSim)))?parseFloat(rawSim):null;
+    const sim=(liveSim!=null) ? liveSim
+            : (rawSim!=null&&rawSim!==''&&!isNaN(parseFloat(rawSim)))?parseFloat(rawSim):null;
     let evPct=(m.evPct!=null&&!isNaN(parseFloat(m.evPct)))?parseFloat(m.evPct):null;
     // A hand-built lineup has no stored EV. The builder's live pricing is the
     // same arithmetic against the same cached field, so fall back to it rather
@@ -7048,7 +7066,7 @@ function renderDkEntriesModal(){
       <label>Rank by
         <select id="dkRankBy" onchange="dkSetGlobal('rankBy',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;cursor:pointer;outline:none;">
           <option value="ev"${st.rankBy==='ev'?' selected':''}>EV%</option>
-          <option value="sim"${st.rankBy==='sim'?' selected':''}>Sim</option>
+          <option value="sim"${st.rankBy==='sim'?' selected':''} title="Sim = median lineup total across the sim">Sim</option>
           <option value="proj"${st.rankBy==='proj'?' selected':''}>Proj</option>
         </select></label>
       ${LS?'':`<label>Max entries per lineup
@@ -9343,6 +9361,66 @@ function lineupSimComposite(lineup, simScoresById, idxList, cptId){
   const p80 = sorted[Math.min(Math.floor(sorted.length*0.80), sorted.length-1)]||0;
   return 0.6*p80 + 0.4*avg;
 }
+
+// ── THE ONE LINEUP "Sim" ──────────────────────────────────────
+// Every surface that shows a user a lineup "Sim" shows THIS number: the MEDIAN
+// of the lineup's total points across the held-out sims (captain at 1.5× on
+// showdown). One definition, everywhere.
+//
+// It exists because three different statistics used to be printed under the
+// same three-letter label and users (rightly) read them as the same thing:
+//   · preview cards summed the per-player `_simP50`, which is not a median at
+//     all — every sport stores the per-player COMPOSITE (0.6·p80 + 0.4·mean)
+//     in that field — so a preview quoted a sum of ceilings;
+//   · saved cards printed `_lineupMeta.simWinAvg`, i.e. whatever internal
+//     selection score the generator ranked on (a lineup composite on NFL /
+//     UFC / PGA, a bucket-conditional sum of driver composites on NASCAR);
+//   · the builder card printed the lineup composite.
+// On a NASCAR slate that spread read as Sim 435.0 in the preview and 328.2 on
+// the saved card for lineups of the same quality.
+//
+// The generators' own selection math is untouched — `lineupSimComposite`, the
+// bucket scores and the EV path still rank candidates exactly as before. This
+// is a DISPLAY statistic, and a median is the honest answer to "what does this
+// lineup score", being on the same scale as the per-sim totals in Details.
+//
+// Quantile convention is deliberately `arr[floor(n/2)]` — identical to
+// `lineupDetailStats`' p50 — so the Details panel's "Median" and the card's
+// "Sim" are the same number to the last decimal, not two roundings apart.
+function lineupSimMedian(players, cptId, ctx){
+  ctx = ctx || (typeof window!=='undefined' ? window._lastSimCtx : null);
+  if(!ctx || !ctx.simScoresById || !players || !players.length) return null;
+  // Every man must have been in the run, or the total is silently short.
+  if(!players.every(p=>p && ctx.simScoresById[p.id])) return null;
+  const idx=_detailSimIdx(ctx.simsDone);
+  if(!idx || !idx.length) return null;
+  const tot=lineupSimTotals(players, cptId, ctx, idx);
+  const arr=Array.from(tot).sort((a,b)=>a-b);
+  const n=arr.length; if(!n) return null;
+  return arr[Math.min(n-1, Math.floor(n*0.5))];
+}
+// The last sim run's context, but only when it describes THIS slate — a
+// context left over from another slate would price the roster with the wrong
+// players' scores. `hbSimCtx` is a binding of this.
+function slateSimCtx(slate){
+  const ctx=(typeof window!=='undefined') ? window._lastSimCtx : null;
+  if(!ctx || !slate || ctx.slateId!==slate.id || !ctx.simScoresById) return null;
+  return ctx;
+}
+// Median lineup Sim for a saved/previewed lineup expressed as player objects,
+// against the active slate's own sim context. null when there is no live
+// context or someone wasn't in the run — callers fall back to stored meta.
+function lineupSimLive(slate, players, cptId){
+  const ctx=slateSimCtx(slate); if(!ctx) return null;
+  return lineupSimMedian(players, cptId, ctx);
+}
+// Human-readable definition, reused by every tooltip that labels the number.
+const LINEUP_SIM_TIP = 'Sim = median lineup total across the sim (the middle outcome of the lineup’s total points over the held-out sims; captain counted at 1.5×)';
+// The per-player pool column is a DIFFERENT statistic on purpose: `_simP50`
+// holds the ceiling-weighted composite because that is what the generators
+// select on, and retitling it to a median would misdescribe the ranking. The
+// header says so, so nobody adds the column up and expects the card's number.
+const PLAYER_SIM_TIP = 'Sim: ceiling-weighted composite (0.6·p80 + 0.4·mean) — the number selection runs on. Lineup Sim on the cards is the median of the lineup total.';
 
 // ── SAME-FIGHT TEST ───────────────────────────────────────────
 // Two fighters oppose each other if they share a fight number, OR (when a fight
@@ -23006,6 +23084,7 @@ function openPreviewModal(lineups, optimizeBy){
   // The head-to-head win rates describe THIS set of lineups against each other,
   // so the cache dies with the set.
   _previewWinCache=null;
+  _previewSimCache=null;   // medians describe THIS run's sims — see previewLineupSim
   previewFilter=null;
   previewSortMode='default';
   previewSortDir='desc';
@@ -23147,6 +23226,10 @@ function lineupDetailStats(players, cptId){
     const a=idx.map(t=>s[t]).sort((x,y)=>x-y);
     const m=a.reduce((x,y)=>x+y,0)/(a.length||1);
     return { p, isCpt: !!(cptId && p.id===cptId), mean:m,
+             // His own median, on the same convention the lineup Sim uses —
+             // the pool's "Sim" column is a composite, so this is the only
+             // place a per-player middle outcome is spelled out beside it.
+             med: a[Math.min(a.length-1, Math.floor(a.length*0.5))],
              p80: a[Math.min(a.length-1, Math.floor(a.length*0.8))],
              boom: (p._simBoom!=null ? p._simBoom : null) };
   });
@@ -23161,6 +23244,22 @@ function lineupDetailStats(players, cptId){
 // sim, so the column sums to 100% by construction. One pass for the whole
 // board, cached for as long as the modal holds this set of lineups.
 let _previewWinCache=null;
+// The lineup Sim printed on a preview card, and the key the preview Sim sort
+// and the "Avg Sim" panel figure read. It is `lineupSimMedian` — the same
+// number the saved card will show the moment the lineup is added, and the same
+// number the builder card shows if you load it. A Map keyed by the lineup array
+// keeps a 150-card render (which sorts AND paints) to one pass per lineup; the
+// cache dies with the previewed set in openPreviewModal.
+let _previewSimCache=null;
+function previewLineupSim(slate, lineup){
+  if(!_previewSimCache) _previewSimCache=new Map();
+  if(_previewSimCache.has(lineup)) return _previewSimCache.get(lineup);
+  const ctx=slateSimCtx(slate);
+  const cpt=(slate && isShowdown(slate)) ? (lineup._sdCaptain || sdCaptainId(slate, lineup.map(p=>p.id))) : null;
+  const v=ctx ? lineupSimMedian(lineup, cpt, ctx) : null;
+  _previewSimCache.set(lineup, v);
+  return v;
+}
 function previewWinPcts(){
   if(_previewWinCache) return _previewWinCache;
   const ctx=window._lastSimCtx, slate=activeSlate();
@@ -23205,7 +23304,7 @@ function lineupDetailHtml(players, cptId, opts){
     // fall back to whatever the lineup carried when it was saved.
     const m=opts.meta||{};
     const bits=[];
-    if(m.simWinAvg!=null&&m.simWinAvg!=='') bits.push(`<span><i>Sim</i>${parseFloat(m.simWinAvg).toFixed(1)}</span>`);
+    if(m.simWinAvg!=null&&m.simWinAvg!=='') bits.push(`<span title="${esc(LINEUP_SIM_TIP)}"><i>Sim</i>${parseFloat(m.simWinAvg).toFixed(1)}</span>`);
     if(m.simAvg!=null&&m.simAvg!=='')       bits.push(`<span><i>Avg</i>${parseFloat(m.simAvg).toFixed(1)}</span>`);
     if(m.evPct!=null)                       bits.push(`<span><i>EV</i>${parseFloat(m.evPct).toFixed(0)}%</span>`);
     return `<div class="lu-det">
@@ -23214,8 +23313,10 @@ function lineupDetailHtml(players, cptId, opts){
     </div>`;
   }
   const f1=v=>(Math.round(v*10)/10).toFixed(1);
+  // "Median" here IS the card's "Sim" — same population, same quantile
+  // convention (see lineupSimMedian) — so the two can never disagree.
   const pcts=[['P10',st.p10],['P25',st.p25],['Median',st.p50],['P75',st.p75],['P90',st.p90],['Mean',st.mean],['Max',st.max]]
-    .map(([l,v])=>`<span><i>${l}</i>${f1(v)}</span>`).join('');
+    .map(([l,v])=>`<span${l==='Median'?` title="${esc(LINEUP_SIM_TIP)} — this is the “Sim” on the card"`:''}><i>${l}</i>${f1(v)}</span>`).join('');
   const win = opts.winPct!=null
     ? `<div class="lu-det-win">Wins ${opts.winPct.toFixed(1)}% of sims vs the other ${opts.nOthers} generated lineup${opts.nOthers===1?'':'s'}</div>` : '';
   const cpt = (SDd && st.cptShare!=null)
@@ -23223,6 +23324,7 @@ function lineupDetailHtml(players, cptId, opts){
   const rows=st.rows.map(r=>`<tr>
       <td>${r.isCpt?'<span class="sd-cpt-tag">CPT</span> ':''}${esc(r.p.name)}</td>
       <td>${f1(r.mean)}${r.isCpt?'<span style="color:var(--muted)"> ×1.5</span>':''}</td>
+      <td>${f1(r.med)}</td>
       <td>${f1(r.p80)}</td>
       <td>${r.boom==null?'—':r.boom.toFixed(1)+'%'}</td>
       <td>${SDd?sdOwnOf(r.p, r.isCpt).toFixed(1)+'%':((parseFloat(r.p.own)||0).toFixed(1)+'%')}</td>
@@ -23232,7 +23334,7 @@ function lineupDetailHtml(players, cptId, opts){
     <div class="lu-det-pcts">${pcts}</div>
     ${_luBarsHtml(st)}
     ${win}${cpt}
-    <table class="lu-det-tbl"><tr><th>Player</th><th>Mean</th><th>P80</th><th>Boom</th><th>${SDd?'Own (slot)':'Own'}</th></tr>${rows}</table>
+    <table class="lu-det-tbl"><tr><th>Player</th><th>Mean</th><th title="His own median score across these sims">Med</th><th>P80</th><th>Boom</th><th>${SDd?'Own (slot)':'Own'}</th></tr>${rows}</table>
   </div>`;
 }
 function togglePreviewDetails(i, btn){
@@ -23461,11 +23563,7 @@ function hbContest(slate){
 }
 // The sim context, but only if it describes THIS slate — a context left over
 // from another slate would price this roster with the wrong players' scores.
-function hbSimCtx(){
-  const ctx=window._lastSimCtx, s=activeSlate();
-  if(!ctx || !s || ctx.slateId!==s.id || !ctx.simScoresById) return null;
-  return ctx;
-}
+function hbSimCtx(){ return slateSimCtx(activeSlate()); }
 // Captain ownership targets for the modeled field, with the same fallback the
 // generator uses when a slate publishes no CPT Own% column (flex ownership ×
 // ceiling, renormalized to one captain slot). Duplicated rather than hoisted
@@ -23833,9 +23931,10 @@ function hbVsFieldHint(players, cptId){
 // The lineup stats card. ONE card under the roster, for every sport, holding
 // everything this app can say about the six (or nine) players you just typed:
 //   Proj / Value / Own%   — arithmetic on the slate's own columns, always on
-//   Sim                   — the SAME statistic the saved cards print under
-//                           "Sim" (lineupSimComposite = 0.6·p80 + 0.4·mean over
-//                           the held-out sims), once a sim has been run here
+//   Sim                   — the SAME statistic the preview and saved cards
+//                           print under "Sim" (`lineupSimMedian` = the MEDIAN
+//                           of the lineup's total across the held-out sims),
+//                           once a sim has been run here
 //   Win% / Contest EV     — hbPriceLineup against the modeled field, once a
 //                           contest is selected in the header
 // Cells that need a complete roster print "— (n/N)" instead of a number.
@@ -23848,14 +23947,18 @@ function hbStatCell(label, value, cls, title){
     + `<div class="hbst-l">${esc(label)}</div>`
     + `<div class="hbst-v ${cls||''}">${value}</div></div>`;
 }
-// Sim composite for an arbitrary roster — matches _lineupMeta.simWinAvg, which
-// is what the saved cards and the saved-panel Sim sort read.
-function hbSimComposite(players, cptId){
+// The lineup Sim for an arbitrary roster — `lineupSimMedian` against this
+// slate's own run. This is the SAME number the preview cards, the saved cards,
+// the DK-entries ranking and the Details panel's "Median" print; see
+// `lineupSimMedian`. It used to be the 0.6·p80 + 0.4·mean composite, which is
+// the generator's selection score, not a score the lineup can post.
+function hbLineupSim(players, cptId){
   const ctx=hbSimCtx(); if(!ctx) return null;
-  if(!players || !players.length) return null;
-  if(!players.every(p=>p && ctx.simScoresById[p.id])) return null;
-  return lineupSimComposite(players, ctx.simScoresById, _detailSimIdx(ctx.simsDone), cptId);
+  return lineupSimMedian(players, cptId, ctx);
 }
+// Legacy name kept as a one-line binding: external probes and older harnesses
+// call it, and it must not drift from what the card shows.
+function hbSimComposite(players, cptId){ return hbLineupSim(players, cptId); }
 // The card header's two selects: FORMAT (Off / the four formats / Custom) and
 // STAKES (disabled unless a format is picked — Off prices nothing and Custom
 // takes its field model from whatever the Auto-Gen block is set to).
@@ -23932,9 +24035,9 @@ function renderHbEv(){
   else if(blocked){ simTxt='—'; simCls='dim'; simTitle='A rostered player is OUT — swap him out to score this lineup'; }
   else if(!done){ simTxt=pend; simCls='dim'; }
   else {
-    const sc=hbSimComposite(players, cptId);
+    const sc=hbLineupSim(players, cptId);
     if(sc==null){ simTxt='—'; simCls='dim'; simTitle='Someone in this lineup was not in the last sim run'; }
-    else { simTxt=sc.toFixed(1); simCls='lit'; simTitle=`Ceiling-weighted sim score (0.6·p80 + 0.4·mean) over ${_detailSimIdx(ctx.simsDone).length} held-out sims — the same number the saved cards show under "Sim"`; }
+    else { simTxt=sc.toFixed(1); simCls='lit'; simTitle=`${LINEUP_SIM_TIP} — ${_detailSimIdx(ctx.simsDone).length.toLocaleString()} held-out sims. The same number the preview and saved cards show under "Sim".`; }
   }
   cells.push(hbStatCell('Sim', simTxt, simCls, simTitle));
 
@@ -23996,9 +24099,11 @@ function renderPreviewLineupsList(){
       const cOf = l => SDs ? (l._sdCaptain || sdCaptainId(slate, l.map(p=>p.id))) : null;
       const wOf = (l,p) => (SDs && p.id===cOf(l)) ? CPT_MULT : 1;
       if(previewSortMode === 'sim'){
-        const sa = a.every(p=>p._simP50!=null) ? a.reduce((s,p)=>s+(p._simP50||0)*wOf(a,p),0) : -Infinity;
-        const sb = b.every(p=>p._simP50!=null) ? b.reduce((s,p)=>s+(p._simP50||0)*wOf(b,p),0) : -Infinity;
-        return dir * (sa - sb);
+        // The card's own number (median lineup total), not a sum of per-player
+        // composites — sorting on a statistic nobody can see is how the two
+        // surfaces drifted apart in the first place.
+        const sa = previewLineupSim(slate, a); const sb = previewLineupSim(slate, b);
+        return dir * ((sa==null?-Infinity:sa) - (sb==null?-Infinity:sb));
       }
       if(previewSortMode === 'proj'){
         const pa = a.reduce((s,p)=>s+(parseFloat(p.proj)||0)*wOf(a,p),0);
@@ -24035,15 +24140,19 @@ function renderPreviewLineupsList(){
     const sal=lineup.reduce((s,p)=>s+((SDp&&p.id===cptId)?cptSalaryOf(p):(p.salary||0)),0);
     const proj=lineup.reduce((s,p)=>s+(parseFloat(p.proj)||0)*m(p),0);
     const rtg=lineup.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
-    const simTotal = lineup.every(p=>p._simP50!=null)
-      ? lineup.reduce((s,p)=>s+(p._simP50||0)*m(p),0) : null;
+    // ONE lineup Sim: the median of this lineup's total across the held-out
+    // sims (see lineupSimMedian). This used to be the SUM of the per-player
+    // `_simP50`s, which is the per-player ceiling COMPOSITE and not a median at
+    // all — that sum is what read as "Sim 435.0" here beside "Sim 328.2" on the
+    // saved card for the same quality of lineup.
+    const simTotal = previewLineupSim(slate, lineup);
     const ordered = SDp ? [...lineup].sort((a,b)=>(b.id===cptId)-(a.id===cptId)) : lineup;
     // Same CPT/FLEX ownership split as the saved cards (see renderSaved).
     const ownTotal = lineup.reduce((s,p)=>s+(SDp?sdOwnOf(p,p.id===cptId):(parseFloat(p.own)||0)),0);
     const stats=[];
     if(hasProj)stats.push(`<span class="preview-stat"><span class="preview-stat-lbl">Proj</span>${proj.toFixed(2)}</span>`);
     if(hasRtg)stats.push(`<span class="preview-stat"><span class="preview-stat-lbl">Rtg</span>${rtg.toFixed(1)}</span>`);
-    if(simTotal!=null)stats.push(`<span class="preview-stat" style="color:var(--green);"><span class="preview-stat-lbl" style="color:var(--green);opacity:.7;">Sim</span>${simTotal.toFixed(1)}</span>`);
+    if(simTotal!=null)stats.push(`<span class="preview-stat" style="color:var(--green);" title="${esc(LINEUP_SIM_TIP)}"><span class="preview-stat-lbl" style="color:var(--green);opacity:.7;">Sim</span>${simTotal.toFixed(1)}</span>`);
     if(lineup._evPct!=null&&!isNaN(lineup._evPct))stats.push(`<span class="preview-stat" style="color:${lineup._evPct>=0?'var(--green)':'var(--red)'};"><span class="preview-stat-lbl" style="color:${lineup._evPct>=0?'var(--green)':'var(--red)'};opacity:.7;">EV</span>${lineup._evPct>=0?'+':''}${lineup._evPct.toFixed(0)}%</span>`);
     if(lineup._simCeiling!=null)stats.push(`<span class="preview-stat" style="color:var(--accent2);"><span class="preview-stat-lbl" style="color:var(--accent2);opacity:.7;">Ceil</span>${lineup._simCeiling}</span>`);
     if(ownTotal>0)stats.push(`<span class="preview-stat" style="color:var(--muted);"><span class="preview-stat-lbl" style="color:var(--muted);opacity:.7;">Own</span>${ownTotal.toFixed(1)}%</span>`);
@@ -24131,14 +24240,16 @@ function renderPreviewExposure(){
   const avgRtg = hasRtg ? (selectedLineups.reduce((s,l)=>s+l.filter(p=>p.rating!=null).reduce((s2,p)=>s2+(parseFloat(p.rating)||0),0),0)/total).toFixed(1) : null;
   const avgSal = (selectedLineups.reduce((s,l)=>{const c=_cptOf(l);
     return s+l.reduce((s2,p)=>s2+((SDavg&&p.id===c)?cptSalaryOf(p):(p.salary||0)),0);},0)/total);
-  const hasSimScores = selectedLineups.some(l=>l.some(p=>p._simP50!=null));
-  const avgSim = hasSimScores ? (selectedLineups.reduce((s,l)=>s+l.reduce((s2,p)=>s2+(p._simP50||0)*_mul(l,p),0),0)/total).toFixed(1) : null;
+  // Average of the CARDS' own Sim numbers (median lineup totals), so the panel
+  // figure and the cards beside it are the same statistic.
+  const _simVals = selectedLineups.map(l=>previewLineupSim(slate, l)).filter(v=>v!=null);
+  const avgSim = _simVals.length ? (_simVals.reduce((s,v)=>s+v,0)/_simVals.length).toFixed(1) : null;
 
   const statsHTML = `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;padding:7px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;">
     <div style="font-family:'Bebas Neue',sans-serif;font-size:11px;letter-spacing:.8px;color:var(--muted);margin-bottom:2px;">Lineup Set Averages</div>
     ${avgProj!=null?`<div style="display:flex;justify-content:space-between;"><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">Avg Proj</span><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--accent);">${avgProj}</span></div>`:''}
     ${avgRtg!=null?`<div style="display:flex;justify-content:space-between;"><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">Avg Rating</span><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--accent);">${avgRtg}</span></div>`:''}
-    ${avgSim!=null?`<div style="display:flex;justify-content:space-between;"><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">Avg Sim</span><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--green);">${avgSim}</span></div>`:''}
+    ${avgSim!=null?`<div style="display:flex;justify-content:space-between;" title="${esc(LINEUP_SIM_TIP)} — averaged over the selected lineups"><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">Avg Sim</span><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--green);">${avgSim}</span></div>`:''}
     <div style="display:flex;justify-content:space-between;"><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">Avg Salary</span><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--accent);">${fmt(Math.round(avgSal))}</span></div>
     <div style="display:flex;justify-content:space-between;"><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">Lineups</span><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">${total}</span></div>
   </div>`;
@@ -24370,9 +24481,18 @@ function addSelectedToSaved(){
     existingKeys.add(key);
     const ids = lineup.map(p=>p.id);
     slate.savedLineups.push(ids);
-    if(lineup._simAvg||lineup._simWinAvg||lineup._evPct!=null){
+    // The Sim the saved card will print must be the Sim the preview card just
+    // printed: `previewLineupSim` (the median lineup total). `l._simWinAvg` is
+    // the generator's INTERNAL selection score — a lineup composite on NFL /
+    // UFC / PGA, a bucket-conditional sum of driver composites on NASCAR — and
+    // storing that is what made the same lineup read 435.0 in the preview and
+    // 328.2 once saved. It stays the fallback for a lineup the live context
+    // can't score (someone wasn't in the run), so nothing goes blank.
+    const _med=previewLineupSim(slate, lineup);
+    const _simStr=(_med!=null) ? _med.toFixed(1) : (lineup._simWinAvg||null);
+    if(_simStr!=null||lineup._simAvg||lineup._evPct!=null){
       slate._lineupMeta=slate._lineupMeta||{};
-      slate._lineupMeta[key]={simAvg:lineup._simAvg||null,simWinRate:lineup._simWinRate||null,simWinAvg:lineup._simWinAvg||null,
+      slate._lineupMeta[key]={simAvg:_simStr||lineup._simAvg||null,simWinRate:lineup._simWinRate||null,simWinAvg:_simStr,
         evPct:(lineup._evPct!=null&&!isNaN(lineup._evPct))?Math.round(lineup._evPct*10)/10:null};
     }
     // Showdown: the sim's captain choice was set on the preview lineup only —
