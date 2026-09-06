@@ -1898,7 +1898,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">
               <span class="setting-label" style="flex:none;">QB +</span>
               <select id="nflStackN" class="form-input" style="width:110px;padding:3px 6px;font-size:11px;"
-                onchange="const _s=activeSlate();if(_s){_s._nflStackN=parseInt(this.value);save();}">
+                onchange="const _s=activeSlate();if(_s){_s._nflStackN=parseInt(this.value);save();renderNflQbStacks();}">
                 <option value="0">off</option>
                 <option value="1">1 pass catcher</option>
                 <option value="2">2 pass catchers</option>
@@ -1906,7 +1906,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
               </select>
               <span class="setting-label" style="flex:none;margin-left:6px;">Bring-back</span>
               <select id="nflBringBack" class="form-input" style="width:74px;padding:3px 6px;font-size:11px;"
-                onchange="const _s=activeSlate();if(_s){_s._nflBringBack=parseInt(this.value);save();}">
+                onchange="const _s=activeSlate();if(_s){_s._nflBringBack=parseInt(this.value);save();renderNflQbStacks();}">
                 <option value="0">off</option>
                 <option value="1">1</option>
                 <option value="2">2</option>
@@ -1919,9 +1919,28 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
             </label>
             <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);cursor:pointer;margin-top:3px;">
               <input type="checkbox" id="nflStackRbCounts" style="accent-color:#a855f7;"
-                onchange="const _s=activeSlate();if(_s){_s._nflStackRbCounts=this.checked;save();}">
+                onchange="const _s=activeSlate();if(_s){_s._nflStackRbCounts=this.checked;save();renderNflQbStacks();}">
               <span>Count a same-team RB toward the stack <span style="opacity:.65;">(off = WR/TE only, the real pass-game correlation)</span></span>
             </label>
+
+            <!-- Per-QB stack overrides. The global "QB + N" is one number for a
+                 whole slate, but the right shape is a property of the QB: some
+                 are viable naked, some need a runningmate, some only pay in a
+                 full onslaught. Collapsed by default so the common case (one
+                 global rule) stays a three-control block; the header carries the
+                 count so a customized slate can never look untouched. -->
+            <div id="nflQbStackWrap" style="margin-top:9px;border-top:1px solid var(--border);padding-top:8px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div id="nflQbStackHdr" onclick="toggleNflQbStacks()"
+                  style="flex:1;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text);user-select:none;">
+                  <span id="nflQbStackCaret" style="font-size:9px;color:var(--muted);">▶</span>
+                  <span id="nflQbStackTitle">Per-QB stacks</span>
+                </div>
+                <button id="nflQbStackReset" onclick="resetNflQbStacks()" title="Clear every per-QB override so all QBs inherit the global setting"
+                  style="flex:none;padding:2px 7px;background:none;border:1px solid var(--border);color:var(--muted);border-radius:5px;font-size:9px;cursor:pointer;font-family:'DM Sans',sans-serif;">Reset all to global</button>
+              </div>
+              <div id="nflQbStackBody" style="display:none;margin-top:7px;"></div>
+            </div>
           </div>
           <div class="autogen-section" id="pgaSection" style="display:none;">
             <div class="autogen-section-title">PGA Simulation</div>
@@ -2731,6 +2750,9 @@ function toggleOut(id, e){
   save();
   if(typeof renderAll === 'function') renderAll();
   if(typeof renderSimDash === 'function' && document.getElementById('simDashPanel')) renderSimDash();
+  // An OUT quarterback loses his row, and an OUT pass catcher changes what every
+  // row's rule can still reach — repaint the per-QB stacks panel if it is open.
+  if(typeof renderNflQbStacks === 'function' && document.getElementById('nflQbStackWrap')) renderNflQbStacks();
   return moved;
 }
 
@@ -3891,13 +3913,25 @@ function leftColLabel(slate){
   return 'Grid';
 }
 
+// NFL desktop: "Team" and "Opp" cells between Name and Sal — the stacking read
+// (who he is correlated with, who the bring-back is). Opp carries the home/away
+// mark ("@KC" away, "KC" home, plain when unknown) and the game line on hover.
+function nflTeamOppCells(slate, p){
+  const team=(p.team||'').toUpperCase(), opp=nflOppOf(p);
+  const gi=(()=>{ const t=Number.isFinite(p.game_ou)?`O/U ${p.game_ou}`:''; const sp=Number.isFinite(p.spread)?`${team} ${p.spread>0?'+':''}${p.spread}`:''; return [t,sp].filter(Boolean).join(' · '); })();
+  const tip=`${esc(team)}${opp?(p.home===true?' vs ':p.home===false?' at ':' vs ')+esc(opp):''}${gi?' — '+gi:''}`;
+  return `<div class="cell-mono col-c" style="font-size:10.5px;color:var(--text);opacity:.9;" title="${tip}">${esc(team)}</div>`
+       + `<div class="cell-mono col-c" style="font-size:10.5px;color:var(--muted);white-space:nowrap;" title="${tip}">${opp?(p.home===false?'@ ':p.home===true?'vs ':'')+esc(opp):'—'}</div>`;
+}
 function leftColValue(slate, p, i){
   if(slate.sport==='nfl'){
     const pos = nflPosOf(p) || '?';
+    // Team and opponent are their own columns (nflTeamOppCells); on mobile the
+    // team rides under the badge so the narrow layout still shows it.
     const team = (p.team||'').toUpperCase();
     return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1;">
       <span class="pos-badge">${pos}</span>
-      ${team?`<span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">${team}</span>`:''}
+      ${team&&isMobileView()?`<span style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">${team}</span>`:''}
     </div>`;
   }
   if(slate.sport==='ufc'){
@@ -4081,7 +4115,9 @@ function slateFieldsBase(slate){
     if(ps.some(p=>p._simP50!=null)){
       f.push({key:'_simP50', label:'Sim', cls:'col-r'});
       f.push({key:'simValue', label:'SVal', cls:'col-r', computed:true});
-      f.push({key:'_simBoom', label:'Boom', cls:'col-r'});
+      // Boom (positional top-N rate) is still computed (_simBoom: Sim CSV,
+      // lineup Details) but not shown as a pool column — more noise than signal
+      // next to Sim / SVal.
     }
   }
   if(cm.cut!=null)    f.push({key:'cut',   label:'Cut',   cls:'col-r'});
@@ -4134,8 +4170,10 @@ function gridTemplate(fields, sdTrail){
     if(sdTrail) parts.push('20px');
     return parts.join(' ');
   }
-  const leftWidth = slate?.sport==='pga' ? '62px' : slate?.sport==='ufc' ? '76px' : slate?.sport==='nfl' ? '48px' : '38px';
-  const cols=[leftWidth,'minmax(140px,1fr)','72px'];
+  const leftWidth = slate?.sport==='pga' ? '62px' : slate?.sport==='ufc' ? '76px' : slate?.sport==='nfl' ? '44px' : '38px';
+  const cols=[leftWidth,'minmax(140px,1fr)'];
+  if(slate?.sport==='nfl') cols.push('44px','54px');   // Team, Opp
+  cols.push('72px');
   fields.forEach(f=>{
     if(f.key==='proj')  cols.push('56px');
     else if(f.key==='value') cols.push('38px');
@@ -4411,6 +4449,9 @@ function toggleHide(id,e){
   const uab=document.getElementById('unhideAllBtn');
   if(uab) uab.style.display=n>0?'':'none';
   save();renderAll();
+  // Same reason as toggleOut: hiding a QB drops his row, hiding a teammate
+  // changes what the remaining rules can reach.
+  if(typeof renderNflQbStacks === 'function' && document.getElementById('nflQbStackWrap')) renderNflQbStacks();
 }
 
 
@@ -4554,6 +4595,11 @@ function getSortedPlayers(){
       }
       if(/_ou$/.test(sortKey)){
         return dir*((parseOuCell(b[sortKey])?.line||0)-(parseOuCell(a[sortKey])?.line||0));
+      }
+      if(sortKey==='team'||sortKey==='opp'){
+        const ka=sortKey==='team'?nflTeamOf(a):nflOppOf(a), kb=sortKey==='team'?nflTeamOf(b):nflOppOf(b);
+        if(ka!==kb) return dir*(ka<kb?-1:1);
+        return (b.salary||0)-(a.salary||0);
       }
       if(sortKey==='value'){
         const va=(parseFloat(a.proj)||0)/((a.salary||1)/1000);
@@ -4795,6 +4841,7 @@ function renderPool(){
   const SDcpt = sdView === 'cpt';
   hdr.innerHTML=(isGroupEdit?`<span class="col-c">✓</span>`:'')
     +`<span class="col-c" onclick="setSort('${slate.sport==='nfl'?'position':'start'}')" title="${leftColLabel(activeSlate())}" style="cursor:pointer;padding-right:6px;">${leftColLabel(slate)}</span><span>Name</span>`
+    +(slate.sport==='nfl'&&!mobile?`<span class="col-c" onclick="setSort('team')" style="cursor:pointer;" title="Team — click to group teammates">Team</span><span class="col-c" onclick="setSort('opp')" style="cursor:pointer;" title="Opponent (@ = away)">Opp</span>`:'')
     +`<span class="col-r" onclick="setSort('salary')"${SDcpt?' title="Captain price — 1.5× the listed salary"':''}>${SDcpt?'CPT Sal':'Sal'}</span>`
     +(mobile
       ? (mStat1?`<span class="${mStat1.cls} pool-col-hdr" onclick="setSort('${mStat1.key}')" style="font-size:9px;">${mStat1.label}</span>`:'')
@@ -4808,7 +4855,9 @@ function renderPool(){
           const cptScaled = SDcpt && (f.key==='proj'||f.key==='_simP50');
           const label = SDcpt && f.key==='own' ? 'CPT Own' : f.label;
           const hint = cptScaled ? ' ×1.5' : '';
-          const tip = SDcpt
+          const tip = f.key==='_simBoom'
+            ? (isShowdown(slate) ? 'Boom: % of sims he is a top-3 scorer in the game' : 'Boom: % of sims he posts a top-N score at his position (QB/TE/DST top 2, RB top 4, WR top 6)')
+            : SDcpt
             ? (cptScaled ? '1.5× as captain' : f.key==='own' ? 'Captain ownership' : 'Drag to reorder')
             : 'Drag to reorder';
           const headerLabel = f.key==='proj'
@@ -5102,6 +5151,7 @@ function renderPool(){
         <div class="cell-name" style="flex:1">${nameHtml}</div>
         ${!isGroupEdit&&dots?`<div class="grp-dots">${dots}</div>`:''}
       </div>
+      ${slate.sport==='nfl'&&!mobile?nflTeamOppCells(slate,p):''}
       <div class="cell-sal col-r" style="${mobile?'font-size:11px;':''}${mode==='cpt'?'color:var(--accent);':''}" ${mode==='cpt'?`title="Captain price (1.5× of ${fmt(p.salary)})"`:''}>${fmt(rowSal)}</div>
       ${mobile
         ? [mStat1, mStat2].filter(Boolean).map(f=>{
@@ -6446,9 +6496,21 @@ function nflLateSwapPlan(slate){
   const lockedArr = pool.map(p => playerLocked(slate, p, now));
   // Who may fill an OPEN slot: game not started, not scratched, not hidden.
   const openOk = pool.map((p,i) => !lockedArr[i] && !outS.has(p.id) && !hiddenS.has(p.id));
-  const cands = pool.map((p,i) => ({i, pos:nflPosOf(p), sal:p.salary||0, score:0,
+  const cands = pool.map((p,i) => ({i, id:p.id, pos:nflPosOf(p), sal:p.salary||0, score:0,
     team:String(p.team||'').toUpperCase(), opp:String(p.opp||'').toUpperCase(),
     cptSal:cptSalaryOf(p), cptOk:SD?sdCptEligible(slate,p.id):true, flexOk:SD?sdFlexEligible(slate,p.id):true}));
+  // STACK RULES ON A SWAP. Late swap used to pass `rules = null`, so a plan
+  // could quietly hand back a naked QB on a slate the user had set to QB+2 —
+  // the rule bound at generation and then evaporated at 1pm. Resolve the same
+  // object runNflSimGen builds (global + per-QB overrides). Showdown keeps null:
+  // sdOptimalForSim has never read stack rules.
+  const lsRules = (() => {
+    if(SD) return null;
+    const g = { stackN: slate._nflStackN|0, bringBack: slate._nflBringBack|0,
+                noRbVsDst: !!slate._nflNoRbVsDst, rbCounts: !!slate._nflStackRbCounts };
+    g.perQb = nflResolveQbStacks(slate, g);
+    return (nflAnyStackRule(g) || g.noRbVsDst) ? g : null;
+  })();
   // Held-out sims, strided: the same population every other selector prices on.
   const all = _detailSimIdx(ctx.simsDone);
   const stride = Math.max(1, Math.ceil(all.length / DK_LS_MAX_SIMS));
@@ -6475,22 +6537,34 @@ function nflLateSwapPlan(slate){
     const gkey = [...fx].sort((a,b)=>a-b).join(',') + '|' + (fxCpt==null?'':fxCpt);
     if(groupCache.has(gkey)) return groupCache.get(gkey);
     const sub = cands.filter(c => openOk[c.i] || fx.has(c.i));
-    const seen = new Map();
-    for(const s of simIdx){
-      for(const c of sub) c.score = ctx.simScoresById[pool[c.i].id][s];
-      let idxs = null, cptIdx = null;
-      if(SD){ const r = sdOptimalForSim(sub, SALARY_CAP, 0, fx, fxCpt); if(r){ idxs = r.idxs; cptIdx = r.cptIdx; } }
-      else { idxs = nflOptimalForSim(sub, SALARY_CAP, 0, null, fx); }
-      if(!idxs) continue;
-      const ids = idxs.map(i => pool[i].id);
-      const cptId = cptIdx != null ? pool[cptIdx].id : null;
-      const k = lsKey(ids, cptId);
-      if(seen.has(k)) seen.get(k).n++;
-      else seen.set(k, {ids, cptId, key:k, n:1});
-    }
+    const collect = (rules) => {
+      const seen = new Map();
+      for(const s of simIdx){
+        for(const c of sub) c.score = ctx.simScoresById[pool[c.i].id][s];
+        let idxs = null, cptIdx = null;
+        if(SD){ const r = sdOptimalForSim(sub, SALARY_CAP, 0, fx, fxCpt); if(r){ idxs = r.idxs; cptIdx = r.cptIdx; } }
+        else { idxs = nflOptimalForSim(sub, SALARY_CAP, 0, rules, fx); }
+        if(!idxs) continue;
+        const ids = idxs.map(i => pool[i].id);
+        const cptId = cptIdx != null ? pool[cptIdx].id : null;
+        const k = lsKey(ids, cptId);
+        if(seen.has(k)) seen.get(k).n++;
+        else seen.set(k, {ids, cptId, key:k, n:1});
+      }
+      return seen;
+    };
+    // The clock can make a rule unsatisfiable: if the locked slots already hold,
+    // say, a QB whose two pass catchers have both played, NOTHING legal exists.
+    // Refusing to swap that entry would be worse than swapping it — so fall back
+    // to the unruled search and say so in the warnings.
+    let noRules = false;
+    let seen = collect(lsRules);
+    if(!seen.size && lsRules){ seen = collect(null); noRules = seen.size > 0; }
     const list = [...seen.values()];
+    list.noRules = noRules;
     for(const c of list) c.m = metricOf(c.ids, c.cptId);
     list.sort((a,b) => b.m.rank - a.m.rank || b.n - a.n);
+    list.noRules = noRules;   // sort() on an array keeps expandos, but be explicit
     groupCache.set(gkey, list);
     return list;
   };
@@ -6543,6 +6617,10 @@ function nflLateSwapPlan(slate){
         if(free) pick = free; else row.dupWarn = true;
       }
       usedKeys.add(pick.key);
+      if(list.noRules && !pick.isCurrent && !pick.manual){
+        row.stackFallback = true;
+        res.warnings.push(`Entry ${e.entryId}: locked players can't satisfy your stack rule — filled without it.`);
+      }
       row.newIds = pick.ids.slice();
       row.cptId = pick.cptId || null;
       row.manual = !!pick.manual;
@@ -7113,7 +7191,7 @@ function exportSimCSV(){
   const sport=slate.sport, nas=sport==='nascar', ufc=sport==='ufc', nfl=sport==='nfl';
   const tailH = nas ? ['SimWin%','SimTop5%','SimTop10%','Usable30+%']
               : ufc ? ['OptRate%','FightOptRate%','LevYield']
-              : nfl ? ['Pos','Team','Usable1.5x%','Boom3x%']
+              : nfl ? ['Pos','Team','Usable1.5x%','BoomTopN%']
               :       ['SimWin%','SimTop5%','SimTop10%','SimTop20%','MadeCut%'];
   // UFC: fighter-level optimal rate (P(in the per-sim optimal), Σ=600 across
   // the slate) and the fight's COMBINED rate (rateA+rateB — exact under
@@ -7187,7 +7265,7 @@ function exportSimCSV(){
   try{
     const scaleCols = nas ? ['SimWin%','SimTop5%','SimTop10%','Usable30+%']
                     : ufc ? ['OptRate%','LevYield']
-                    : nfl ? ['Usable1.5x%','Boom3x%']
+                    : nfl ? ['Usable1.5x%','BoomTopN%']
                     :       ['SimWin%','SimTop5%','SimTop10%','SimTop20%','MadeCut%'];
     const parts=buildStyledXlsx(header,xlsxRows,scaleCols,'# run: '+(_lastRunStamp||''));
     const b=document.createElement('a');
@@ -7800,6 +7878,9 @@ function renderGroupRulesSummary(){
     if(nRb) nRb.checked = !!slate._nflNoRbVsDst;
     const rbC = document.getElementById('nflStackRbCounts');
     if(rbC) rbC.checked = !!slate._nflStackRbCounts;
+    // Per-QB overrides live under the global controls and read them (the RB
+    // checkbox decides each row's default partner set), so render after both.
+    if(typeof renderNflQbStacks==='function') renderNflQbStacks();
     // The Contest EV block is one shared DOM node that restoreContestEvUI
     // relocates into the active sport's section — every other sport called it
     // here; NFL never did, so the block stayed parked (invisible) in the UFC
@@ -7858,8 +7939,11 @@ function renderGroupRulesSummary(){
   // Honesty note: a sim path that builds from per-sim optimal lineups and never
   // applies group min/max rules must SAY so instead of implying they bind.
   // The note fired for PGA (both sim modes) and NASCAR Contest-EV until those
-  // paths were fixed on 2026-08-03; it now fires for NFL Simulate only —
-  // runNflSimGen still never reads slate.groups.
+  // paths were fixed on 2026-08-03; NFL Simulate was the last holdout until
+  // runNflSimGen gained the same post-search checkGroupRules sweep (both
+  // Classic and Showdown), so the note no longer fires anywhere. HARD rules
+  // (ruleMin / ruleMax / hard conditionals) bind in every sim path now; SOFT
+  // conditional boosts are still an Optimize-mode-only concept.
   // RE-MEASURED 2026-08-03 after the NASCAR Contest-EV fix, binding
   // max-1-of-top-6-salary and min-3-of-a-10-driver-mid-tier rules, 50 lineups
   // per run, $49,000 floor:
@@ -7868,7 +7952,7 @@ function renderGroupRulesSummary(){
   //   NASCAR Simulate, EV on ................ 0/50 on all 8 July slates
   //                                           (was 27/50 and 29/50 before)
   //   PGA Simulate (EV off / EV on) ......... 0/50, 0/50 — rules bind
-  const _noGroupsHere = (slate.sport==='nfl' && _genMode==='simulate');
+  const _noGroupsHere = false;
   const _pgaSimNote = _noGroupsHere
     ? '<div style="font-size:10px;color:var(--muted);font-style:italic;margin-bottom:6px;">'
       + 'Simulate mode: group rules are not applied — the sim builds from per-sim optimal lineups. Switch to Optimize to enforce them.'
@@ -12032,7 +12116,10 @@ async function runUFCContestEV(ctx){
                 if(!nflComplete(c)) continue;   // would break the roster
               }
               // ...and never let an "upgrade" break the stack the user asked for.
-              if(_repRules && (_repRules.stackN||_repRules.bringBack||_repRules.noRbVsDst)){
+              // nflAnyStackRule, not a raw stackN test: a per-QB override can
+              // demand a stack on a slate whose global setting is "off", and
+              // `_repRules.perQb` is what nflStackOk consults for that QB.
+              if(_repRules && (nflAnyStackRule(_repRules)||_repRules.noRbVsDst)){
                 const after=idxs.map(i=>i===pI?fieldPool[q]:fieldPool[i]);
                 if(!nflStackOk(after,_repRules)) continue;
               }
@@ -20110,7 +20197,9 @@ function sdOptimalForSim(cands, salaryCap, minSal, fixed, fixedCpt){
 //   stackN     — require N same-team WR/TE (optionally RB) alongside the QB
 //   bringBack  — require N skill players from the QB's OPPONENT
 //   noRbVsDst  — forbid rostering an RB who plays against your own DST
-// `rules` is {stackN, bringBack, noRbVsDst, rbCounts}; all default to off.
+// `rules` is {stackN, bringBack, noRbVsDst, rbCounts, perQb}; all default to
+// off. `perQb` (see nflResolveQbStacks) overrides stackN / bringBack / the
+// eligible-partner set for individual quarterbacks.
 // One team-abbreviation normalizer for the whole app: upper-case, letters only
 // (so "NE", "ne", "@NE" and "N.E." are one key). It was re-inlined as TM / TMK /
 // OPP / teamOf in a dozen places, which is a dozen chances for one of them to
@@ -20136,10 +20225,261 @@ function nflTeamNorm(t){
 function nflTeamOf(p){ return nflTeamNorm(p && p.team); }
 function nflOppOf(p){ return nflTeamNorm(p && p.opp); }
 
+// ── Per-QB stack overrides ───────────────────────────────────────────────────
+// Not every QB wants the same shape: some are viable naked, some need one
+// runningmate, some are only worth rostering in a full onslaught. The global
+// "QB + N" is one number for the whole slate, so per-QB exceptions live on the
+// slate as
+//   slate._qbStacks = { [qbId]: {n, partners, bringBack} }
+// where EVERY field is null when it should inherit the global setting (and
+// n===0 means "solo is fine" even when the global says 1+). `partners` is an
+// explicit id list restricting which teammates count toward the requirement;
+// null means "whatever the global position rule says" (WR/TE, plus RB when
+// "Count a same-team RB" is on).
+//
+// Resolved ONCE per run into `rules.perQb` so the per-sim optimizer and the
+// post-search sweep do a plain object lookup instead of re-deriving slate state
+// inside the hot loop.
+
+// Every teammate of `qb` who could plausibly be a stacking partner, salary desc.
+// Deliberately position-wide (WR/TE/RB) regardless of the global RB setting —
+// the chip strip lets the user opt an RB in for ONE QB without turning RBs on
+// slate-wide, and the DEFAULT selection (below), not this list, follows the box.
+function nflQbTeammates(slate, qb){
+  const t = nflTeamOf(qb);
+  if(!t) return [];
+  return (slate.players||[]).filter(p => p.id!==qb.id && (p.salary||0)>0 &&
+      nflTeamOf(p)===t && ['WR','TE','RB'].includes(nflPosOf(p)))
+    .sort((a,b)=>(b.salary||0)-(a.salary||0));
+}
+// The teammates that count by DEFAULT (no explicit partner list) — the same
+// position test nflStackOk has always applied.
+function nflQbDefaultPartners(slate, qb, rbCounts){
+  const pos = rbCounts ? ['WR','TE','RB'] : ['WR','TE'];
+  return nflQbTeammates(slate, qb).filter(p => pos.includes(nflPosOf(p)));
+}
+// Is this player actually available to the generator? The run builds its pool
+// as "not hidden, not OUT", so the PANEL has to count eligibility the same way —
+// otherwise a row reads "≥2 of Whitfield · Ferrell" as satisfied while one of
+// them is OUT and the generator is quietly dropping that QB entirely.
+function nflQbStackPoolOk(slate){
+  const hidden = new Set(slate && slate.hiddenIds || []);
+  const out = (typeof nflOutSet === 'function' && slate) ? nflOutSet(slate) : new Set();
+  return p => !hidden.has(p.id) && !out.has(p.id);
+}
+// {qbId: {n, partnerIds:Set|null, bringBack}} for the QBs the user customized.
+// A QB whose every field is null is NOT included: inheriting everything is
+// exactly what the global path already does, and an empty map lets every caller
+// keep its old fast path.
+function nflResolveQbStacks(slate, g){
+  const store = (slate && slate._qbStacks) || {};
+  const out = {};
+  for(const id in store){
+    const s = store[id] || {};
+    const hasN = s.n != null, hasP = Array.isArray(s.partners), hasB = s.bringBack != null;
+    if(!hasN && !hasP && !hasB) continue;
+    out[id] = {
+      n:          hasN ? (s.n|0)             : ((g && g.stackN)|0),
+      partnerIds: hasP ? new Set(s.partners) : null,
+      bringBack:  hasB ? (s.bringBack|0)     : ((g && g.bringBack)|0),
+    };
+  }
+  return out;
+}
+// The requirement that applies to ONE QB: his override if he has one, else the
+// global numbers. Both enforcement sites go through this so they cannot drift.
+function nflStackReqFor(rules, qbId){
+  const pq = (rules && rules.perQb && qbId != null) ? rules.perQb[qbId] : null;
+  if(pq) return { n: pq.n|0, partnerIds: pq.partnerIds || null, bringBack: pq.bringBack|0 };
+  return { n: rules ? rules.stackN|0 : 0, partnerIds: null, bringBack: rules ? rules.bringBack|0 : 0 };
+}
+// Is ANY stack requirement live? A per-QB override can demand a stack on a
+// slate whose global setting is "off", so "global is 0" is no longer the test.
+function nflAnyStackRule(rules){
+  if(!rules) return false;
+  if((rules.stackN|0)>0 || (rules.bringBack|0)>0) return true;
+  const pq = rules.perQb;
+  if(pq) for(const k in pq){ if((pq[k].n|0)>0 || (pq[k].bringBack|0)>0) return true; }
+  return false;
+}
+
+// ── Per-QB stacks panel (NFL Auto-Gen → Stacking) ────────────────────────────
+// One row per QB in the pool. Everything defaults to "Global", so a slate the
+// user never touched behaves exactly as it did before this panel existed.
+function nflQbStackStore(slate){ return (slate._qbStacks = slate._qbStacks || {}); }
+function nflQbStackEntry(slate, qbId){
+  const st = nflQbStackStore(slate);
+  return (st[qbId] = st[qbId] || {n:null, partners:null, bringBack:null});
+}
+// Drop a row that has drifted back to "inherit everything" — the header count
+// and the run log both read "customized" off the presence of a key.
+function nflQbStackPrune(slate, qbId){
+  const st = nflQbStackStore(slate), e = st[qbId];
+  if(e && e.n==null && e.partners==null && e.bringBack==null) delete st[qbId];
+}
+function nflQbStackCount(slate){
+  const st = (slate && slate._qbStacks) || {};
+  let n = 0;
+  for(const k in st){ const e = st[k]||{};
+    if(e.n!=null || e.bringBack!=null || Array.isArray(e.partners)) n++; }
+  return n;
+}
+function setNflQbStackN(qbId, v){
+  const s = activeSlate(); if(!s) return;
+  nflQbStackEntry(s, qbId).n = (v===''||v==null) ? null : (parseInt(v)|0);
+  nflQbStackPrune(s, qbId); save(); renderNflQbStacks();
+}
+function setNflQbStackBB(qbId, v){
+  const s = activeSlate(); if(!s) return;
+  nflQbStackEntry(s, qbId).bringBack = (v===''||v==null) ? null : (parseInt(v)|0);
+  nflQbStackPrune(s, qbId); save(); renderNflQbStacks();
+}
+function toggleNflQbPartner(qbId, pid){
+  const s = activeSlate(); if(!s) return;
+  const qb = (s.players||[]).find(p=>p.id===qbId); if(!qb) return;
+  const e = nflQbStackEntry(s, qbId);
+  const dflt = nflQbDefaultPartners(s, qb, !!s._nflStackRbCounts).map(p=>p.id);
+  // An untouched row shows the DEFAULT set already ticked, so the first click
+  // has to materialize that set before removing one from it — otherwise the
+  // click would read as "start from empty", which is not what the user sees.
+  let ids = Array.isArray(e.partners) ? e.partners.slice() : dflt.slice();
+  ids = ids.includes(pid) ? ids.filter(x=>x!==pid) : ids.concat([pid]);
+  // Back to exactly the default? Store null again so the row stops counting as
+  // customized (and keeps following the global RB checkbox).
+  const same = ids.length===dflt.length && ids.every(x=>dflt.includes(x));
+  e.partners = same ? null : ids;
+  nflQbStackPrune(s, qbId); save(); renderNflQbStacks();
+}
+function toggleNflQbPartnerEdit(qbId){
+  const el = document.getElementById('qbchips_'+qbId);
+  if(el) el.style.display = (el.style.display==='none') ? 'flex' : 'none';
+}
+function toggleNflQbStacks(){
+  const b = document.getElementById('nflQbStackBody');
+  const c = document.getElementById('nflQbStackCaret');
+  if(!b) return;
+  const open = b.style.display === 'none';
+  b.style.display = open ? 'block' : 'none';
+  if(c) c.textContent = open ? '▼' : '▶';
+  const s = activeSlate(); if(s){ s._qbStacksOpen = open; save(); }
+  if(open) renderNflQbStacks();
+}
+function resetNflQbStacks(){
+  const s = activeSlate(); if(!s) return;
+  s._qbStacks = {}; save(); renderNflQbStacks();
+}
+function renderNflQbStacks(){
+  const wrap = document.getElementById('nflQbStackWrap');
+  if(!wrap) return;
+  const slate = activeSlate();
+  // Showdown has no QB roster slot and no same-team stack rule to override
+  // (sdOptimalForSim never consults stackRules), so the panel would be a lie.
+  const show = !!slate && slate.sport==='nfl' && !(typeof isShowdown==='function' && isShowdown(slate));
+  wrap.style.display = show ? '' : 'none';
+  if(!show) return;
+  const body = document.getElementById('nflQbStackBody');
+  const ttl  = document.getElementById('nflQbStackTitle');
+  const caret= document.getElementById('nflQbStackCaret');
+  const nCustom = nflQbStackCount(slate);
+  if(ttl) ttl.textContent = `Per-QB stacks (${nCustom} customized)`;
+  // Reopen where the user left it (per slate).
+  if(body && slate._qbStacksOpen && body.style.display==='none'){
+    body.style.display='block'; if(caret) caret.textContent='▼';
+  }
+  if(!body || body.style.display==='none') return;
+
+  const hidden = slate.hiddenIds||[];
+  const qbs = (slate.players||[]).filter(p => nflPosOf(p)==='QB' && (p.salary||0)>0 &&
+      !hidden.includes(p.id) && !nflIsOut(slate, p.id))
+    .sort((a,b)=>(b.salary||0)-(a.salary||0));
+  if(!qbs.length){
+    body.innerHTML = '<div style="font-size:10px;color:var(--muted);font-style:italic;">No quarterbacks in the pool yet.</div>';
+    return;
+  }
+  const gN  = slate._nflStackN|0, gBB = slate._nflBringBack|0, rbC = !!slate._nflStackRbCounts;
+  const store = slate._qbStacks || {};
+  const poolOk = nflQbStackPoolOk(slate);
+  const last = p => String(p.name||'').split(' ').slice(-1)[0] || p.name || '?';
+
+  // One segment of the Global / Solo OK / ≥1 / ≥2 / ≥3 control. The divider is
+  // a LEFT border on every segment but the first, so the strip has no double
+  // edge against its own container.
+  const segBtn = (qbId, val, label, active, first) =>
+    `<button onclick="setNflQbStackN('${qbId}',${val==null?"''":val})" title="${val==null?'Inherit the global QB + N setting':(val===0?'This QB is fine with no stacking partner':'Require '+val+' partner'+(val>1?'s':''))}"
+      style="flex:none;padding:2px 6px;border:none;${first?'':'border-left:1px solid var(--border);'}font-size:9px;font-family:'DM Sans',sans-serif;cursor:pointer;
+      background:${active?'#a855f7':'transparent'};color:${active?'#fff':'var(--muted)'};font-weight:${active?'600':'400'};">${label}</button>`;
+
+  let html = `<div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">`
+    + `Each QB can override the global rule: <b>Global</b> inherits it, <b>Solo OK</b> requires nothing even when the global asks for a stack, and ≥1/≥2/≥3 demand that many partners from his own team. `
+    + `<b>✎ partners</b> narrows which teammates count (all on by default${rbC?'; RBs included because "Count a same-team RB" is on':'; RBs excluded — turn on "Count a same-team RB" or tick one here'}).`
+    + `</div>`;
+
+  for(const qb of qbs){
+    const e = store[qb.id] || {};
+    const effN  = e.n!=null ? (e.n|0) : gN;
+    const effBB = e.bringBack!=null ? (e.bringBack|0) : gBB;
+    const mates = nflQbTeammates(slate, qb);
+    const dflt  = nflQbDefaultPartners(slate, qb, rbC).map(p=>p.id);
+    const sel   = Array.isArray(e.partners) ? e.partners : dflt;
+    // Ticked AND actually in the pool — a hidden/OUT teammate cannot satisfy
+    // anything, so he must not be counted in the summary either.
+    const selP  = mates.filter(p=>sel.includes(p.id) && poolOk(p));
+    const custom = e.n!=null || e.bringBack!=null || Array.isArray(e.partners);
+    // Compact summary — what this row actually MEANS for the generator.
+    let summary;
+    if(effN<=0) summary = 'no stacking partner required';
+    else if(!selP.length) summary = `≥${effN} — ⚠ no eligible teammate, this QB cannot appear`;
+    else if(selP.length < effN) summary = `≥${effN} of only ${selP.length} eligible (${selP.map(last).join(' · ')}) — ⚠ cannot appear`;
+    else summary = `≥${effN} of ${selP.map(last).join(' · ')}`;
+    if(effBB>0) summary += ` + ${effBB} bring-back`;
+
+    html += `<div style="border:1px solid ${custom?'rgba(168,85,247,.45)':'var(--border)'};border-radius:6px;padding:5px 6px;margin-bottom:4px;background:${custom?'rgba(168,85,247,.06)':'transparent'};">`
+      + `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">`
+      +   `<span style="flex:1 1 110px;min-width:100px;font-size:10px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">`
+      +     `${esc(qb.name)} <span style="color:var(--muted);font-weight:400;">· ${esc(nflTeamOf(qb)||'—')}</span></span>`
+      +   `<span style="flex:none;display:flex;border:1px solid var(--border);border-radius:5px;overflow:hidden;">`
+      +     segBtn(qb.id, null, 'Global', e.n==null, true)
+      +     segBtn(qb.id, 0, 'Solo OK', e.n===0)
+      +     segBtn(qb.id, 1, '≥1', e.n===1)
+      +     segBtn(qb.id, 2, '≥2', e.n===2)
+      +     segBtn(qb.id, 3, '≥3', e.n===3)
+      +   `</span>`
+      +   `<span style="flex:none;display:flex;align-items:center;gap:3px;font-size:9px;color:var(--muted);">Bring-back`
+      +     `<select onchange="setNflQbStackBB('${qb.id}', this.value)" class="form-input"`
+      +       ` style="width:78px;padding:1px 3px;font-size:9px;">`
+      +       `<option value="" ${e.bringBack==null?'selected':''}>Global</option>`
+      +       `<option value="0" ${e.bringBack===0?'selected':''}>0</option>`
+      +       `<option value="1" ${e.bringBack===1?'selected':''}>1</option>`
+      +       `<option value="2" ${e.bringBack===2?'selected':''}>2</option>`
+      +     `</select></span>`
+      + `</div>`
+      + `<div style="display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap;">`
+      +   `<span style="flex:1 1 120px;font-size:9px;color:${/⚠/.test(summary)?'#f59e0b':'var(--muted)'};">${esc(summary)}</span>`
+      +   `<button onclick="toggleNflQbPartnerEdit('${qb.id}')"`
+      +     ` style="flex:none;padding:1px 6px;background:none;border:1px solid var(--border);color:var(--muted);border-radius:5px;font-size:9px;cursor:pointer;font-family:'DM Sans',sans-serif;">✎ partners</button>`
+      + `</div>`
+      + `<div id="qbchips_${qb.id}" style="display:none;flex-wrap:wrap;gap:3px;margin-top:4px;">`;
+    if(!mates.length){
+      html += `<span style="font-size:9px;color:var(--muted);font-style:italic;">No WR/TE/RB teammates on the slate.</span>`;
+    } else {
+      for(const m of mates){
+        const on = sel.includes(m.id);
+        const avail = poolOk(m);
+        html += `<span onclick="toggleNflQbPartner('${qb.id}','${m.id}')" title="${avail?(on?'Counts toward this QB\'s stack':'Ignored for this QB\'s stack'):'Hidden or OUT — cannot satisfy this rule until he is back in the pool'}"`
+          + ` style="cursor:pointer;padding:1px 5px;border-radius:9px;font-size:9px;border:1px solid ${on&&avail?'#a855f7':'var(--border)'};`
+          + `background:${on&&avail?'rgba(168,85,247,.18)':'transparent'};color:${on&&avail?'var(--text)':'var(--muted)'};`
+          + `${avail?'':'opacity:.5;text-decoration:line-through;'}">`
+          + `${esc(m.name)} <span style="opacity:.6;">${esc(nflPosOf(m))}${avail?'':' · out'}</span></span>`;
+      }
+    }
+    html += `</div></div>`;
+  }
+  body.innerHTML = html;
+}
+
 // Does a COMPLETE lineup satisfy the rules? entries are player objects.
 function nflStackOk(players, rules){
   if(!rules) return true;
-  const stackN = rules.stackN|0, bringBack = rules.bringBack|0;
   if(rules.noRbVsDst){
     const dst = players.find(p=>nflPosOf(p)==='DST');
     if(dst){
@@ -20147,13 +20487,18 @@ function nflStackOk(players, rules){
       if(dstOpp && players.some(p=>nflPosOf(p)==='RB' && nflTeamOf(p)===dstOpp)) return false;
     }
   }
-  if(stackN<=0 && bringBack<=0) return true;
+  if(!nflAnyStackRule(rules)) return true;
   const qb = players.find(p=>nflPosOf(p)==='QB');
   if(!qb) return false;
+  const _req = nflStackReqFor(rules, qb.id);
+  const stackN = _req.n, bringBack = _req.bringBack;
+  if(stackN<=0 && bringBack<=0) return true;
   const qbTeam = nflTeamOf(qb), qbOpp = nflOppOf(qb);
   if(stackN>0){
-    const catchers = players.filter(p=>p!==qb && nflTeamOf(p)===qbTeam &&
-      (rules.rbCounts ? ['WR','TE','RB'] : ['WR','TE']).includes(nflPosOf(p))).length;
+    const catchers = players.filter(p=>p!==qb && (_req.partnerIds
+      ? _req.partnerIds.has(p.id)
+      : (nflTeamOf(p)===qbTeam &&
+         (rules.rbCounts ? ['WR','TE','RB'] : ['WR','TE']).includes(nflPosOf(p))))).length;
     if(catchers < stackN) return false;
   }
   if(bringBack>0){
@@ -20202,38 +20547,83 @@ function nflOptimalForSim(cands, salaryCap, minSal, rules, fixed){
   const FXi = fixed && fixed.size ? fixed : null;
   const fixedSeed = FXi ? cands.filter(c => FXi.has(c.i)) : [];
   if(FXi && fixedSeed.length !== FXi.size) return null;   // a locked man isn't in this pool
+  // Seeds are {seed, ban}: `seed` is forced in before optimizing the rest, and
+  // `ban` is a set of candidate indices the fill/upgrade passes may never take.
   const seeds = [];
-  if(stackN>0 || bringBack>0){
-    for(const qb of byScore.QB.slice(0, 4)){
-      const t = TM(qb), o = OP(qb);
-      const mates = byScore.QB.length && t
-        ? cands.filter(c=>c!==qb && TM(c)===t && catcherPos.includes(c.pos))
-               .sort((a,b)=>b.score-a.score).slice(0, stackN)
-        : [];
-      if(mates.length < stackN) continue;
-      const backs = bringBack>0
-        ? cands.filter(c=>o && TM(c)===o && ['WR','TE','RB'].includes(c.pos))
-               .sort((a,b)=>b.score-a.score).slice(0, bringBack)
-        : [];
-      if(backs.length < bringBack) continue;
-      seeds.push([qb, ...mates, ...backs]);
+  // A stack requirement is a property of the QUARTERBACK, not of the slate, so
+  // only the QBs who actually carry one need the (expensive) seeded search:
+  //   • constrained QBs — the global rule when it is on, or a per-QB override
+  //     with n>0 / bring-back>0 — get one seed each, built from HIS numbers and
+  //     HIS partner set.
+  //   • every other QB (all of them when the global rule is off, and any QB
+  //     overridden to "Solo OK") rides the ONE cheap unseeded fill, with the
+  //     constrained QBs banned from it so that path can never emit a lineup
+  //     that breaks somebody else's rule.
+  // Seeding every QB the moment any override existed cost 25-36% of the run for
+  // nothing: an override that REMOVES a requirement needs no seed at all.
+  if(nflAnyStackRule(R)){
+    const _needSeed = c => { const r = nflStackReqFor(R, c.id); return r.n>0 || r.bringBack>0; };
+    // LATE SWAP: when the clock has already frozen a quarterback, he is the only
+    // QB any completion can have — so he is the only one worth seeding, and the
+    // unseeded path must not be offered as an escape hatch around HIS rule (the
+    // ban below only stops the fill from PICKING a constrained QB; a fixed one
+    // rides in on the seed).
+    const _fxQb = fixedSeed.find(c => c.pos==='QB') || null;
+    const _qbUniverse = _fxQb ? [_fxQb] : byScore.QB;
+    const _ruled = _qbUniverse.filter(_needSeed);
+    const _banQb = new Set(byScore.QB.filter(_needSeed).map(c=>c.i));
+    // The top few constrained QBs by this sim's score, so one rule can't
+    // collapse every sim onto a single stack — plus every constrained QB the
+    // user customized by hand, whatever he scored here. Without that union a QB
+    // who was customized precisely because he is cheap/contrarian would
+    // essentially never be seeded, and his rule would look like it silently
+    // removed him.
+    const _qbSeedList = _ruled.slice(0, 4);
+    if(R.perQb && !_fxQb){
+      for(const qb of _ruled){
+        if(_qbSeedList.length >= 8) break;
+        if(R.perQb[qb.id] && !_qbSeedList.includes(qb)) _qbSeedList.push(qb);
+      }
     }
+    for(const qb of _qbSeedList){
+      const req = nflStackReqFor(R, qb.id);
+      const need = req.n, needBack = req.bringBack;
+      const t = TM(qb), o = OP(qb);
+      const eligible = c => req.partnerIds
+        ? req.partnerIds.has(c.id)
+        : (t && TM(c)===t && catcherPos.includes(c.pos));
+      const mates = need>0
+        ? cands.filter(c=>c!==qb && c.pos!=='QB' && c.pos!=='DST' && eligible(c))
+               .sort((a,b)=>b.score-a.score).slice(0, need)
+        : [];
+      if(mates.length < need) continue;     // this QB cannot meet his own rule
+      const backs = needBack>0
+        ? cands.filter(c=>o && TM(c)===o && ['WR','TE','RB'].includes(c.pos))
+               .sort((a,b)=>b.score-a.score).slice(0, needBack)
+        : [];
+      if(backs.length < needBack) continue;
+      seeds.push({ seed:[qb, ...mates, ...backs], ban:null });
+    }
+    // Somebody has to be able to play QB on the unseeded path, or it is dead
+    // weight — with the global rule on and no Solo-OK override every QB is
+    // constrained and this seed is correctly skipped.
+    if(_qbUniverse.some(c=>!_banQb.has(c.i))) seeds.push({ seed:[], ban:_banQb });
     if(!seeds.length) return null;          // rules unsatisfiable with this pool
   } else {
-    seeds.push([]);
+    seeds.push({ seed:[], ban:null });
   }
   if(FXi){
     // Locked players ride in front of every seed, de-duplicated: a stack rule
     // may well have picked the same man the clock already froze.
     for(let s=0;s<seeds.length;s++){
       const have = new Set(fixedSeed.map(c=>c.i));
-      seeds[s] = [...fixedSeed, ...seeds[s].filter(c=>!have.has(c.i))];
+      seeds[s] = { seed:[...fixedSeed, ...seeds[s].seed.filter(c=>!have.has(c.i))], ban:seeds[s].ban };
     }
   }
 
   // Fill one (seed, distribution) pair from `lists` (pre-sorted by the
   // criterion you want). Returns {pick, used, sal} or null.
-  const fill = (seed, dist, lists) => {
+  const fill = (seed, dist, lists, ban) => {
     const need = { QB:1, RB:dist.RB, WR:dist.WR, TE:dist.TE, DST:1 };
     const pick = [], used = new Set();
     let sal = 0;
@@ -20249,6 +20639,7 @@ function nflOptimalForSim(cands, salaryCap, minSal, rules, fixed){
       for(const c of lists[pos]){
         if(n<=0) break;
         if(used.has(c.i)) continue;
+        if(ban && ban.has(c.i)) continue;   // a constrained QB is off-limits here
         if(pos==='DST' && R.noRbVsDst){
           const dOpp = OP(c);
           if(dOpp && pick.some(x=>x.pos==='RB' && TM(x)===dOpp)) continue;
@@ -20257,7 +20648,7 @@ function nflOptimalForSim(cands, salaryCap, minSal, rules, fixed){
       }
       if(n>0) return null;
     }
-    return { pick, used, sal, seedIds:new Set(seed.map(c=>c.i)), dist };
+    return { pick, used, sal, seedIds:new Set(seed.map(c=>c.i)), dist, ban:ban||null };
   };
 
   // Same-position swaps only: distribution (and therefore legality) is
@@ -20280,6 +20671,7 @@ function nflOptimalForSim(cands, salaryCap, minSal, rules, fixed){
         if(st.seedIds.has(out.i)) continue;
         for(const c of byScore[out.pos]){
           if(st.used.has(c.i)) continue;
+          if(st.ban && st.ban.has(c.i)) continue;   // never upgrade INTO a constrained QB
           if(R.noRbVsDst){
             // Guard BOTH directions: swapping a DST in must not collide with a
             // rostered RB, and swapping an RB in must not collide with the
@@ -20321,14 +20713,15 @@ function nflOptimalForSim(cands, salaryCap, minSal, rules, fixed){
   };
 
   let best = null;
-  for(const seed of seeds){
+  for(const sd of seeds){
+    const seed = sd.seed, ban = sd.ban;
     for(const dist of NFL_DISTS){
       // Best-score fill, then repair down to the cap.
-      let st = fill(seed, dist, byScore);
+      let st = fill(seed, dist, byScore, ban);
       if(st && st.sal > salaryCap) swapWithin(st, true);
       // Still over? Build the CHEAPEST roster for this shape and upgrade up.
       if(!st || st.sal > salaryCap){
-        st = fill(seed, dist, bySal);
+        st = fill(seed, dist, bySal, ban);
         if(!st || st.sal > salaryCap) continue;   // this shape can't fit the cap
         swapWithin(st, false);
       }
@@ -20685,11 +21078,35 @@ async function runNflSimGen(){
     const bar=Math.max(3, (p.salary||3000)/1000 * 1.5);
     let usable=0; for(let k=0;k<n;k++) if(arr[k]>=bar) usable++;
     p._simCut=Math.round(100*usable/n);
-    // Boom rate (3× value) — the ceiling stat NFL GPPs actually chase.
-    const boomBar=Math.max(6, (p.salary||3000)/1000 * 3);
-    let boom=0; for(let k=0;k<n;k++) if(arr[k]>=boomBar) boom++;
-    p._simBoom=Math.round(1000*boom/n)/10;
   });
+  // Boom rate — how often the player posts a TOP-N score at his position in
+  // a simulated slate (N = roughly the slots that position fills in a winning
+  // GPP lineup ×2: QB/TE/DST 2, RB 4, WR 6; showdown: top-3 overall in the
+  // game). The old "3× salary" bar was scale-relative, so a $2,900 TE "boomed"
+  // at 9 points while a $7,000 QB needed 21 — cheap players trivially cleared
+  // it and the column ranked salary, not ceiling. A positional rank is what
+  // the optimal lineup actually rewards.
+  {
+    const SDb = isShowdown(slate);
+    const TOPN = {QB:2, RB:4, WR:6, TE:2, DST:2, K:1};
+    const groups = {};
+    simPool.forEach((p,i)=>{ const g = SDb ? 'ALL' : (nflPosOf(p)||'UNK'); (groups[g]=groups[g]||[]).push(i); });
+    const hits = new Float64Array(simPool.length);
+    for(const g in groups){
+      const idx = groups[g]; const N = SDb ? 3 : (TOPN[g]||2);
+      if(idx.length <= N){ idx.forEach(i=>{ hits[i]=simsDone; }); continue; }
+      const col = new Float64Array(idx.length);
+      for(let k=0;k<simsDone;k++){
+        for(let j=0;j<idx.length;j++) col[j]=simScores[idx[j]][k];
+        // N-th largest by partial selection (N is tiny).
+        const sorted = Float64Array.from(col).sort();
+        const thr = sorted[sorted.length-N];
+        if(!(thr>0)) continue;                    // a top-N of zeros is not a boom
+        for(let j=0;j<idx.length;j++) if(col[j]>=thr) hits[idx[j]]++;
+      }
+    }
+    simPool.forEach((p,i)=>{ p._simBoom = Math.round(1000*hits[i]/Math.max(1,simsDone))/10; });
+  }
   window._nflSimReady=true;
   const xb=document.getElementById('simCsvBtn'); if(xb) xb.style.display='';
   if(typeof renderPool==='function') renderPool();
@@ -20711,6 +21128,9 @@ async function runNflSimGen(){
     noRbVsDst: !!slate._nflNoRbVsDst,
     rbCounts:  !!slate._nflStackRbCounts,
   };
+  // Per-QB overrides (Showdown has no QB slot to constrain, so they are ignored
+  // there — the panel is hidden on showdown slates for the same reason).
+  stackRules.perQb = SD ? {} : nflResolveQbStacks(slate, stackRules);
   {
     const bits=[];
     if(stackRules.stackN)    bits.push(`QB + ${stackRules.stackN} ${stackRules.rbCounts?'same-team skill player':'pass catcher'}${stackRules.stackN>1?'s':''}`);
@@ -20718,13 +21138,45 @@ async function runNflSimGen(){
     if(stackRules.noRbVsDst) bits.push('no RB vs own DST');
     log(bits.length ? `Stacking: ${bits.join(' · ')} — enforced in every generated lineup.`
                     : 'Stacking: off (lineups take whatever shape the sims favor).');
+    // Say EXACTLY which quarterbacks were carved out of that global rule, and
+    // whether the pool can actually satisfy each carve-out — a QB whose rule
+    // cannot be met simply never appears, which is invisible without this line.
+    const _pqIds = Object.keys(stackRules.perQb||{});
+    if(_pqIds.length){
+      const _lastName = p => String(p.name||'').split(' ').slice(-1)[0] || p.name || '?';
+      const _parts = [], _infeasible = [];
+      for(const qid of _pqIds){
+        const qb = (slate.players||[]).find(p=>p.id===qid);
+        if(!qb) continue;
+        const r = stackRules.perQb[qid];
+        const eligible = (r.partnerIds
+          ? nflQbTeammates(slate, qb).filter(p=>r.partnerIds.has(p.id))
+          : nflQbDefaultPartners(slate, qb, stackRules.rbCounts))
+          .filter(p=>pool.some(x=>x.id===p.id));
+        const seg = r.n<=0 ? 'solo OK' : `≥${r.n}`;
+        const scope = r.partnerIds ? ` of ${eligible.map(_lastName).join('/')||'—'}` : '';
+        const bb = r.bringBack!==(stackRules.bringBack|0) ? `, bring-back ${r.bringBack}` : '';
+        _parts.push(`${_lastName(qb)} ${seg}${scope}${bb}`);
+        const inPool = pool.some(p=>p.id===qid);
+        if(inPool && r.n > eligible.length)
+          _infeasible.push(`${qb.name} needs ≥${r.n} partner${r.n>1?'s':''} but only ${eligible.length} eligible teammate${eligible.length===1?' is':'s are'} in the pool`);
+      }
+      if(_parts.length){
+        const _globalTxt = stackRules.stackN ? `QB+${stackRules.stackN}` : 'no stack';
+        log(`QB stacks: ${_parts.join(', ')}; all other QBs global ${_globalTxt}.`);
+      }
+      for(const msg of _infeasible)
+        log(`  ⚠ ${msg} — he cannot appear in any lineup. Loosen his row in Per-QB stacks or unhide a teammate.`);
+    }
   }
 
   // Candidates: the ex-post optimal roster of each (even) sim.
   // Showdown also records WHICH player the sim wanted as captain, keyed by the
   // lineup — the 1.5× makes that choice most of the lineup's edge.
   log('Computing per-sim optimal lineups…');
-  const cands=pool.map((p,i)=>({i, pos:nflPosOf(p), sal:p.salary||0, score:0,
+  // `id` rides along so nflOptimalForSim can look a QB up in the per-QB stack
+  // overrides (and match an explicit partner list) without a pool round-trip.
+  const cands=pool.map((p,i)=>({i, id:p.id, pos:nflPosOf(p), sal:p.salary||0, score:0,
     team:p.team||'', opp:p.opp||''}));
   const rankedMap=new Map();
   // Showdown: the same six with a different captain is a DIFFERENT lineup
@@ -20789,7 +21241,7 @@ async function runNflSimGen(){
     }
   }
   if(!ranked.length){
-    const anyRule = stackRules.stackN||stackRules.bringBack||stackRules.noRbVsDst;
+    const anyRule = nflAnyStackRule(stackRules)||stackRules.noRbVsDst;
     alert(anyRule
       ? 'No lineups satisfy the stacking rules with this pool.\n\nUsually means the pool lacks enough same-team pass catchers (or an opponent for the bring-back). Loosen the rules or unhide players.'
       : 'No legal lineups were built — check that the pool has enough players at each position under the salary cap.');
@@ -20804,6 +21256,24 @@ async function runNflSimGen(){
     for(let i=ranked.length-1;i>=0;i--) if(!nflStackOk(ranked[i].lineup, stackRules)) ranked.splice(i,1);
     if(ranked.length<before) log(`  (${before-ranked.length} candidate(s) dropped by the stack-rule check)`);
     if(!ranked.length){ alert('Every candidate was rejected by the stacking rules — loosen them and re-run.'); done(); return; }
+  }
+  // ── Groups-tab hard rules ─────────────────────────────────────────────────
+  // Same doctrine (and the same code shape) as the PGA sweep: the per-sim
+  // search does not model group min/max, so filter the candidate set once,
+  // after the search, rather than shipping a lineup that breaks a rule the user
+  // set on the Groups tab. Runs on Showdown too — group rules are positionless.
+  {
+    const _hard=(slate.groups||[]).filter(g=>(g.ruleMin||0)>0||(g.ruleMax||0)>0||
+      (g.condGroups||[]).some(c=>c.type==='hard'));
+    if(_hard.length){
+      const before=ranked.length;
+      for(let i=ranked.length-1;i>=0;i--) if(!checkGroupRules(ranked[i].lineup,_hard)) ranked.splice(i,1);
+      log(`Group rules: ${_hard.length} hard rule${_hard.length>1?'s':''} applied — ${(before-ranked.length).toLocaleString()} of ${before.toLocaleString()} candidate(s) dropped.`);
+      if(!ranked.length){
+        alert('Every candidate lineup was rejected by your group rules — loosen them and re-run.');
+        done(); return;
+      }
+    }
   }
   log(`${ranked.length.toLocaleString()} unique optimal lineups from ${Math.ceil(simsDone/2).toLocaleString()} generation sims (selection priced on the ${Math.floor(simsDone/2).toLocaleString()} held-out sims).`);
   // The hand builder models the SAME field the generator prices against, and
