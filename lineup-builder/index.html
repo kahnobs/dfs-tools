@@ -401,6 +401,14 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
   line-height:1;padding:2px 4px;border-radius:6px;opacity:.65;}
 .sc-x:hover{opacity:1;color:var(--text);background:var(--border);}
 .slate-check-none{padding:7px 9px;font-size:10.5px;color:var(--muted);}
+.sc-team{cursor:pointer;}
+.sc-team:hover{background:rgba(255,255,255,.025);}
+.sc-caret{display:inline-block;width:12px;color:var(--muted);font-size:10px;}
+.sc-teamname{font-family:'DM Mono',monospace;font-size:11px;margin-right:6px;letter-spacing:.04em;}
+.sc-sub{background:rgba(0,0,0,.18);border-top:1px solid var(--border);}
+.sc-sub .sc-row{padding-left:30px;font-size:10.5px;}
+.sc-section{padding:5px 9px 2px;font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;border-top:1px solid var(--border);}
+.sc-section:first-child{border-top:none;}
 @media(max-width:760px){.sc-row{flex-wrap:wrap;}.sc-fix{margin-left:14px;}}
 /* Prop-coverage note: the share rows under it do not add to 100% and this says
    why, in the same amber the Slate check panel uses for a warning. */
@@ -2652,7 +2660,8 @@ function sdDedupePlayers(slate){
         else if(Number.isFinite(qo)) base.cptOwn = qo;
       }
       // Carry any prop/env columns the survivor lacks.
-      ['pass_yds_ou','pass_td_ou','rush_yds_ou','rec_yds_ou','rec_ou','rush_rec_ou','atd','game_ou','spread','tm_tot','opp_tot']
+      ['pass_yds_ou','pass_td_ou','rush_yds_ou','rec_yds_ou','rec_ou','rush_rec_ou','atd','game_ou','spread','tm_tot','opp_tot',
+       'base_tgt','base_recyd','base_rush','base_td','base_src']
         .forEach(k => { if((base[k]==null||base[k]==='') && q[k]!=null && q[k]!=='') base[k] = q[k]; });
       remap.set(q.id, base.id);
     }
@@ -2939,9 +2948,27 @@ function nflPropsTooltip(p){
     if(p.cptOwn != null) own.push(`CPT own ${(+p.cptOwn).toFixed(1)}%`);
     if(p.own != null) own.push(`FLEX own ${(+p.own).toFixed(1)}%`);
   }
-  if(!rows.length) return `<div class="odds-tip-empty">No props pulled for this player</div>`;
+  // BASELINE. Not a market number — an independent statement of what slice of
+  // his team this player is expected to take (see BASELINE_CONTRACT.md). It
+  // belongs on this card because it is the only place a person can see WHY a
+  // player with no posted line is nevertheless simming 40 receiving yards: the
+  // team's uncovered remainder was handed to him against these shares. Shown
+  // whenever the sheet carries it, priced or not, so the two numbers can be
+  // compared side by side — a market share far above the baseline is the
+  // mis-routed prop the Slate check's share_vs_baseline warns about.
+  const bl = [
+    ['Tgt', p.base_tgt], ['RecYd', p.base_recyd], ['Rush', p.base_rush], ['TD', p.base_td],
+  ].filter(x => x[1] != null && x[1] !== '');
+  const base = bl.length
+    ? `<div class="odds-tip-sec" style="margin-top:8px;">Baseline share${p.base_src?` · ${esc2(p.base_src)}`:''}</div>
+       <div class="odds-tip-grid">${bl.map(x => `<div class="odds-tip-cell"><span class="odds-tip-k">${x[0]}</span><span class="odds-tip-v">${(+x[1]).toFixed(1)}%</span></div>`).join('')}</div>`
+    : '';
+  if(!rows.length) return base
+    ? `<div class="odds-tip-sec">${esc2(p.name)} · no market props</div>${base}`
+    : `<div class="odds-tip-empty">No props pulled for this player</div>`;
   return `<div class="odds-tip-sec">${esc2(p.name)} · market props</div>
     <div class="odds-tip-grid">${rows.join('')}</div>
+    ${base}
     ${own.length?`<div class="odds-tip-sec" style="margin-top:8px;">${own.join(' · ')}</div>`:''}`;
 }
 
@@ -2964,6 +2991,28 @@ function applyNflStats(p, row, headers){
   setStr('rush_rec_ou', /^rush\s*\+\s*rec\s*o\/u$/i);
   if(has(/^atd$/i)) p.atd = get(/^atd$/i) || null;
   else if(has(/^anytime\s*td$/i)) p.atd = get(/^anytime\s*td$/i) || null;
+  // ── BASELINE SHARES (see BASELINE_CONTRACT.md) ────────────────────────────
+  // The books price the top of every depth chart and nobody else, so a team's
+  // props routinely cover only half its pass line and the rest of the offense
+  // is an anonymous remainder nobody can roster. These five columns are the
+  // odds puller's answer: what slice of the team each player is expected to
+  // get — Mike Clay's season projections blended with in-season usage, i.e. a
+  // statement that does not depend on whether a book bothered to post a line.
+  // They are PERCENT of the team, one decimal.
+  //
+  // BLANK IS NOT ZERO. A blank cell means "nobody has an opinion about this
+  // player"; 0.0 means "he is known to get none of this". The remainder fill
+  // below weights by these numbers and skips nulls, so the distinction decides
+  // whether a fourth receiver absorbs targets or stays out of the split
+  // entirely — hence the explicit empty-string guard instead of `num()`,
+  // which cannot tell a blank cell from a 0 once parseFloat has failed.
+  const setPct = (key, rx)=>{ if(!has(rx)) return; const v=get(rx); const n=parseFloat(v);
+                              p[key] = (v!=null && v!=='' && Number.isFinite(n)) ? n : null; };
+  setPct('base_tgt',   /^base\s*tgt\s*%?$/i);
+  setPct('base_recyd', /^base\s*rec\s*yds?\s*%?$/i);
+  setPct('base_rush',  /^base\s*rush\s*%?$/i);
+  setPct('base_td',    /^base\s*td\s*%?$/i);
+  setStr('base_src',   /^base\s*src$/i);
   setNum('game_ou', /^o\/u$/i);
   setNum('spread',  /^spread$/i);
   setNum('tm_tot',  /^tm\s*tot(al)?$/i);
@@ -3936,7 +3985,8 @@ function imputeMissingRatings(slate){
 }
 
 function loadFromStorage() {
-  try { const r=localStorage.getItem(STORAGE_KEY); if(r){ slates=JSON.parse(r); slates.forEach(imputeMissingRatings); } } catch(e){ slates=[]; }
+  try { const r=localStorage.getItem(STORAGE_KEY); if(r){ slates=JSON.parse(r); slates.forEach(imputeMissingRatings);
+    for(const sl of slates) for(const pl of (sl.players||[])) if(pl && typeof pl.name==='string' && /[<>\u0000-\u001f]/.test(pl.name)) pl.name=cleanName(pl.name); } } catch(e){ slates=[]; }
   // Repair: showdown slates whose sheet refresh re-added the CPT twin rows.
   try {
     let fixed=0;
@@ -4297,6 +4347,14 @@ function renderArchetypeLegend(){
   </div>`;
 }
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// Player names come off an untrusted CSV and are interpolated into innerHTML
+// in a couple of dozen places (pool rows, saved cards, group chips, options).
+// Escaping every site is a whack-a-mole nobody wins — a name that carried an
+// <img onerror> in the Name column executed in the live pool. Names never
+// legitimately contain angle brackets or control characters, so they are
+// stripped ONCE, at import and again on load (for slates saved before this
+// existed), and every renderer downstream is safe by construction.
+const cleanName=s=>String(s==null?'':s).replace(/[<>\u0000-\u001f]/g,'').trim();
 
 // ═══════════════════════════════════════════════════════════
 // TOP BAR
@@ -4808,37 +4866,55 @@ function renderSlateCheck(){
   catch(e){ el.style.display = 'none'; el.innerHTML = ''; console.warn('slate check failed', e); return; }
   const f = nflAuditVisible(slate, all);
   const dismissed = all.length - f.length;
-  const err = f.filter(x => x.sev === 'error'), warn = f.filter(x => x.sev === 'warn'), info = f.filter(x => x.sev === 'info');
+  const g = nflAuditGroups(slate, f);
+  const errTeams = g.teams.filter(t => t.sev === 'error').length;
+  const anyErr = errTeams > 0 || g.players.some(x => x.sev === 'error') || g.slateWide.some(x => x.sev === 'error');
+  const anyWarn = g.teams.length > 0 || g.players.length > 0 || g.slateWide.some(x => x.sev === 'warn');
   const open = !!slate._auditOpen;
-  el.className = 'slate-check' + (err.length ? ' err' : warn.length ? ' warn' : '');
-  const badge = (n, cls, label) => n ? `<span class="sc-badge ${cls}">${n} ${label}${n === 1 ? '' : 's'}</span>` : '';
+  el.className = 'slate-check' + (anyErr ? ' err' : anyWarn ? ' warn' : '');
+  const badge = (n, cls, label, plural) => n ? `<span class="sc-badge ${cls}">${n} ${n === 1 ? label : (plural || label + 's')}</span>` : '';
+  const first = g.teams[0] ? `${g.teams[0].team}: ${g.teams[0].summary}` : g.players[0] ? nflAuditShort(g.players[0]) : g.slateWide[0] ? nflAuditShort(g.slateWide[0]) : '';
   const head = f.length
-    ? `<span class="slate-check-head">${esc(nflAuditShort(err[0] || warn[0] || info[0]))}</span>`
+    ? `<span class="slate-check-head">${esc(first)}</span>`
     : `<span class="slate-check-head">Game environments and props look complete.</span>`;
-  // Order: errors, then warnings, then infos — a list you read top-down and can
-  // stop reading whenever you like.
-  const rank = { error: 0, warn: 1, info: 2 };
-  const rows = f.slice().sort((a, b) => rank[a.sev] - rank[b.sev]).map(x => {
-    const key = nflAuditKey(x);
-    const btn = fx => fx ? `<button class="sc-fix" onclick="event.stopPropagation();nflAuditFix('${fx.kind}',${JSON.stringify(String(fx.arg == null ? '' : fx.arg)).replace(/"/g, '&quot;')})">${esc(fx.label)}</button>` : '';
-    const fix = btn(x.fix) + btn(x.fix2);
-    return `<div class="sc-row ${x.sev}">
+  const btn = fx => fx ? `<button class="sc-fix" onclick="event.stopPropagation();nflAuditFix('${fx.kind}',${JSON.stringify(String(fx.arg == null ? '' : fx.arg)).replace(/"/g, '&quot;')})">${esc(fx.label)}</button>` : '';
+  const xbtn = key => `<button class="sc-x" title="Dismiss this finding on this slate" onclick="event.stopPropagation();nflAuditDismiss('${key.replace(/'/g, "\\'")}')">✕</button>`;
+  const row = x => `<div class="sc-row ${x.sev}">
       <span class="sc-dot"></span>
       <span class="sc-msg">${esc(x.msg)}<span class="sc-code">${esc(x.code)}</span></span>
-      ${fix}
-      <button class="sc-x" title="Dismiss this finding on this slate" onclick="event.stopPropagation();nflAuditDismiss('${key.replace(/'/g, "\\'")}')">✕</button>
+      ${btn(x.fix) + btn(x.fix2)}
+      ${x.folded ? '' : xbtn(nflAuditKey(x))}
     </div>`;
+  const openTeams = slate._auditOpenTeams || {};
+  const teamRows = g.teams.map(t => {
+    const isOpen = !!openTeams[t.team];
+    const fix = t.gk ? btn({ label: `Sim inputs → ${t.team}`, kind: 'simInputs', arg: t.gk }) : btn({ label: `Sim inputs → ${t.team}`, kind: 'simInputsTeam', arg: t.team });
+    // Team names come off the sheet: attribute-escape them like every other
+    // interpolated string here, or a quote in a Team cell breaks the handler.
+    const tArg = JSON.stringify(String(t.team)).replace(/"/g, '&quot;');
+    return `<div class="sc-row sc-team ${t.sev}" onclick="nflAuditToggleTeam(${tArg})" title="${isOpen ? 'Collapse' : 'Expand'} ${esc(t.team)}">
+      <span class="sc-dot"></span>
+      <span class="sc-msg"><span class="sc-caret">${isOpen ? '▾' : '▸'}</span><b class="sc-teamname">${esc(t.team)}</b> ${esc(t.summary)}</span>
+      ${fix}
+      <button class="sc-x" title="Dismiss every ${esc(t.team)} finding on this slate" onclick="event.stopPropagation();nflAuditDismissTeam(${tArg})">✕</button>
+    </div>${isOpen ? `<div class="sc-sub">${t.items.map(row).join('')}</div>` : ''}`;
   }).join('');
+  const playerRows = g.players.map(row).join('');
+  const wideRows = g.slateWide.map(row).join('');
+  const section = (label, html) => html ? `<div class="sc-section">${label}</div>${html}` : '';
+  const body = section(`${g.teams.length} team${g.teams.length === 1 ? '' : 's'} to look at`, teamRows) +
+               section(`${g.players.length} bad cell${g.players.length === 1 ? '' : 's'}`, playerRows) +
+               section('Slate-wide', wideRows);
   el.innerHTML = `<div class="slate-check-bar" onclick="toggleSlateCheck()" title="Everything the sim will quietly tolerate on this slate. Click to ${open ? 'collapse' : 'expand'}.">
       <span class="slate-check-caret">${open ? '▾' : '▸'}</span>
       <span class="slate-check-ttl">Slate check</span>
-      ${badge(err.length, 'err', 'error')}${badge(warn.length, 'warn', 'warning')}${badge(info.length, 'info', 'note')}
-      ${(!err.length && !warn.length && !info.length) ? '<span class="sc-badge ok">clean</span>' : ''}
+      ${badge(g.teams.length, errTeams ? 'err' : 'warn', 'team')}${badge(g.players.length, 'err', 'bad cell')}${badge(g.slateWide.length, 'info', 'note')}
+      ${(!f.length) ? '<span class="sc-badge ok">clean</span>' : ''}
       ${head}
       ${dismissed ? `<button class="slate-check-recheck" onclick="event.stopPropagation();nflAuditUndismiss()" title="Bring back the ${dismissed} dismissed finding${dismissed === 1 ? '' : 's'}">↺ ${dismissed} dismissed</button>` : ''}
       <button class="slate-check-recheck" onclick="event.stopPropagation();nflAuditRecheck()" title="Re-run every check against the slate as it is now">Re-check</button>
     </div>
-    ${open ? (rows ? `<div class="slate-check-list">${rows}</div>`
+    ${open ? (body ? `<div class="slate-check-list">${body}</div>`
                    : `<div class="slate-check-list"><div class="slate-check-none">Nothing to report${dismissed ? ` (${dismissed} dismissed)` : ''}.</div></div>`) : ''}`;
   el.style.display = '';
 }
@@ -5247,7 +5323,9 @@ function renderPool(){
     // UFC name-hover odds tooltip (desktop only, when extended odds are loaded)
     // NFL: hover the name for the full prop card (pass/rush/rec yards, receptions,
     // rush+rec, pass TDs, ATD, and DST lines when present).
-    const hasNflTip = slate.sport==='nfl' && !mobile && nflHasProps(p);
+    // Baseline shares alone are worth a hover: a player with no posted line but
+    // a baseline is exactly the one the remainder fill just handed production to.
+    const hasNflTip = slate.sport==='nfl' && !mobile && (nflHasProps(p) || nflHasBaseline(p));
     const hasOddsTip = hasNflTip || slate.sport==='ufc' && !mobile && (
       p.finish_r1!=null||p.finish_r2!=null||p.finish_r3!=null||p.finish_r4!=null||
       p.finish_r5!=null||p.decision!=null||p.ss_ou!=null||p.td_ou!=null
@@ -18679,8 +18757,22 @@ function buildNflSimInputs(pool, opts){
   // PROP COVERAGE, part 2: measure each team's coverage on the MARKET entries,
   // before the dashboard rewrites anything, and keep that reading on the team as
   // `covMarket` — the slate audit grades the sheet, not the user's what-ifs.
-  nflShareModel(null, pool, entries, teamInfo);
+  const _mktModel = nflShareModel(null, pool, entries, teamInfo);
   teamInfo.forEach(ti => { ti.covMarket = ti.coverage; ti.remMarket = ti.remainder; });
+  // The market shares, by player id, exactly as the sim will use them. The
+  // slate audit's share_vs_baseline check compares each priced player's
+  // prop-implied share against his baseline, and it must grade the SHEET (this
+  // reading) rather than whatever the dashboard did afterwards — same reason
+  // covMarket is snapshotted one line up.
+  for(const T of Object.values(_mktModel)){
+    const ti = teamInfo.get(T.team); if(!ti) continue;
+    const m = {}, mean = {};
+    for(const pl of T.players) if(!pl.skip){ m[pl.p.id] = pl.share; mean[pl.p.id] = pl.m; }
+    ti.mktShare = m; ti.mktMean = mean; ti.budgetMarket = T.budget; ti.lineSumMarket = T.lineSum;
+  }
+  // PROP COVERAGE, part 3: hand the remainder to the players it actually
+  // belongs to, using the baseline shares off the sheet.
+  nflFillFromBaseline(pool, entries, teamInfo, _mktModel);
   // Sim dashboard: game / team / player-share adjustments re-derive the means.
   nflApplySimDash(pool, entries, teamInfo, _dash);
 
@@ -18736,6 +18828,255 @@ function buildNflSimInputs(pool, opts){
   if(!_skipDstCal) nflCalibrateDst(entries, _games);
 
   return { games: _games, teamInfo, entries, shareSim, shareAlphaKey: _alphaKey, paceKey: _paceKey, pace: _paceCfg };
+}
+
+// ── BASELINE REMAINDER FILL (see BASELINE_CONTRACT.md) ───────────────────────
+// The coverage guardrail one screen down anchors each team denominator to what
+// the sheet says about the TEAM (the pass line, the implied points) and turns
+// whatever the props don't cover into a REMAINDER: production the offense makes
+// but nobody in the pool scores. That is the right answer when we know nothing
+// about who makes it. When the sheet carries baseline shares we DO know: the
+// remainder belongs to the receivers and backs the books never priced, in the
+// proportion Clay/usage says they split the team.
+//
+// So this hands each stat's uncovered slice to the unpriced players in
+// proportion to their baseline share, by writing the slice back onto their sim
+// entries as if the book had posted the line. Three properties make that safe:
+//   · It REDISTRIBUTES, it never adds. The amounts handed out sum to exactly
+//     the gap the anchor already carved out, so when nflShareModel is re-run
+//     below the team's coverage comes back at 1.0 and its denominator is the
+//     same anchor it already was. A team's simmed receiving yards still
+//     reconcile to its quarterback's pass line — the yards just have names on
+//     them now.
+//   · PRICED PLAYERS ARE NOT TOUCHED. A player the market priced keeps his
+//     market line and therefore his market share of the (unchanged) anchor.
+//     The baseline is not a second opinion about him; it is an opinion about
+//     the people the market skipped.
+//   · The absorbers are collected off the SLATE, not off the pool. A hidden
+//     player is a pool choice, not an injury — he is still on the field
+//     catching passes, so he holds his end of the split and the part of the
+//     remainder that is his stays a remainder. An OUT player is the opposite:
+//     he is not playing, so he is excluded and his share renormalizes onto his
+//     teammates, which is the same thing nflRedistributeOut does for the market.
+//
+// A slate with no baseline columns has no absorber with a baseline anywhere, so
+// every loop below falls through and the sim is bit-identical to before.
+//
+// The stat → column mapping. Receptions ride the TARGET share: a target is the
+// event the baseline actually measures, and the receiving-yards share is only a
+// fallback for a sheet that filled one column and not the other.
+const NFL_BASE_COLS = [
+  { key:'recYds',  cols:['base_recyd','base_tgt'] },
+  { key:'rec',     cols:['base_tgt','base_recyd'] },
+  { key:'rushYds', cols:['base_rush'] },
+  { key:'td',      cols:['base_td'] },
+];
+// A baseline cell, as a number or null. Blank is NOT zero (see applyNflStats):
+// null means "no opinion, leave him out of the split", 0 means "he gets none".
+function nflBaseShare(p, cols){
+  for(const c of cols){
+    const v = p ? p[c] : null;
+    if(v == null || v === '') continue;
+    const n = +v; if(Number.isFinite(n)) return n;
+  }
+  return null;
+}
+function nflHasBaseline(p){
+  return NFL_BASE_COLS.some(s => nflBaseShare(p, s.cols) != null);
+}
+function nflFillFromBaseline(pool, entries, teamInfo, model){
+  teamInfo.forEach(ti => { ti.baseFill = null; ti._covPin = null; });
+  if(!model) return false;
+  const slate = (typeof activeSlate === 'function') ? activeSlate() : null;
+  if(!slate || !Array.isArray(slate.players)) return false;
+  // Cheap bail-out for every slate that has no baseline columns at all, so the
+  // no-baseline path costs one pass over the roster and nothing else.
+  if(!slate.players.some(nflHasBaseline)) return false;
+  const outS = (typeof nflOutSet === 'function') ? nflOutSet(slate) : new Set();
+  const idxById = new Map(); pool.forEach((p, i) => idxById.set(p.id, i));
+  const teamOfP = p => String(p.team||'').toUpperCase().replace(/[^A-Z]/g,'');
+  // "Unpriced" is PER STAT, not per player. The contract says the remainder goes
+  // to the unpriced players; on a real sheet almost nobody is unpriced in the
+  // whole-player sense, because the books post an anytime-TD price for the
+  // fourth receiver and no yardage line at all. Week 1's BUF is the case: the
+  // receiving props cover 51% of the pass line, and the 49% that is missing
+  // belongs to Dalton Kincaid and Keon Coleman — both of whom carry an ATD
+  // price and would be "priced players, not touched" under a per-player test,
+  // leaving the remainder anonymous forever and the feature inert on the exact
+  // slate it was written for. So a player is an absorber for a stat when he
+  // contributes NOTHING to that stat's numerator — which is also the only
+  // definition under which the arithmetic closes, since the absorbers are then
+  // exactly the players the coverage gap was measured against. The other half
+  // of the contract's sentence holds exactly: a player who DOES carry a line
+  // for a stat keeps it untouched.
+  const mOf = (e, key) => key === 'td' ? nflTdLam(e.atd) : (e[key] || 0);
+  // Candidates come off the SLATE, so a hidden player still holds his end.
+  const absorbers = new Map();
+  for(const p of slate.players){
+    const pos = nflPosOf(p); if(pos === 'K' || pos === 'DST') continue;
+    if(!nflHasBaseline(p)) continue;                 // no opinion → not in any split
+    const t = teamOfP(p); if(!t) continue;
+    const i = idxById.get(p.id);
+    // Pool players are graded on the entry the sim will actually run; everyone
+    // else (hidden, no salary) on a freshly derived one, so the "does he carry
+    // a line for this stat" test is the same test either way.
+    const e = (i != null && entries[i]) ? entries[i] : nflPropEntry(p, t, null);
+    if(!absorbers.has(t)) absorbers.set(t, []);
+    // OUT players stay in the list but never receive: see the claim/assign split
+    // below — their share is the one thing about them that does NOT vanish.
+    absorbers.get(t).push({ p, e, i: (i == null ? null : i), out: outS.has(p.id) });
+  }
+  let filledAny = false;
+  for(const T of Object.values(model)){
+    const ti = teamInfo.get(T.team); if(!ti) continue;
+    const all = absorbers.get(T.team) || [];
+    if(!all.length) continue;
+    const report = {};
+    for(const st of NFL_BASE_COLS){
+      const remFrac = T.remainder[st.key] || 0;
+      const gap = (T.base[st.key] || 0) * remFrac;
+      if(!(gap > 0)) continue;
+      const cand = all.filter(c => !(mOf(c.e, st.key) > 0));
+      if(!cand.length) continue;
+      // How much of the team these absorbers claim, in the stat's own units:
+      // a baseline is a percentage OF THE TEAM, so his amount is that
+      // percentage of the (anchored) team total.
+      //
+      // Two sums, and the difference between them is the whole OUT story. The
+      // CLAIM is over every absorber including the scratched ones, because a
+      // scratch does not reduce the number of passes his offense throws — the
+      // balls he was going to catch are still caught. The WEIGHTS are over the
+      // players who are actually playing, so that claim is split among them.
+      // A team with nobody OUT has the two sums equal and this is a no-op.
+      let wSum = 0, claimPct = 0; const w = [];
+      for(const c of cand){
+        const b = nflBaseShare(c.p, st.cols); const v = (b != null && b > 0) ? b : 0;
+        claimPct += v; w.push(c.out ? 0 : v); if(!c.out) wSum += v;
+      }
+      if(!(wSum > 0)) continue;
+      const claim = claimPct / 100 * (T.base[st.key] || 0);
+      // SCALE DOWN, NEVER UP. When the absorbers' baselines add to more than
+      // the gap (the usual case on a thin sheet, because a baseline covers the
+      // whole depth chart and the gap is only what the books missed) they are
+      // renormalized down in proportion, which is the contract's "renormalized
+      // among them". When they add to LESS, they are handed exactly their
+      // baseline share and the difference stays UNASSIGNED.
+      //
+      // Scaling up is the tempting mistake and it is the same failure the
+      // coverage guardrail exists to stop, one level down: BUF's receiving gap
+      // is 49% of the team and the unpriced Bills who have a baseline account
+      // for 39% of it, so scaling to fit would hand Dalton Kincaid 22% of the
+      // team's receiving yards on the strength of a 17.1% projection — a 27%
+      // raise he earned only by being the biggest name left in the room. The
+      // honest answer is that 10% of that offense is still unaccounted for,
+      // which is what the Slate check now says out loud, and why the severity
+      // drop is gated on how much of the gap actually found an owner.
+      const scale = Math.min(1, claim > 0 ? gap / claim : 0);
+      const parts = []; let assigned = 0;
+      cand.forEach((c, k) => {
+        if(!(w[k] > 0)) return;
+        const p = c.p;
+        const amt = (w[k] / wSum) * claim * scale;
+        const i = c.i;
+        // Not in the pool (hidden, or no salary): he still held his end of the
+        // split above, and his slice stays remainder. That is the point.
+        if(i == null) return;
+        const e = entries[i]; if(!e) return;
+        if(st.key === 'td'){ e.atd = nflTdProb(nflTdLam(e.atd) + amt); }
+        else { e[st.key] = (e[st.key] || 0) + amt; }
+        e.hasProps = true; e.unpriced = false; e.fallbackMean = null;
+        (e._baseFill || (e._baseFill = {}))[st.key] = amt;
+        assigned += amt;
+        parts.push({ id: p.id, name: p.name || p.id, amount: amt,
+                     pct: (T.base[st.key] > 0 ? amt / T.base[st.key] : 0) });
+      });
+      if(!parts.length) continue;
+      filledAny = true;
+      // THE LEFTOVER. When the absorbers' baselines claim less than the gap,
+      // the difference used to stay an anonymous remainder — 3–4% of DET's and
+      // MIN's receiving yards, a WR2's week, scored by nobody. Whose is it? The
+      // 0.95 target already took the median-vs-mean skew off the top, so what
+      // is left is production Clay's preseason view does not see and the books
+      // did not price. It does not belong to any one man, so it is spread
+      // pro-rata over EVERYONE on the team by the share he already holds,
+      // priced players included: every relative share the market and the
+      // baseline set stays exactly what it was, nobody is singled out, and the
+      // team lands on its anchor. Two limits keep it honest. A priced player's
+      // line is a market number, so his mean may not drift more than
+      // NFL_LEFTOVER_CAP above it; and past what the caps can absorb (a badly
+      // covered sheet) the excess stays a remainder, because inventing a WR1's
+      // ceiling is exactly the guess this whole feature exists to avoid.
+      let leftover = Math.max(0, gap - assigned);
+      const spread = [];
+      if(leftover > 1e-9){
+        const holders = [];
+        T.players.forEach(pl => {
+          if(pl.skip) return;
+          const e = entries[pl.i]; if(!e || e.out) return;
+          const cur = mOf(e, st.key); if(!(cur > 0)) return;
+          const isFilled = !!(e._baseFill && e._baseFill[st.key] != null);
+          // A baseline-filled player holds a projection, not a market line, so
+          // he has more room than a priced player — but not unlimited: letting
+          // him take his whole Clay claim again is the Kincaid mistake (22% of
+          // the team on a 17% projection). Priced players are capped at
+          // NFL_LEFTOVER_CAP of their line, filled players at NFL_LEFTOVER_CAP_FILL.
+          const room = cur * (isFilled ? NFL_LEFTOVER_CAP_FILL : NFL_LEFTOVER_CAP);
+          holders.push({ e, pl, cur, room });
+        });
+        const total = holders.reduce((a, h) => a + h.cur, 0);
+        if(total > 0){
+          // Water-fill: pro-rata by current share, honouring each cap, in passes.
+          let pool_ = leftover;
+          for(let pass = 0; pass < 4 && pool_ > 1e-9; pass++){
+            const open = holders.filter(h => h.room > 1e-9);
+            const denomS = open.reduce((a, h) => a + h.cur, 0);
+            if(!(denomS > 0)) break;
+            let given = 0;
+            for(const h of open){
+              const want = pool_ * h.cur / denomS;
+              const amt = Math.min(want, h.room);
+              h.room -= amt; given += amt;
+              const e = h.e;
+              if(st.key === 'td'){ e.atd = nflTdProb(nflTdLam(e.atd) + amt); }
+              else { e[st.key] = (e[st.key] || 0) + amt; }
+              (e._leftover || (e._leftover = {}))[st.key] = ((e._leftover || {})[st.key] || 0) + amt;
+              spread.push({ id: h.pl.p.id, name: h.pl.p.name || h.pl.p.id, amount: amt });
+            }
+            pool_ -= given;
+            if(given <= 1e-12) break;
+          }
+          assigned += leftover - pool_;
+          leftover = pool_;
+        }
+      }
+      // Pin this stat's anchor for every later nflShareModel pass (see `pin`
+      // in the guardrail): the team total is the anchor and the slice nobody
+      // claimed is a remainder, not yards that quietly stop existing.
+      // (receptions need no pin of their own — they ride the receiving-yards
+      // remainder inside nflShareModel.)
+      (ti._covPin || (ti._covPin = {}))[st.key] = true;
+      parts.sort((a, b) => b.amount - a.amount);
+      // Collapse the leftover spread to one line per player.
+      const spreadBy = {}; for(const x of spread){ (spreadBy[x.id] = spreadBy[x.id] || { id: x.id, name: x.name, amount: 0 }).amount += x.amount; }
+      const leftoverParts = Object.values(spreadBy).sort((a, b) => b.amount - a.amount);
+      const leftoverAmt = leftoverParts.reduce((a, x) => a + x.amount, 0);
+      report[st.key] = { gapFrac: remFrac, gap,
+                         filled: assigned,
+                         filledFrac: T.base[st.key] > 0 ? assigned / T.base[st.key] : 0,
+                         ofGap: gap > 0 ? assigned / gap : 0,
+                         unassignedFrac: Math.max(0, remFrac - (T.base[st.key] > 0 ? assigned / T.base[st.key] : 0)),
+                         parts,
+                         leftover: leftoverAmt, leftoverFrac: T.base[st.key] > 0 ? leftoverAmt / T.base[st.key] : 0,
+                         leftoverParts };
+    }
+    if(Object.keys(report).length) ti.baseFill = report;
+  }
+  // Re-measure. The filled lines are now part of every denominator, so coverage
+  // comes back at (or near) 1 and the guardrail stops reserving a remainder for
+  // players who now have names. `covMarket` was snapshotted before this ran, so
+  // the Slate check still grades the sheet the puller actually delivered.
+  if(filledAny) nflShareModel(null, pool, entries, teamInfo);
+  return filledAny;
 }
 
 // Lines that belong to a team's denominators but to nobody in the pool: every
@@ -18917,6 +19258,40 @@ const nflTdProb = lam => lam > 0 ? 1 - Math.exp(-lam) : 0;
 // shipped seeds run untouched (their coverage is measured and reported above
 // the threshold on every team).
 const NFL_COV_MIN = 0.85;
+// WITH A BASELINE the bar moves. The 0.85 floor exists because the anonymous
+// remainder is a blunt instrument: on a normal sheet the listed men cover
+// 87–92% and the missing 8–13% is real depth-chart production the books skip,
+// but nobody rosterable could receive it, so engaging there just told every
+// slate it was broken. Once the sheet carries baseline shares the remainder is
+// no longer anonymous — it goes, by name and in proportion, to the WR4 and the
+// third-down back who actually catch those balls — and the Week 1 review
+// measured Σ receiving yards running 9% (median) to 15% (WAS, DET, CHI) under
+// the pass line on teams sitting ABOVE the floor. So a team whose absorbers
+// are known engages at 0.95 instead, and fills to 0.95 of the anchor rather
+// than 1.0: the books' lines are medians of right-skewed stats, and the sum of
+// a complete sheet's medians lands a few percent under the QB's line by
+// arithmetic, not because anyone is missing. That last slice stays with the
+// priced players, where it belongs.
+const NFL_COV_FILL_MIN = 0.95;
+const NFL_COV_FILL_TARGET = 0.95;
+// How far above his market line a PRICED player's mean may be lifted by the
+// leftover spread (see nflFillFromBaseline). 6% is a touch over the typical
+// mean-over-median skew of a receiving line; beyond it the excess stays a
+// remainder rather than becoming a projection nobody made.
+const NFL_LEFTOVER_CAP = 0.06;
+const NFL_LEFTOVER_CAP_FILL = 0.25;
+// Which teams have at least one non-K/DST player carrying a baseline share —
+// the only teams the softer bar applies to.
+function nflBaselineTeams(slate){
+  const out = new Set();
+  if(!slate || typeof nflHasBaseline !== 'function') return out;
+  for(const p of (slate.players || [])){
+    if(!nflHasBaseline(p)) continue;
+    const pos = nflPosOf(p); if(pos === 'K' || pos === 'DST') continue;
+    const t = String(p.team || '').toUpperCase().replace(/[^A-Z]/g, ''); if(t) out.add(t);
+  }
+  return out;
+}
 // Rushing anchor. The league average is ~112 rush yards on a 22.5-point team
 // (≈5.0 yds/pt), but this number is not a projection — it is a floor whose only
 // job is to notice that a team's LEAD BACK is missing from the sheet. Set at
@@ -18958,6 +19333,9 @@ function nflShareModel(slate, pool, entries, teamInfo){
     T.base.recYds += m.recYds; T.base.rec += m.rec; T.base.rushYds += m.rushYds; T.base.td += m.td;
     T.base.passYds += m.passYds;                          // SUM, not max: two priced QBs share one pie
   });
+  // Most callers pass slate = null (the model only ever needed the pool); the
+  // baseline bar needs the slate's rows, so fall back to the active one.
+  const baseTeams = nflBaselineTeams(slate || ((typeof activeSlate === 'function') ? activeSlate() : null));
   for(const T of Object.values(teams)){
     const ti = tiOf(T.team);
     const imp = (ti && Number.isFinite(ti.implied)) ? ti.implied : (Number.isFinite(T.imp) ? T.imp : null);
@@ -18969,14 +19347,34 @@ function nflShareModel(slate, pool, entries, teamInfo){
     T.lineSum = { recYds: T.base.recYds, rec: T.base.rec, rushYds: T.base.rushYds, td: T.base.td, passYds: T.base.passYds };
     T.offPool = off;
     if(off){ T.base.recYds += off.recYds; T.base.rec += off.rec; T.base.rushYds += off.rushYds; T.base.td += off.td; }
+    // A stat the baseline fill already ran on is PINNED: the anchor holds no
+    // matter what the coverage now reads. Filling a 49%-uncovered team up to
+    // 89% otherwise walks it back over NFL_COV_MIN, the guardrail stands down,
+    // and the denominator silently reverts to "the sum of whoever is listed" —
+    // which would delete the 11% nobody claimed instead of leaving it a
+    // remainder, i.e. the fill would REMOVE production from the offense. The
+    // pin makes the invariant explicit: once we have started assigning a team's
+    // remainder by name, its total is the anchor and whatever is still
+    // unassigned stays a remainder.
+    const pin = ti && ti._covPin;
+    const hasBase = baseTeams.has(T.team);
     const denom = (key, anchor) => {
       const have = T.base[key];
       if(!(anchor > 0)) return;
       const c = have / anchor;
       T.coverage[key] = c;
-      if(c >= NFL_COV_MIN) return;              // a normal sheet — nothing changes
-      T.remainder[key] = 1 - Math.max(0, c);
-      T.base[key] = anchor;
+      const floor = hasBase ? NFL_COV_FILL_MIN : NFL_COV_MIN;
+      if(c >= floor && !(pin && pin[key])) return;   // a normal sheet — nothing changes
+      // With a baseline the anchor the pie is built on is 0.95 of the market
+      // anchor (see NFL_COV_FILL_TARGET); without one it is the anchor itself.
+      const target = hasBase ? anchor * NFL_COV_FILL_TARGET : anchor;
+      const cT = have / target;
+      // Clamped: a PINNED stat can measure slightly over 1 once the fill has
+      // closed the gap, and a -1e-16 remainder would leak out as a coverage of
+      // 1.0000000000000002. Unpinned, cT is always below 1 here, so the clamp
+      // is unreachable and this line is what it always was.
+      T.remainder[key] = Math.max(0, 1 - Math.max(0, cT));
+      T.base[key] = Math.max(have, target);
     };
     denom('recYds', qbLine);
     // Receptions ride the receiving-yards coverage: the catches that went with
@@ -18986,7 +19384,10 @@ function nflShareModel(slate, pool, entries, teamInfo){
       const c = T.coverage.recYds;
       T.coverage.rec = c;
       T.remainder.rec = T.remainder.recYds;
-      T.base.rec = T.base.rec / Math.max(1e-6, c);
+      // Same target as the yards: with a baseline the receiving pie is built on
+      // 0.95 of the anchor, so the catches must be too — dividing by the
+      // full-anchor coverage alone paid out 1/0.95 of the listed receptions.
+      T.base.rec = T.base.rec / Math.max(1e-6, c) * (hasBase ? NFL_COV_FILL_TARGET : 1);
     }
     if(imp != null && imp > 0) denom('rushYds', imp * NFL_RUSH_YDS_PER_PT * NFL_RUSH_ANCHOR);
     // TOUCHDOWNS. Two anchors, and the pie takes the larger.
@@ -19036,10 +19437,39 @@ function nflShareModel(slate, pool, entries, teamInfo){
         pl.share[st.key] = tot > 0 ? pl.m[st.key] / tot : 0;
       }
     }
+    // The ANCHORED budget per stat — the denominator the guardrail measures
+    // coverage against, whether or not it engaged. `T.base` is not that number
+    // on a well-covered team (there it is just the sum of the listed lines), so
+    // anything that wants to ask "what fraction of this offense does this line
+    // claim?" has to ask against this instead. nflSlateAudit's
+    // share_vs_baseline does exactly that: measured against the listed sum, an
+    // ordinary quarterback scramble line reads as a quarter of a team's ground
+    // game purely because his running backs are missing from the sheet.
+    {
+      const capC = v => (v > 0 && v < 1) ? v : 1;
+      // Each entry is the larger of the team-level anchor and the (already
+      // anchored) total the sim runs on, so the denominator is never the small
+      // one. Where the guardrail engaged the two are the same number; where it
+      // did not, the sheet's priced lines already exceed the anchor and THEY
+      // are the honest denominator — the rushing anchor in particular is a
+      // deliberate floor (see NFL_RUSH_YDS_PER_PT), not a projection, and
+      // dividing by it on a well-covered team would inflate every share.
+      const mx = (a, b) => (a > 0 && a > b) ? a : b;
+      T.budget = {
+        recYds:  mx(qbLine, T.base.recYds),
+        // Receptions have no anchor of their own; they ride the receiving-yards
+        // coverage, and T.base.rec has ALREADY been scaled up by it when the
+        // guardrail engaged (see the ride-along above), so scale here only when
+        // it did not.
+        rec:     (T.remainder.recYds > 0) ? T.base.rec : T.base.rec / capC(T.coverage.recYds),
+        rushYds: mx((imp != null && imp > 0) ? imp * NFL_RUSH_YDS_PER_PT * NFL_RUSH_ANCHOR : 0, T.base.rushYds),
+        td:      mx((imp != null && imp > 0) ? imp * NFL_TD_PER_PT : 0, T.base.td),
+      };
+    }
     // Hand the measurement back to the caller's team info — the Sim inputs
     // pop-out prints it as an amber note and nflSlateAudit grades it.
     if(ti){ ti.coverage = T.coverage; ti.remainder = T.remainder; ti.lineSum = T.lineSum;
-            ti.passLine = qbLine; ti.covAtd = T.covAtd; ti.covYards = T.covYards; }
+            ti.passLine = qbLine; ti.covAtd = T.covAtd; ti.covYards = T.covYards; ti.budget = T.budget; }
   }
   return teams;
 }
@@ -19061,6 +19491,28 @@ function nflCoverageNoteHtml(ti, team){
     ? ` Lines with no salary are already counted: ${esc(ti._offPool.names.slice(0,4).join(', '))}.` : '';
   return `<div class="sdash-cov" title="The share model anchors each team denominator to what the sheet says about the TEAM (the passing line, the implied points) instead of to the sum of whoever happens to be listed, so a missing teammate cannot inflate the players who are present. The missing slice is still produced by the offense — it just isn't scored by anybody in this pool.">
     ⚠ ${esc(team)} ${parts.join('; ')}. Shares below add to less than 100% on purpose.${off}</div>`;
+}
+// The same note for a team whose remainder the BASELINE fill claimed. `remainder`
+// is 0 by the time anybody reads it (the fill closed the gap and the model was
+// re-measured), so nflCoverageNoteHtml above says nothing at all — which is
+// right, the shares below DO add to 100% now. But the reader still deserves to
+// know that half of this team's receiving pie is carried by a projection rather
+// than by a posted line, and by whom.
+function nflBaseFillNoteHtml(ti, team){
+  const bf = ti && ti.baseFill; if(!bf) return '';
+  const pc = v => Math.round(v * 100) + '%';
+  const parts = [];
+  for(const st of NFL_BASE_COLS){
+    const r = bf[st.key]; if(!r || st.key === 'rec') continue;   // receptions ride receiving yards
+    const who = r.parts.slice(0, 4).map(x => `${esc(x.name)} ${pc(x.pct)}`).join(', ');
+    const more = r.parts.length > 4 ? `, +${r.parts.length - 4} more` : '';
+    const named = Math.max(0, r.filledFrac - (r.leftoverFrac || 0));
+    const spreadTxt = (r.leftoverFrac || 0) > 0.004 ? ` (+${pc(r.leftoverFrac)} spread pro-rata)` : '';
+    parts.push(`<b>${pc(named)}</b> of ${NFL_COV_LABEL[st.key]} — ${who}${more}${spreadTxt}`);
+  }
+  if(!parts.length) return '';
+  return `<div class="sdash-cov" title="These players carry no market line for the stat. The share model had already carved their production out of the team as an anonymous remainder; the sheet's baseline columns say whose it is, so it was handed back to them in proportion to their baseline share. The team's totals did not move — only the names on them.">
+    ⌁ ${esc(team)} baseline fill: ${parts.join('; ')}.</div>`;
 }
 // ═══════════════════════════════════════════════════════════════════════════
 // SLATE CHECK — the audit behind the pool-header badge
@@ -19173,18 +19625,100 @@ function nflSlateAudit(slate){
            { team: t, fix: simFix });
     if(ti){
       const c = ti.covMarket;
-      if(c.recYds < 0.6)
-        push('error', 'rec_coverage', `${t} receiving props cover ${pc(c.recYds)} of the pass line — ${pc(1 - c.recYds)} of receiving yards go to unlisted players.`,
-             { team: t, fix: simFix });
-      else if(c.recYds < 0.85)
-        push('warn', 'rec_coverage', `${t} receiving props cover ${pc(c.recYds)} of the pass line — ${pc(1 - c.recYds)} of receiving yards go to unlisted players.`,
-             { team: t, fix: simFix });
-      if(c.rushYds < 0.6)
-        push('error', 'rush_coverage', `${t} rushing props cover ${pc(c.rushYds)} of the expected ground game — a lead back is probably missing.`,
-             { team: t, fix: simFix });
-      else if(c.rushYds < 0.85)
-        push('warn', 'rush_coverage', `${t} rushing props cover ${pc(c.rushYds)} of the expected ground game.`,
-             { team: t, fix: simFix });
+      // BASELINE FILL. A coverage gap the sheet's baseline columns closed is a
+      // different fact from one nobody can account for: the yards still leave
+      // the priced players' hands, but they land on named teammates instead of
+      // on an anonymous remainder, which is most of what made the gap dangerous.
+      // So the finding names the fill and drops one severity level once ≥80% of
+      // the gap is claimed. It never disappears — a team whose receiving corps
+      // is half projection is still worth knowing about before you roster it.
+      const fill = st => {
+        const r = ti.baseFill && ti.baseFill[st]; if(!r) return { note: '', drop: false };
+        const who = r.parts.slice(0, 3).map(x => `${x.name} (${pc(x.pct)})`).join(', ');
+        const more = r.parts.length > 3 ? `, +${r.parts.length - 3} more` : '';
+        const named = Math.max(0, r.filledFrac - (r.leftoverFrac || 0));
+        const spreadTxt = (r.leftoverFrac || 0) > 0.004 ? `; ${pc(r.leftoverFrac)} spread pro-rata across the roster (priced lines lifted ≤ ${Math.round(NFL_LEFTOVER_CAP * 100)}%)` : '';
+        const unTxt = r.unassignedFrac > 0.004 ? `; ${pc(r.unassignedFrac)} unassigned` : '';
+        return { note: `; ${pc(named)} filled from baseline: ${who}${more}${spreadTxt}${unTxt}`,
+                 drop: r.ofGap >= 0.80 };
+      };
+      const sevDrop = (sev, d) => !d ? sev : (sev === 'error' ? 'warn' : sev === 'warn' ? 'info' : sev);
+      // A coverage percentage printed next to the threshold that produced it has
+      // to survive being read back: TB's 0.8497 rounded to "85%" and the finding
+      // then said the props cover 85% of the pass line under a rule that only
+      // fires below 85%. Print a decimal whenever the rounded number would land
+      // on a threshold it is not actually on.
+      const pcCov = v => {
+        const x = v * 100;
+        return [60, 85].some(t => Math.round(x) === t && x !== t) ? x.toFixed(1) + '%' : Math.round(x) + '%';
+      };
+      {
+        const f = fill('recYds');
+        // Without a fill this is the sentence it has always been, to the byte.
+        const msg = f.note
+          ? `${t} receiving props cover ${pcCov(c.recYds)} of the pass line — ${pc(1 - c.recYds)} uncovered${f.note}.`
+          : `${t} receiving props cover ${pcCov(c.recYds)} of the pass line — ${pc(1 - c.recYds)} of receiving yards go to unlisted players.`;
+        if(c.recYds < 0.6)       push(sevDrop('error', f.drop), 'rec_coverage', msg, { team: t, fix: simFix });
+        else if(c.recYds < 0.85) push(sevDrop('warn',  f.drop), 'rec_coverage', msg, { team: t, fix: simFix });
+      }
+      {
+        const f = fill('rushYds');
+        if(c.rushYds < 0.6)
+          push(sevDrop('error', f.drop), 'rush_coverage', `${t} rushing props cover ${pcCov(c.rushYds)} of the expected ground game — a lead back is probably missing${f.note}.`,
+               { team: t, fix: simFix });
+        else if(c.rushYds < 0.85)
+          push(sevDrop('warn', f.drop), 'rush_coverage', `${t} rushing props cover ${pcCov(c.rushYds)} of the expected ground game${f.note}.`,
+               { team: t, fix: simFix });
+      }
+      // ── SHARE vs BASELINE — the mis-routed-prop detector ──────────────────
+      // The wrong_pos_prop check below catches a prop that landed on a player
+      // who cannot possibly own it (passing yards on a tight end). This catches
+      // the harder half: a prop that landed on a plausible OWNER of that stat
+      // but at a number nobody's usage supports — the puller's fuzzy match
+      // handing the WR1's 78.5 receiving yards to the WR4, or a decimal that
+      // slipped. The market share is a fact about the sheet, the baseline is an
+      // independent fact about the depth chart, and they disagreeing by this
+      // much is not a market read, it is a data error.
+      //
+      // The threshold is deliberately loose in BOTH directions at once —
+      // max(2.5× baseline, baseline + 15 points) — because neither test alone
+      // survives the range of real shares. A 2.5× multiple on a 3%-baseline WR4
+      // fires at 7.5%, which a real game plan reaches; a flat +15 points on a
+      // 30%-baseline WR1 fires at 45%, which a two-man passing attack reaches.
+      // Taking the larger means a small share has to be absurd in RATIO and a
+      // large one absurd in MAGNITUDE before either is called out.
+      // Measured against the team's ANCHORED budget (ti.budgetMarket — the pass
+      // line for receiving yards, implied points × the rushing anchor for
+      // rushing, the implied touchdown budget for TDs), never against the sum
+      // of the priced lines. Against that sum a thin sheet inflates everyone
+      // who IS on it, and the check would fire on the very teams the coverage
+      // findings already cover.
+      // QB rushing is exempt. A quarterback's scramble line is never a
+      // teammate's mis-routed prop (the pass-stat mis-routes this check exists
+      // for are caught by wrong_pos_prop), and his season baseline is diluted
+      // by every backup on Clay's roster: CLE's Deshaun Watson read 24% of a
+      // 62-yard ground game on an ordinary 18.5-yard line against a 6.7%
+      // baseline — a "3.5× disagreement" that was noise on both sides.
+      if(ti.mktMean && ti.budgetMarket) for(const p of mates){
+        const mm = ti.mktMean[p.id]; if(!mm) continue;
+        const isQb = nflPosOf(p) === 'QB';
+        let worst = null;
+        for(const st of [{k:'recYds', c:['base_recyd'], l:'receiving yards'},
+                         {k:'rushYds', c:['base_rush'],  l:'rushing yards'},
+                         {k:'rec',     c:['base_tgt'],   l:'targets'}]){
+          if(isQb && st.k === 'rushYds') continue;
+          const b = nflBaseShare(p, st.c); if(b == null) continue;   // blank = no opinion
+          const budget = ti.budgetMarket[st.k];
+          if(!(budget > 0)) continue;
+          const got = (mm[st.k] || 0) / budget * 100;
+          const lim = Math.max(2.5 * b, b + 15);
+          if(got > lim && (!worst || got - lim > worst.over)) worst = { st, b, got, lim, over: got - lim };
+        }
+        if(worst)
+          push('warn', 'share_vs_baseline',
+               `${t} ${nflPosOf(p)} ${p.name}: his props imply ${worst.got.toFixed(0)}% of the team's ${worst.st.l} against a ${worst.b.toFixed(1)}% baseline — that line probably belongs to a teammate (check the sheet's cell before trusting the sim on him).`,
+               { team: t, playerId: p.id, fix: { label: 'Show in pool', kind: 'search', arg: p.name } });
+      }
       // The anytime-TD book is over-round by 20-30% on a complete sheet, so a
       // book that has fallen to its team's implied touchdown budget has lost
       // scorers even though the number still looks plausible.
@@ -19252,6 +19786,7 @@ function nflSlateAudit(slate){
       push('warn', 'player_no_props',
            `${t}: ${list.length} priced player${list.length === 1 ? '' : 's'} with no props at all — ${names}. ${list.length === 1 ? 'He scores' : 'They score'} 0 in every sim.`,
            { team: t === '?' ? null : t, playerId: list.length === 1 ? list[0].id : null,
+             players: list.map(p => ({ id: p.id, name: p.name, salary: p.salary || 0 })),
              fix: { label: 'Show in pool', kind: 'search', arg: list.length === 1 ? list[0].name : t },
              // The usual reason the books never priced a $6,000 player is that
              // he is not playing, so the second fix is the one that says so —
@@ -19398,18 +19933,147 @@ function nflAuditDismiss(key){
 // the panel is collapsed or was never opened.
 function nflAuditSummary(slate){
   const f = nflAuditVisible(slate, nflSlateAudit(slate));
-  const err = f.filter(x => x.sev === 'error'), warn = f.filter(x => x.sev === 'warn');
-  if(!err.length && !warn.length) return `Slate check: clean${f.length ? ` (${f.length} note${f.length === 1 ? '' : 's'})` : ''}.`;
+  const g = nflAuditGroups(slate, f);
+  const errTeams = g.teams.filter(t => t.sev === 'error');
+  if(!g.teams.length && !g.players.length) return `Slate check: clean${g.slateWide.length ? ` (${g.slateWide.length} note${g.slateWide.length === 1 ? '' : 's'})` : ''}.`;
   const parts = [];
-  if(err.length) parts.push(`${err.length} error${err.length === 1 ? '' : 's'}`);
-  if(warn.length) parts.push(`${warn.length} warning${warn.length === 1 ? '' : 's'}`);
-  const head = err.concat(warn).slice(0, 3).map(x => nflAuditShort(x)).join(', ');
-  return `Slate check: ${parts.join(', ')} — ${head}${err.length + warn.length > 3 ? ', …' : ''}`;
+  if(g.teams.length) parts.push(`${g.teams.length} team${g.teams.length === 1 ? '' : 's'}${errTeams.length ? ` (${errTeams.length} with errors)` : ''}`);
+  if(g.players.length) parts.push(`${g.players.length} bad cell${g.players.length === 1 ? '' : 's'}`);
+  const head = g.teams.slice(0, 3).map(t => `${t.team} ${nflAuditShortTeam(t.items[0])}`).join(', ');
+  return `Slate check: ${parts.join(', ')} — ${head}${g.teams.length > 3 ? ', …' : ''}`;
 }
 // The badge / log form of a finding: the claim without the explanation.
 function nflAuditShort(f){
   const m = f.msg.split(' — ')[0].replace(/\.$/, '');
   return m.length > 62 ? m.slice(0, 60) + '…' : m;
+}
+
+// ── Grouping ─────────────────────────────────────────────────────────────────
+// The audit emits one finding per (team, check) because that is the grain the
+// checks run at. It is NOT the grain a person acts at: Week 1 produced 8 errors
+// and 63 warnings, and 45 of them were the same two checks firing once per
+// team. The panel therefore shows one row per TEAM (its findings summarized,
+// one Sim-inputs button), keeps per-player bad cells as their own rows, and
+// folds any warning that fires on half the slate into a single slate-wide
+// note — a check that trips on 21 of 26 teams is describing the sheet, not a
+// team. Errors are never folded: a 51% receiving coverage is a team problem
+// even when eighteen other teams are a little thin.
+const NFL_AUDIT_TEAM_CODES = new Set(['no_qb_line','rec_coverage','rush_coverage','atd_book','atd_coverage','player_no_props',
+                                      'share_vs_baseline',
+                                      'cheap_overrated','share_extreme','share_extreme_rush','team_total_off',
+                                      'game_no_ou','game_no_spread','team_no_total','total_mismatch','team_no_game','opp_not_in_pool','unknown_team']);
+const NFL_AUDIT_PLAYER_CODES = new Set(['wrong_pos_prop','dup_name','name_mismatch']);
+function nflAuditShortTeam(f){
+  // The finding without its team prefix and without the explanation clause.
+  let m = f.msg.replace(/^[A-Z?]{2,4}(?:\s+vs\s+[A-Z?]{2,4})?[:\s]\s*/, '');
+  if(f.code === 'player_no_props'){
+    // "3 priced players with no props at all — Name $6,000, … . They score 0…"
+    const mm = m.match(/^(\d+) priced players? with no props at all — (.*?)\.\s/);
+    if(mm) return `${mm[1]} without props: ${mm[2]}`;
+  }
+  if(f.code === 'share_vs_baseline'){
+    // "WR Keon Coleman: his props imply 80% of the team's receiving yards
+    //  against a 8.3% baseline — …"  →  "Keon Coleman 80% rec yds vs 8.3% base"
+    const mm = m.match(/^\S+ (.+?): his props imply (\d+)% of the team's (\S+ \S+) against a ([\d.]+)% baseline/);
+    if(mm) return `${mm[1]} ${mm[2]}% ${mm[3].replace('receiving yards','rec yds').replace('rushing yards','rush yds')} vs ${mm[4]}% base`;
+  }
+  m = m.split(' — ')[0].replace(/\.$/, '');
+  m = m.replace(/^receiving props cover/, 'rec props cover').replace(/^rushing props cover/, 'rush props cover')
+       .replace(/ of the pass line$/, '').replace(/ of the expected ground game$/, '')
+       .replace(/^the anytime-TD book only reaches (\S+) of the team's implied touchdowns$/, 'ATD book $1')
+       .replace(/^only (\d+) of (\d+) skill players at \$4,000\+ carry an anytime-TD price$/, 'ATD $1/$2');
+  return m;
+}
+function nflAuditGroups(slate, findings){
+  const priced = (slate.players || []).filter(p => (p.salary || 0) > 0);
+  const nTeams = new Set(priced.map(p => nflTeamOf(p)).filter(Boolean)).size || 1;
+  const games = (typeof nflGameEnvs === 'function') ? nflGameEnvs(slate) : [];
+  const nGames = games.length || 1;
+  const teamKeep = [], slateWide = [], players = [];
+  // Pass 0: "players with no props" is really per PLAYER. A $5,000+ player
+  // scoring 0 in every sim is a team-row item with his name on it; the cheap
+  // tail (the $3,000 WR4 nobody prices) is one slate-wide list, names kept.
+  const NO_PROPS_KEEP = 5000;
+  const tail = [];
+  findings = findings.flatMap(f => {
+    if(f.code !== 'player_no_props' || !Array.isArray(f.players)) return [f];
+    const big = f.players.filter(p => p.salary >= NO_PROPS_KEEP), small = f.players.filter(p => p.salary < NO_PROPS_KEEP);
+    tail.push(...small.map(p => Object.assign({ team: f.team }, p)));
+    if(!big.length) return [];
+    const names = big.map(p => `${p.name} $${p.salary.toLocaleString()}`).join(', ');
+    return [Object.assign({}, f, { players: big, playerId: big.length === 1 ? big[0].id : null,
+      msg: `${f.team || '?'}: ${big.length} priced player${big.length === 1 ? '' : 's'} with no props at all — ${names}. ${big.length === 1 ? 'He scores' : 'They score'} 0 in every sim.`,
+      fix: { label: 'Show in pool', kind: 'search', arg: big.length === 1 ? big[0].name : f.team },
+      fix2: big.length === 1 ? { label: 'Mark OUT', kind: 'out', arg: big[0].id } : null })];
+  });
+  if(tail.length){
+    tail.sort((a, b) => b.salary - a.salary);
+    slateWide.push({ sev: 'info', code: 'player_no_props_tail', team: null, folded: tail,
+      msg: `${tail.length} cheaper player${tail.length === 1 ? '' : 's'} (under $${NO_PROPS_KEEP.toLocaleString()}) carry no props and score 0 in every sim: ${tail.slice(0, 12).map(p => `${p.name} ${p.team || ''} $${p.salary.toLocaleString()}`).join(', ')}${tail.length > 12 ? `, … ${tail.length - 12} more` : ''}. Normal for deep depth charts; mark anyone who is actually a starter OUT or add his line.` });
+  }
+  // Pass 1: which warn-level team codes fire on half the slate?
+  const byCode = {};
+  for(const f of findings) if(f.sev === 'warn' && NFL_AUDIT_TEAM_CODES.has(f.code) && f.team) (byCode[f.code] = byCode[f.code] || []).push(f);
+  const folded = new Set();
+  const FOLD_LABEL = {
+    atd_coverage: n => `Anytime-TD prices are missing for skill players on ${n} teams`,
+    atd_book: n => `The anytime-TD book is thin on ${n} teams`,
+    rec_coverage: n => `Receiving props are thin (60–85% of the pass line) on ${n} teams`,
+    rush_coverage: n => `Rushing props are thin (60–85% of the ground game) on ${n} teams`,
+  };
+  for(const [code, list] of Object.entries(byCode)){
+    if(!FOLD_LABEL[code]) continue;
+    if(list.length < Math.max(6, Math.ceil(nTeams / 2))) continue;
+    for(const f of list) folded.add(f);
+    const teams = list.map(f => f.team).sort();
+    slateWide.push({ sev: 'info', code: code + '_slate', team: null, folded: list,
+      msg: `${FOLD_LABEL[code](teams.length)} of ${nTeams} (${teams.join(', ')}) — that is the sheet's column, not any one team; re-pull with more books before chasing it team by team.` });
+  }
+  // no_kick fires once per game; all of them is one fact about the sheet.
+  const kicks = findings.filter(f => f.code === 'no_kick');
+  if(kicks.length >= Math.max(3, Math.ceil(nGames / 2))){
+    for(const f of kicks) folded.add(f);
+    slateWide.push({ sev: 'info', code: 'no_kick_slate', team: null, folded: kicks,
+      msg: `No kickoff times for ${kicks.length === nGames ? 'any game' : kicks.length + ' of ' + nGames + ' games'} — late swap can't tell which games have started.` });
+  }
+  // Pass 2: route.
+  const teams = {};
+  for(const f of findings){
+    if(folded.has(f)) continue;
+    if(NFL_AUDIT_PLAYER_CODES.has(f.code)){ players.push(f); continue; }
+    if(f.team && NFL_AUDIT_TEAM_CODES.has(f.code)){
+      const t = teams[f.team] = teams[f.team] || { team: f.team, items: [], sev: 'info', gk: null };
+      t.items.push(f);
+      if(f.fix && f.fix.kind === 'simInputs' && f.fix.arg) t.gk = f.fix.arg;
+      continue;
+    }
+    slateWide.push(f);
+  }
+  const rank = { error: 0, warn: 1, info: 2 };
+  const rows = Object.values(teams);
+  for(const t of rows){
+    t.items.sort((a, b) => rank[a.sev] - rank[b.sev]);
+    t.sev = t.items[0].sev;
+    t.summary = t.items.map(nflAuditShortTeam).join(' · ');
+  }
+  rows.sort((a, b) => rank[a.sev] - rank[b.sev] || a.team.localeCompare(b.team));
+  players.sort((a, b) => rank[a.sev] - rank[b.sev]);
+  slateWide.sort((a, b) => rank[a.sev] - rank[b.sev]);
+  return { teams: rows, players, slateWide };
+}
+function nflAuditDismissTeam(team){
+  const slate = activeSlate(); if(!slate) return;
+  const g = nflAuditGroups(slate, nflAuditVisible(slate, nflSlateAudit(slate)));
+  const t = g.teams.find(x => x.team === team); if(!t) return;
+  slate._auditDismissed = slate._auditDismissed || {};
+  for(const f of t.items) slate._auditDismissed[nflAuditKey(f)] = 1;
+  save(); renderSlateCheck();
+}
+function nflAuditToggleTeam(team){
+  const slate = activeSlate(); if(!slate) return;
+  slate._auditOpenTeams = slate._auditOpenTeams || {};
+  if(slate._auditOpenTeams[team]) delete slate._auditOpenTeams[team]; else slate._auditOpenTeams[team] = 1;
+  save(); renderSlateCheck();
 }
 
 // ── Fixes ────────────────────────────────────────────────────────────────────
@@ -19489,7 +20153,22 @@ function nflAdjShares(T, statKey, adj){
   // guardrail set aside for players who aren't in the pool. Renormalizing the
   // unlocked players to 1 here would hand that slice straight back to them and
   // undo the whole guardrail, so the room they compete for is the covered part.
-  const capT = 1 - ((T && T.remainder && T.remainder[statKey]) || 0);
+  //
+  // TWO slices are set aside, not one, and this only ever knew about the first.
+  // The OFF-POOL lines — a player who carries props but no salary, so he can
+  // never be rostered — are counted into the team's denominator by
+  // nflShareModel precisely so the priced players cannot split them; and then
+  // this renormalization handed them straight back, because on a well-covered
+  // team the remainder is 0 and `capT` was 1. That is the Bowers failure the
+  // off-pool code exists to stop, surviving inside the renormalizer: an
+  // unpriced tight end's receiving yards ended up on the $2,900 backup. The
+  // room is the covered part MINUS what the unrosterable lines already hold.
+  const _offSh = (() => {
+    const off = T && T.offPool; if(!off) return 0;
+    const tot = (T.base && T.base[statKey]) || 0;
+    return tot > 0 ? Math.max(0, (off[statKey] || 0) / tot) : 0;
+  })();
+  const capT = Math.max(0, 1 - ((T && T.remainder && T.remainder[statKey]) || 0) - _offSh);
   let room = capT - fixed;
   if(room < 0){ room = 0; over = true; }
   const k = restBase > 0 ? room / restBase : 0;
@@ -19960,7 +20639,9 @@ function closeSimInputsModal(){
 // Esc closes it, like every other modal in the app. Registered once, at the
 // document level. The Sim pop-out sits above the DK Entries modal (z 9010 vs
 // 9000), so it is always the one Esc closes first.
-document.addEventListener('keydown', function(ev){
+// (Guarded: this block sits inside the NFL CORE B markers that the puller's
+// node tests extract verbatim, and there is no `document` in a vm sandbox.)
+if(typeof document !== 'undefined') document.addEventListener('keydown', function(ev){
   if(ev.key !== 'Escape' || !simInputsModalOpen()) return;
   closeSimInputsModal();
 });
@@ -20151,6 +20832,7 @@ function simDashGameHtml(ctx, g){
       // engaged, say so here — the share numbers below add up to less than 100%
       // and the user is owed the reason in the place where he is reading them.
       html += nflCoverageNoteHtml(ti, t);
+      html += nflBaseFillNoteHtml(ti, t);
       // The team defense has no shares to split, but its inputs still belong on
       // this panel: one read-only line saying what the sim thinks it will do.
       // Sliders can come later — right now the point is that a DST quoting 12
@@ -20662,10 +21344,38 @@ function nflBuildShareSim(pool, entries, adj, alphaTotal, teamInfo){
       // below reduces to what it was. The rest of the pie is drawn and spent by
       // the team (so team totals and the quarterback's line stay right) but no
       // slice of it reaches a rosterable player — see nflDrawTeamPie.
-      cov: { recYds: 1 - (T.remainder.recYds||0), rec: 1 - (T.remainder.rec||0),
-             rushYds: 1 - (T.remainder.rushYds||0), td: 1 - (T.remainder.td||0) },
+      //
+      // TWO things are reserved, not one. The guardrail's `remainder` is the
+      // production nobody on the sheet claims at all. The OFF-POOL lines are
+      // the other half: a player who carries props but no salary is not
+      // rosterable, so nflShareModel deliberately counts his line in the team's
+      // denominator to stop the priced players from splitting it — and then the
+      // Dirichlet handed it straight back, because it normalizes its draws to
+      // sum to 1 and the listed players' shares only sum to (base − offPool)
+      // / base. That is the literal Bowers failure the off-pool code was
+      // written to stop, still alive on any team whose coverage sits ABOVE
+      // NFL_COV_MIN: there the remainder is 0, `cov` was 1, and an unpriced
+      // tight end's receiving yards were quietly redistributed to the $2,900
+      // backup the guardrail was protecting us from. Subtracting the off-pool
+      // share here makes the multiplier exactly Σ(listed shares), so each
+      // listed player's mean share comes out at his market share — the same
+      // number the independent (non-pie) path uses — instead of that number
+      // scaled by base/(base − offPool).
+      cov: (() => {
+        const off = T.offPool, c = {};
+        for(const st of ['recYds','rec','rushYds','td']){
+          const tot = T.base[st] || 0;
+          const o = (off && tot > 0) ? (off[st] || 0) / tot : 0;
+          c[st] = Math.max(0, 1 - (T.remainder[st]||0) - o);
+        }
+        return c;
+      })(),
       hasRem: !!T.hasRemainder,
     };
+    // Anything at all is reserved — the guardrail's remainder, off-pool lines,
+    // or both. `hasRem` alone gated the scaling below, which is why the
+    // off-pool-only case leaked.
+    TS.hasRes = ['recYds','rec','rushYds','td'].some(st => TS.cov[st] < 1 - 1e-12);
     // nflAdjShares is the same renormalization the dashboard panel displays;
     // on entries the dashboard already rewrote it is the identity, and on a
     // team it never touched it hands back the untouched market shares.
@@ -20784,7 +21494,7 @@ function nflDrawTeamPie(TS, te, gauss){
   // posted a line for — is spent by the team without reaching a rosterable
   // player. `cov` is 1 on a normal sheet and this is a no-op.
   const cov = TS.cov;
-  if(TS.hasRem){
+  if(TS.hasRes){
     if(cov.recYds  < 1) for(let k = 0; k < n; k++) shRec[k]  *= cov.recYds;
     if(cov.rushYds < 1) for(let k = 0; k < n; k++) shRush[k] *= cov.rushYds;
   }
@@ -20800,7 +21510,7 @@ function nflDrawTeamPie(TS, te, gauss){
   // The reception weights renormalize to 1 among the listed players, so the
   // remainder has to be reapplied here too or the catches the missing receivers
   // make would land back on the ones who are listed.
-  if(rcSum > 0){ const s = (TS.hasRem && cov.rec < 1) ? cov.rec / rcSum : 1 / rcSum;
+  if(rcSum > 0){ const s = (TS.hasRes && cov.rec < 1) ? cov.rec / rcSum : 1 / rcSum;
                  for(let k = 0; k < n; k++) shRecCnt[k] *= s; }
 
   // Team touchdowns: the SAME count dkKickerScore derives from the sampled
@@ -20811,7 +21521,7 @@ function nflDrawTeamPie(TS, te, gauss){
   const recTD = new Array(n).fill(0), rushTD = new Array(n).fill(0);
   let tdSum = 0; for(let k = 0; k < n; k++) tdSum += shTd[k];
   let teamRecTD = 0;
-  const covTd = (TS.hasRem && cov.td < 1) ? cov.td : 1;
+  const covTd = (TS.hasRes && cov.td < 1) ? cov.td : 1;
   if(tdSum > 0){
     for(let j = 0; j < teamTD; j++){
       // A touchdown falls through the listed players' slices with probability
@@ -25817,11 +26527,11 @@ function buildMapper(){
     const colName=assigned!=null?parsedCSV.headers[assigned]:'Not detected';
     const sample=assigned!=null?(parsedCSV.rows[0]?.[assigned]||'').toString().slice(0,25):'';
     return `<div class="mapper-row">
-      <div class="mapper-col-name" title="${colName}">${r.label} <span style="color:var(--muted);font-size:9px;">${assigned!=null?'(auto)':''}</span></div>
-      <div class="mapper-col-sample">${sample||'—'}</div>
+      <div class="mapper-col-name" title="${esc(colName)}">${r.label} <span style="color:var(--muted);font-size:9px;">${assigned!=null?'(auto)':''}</span></div>
+      <div class="mapper-col-sample">${esc(sample)||'—'}</div>
       <select class="mapper-select${assigned!=null?' req-mapped':''}" data-role="${r.value}" onchange="onRoleChange(this,'req')">
         <option value="">— Not found —</option>
-        ${parsedCSV.headers.map((h,i)=>`<option value="${i}"${assigned===i?' selected':''}>${h}</option>`).join('')}
+        ${parsedCSV.headers.map((h,i)=>`<option value="${i}"${assigned===i?' selected':''}>${esc(h)}</option>`).join('')}
       </select>
     </div>`;
   }).join('');
@@ -25894,8 +26604,8 @@ function buildMapper(){
     const optRole=Object.entries(colMapping).find(([k,v])=>v===i&&OPTIONAL_ROLES.find(r=>r.value===k))?.[0]||'';
     const sample=(parsedCSV.rows[0]?.[i]||'').toString().slice(0,25);
     const rowHtml=`<div class="mapper-row">
-      <div class="mapper-col-name" title="${h}">${h}</div>
-      <div class="mapper-col-sample">${sample}</div>
+      <div class="mapper-col-name" title="${esc(h)}">${esc(h)}</div>
+      <div class="mapper-col-sample">${esc(sample)}</div>
       <select class="mapper-select${optRole?' mapped':''}" data-col="${i}" onchange="onRoleChange(this,'opt')">
         <option value="">— Skip —</option>
         ${OPTIONAL_ROLES.map(r=>`<option value="${r.value}"${optRole===r.value?' selected':''}>${r.label}</option>`).join('')}
@@ -26027,7 +26737,7 @@ function buildPreview(){
     return row[colMapping[r.value]]||'';
   };
   const thead='<tr>'+mapped.map(r=>`<th>${r.label}</th>`).join('')+'</tr>';
-  const rows=parsedCSV.rows.slice(0,3).map(row=>'<tr>'+mapped.map(r=>`<td>${cell(row,r)}</td>`).join('')+'</tr>').join('');
+  const rows=parsedCSV.rows.slice(0,3).map(row=>'<tr>'+mapped.map(r=>`<td>${esc(cell(row,r))}</td>`).join('')+'</tr>').join('');
   table.innerHTML='<thead>'+thead+'</thead><tbody>'+rows+'</tbody>';
 }
 
@@ -26049,7 +26759,7 @@ function createSlate(){
     const id=idMatch?idMatch[1]:(idRaw.trim()||('row_'+ri));
     const salRaw=(colMapping.salary!=null?row[colMapping.salary]||'':'').replace(/[^0-9.]/g,'');
     const sal=parseFloat(salRaw)||0;if(!sal)return;
-    const p={id:id.trim(),name:colMapping.name!=null?(row[colMapping.name]||'').replace(/\s*\(\d+\)\s*/g,'').trim():'Player '+(ri+1),salary:sal};
+    const p={id:id.trim(),name:colMapping.name!=null?cleanName((row[colMapping.name]||'').replace(/\s*\(\d+\)\s*/g,'')):'Player '+(ri+1),salary:sal};
     if(colMapping.proj!=null)p.proj=parseFloat(row[colMapping.proj])||0;
     if(colMapping.own!=null) p.own=parseFloat(row[colMapping.own])||0;
     if(colMapping.rating!=null)p.rating=parseFloat(row[colMapping.rating])||null;
@@ -26212,7 +26922,9 @@ function restoreData(input){
       // Merge: add restored slates that don't already exist by id
       const existingIds = new Set(slates.map(s=>s.id));
       let added = 0;
-      payload.slates.forEach(s=>{ if(!existingIds.has(s.id)){ slates.push(s); added++; } });
+      payload.slates.forEach(s=>{ if(!existingIds.has(s.id)){
+        for(const pl of (s.players||[])) if(pl && typeof pl.name==='string') pl.name=cleanName(pl.name);
+        slates.push(s); added++; } });
       // Merge history
       if(payload.history){ Object.assign(lineupHistory, payload.history); saveHistory(); }
       slates.forEach(imputeMissingRatings);
@@ -26363,7 +27075,7 @@ function renderUpdatePoolMapper(){
   const container = document.getElementById('updatePoolMapperRows');
   container.innerHTML = toShow.map(([key, cfg])=>{
     const cur = updateColMapping[key];
-    const opts = updateParsedCSV.headers.map((h,i)=>`<option value="${i}" ${cur===i?'selected':''}>${h}</option>`).join('');
+    const opts = updateParsedCSV.headers.map((h,i)=>`<option value="${i}" ${cur===i?'selected':''}>${esc(h)}</option>`).join('');
     const borderColor = cur!=null ? 'var(--accent)' : (cfg.required ? 'var(--red)' : 'var(--border)');
     return `<div style="display:flex;flex-direction:column;gap:3px;">
       <label style="font-size:10px;color:var(--muted);">${cfg.label}${cfg.required?'<span style="color:var(--red)">*</span>':''}</label>
@@ -26578,7 +27290,7 @@ function applyPoolUpdate(){
     const salRaw=(cm.salary!=null?row[cm.salary]||'':'').replace(/[^0-9.]/g,'');
     const sal=parseFloat(salRaw)||0; if(!sal) return;
     const id=_idOf(row)||('new_'+uid());
-    const p={id, name:(cm.name!=null?(row[cm.name]||'').replace(/\s*\(\d+\)\s*/g,'').trim():'Unknown'), salary:sal};
+    const p={id, name:(cm.name!=null?cleanName((row[cm.name]||'').replace(/\s*\(\d+\)\s*/g,'')):'Unknown'), salary:sal};
     if(cm.proj!=null) p.proj=parseFloat(row[cm.proj])||0;
     if(cm.own!=null)  p.own=parseFloat(row[cm.own])||0;
     if(g.cptOwn!=null) p.cptOwn=g.cptOwn;
@@ -27178,7 +27890,7 @@ function showOddsTooltip(el, p) {
   // Non-numeric values pass through untouched.
   const amOdds = v => { const n = parseFloat(v); return isNaN(n) ? v : (n > 0 ? '+' + n : '' + n); };
 
-  if(nflHasProps(p) && !has(p.finish_r1) && !has(p.ss_ou)){
+  if((nflHasProps(p) || (typeof nflHasBaseline==='function' && nflHasBaseline(p))) && !has(p.finish_r1) && !has(p.ss_ou)){
     body.innerHTML = nflPropsTooltip(p);
   } else {
   const rounds = [
