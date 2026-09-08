@@ -19817,9 +19817,16 @@ function nflSlateAudit(slate){
   // projection the user typed, which is a deliberate answer to this very gap.
   {
     const gaps = {};
+    // One quarterback per team carries props; the backups never will, on any
+    // slate, so a QB2/QB3 without a line is the normal state of the sheet, not
+    // a gap. A QB is only a gap when his team has NO quarterback with a
+    // passing line — and no_qb_line above already says that, louder.
+    const teamHasQbLine = new Set(priced.filter(p => nflPosOf(p) === 'QB' && parseOuCell(p.pass_yds_ou) != null)
+                                        .map(p => nflTeamOf(p)).filter(Boolean));
     for(const p of priced){
       const pos = nflPosOf(p);
       if(pos === 'K' || pos === 'DST') continue;      // both are modeled off the team score
+      if(pos === 'QB' && teamHasQbLine.has(nflTeamOf(p))) continue;
       if(nflHasAnyProp(p)) continue;
       if(parseFloat(p.proj) > 0) continue;
       const own = Number(p.own) || 0;
