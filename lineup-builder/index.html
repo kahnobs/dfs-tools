@@ -297,6 +297,7 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .driver-row.is-out{background:repeating-linear-gradient(135deg,transparent,transparent 5px,rgba(239,68,68,.05) 5px,rgba(239,68,68,.05) 10px);}
 .out-name{text-decoration:line-through;text-decoration-color:var(--red);opacity:.6;}
 .out-badge{font-size:8px;font-weight:700;letter-spacing:.4px;color:var(--red);border:1px solid rgba(239,68,68,.45);border-radius:3px;padding:0 3px;vertical-align:middle;}
+.q-badge{display:inline-block;margin-left:4px;padding:0 5px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:.06em;color:#f59e0b;border:1px solid rgba(245,158,11,.5);background:rgba(245,158,11,.10);vertical-align:1px;}
 .lock-badge{font-size:9px;opacity:.75;vertical-align:middle;cursor:help;}
 .sdash-out-note{margin:0 0 10px;padding:7px 10px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.07);border-radius:6px;font-size:11px;color:var(--text);line-height:1.6;font-family:'DM Mono',monospace;}
 .sdash-outbtn{background:none;border:1px solid transparent;color:var(--muted);border-radius:3px;font-size:9px;line-height:1;padding:2px 3px;cursor:pointer;opacity:.3;filter:grayscale(1);}
@@ -2789,12 +2790,53 @@ function nflOutIds(slate){ return (slate && slate._outIds) || []; }
 function nflIsOut(slate, id){ return !!(slate && slate._outIds && slate._outIds.indexOf(id) >= 0); }
 function nflOutSet(slate){ return new Set(nflOutIds(slate)); }
 // The visible ⛔ button in the pool and on the Sim tab's player rows.
+// ── Status column → OUT marks and Q badges ─────────────────────────────────
+// DraftKings' Status column is the first-party word on who is playing: O / IR /
+// PUP / SUSP / NA mean he is not, D (doubtful) is treated the same because a
+// doubtful player who suits up is the exception, and Q is a flag, not a
+// scratch — he is left in the pool with a badge and named in the Slate check.
+// Marks made from here are remembered in slate._outAuto so a later import that
+// clears the status also clears the mark, while a ⛔ the user set by hand is
+// never touched by the sheet.
+const NFL_STATUS_OUT = /^(O|OUT|IR|PUP|SUSP|SUSPENDED|NA|D|DOUBTFUL|NFI|RES)$/i;
+const NFL_STATUS_Q   = /^(Q|QUESTIONABLE|P|PROBABLE)$/i;
+function nflStatusKind(p){
+  const v = String((p && p.status) || '').trim();
+  if(!v) return null;
+  if(NFL_STATUS_OUT.test(v)) return 'out';
+  if(NFL_STATUS_Q.test(v)) return 'q';
+  return null;
+}
+function nflApplyStatus(slate){
+  if(!slate || !isNfl(slate)) return { out: 0, cleared: 0, q: 0 };
+  slate._outIds = slate._outIds || [];
+  const auto = new Set(slate._outAuto || []);
+  let out = 0, cleared = 0, q = 0;
+  for(const p of (slate.players || [])){
+    const k = nflStatusKind(p);
+    const isOut = slate._outIds.includes(p.id);
+    if(k === 'out'){
+      if(!isOut){ slate._outIds.push(p.id); out++; }
+      auto.add(p.id);
+      slate.currentLineup = (slate.currentLineup || []).filter(x => x !== p.id);
+      if(slate.sdCaptain === p.id) slate.sdCaptain = null;
+    } else if(auto.has(p.id)){
+      // The sheet no longer says he is out; only a sheet-made mark is lifted.
+      if(isOut){ slate._outIds = slate._outIds.filter(x => x !== p.id); cleared++; }
+      auto.delete(p.id);
+    }
+    if(k === 'q') q++;
+  }
+  slate._outAuto = [...auto];
+  if(out || cleared) nflRedistributeOut(slate);
+  return { out, cleared, q };
+}
 function toggleOut(id, e){
   if(e) e.stopPropagation();
   const slate = activeSlate(); if(!slate) return;
   slate._outIds = slate._outIds || [];
   const i = slate._outIds.indexOf(id);
-  if(i >= 0) slate._outIds.splice(i, 1);
+  if(i >= 0){ slate._outIds.splice(i, 1); if(slate._outAuto) slate._outAuto = slate._outAuto.filter(x => x !== id); }
   else {
     slate._outIds.push(id);
     // An OUT player cannot sit in the roster you are building, and he cannot be
@@ -2983,6 +3025,9 @@ function applyNflStats(p, row, headers){
   const has = (rx)=>idx(rx)>=0;
   const setStr = (key, rx)=>{ if(has(rx)) p[key] = get(rx) || null; };
   const setNum = (key, rx)=>{ if(has(rx)) p[key] = num(rx); };
+  // Injury status off the sheet (DK's "Status" column: O / Q / D / IR / …).
+  // Stored raw; nflApplyStatus() turns it into OUT marks and Q badges.
+  setStr('status', /^(status|inj(ury)?\s*status|inj)$/i);
   setStr('pass_yds_ou', /^pass\s*yds?\s*o\/u$/i);
   setStr('pass_td_ou',  /^pass\s*tds?\s*o\/u$/i);
   setStr('rush_yds_ou', /^rush\s*yds?\s*o\/u$/i);
@@ -5340,7 +5385,9 @@ function renderPool(){
       : p.name;
     // OUT reads as a struck-through name plus a badge; 🔒 says the game has
     // already kicked off, with the kickoff itself in the tooltip.
-    const nameHtml = (isOut ? `<span class="out-name">${nameHtml0}</span> <span class="out-badge" title="Marked OUT — scores 0 and his market share was handed to his teammates">OUT</span>` : nameHtml0)
+    const _sk = (typeof nflStatusKind === 'function' && isNfl(slate)) ? nflStatusKind(p) : null;
+    const qBadge = (!isOut && _sk === 'q') ? ` <span class="q-badge" title="Questionable on the sheet's Status column — priced and simmed as playing; scratch him with ⛔ on the Sim tab if he's ruled out">Q</span>` : '';
+    const nameHtml = (isOut ? `<span class="out-name">${nameHtml0}</span> <span class="out-badge" title="Marked OUT — scores 0 and his market share was handed to his teammates">OUT</span>` : nameHtml0 + qBadge)
       + (isLocked ? ` <span class="lock-badge" title="Locked — ${esc(nflKickText(p)||'his game has started')}">🔒</span>` : '');
 
     return `<div class="${rowClass}" style="grid-template-columns:${gt}${isHidden&&!showHidden?';display:none':''}${isGroupEdit?';cursor:pointer':''}" data-pid="${p.id}" onclick="${rowClick}">
@@ -19912,6 +19959,23 @@ function nflSlateAudit(slate){
     if(ghosts.length)
       push('info', 'own_no_salary', `${ghosts.length} row${ghosts.length === 1 ? ' carries' : 's carry'} an ownership number with no salary: ${ghosts.slice(0, 6).map(p => p.name).join(', ')}.`, {});
   }
+  // Injury status off the sheet. OUT marks were applied on import (see
+  // nflApplyStatus); the audit just says who, and names the questionable
+  // players worth a second look before lock — a Q who sits is the single most
+  // common way a lineup dies, and the sheet knows about him before you do.
+  if(typeof nflStatusKind === 'function'){
+    const all = (slate.players || []).filter(p => p && (p.salary || 0) > 0);
+    const seen = new Set();
+    const uniq = list => list.filter(p => { const k = String(p.name).toLowerCase(); if(seen.has(k)) return false; seen.add(k); return true; });
+    const outS = uniq(all.filter(p => nflStatusKind(p) === 'out' && _out.has(p.id))).sort((a, b) => (b.salary||0) - (a.salary||0));
+    seen.clear();
+    const qS = uniq(all.filter(p => nflStatusKind(p) === 'q' && !_out.has(p.id))).sort((a, b) => (b.salary||0) - (a.salary||0));
+    if(outS.length)
+      push('info', 'status_out', `${outS.length} player${outS.length === 1 ? '' : 's'} marked OUT from the sheet's Status column: ${outS.slice(0, 8).map(p => `${p.name} ${money(p.salary)}`).join(', ')}${outS.length > 8 ? `, … ${outS.length - 8} more` : ''}. Their shares went to teammates.`, {});
+    if(qS.length)
+      push('warn', 'status_q', `${qS.length} questionable player${qS.length === 1 ? '' : 's'} (Status = Q) simmed as playing: ${qS.slice(0, 8).map(p => `${p.name} ${money(p.salary)}`).join(', ')}${qS.length > 8 ? `, … ${qS.length - 8} more` : ''}. Re-check before lock; ⛔ anyone ruled out.`,
+           { fix: qS.length === 1 ? { label: 'Mark OUT', kind: 'out', arg: qS[0].id } : null });
+  }
   return out;
 }
 
@@ -26893,7 +26957,10 @@ function createSlate(){
     }
   }
   imputeMissingRatings(slate);
+  const _st = (slate.sport==='nfl') ? nflApplyStatus(slate) : null;
   slates.push(slate);activeSlateId=slate.id;save();closeSlateModal();renderTopBar();renderSlate();
+  if(_st && (_st.out || _st.q))
+    showToast(`Status column: ${_st.out} marked OUT${_st.q ? `, ${_st.q} questionable` : ''} — see the Slate check.`, 'ok');
 }
 
 function backupData(){
@@ -27348,9 +27415,12 @@ function applyPoolUpdate(){
   if(isShowdown(slate)) sdDedupePlayers(slate);
 
   imputeMissingRatings(slate);
+  const _st = (slate.sport==='nfl') ? nflApplyStatus(slate) : null;
   save();
   renderSlate();
   closeUpdatePoolModal();
+  if(_st && (_st.out || _st.cleared))
+    showToast(`Status column: ${_st.out} newly OUT${_st.cleared ? `, ${_st.cleared} back in` : ''}${_st.q ? `, ${_st.q} questionable` : ''}.`, 'ok');
 
   // This summary used to be computed into a variable that was never read, so
   // the unmatched count — the one number that tells you the file was for the
