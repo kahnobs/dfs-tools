@@ -19958,10 +19958,24 @@ function nflSlateAudit(slate){
   // ownership column sums to 900% on classic and 600% on showdown; a long way
   // off means the column is partial, doubled, or on a different scale.
   {
-    const target = SD ? 600 : 900;
-    const sum = priced.reduce((a, p) => a + (Number(p.own) || 0), 0);
-    if(sum > 0 && Math.abs(sum - target) / target > 0.15)
-      push('info', 'own_sum', `Ownership sums to ${Math.round(sum)}% against the ${target}% a ${SD ? 'showdown' : 'classic'} field has to add up to.`, {});
+    if(SD){
+      // Showdown rows collapse to one player carrying `own` (FLEX) and
+      // `cptOwn` (captain) — two separate books, 500% and 100%. Summing only
+      // `own` reported 500% against 600 and read as a hole that wasn't there.
+      const flex = priced.reduce((a, p) => a + (Number(p.own) || 0), 0);
+      const cpt  = priced.reduce((a, p) => a + (Number(p.cptOwn) || 0), 0);
+      if(flex > 0 && Math.abs(flex - 500) / 500 > 0.15)
+        push('info', 'own_sum', `FLEX ownership sums to ${Math.round(flex)}% against the 500% five FLEX slots add up to.`, {});
+      if(flex > 0 && cpt > 0 && Math.abs(cpt - 100) > 15)
+        push('info', 'own_sum', `Captain ownership sums to ${Math.round(cpt)}% against the 100% one CPT slot adds up to.`, {});
+      if(flex > 0 && !(cpt > 0))
+        push('info', 'own_sum', `No captain ownership on the sheet — the field model splits CPT by salary-weighted FLEX ownership.`, {});
+    } else {
+      const target = 900;
+      const sum = priced.reduce((a, p) => a + (Number(p.own) || 0), 0);
+      if(sum > 0 && Math.abs(sum - target) / target > 0.15)
+        push('info', 'own_sum', `Ownership sums to ${Math.round(sum)}% against the ${target}% a classic field has to add up to.`, {});
+    }
     const ghosts = players.filter(p => !((p.salary || 0) > 0) && (Number(p.own) || 0) > 0);
     if(ghosts.length)
       push('info', 'own_no_salary', `${ghosts.length} row${ghosts.length === 1 ? ' carries' : 's carry'} an ownership number with no salary: ${ghosts.slice(0, 6).map(p => p.name).join(', ')}.`, {});
