@@ -65,6 +65,7 @@ a:focus-visible,[tabindex]:focus-visible{outline:none;box-shadow:var(--focus);}
 .topbar{display:flex;align-items:center;gap:10px;padding:10px 18px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);flex-wrap:wrap;}
 .logo{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:2px;color:var(--accent);line-height:1;flex-shrink:0;}
 .logo span{color:var(--accent2);}
+.logo .logo-build{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:0;color:var(--muted);margin-left:7px;vertical-align:2px;font-weight:400;}
 .slate-tabs{display:flex;align-items:center;gap:5px;flex:1;overflow-x:auto;min-width:0;}
 .slate-tabs::-webkit-scrollbar{height:3px;}
 .slate-tabs::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
@@ -1527,7 +1528,8 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
     <div class="topbar-home-mark">DFS</div>
     <span class="topbar-home-label">All Tools</span>
   </a>
-  <div class="logo">DFS <span>//</span> Builder</div>
+  <div class="logo">DFS <span>//</span> Builder<span class="logo-build" id="logoBuild"
+    title="Build loaded in this tab. If it is older than the file on disk, hard-refresh (Ctrl+Shift+R) — a stale tab runs stale code."></span></div>
   <div class="slate-tabs" id="slateTabs"></div>
   <button class="btn-new-slate" onclick="openNewSlateModal()">＋ New Slate</button>
   <div class="topbar-menu-wrap" id="topbarMenuWrap">
@@ -2182,19 +2184,47 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
                      payout below AND sets the field model (sharp share +
                      ownership temperature); editing those by hand flips this
                      back to Custom. -->
+                <!-- TWO AXES (checkpoint 71): multi-entry or single-entry, and
+                     how many entries. Everything else about the contest — the
+                     payout's top-heaviness, the min cash, how much of the field
+                     is modeled as optimizers — is derived from those two. The
+                     entry fee is NOT one of them: it cancels out of ROI, out of
+                     any payout written as a multiple of the entry and out of
+                     the field model, so it lives under Advanced and is only
+                     needed to print dollars. -->
                 <div style="display:flex;gap:6px;margin-bottom:6px;">
                   <div style="flex:1;min-width:0;">
-                    <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Format</div>
+                    <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Contest type</div>
                     <select id="ufcEvFormat" onchange="setContestPickerFromUI()"
                       style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 4px;border-radius:4px;font-size:10px;font-family:'DM Sans',sans-serif;outline:none;text-overflow:ellipsis;"></select>
                   </div>
                   <div style="flex:1;min-width:0;">
-                    <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Stakes</div>
-                    <select id="ufcEvStakes" onchange="setContestPickerFromUI()"
-                      style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 4px;border-radius:4px;font-size:10px;font-family:'DM Sans',sans-serif;outline:none;text-overflow:ellipsis;"></select>
+                    <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Entries in the field</div>
+                    <input type="number" id="ufcEvFieldMain" min="10" step="100" value="8000" onchange="setContestPickerFromUI()"
+                      style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
                   </div>
                 </div>
+                <select id="ufcEvStakes" style="display:none;" onchange="setContestPickerFromUI()"></select>
                 <div id="ufcEvPickerNote" style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;"></div>
+                <!-- THE EXACT STRUCTURE. Everything above is a modelled
+                     archetype fitted to published DK averages; this is the
+                     contest's own table, and it makes the modelling question
+                     moot for any contest the user is actually entering. The
+                     parser has always existed (buildPayoutFn's `custom` preset
+                     reads DK's contest page verbatim) — it was buried three
+                     clicks deep behind "Advanced → Custom", which is why nobody
+                     used it. It is a first-class control now, and it shows what
+                     it parsed so a bad paste is visible instead of silent. -->
+                <div style="margin-bottom:6px;">
+                  <span id="nflExactToggle" onclick="nflToggleExactPayout()" style="cursor:pointer;font-size:10px;color:var(--purple);user-select:none;">▸ Paste the contest's payout table</span>
+                  <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-top:2px;">Copying DK's own table beats any modelled shape — the presets above are fitted averages.</div>
+                </div>
+                <div id="nflExactWrap" style="display:none;margin-bottom:6px;">
+                  <textarea id="nflExactPayout" spellcheck="false" placeholder="Paste from the contest page, e.g.&#10;1st&#9;$1,000.00&#10;2nd - 5th&#9;$250.00&#10;2363rd - 4636th&#9;$1.50"
+                    oninput="nflExactPayoutPreview()" onchange="nflExactPayoutCommit()"
+                    style="width:100%;min-height:70px;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-size:10px;font-family:'DM Mono',monospace;outline:none;"></textarea>
+                  <div id="nflExactNote" style="font-size:9px;line-height:1.6;margin-top:4px;color:var(--muted);"></div>
+                </div>
                 <!-- NFL Classic only: which ownership column builds the field.
                      Auto prefers SS Own while it is mapped and populated, and
                      falls back to the in-house Own Model. -->
@@ -2204,8 +2234,8 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
                      is a fact about the user rather than a tuning knob. Stored
                      per slate with the last value kept as the global default. -->
                 <div id="nflGppBankrollRow" style="margin-bottom:6px;">
-                  <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Bankroll $ (GPP engine — sets the risk aversion, nothing else)</div>
-                  <input type="number" id="ufcEvBankroll" min="1" step="100" placeholder="auto"
+                  <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Bankroll, in times over you could enter this board (GPP engine — sets the risk aversion, nothing else)</div>
+                  <input type="number" id="ufcEvBankroll" min="1" step="1" placeholder="20"
                     onchange="nflGppSetBankroll(this.value)"
                     style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
                 </div>
@@ -2217,12 +2247,12 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
                   <div style="display:flex;gap:6px;margin-bottom:6px;">
                     <div style="flex:1;">
                       <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Field size</div>
-                      <input type="number" id="ufcEvField" value="10000" min="100" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.fieldSize=parseInt(this.value)||10000;save();}contestManualEdit();updateContestEvSummary();"
+                      <input type="number" id="ufcEvField" value="10000" min="100" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.fieldSize=parseInt(this.value)||10000;save();}updateContestEvSummary();syncContestPickerUI();"
                         style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
                     </div>
                     <div style="flex:1;">
-                      <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Entry fee $</div>
-                      <input type="number" id="ufcEvFee" value="20" min="0.1" step="0.5" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};s._ufcEv.fee=parseFloat(this.value)||20;save();}contestManualEdit();updateContestEvSummary();"
+                      <div style="font-size:9px;color:var(--muted);margin-bottom:2px;">Entry fee $ (optional — only needed to print dollars)</div>
+                      <input type="number" id="ufcEvFee" value="" placeholder="none — report in entries" min="0.1" step="0.5" onchange="const s=activeSlate();if(s){s._ufcEv=s._ufcEv||{};const v=parseFloat(this.value);if(v>0)s._ufcEv.fee=v;else delete s._ufcEv.fee;save();}updateContestEvSummary();syncContestPickerUI();"
                         style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace;outline:none;">
                     </div>
                   </div>
@@ -4998,7 +5028,22 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // run stamp closes that: one machine-parseable line naming the RNG seed and
 // every setting that shapes a build, written to BOTH the generation log and
 // the Sim CSV header. Bump BUILD_ID on every ship.
-const BUILD_ID = '2.0/2026-08-04-f4prot';
+// BUILD_ID identifies the SHIPPED FILE, not the product. It sat at
+// '2026-08-04-f4prot' through thirty-odd checkpoints, which is how a stale
+// browser tab went undiagnosed: Matt's 150-lineup board came out 39% naked-QB
+// against 0-3% on three identical-config runs of the then-current build, and
+// the stamp on his export was byte-identical to the stamp on mine. A version
+// that never changes cannot tell you which version you ran.
+// EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
+// full string) so a page loaded before the last deploy is visible at a glance.
+const BUILD_ID = '2.0/ck71/2026-09-09';
+// Paint the build badge as soon as the DOM is up.
+(function(){
+  const paint = () => { const el = document.getElementById('logoBuild');
+    if(el) el.textContent = BUILD_ID.replace(/^2\.0\//, ''); };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', paint);
+  else paint();
+})();
 // mulberry32 — small, fast, well-distributed 32-bit generator. Installed over
 // Math.random for the duration of a seeded run (see runUFCSimGen).
 function mulberry32(a){
@@ -5042,6 +5087,10 @@ function buildRunStamp(slate, o){
     'evField=' + q(ev.fieldSize),
     'evFee=' + q(ev.fee),
     'evPreset=' + q(ev.preset || (ev.custom ? 'custom' : '')),
+    // Which payout priced the board — a fitted archetype or the contest's own
+    // pasted table. Two boards built from the same settings but different
+    // payout SOURCES are not comparable, so the stamp has to carry it.
+    'payout=' + q((typeof nflPayoutIsExact === 'function' && nflPayoutIsExact(slate)) ? 'exact-paste' : 'modelled'),
     'evSE=' + (ev.se ? 1 : 0),
     'evContestId=' + q(ev.contestId || ''),
     'hidden=' + ((slate && slate.hiddenIds || []).length),
@@ -8787,7 +8836,7 @@ function exportSimCSV(){
       lines.push('# GPP engine portfolio — held-out EV is the number these were chosen on');
       lines.push(['Lineup','Build','HeldOutEV$','EV%ofFee','Win%','Cash%','ExpDupes','Salary',
                   ...SPORT_CFG.nfl.slots].join(','));
-      const feeG = parseFloat((slate._ufcEv||{}).fee)||20;
+      const feeG = parseFloat((slate._ufcEv||{}).fee)||1;   // ck71: fee is optional; 1 means "one entry"
       g.lineups.forEach((L,i)=>{
         const ps = L.ids.map(id=>playerById(slate,id)).filter(Boolean);
         const slotted = (typeof nflAssignSlots==='function') ? nflAssignSlots(slate, L.ids) : null;
@@ -11713,7 +11762,7 @@ function onContestSelectChange(id){
 function saveContestPreset(){
   const s=activeSlate(); if(!s) return;
   const ev=s._ufcEv||{};
-  const fee=ev.fee!=null?ev.fee:(parseFloat(document.getElementById('ufcEvFee')?.value)||20);
+  const fee=ev.fee!=null?ev.fee:(parseFloat(document.getElementById('ufcEvFee')?.value)||1);
   const F=ev.fieldSize||parseInt(document.getElementById('ufcEvField')?.value)||10000;
   const preset=ev.preset||'gpp';
   const custom=(preset==='custom')?(ev.custom||document.getElementById('ufcEvCustom')?.value||''):'';
@@ -11809,12 +11858,110 @@ function contestDrift(ev){
 }
 // One-line plain-language readout of whatever contest config is live, so you
 // can sanity-check the field without opening the details editor.
+// ── THE PASTED, EXACT PAYOUT TABLE ─────────────────────────────────────────
+// Reads DK's contest page verbatim through buildPayoutFn's `custom` parser and
+// reports what it understood, because the failure mode of a paste box is a
+// SILENT partial parse: a table that lost its deep tiers still returns a payout
+// function, it just quietly stops paying at rank 300. Showing the tier count,
+// the pool it adds to, 1st place's share, the top-1% share, the min cash and
+// the paid fraction makes a bad paste obvious at a glance — and those are the
+// same five statistics the modelled presets are calibrated against, so the two
+// can be compared side by side.
+function nflToggleExactPayout(){
+  const w = document.getElementById('nflExactWrap'), t = document.getElementById('nflExactToggle');
+  if(!w) return;
+  const open = w.style.display === 'none';
+  w.style.display = open ? 'block' : 'none';
+  if(t) t.textContent = (open ? '▾' : '▸') + " Paste the contest's payout table";
+  if(open) nflExactPayoutPreview();
+}
+// What the parser made of the text, as numbers. Null when nothing parsed.
+function nflExactPayoutStats(text, F, fee){
+  const fn = buildPayoutFn({fieldSize:F, fee, preset:'custom', custom:text});
+  if(!fn || !/^Custom:/.test(fn.desc || '')) return null;
+  let sum = 0, paid = 0, top1 = 0, last = 0;
+  const onePct = Math.max(1, Math.round(F*0.01));
+  const cap = Math.max(F, 1);
+  for(let r = 1; r <= cap; r++){
+    const v = fn.at(r);
+    if(v > 0){ sum += v; paid = r; }
+    if(r <= onePct) top1 += v;
+    if(v > 0) last = v;
+  }
+  if(!(sum > 0)) return null;
+  const tiers = parseInt((fn.desc.match(/Custom: (\d+) tiers/) || [0,0])[1]) || 0;
+  return { fn, tiers, pool: sum, first: fn.at(1), firstPct: 100*fn.at(1)/sum,
+           top1Pct: 100*top1/sum, paid, paidPct: 100*paid/F, minCash: last,
+           minCashMult: last/Math.max(1e-9, fee), rake: 100*(1 - sum/(F*fee)) };
+}
+function nflExactPayoutHtml(st, F, fee){
+  if(!st) return '<span style="color:var(--muted);">Nothing parsed yet — paste the rows from the contest page.</span>';
+  const money = v => '$' + (v < 10 ? v.toFixed(2) : Math.round(v).toLocaleString());
+  const warn = [];
+  if(st.paid > F) warn.push(`it pays through ${st.paid.toLocaleString()} but the field is ${F.toLocaleString()} — check the field size`);
+  if(st.rake < -1) warn.push(`the tiers add to MORE than the entry dollars (${st.rake.toFixed(1)}% rake) — check the fee`);
+  else if(st.rake > 30) warn.push(`that implies a ${st.rake.toFixed(0)}% rake — a tier was probably lost in the paste`);
+  return `<b style="color:var(--text);">${st.tiers} tiers</b> · pool ${money(st.pool)} (rake ${st.rake.toFixed(1)}%) · 1st ${money(st.first)} = ${st.firstPct.toFixed(1)}% of pool`
+    + ` · top 1% takes ${st.top1Pct.toFixed(1)}% · min cash ${money(st.minCash)} = ${st.minCashMult.toFixed(1)}× fee`
+    + ` · pays ${st.paid.toLocaleString()} of ${F.toLocaleString()} (${st.paidPct.toFixed(1)}%)`
+    + (warn.length ? `<div style="color:var(--amber,#f59e0b);margin-top:2px;">⚠ ${esc(warn.join('; '))}</div>` : '');
+}
+function nflExactPayoutFieldFee(){
+  const s = (typeof activeSlate === 'function') ? activeSlate() : null;
+  const ev = (s && s._ufcEv) || {};
+  const F = Math.max(10, parseInt(ev.fieldSize) || parseInt((document.getElementById('ufcEvField')||{}).value) || 10000);
+  const fee = Math.max(0.01, parseFloat(ev.fee) || parseFloat((document.getElementById('ufcEvFee')||{}).value) || 1);
+  return {F, fee};
+}
+function nflExactPayoutPreview(){
+  const ta = document.getElementById('nflExactPayout'), note = document.getElementById('nflExactNote');
+  if(!ta || !note) return;
+  const {F, fee} = nflExactPayoutFieldFee();
+  note.innerHTML = String(ta.value||'').trim() ? nflExactPayoutHtml(nflExactPayoutStats(ta.value, F, fee), F, fee)
+    : '<span style="color:var(--muted);">Nothing parsed yet — paste the rows from the contest page.</span>';
+}
+// Commit on change: a table that parses becomes the slate's payout, and an
+// emptied box hands the contest back to its modelled preset.
+function nflExactPayoutCommit(){
+  const s = (typeof activeSlate === 'function') ? activeSlate() : null;
+  const ta = document.getElementById('nflExactPayout');
+  if(!s || !ta) return;
+  const txt = String(ta.value || '').trim();
+  const {F, fee} = nflExactPayoutFieldFee();
+  s._ufcEv = s._ufcEv || {};
+  if(txt && nflExactPayoutStats(txt, F, fee)){
+    s._ufcEv.custom = txt; s._ufcEv.preset = 'custom'; s._ufcEv.exactPaste = true;
+    // The picked contest is no longer the source of truth for the PAYOUT (the
+    // field model still is), so `exact` comes off — contestPayoutFn checks it.
+    if(s._contest) s._contest.exact = false;
+  } else {
+    delete s._ufcEv.exactPaste;
+    if(s._ufcEv.preset === 'custom'){ s._ufcEv.preset = 'gpp'; s._ufcEv.custom = ''; }
+  }
+  save();
+  const c = document.getElementById('ufcEvCustom'); if(c) c.value = s._ufcEv.custom || '';
+  nflExactPayoutPreview();
+  updateContestEvSummary();
+}
+// True when this slate's payout is a pasted exact table rather than a modelled
+// preset. One reader, so the log, the stamp and the panel cannot disagree.
+function nflPayoutIsExact(slate){
+  const ev = (slate && slate._ufcEv) || {};
+  return !!(ev.exactPaste && ev.preset === 'custom' && ev.custom && String(ev.custom).trim());
+}
+function nflPayoutSourceLabel(slate){
+  if(nflPayoutIsExact(slate)) return 'pasted exact table';
+  const cs = (typeof contestSettings === 'function') ? contestSettings(slate) : null;
+  if(cs && cs.format) return `modelled preset (${cs.format} · ${cs.stakes})`;
+  const ev = (slate && slate._ufcEv) || {};
+  return `modelled preset (${ev.preset || 'gpp'})`;
+}
 function updateContestEvSummary(){
   const el=document.getElementById('ufcEvSummary'); if(!el) return;
   const s=activeSlate(); if(!s){ el.style.display='none'; return; }
   const ev=s._ufcEv||{};
   const F=Math.max(10, parseInt(ev.fieldSize)||10000);
-  const fee=Math.max(0.01, parseFloat(ev.fee)||20);
+  const fee=Math.max(0.01, parseFloat(ev.fee)||1);
   const payout=contestPayoutFn(s, F, fee);
   let pool=0, lastPaid=0;
   // Payout tables are contiguous — once we're well past the last paid rank,
@@ -12086,7 +12233,7 @@ function restoreContestEvUI(slate){
 // Payout curve builder. Returns { at(rank)→$, desc }.
 function buildPayoutFn(cfg){
   const F   = Math.max(10, cfg.fieldSize||10000);
-  const fee = Math.max(0.01, cfg.fee||20);
+  const fee = Math.max(0.01, cfg.fee||1);
   if(cfg.preset==='double'){
     // Double-up: ~44% of the field doubles (rake baked into the 44%).
     const paidTo = Math.floor(F*0.44);
@@ -12679,53 +12826,236 @@ function beatersEstimate(beating, tied, sampleN, arr, t, F, refine){
 // None of the eight rows is a measurement. They are the knobs to turn when a
 // real contest's realized field is measured; nothing else in the engine should
 // hard-code a sharp share or an ownership exponent again.
+// ── RECALIBRATED AT CHECKPOINT 70, AGAINST THE PUBLISHED SHAPE ─────────────
+// The old parameterisation was `firstShare` + `paidFrac`, and neither of those
+// is a quantity anybody publishes. Measured against DFS Army's DK payout
+// analysis (https://www.dfsarmy.com/2019/01/payout-analysis-part-2-comparing-gpp-pay-structures-on-dk.html
+// — DK GPPs rake ~15.9%, the top 1% of the field takes 25–40% of the prize
+// pool, a top prize is typically ~10% of the pool or less with promoted
+// contests more top-heavy, and min cash sits at 1.5–2× the entry fee), the five
+// archetypes were wrong in two directions at once: three of five put 18–23% of
+// the pool above the 1% line against a 25–40% band, and EVERY one paid a min
+// cash of 2.4–3.1× the fee against a 1.5–2× reference. Both errors move pool
+// out of the head and into the tail, which is exactly the shape that makes an
+// EV maximiser grind the cash line — Matt's mme_small boards were coming back
+// full of naked quarterbacks for a reason that was in the payout table.
+//
+// So each format is now stated as the two quantities the reference actually
+// reports, and hbBuildPayout SOLVES for the head scale and the paid count that
+// hit both while summing to the pool:
+//   · `top1Share`   — fraction of the prize pool paid to the top 1% of entries.
+//   · `minCashMult` — min cash as a multiple of the entry fee.
+//   · `paidFrac`    — the share of the field that cashes (DK's ~20–25%).
+// `firstShare` is gone as an input; it is an OUTPUT now, and it lands where the
+// reference says it should. The three targets plus the pool identity are four
+// constraints, so the builder solves TWO free parameters — the head scale and
+// the tail's decay exponent — rather than one. That second solve is what was
+// missing: with the exponent pinned at 1.15 the graded region between the head
+// and the cash line was too short, almost the whole tail sat AT the floor, and
+// no combination of the other knobs could put 25–40% in the head, pay a 1.5–2×
+// min cash and still pay only a fifth of the field.
+//
+// THE NUMBERS, as calibrated judgements inside the published band:
+//   · Single-entry fields spread wider — nobody is firing 150 bullets at 1st —
+//     so they sit at the bottom of the 25–40% band and carry the fatter min
+//     cash (2× the fee). The mini field is the flattest thing DK runs.
+//   · Multi-entry fields are where the pool is bought by people chasing the
+//     head, and the large one is a promoted contest: 40%, the top of the band,
+//     with a 1.5× min cash.
+//   · HEAD SHAPE differs by temperament, which it did not before — every format
+//     used to run the promoted contest's steep drop. A routine GPP is much
+//     flatter at the very top (2nd ≈ half of 1st); a promoted mega-GPP drops
+//     1st→2nd like the Milly Maker (2nd ≈ a tenth of 1st).
+// ── TWO AXES, AND ONLY TWO (checkpoint 71) ─────────────────────────────────
+// Matt: "MME or SE as the options, and use a standard GPP structure… I don't
+// even think we need to consider the fee." Checkpoint 70's own numbers back
+// him: once the curve is calibrated to the published bands, the five archetypes
+// differed only by a FIELD SIZE he can type, and the entry fee cancels out of
+// every ratio the tool reports. So the picker is a MME/SE toggle plus a field
+// size, and the payout is one standard GPP curve whose top-heaviness scales
+// smoothly with field size — because a 150,000-entry contest genuinely IS more
+// top-heavy than a 4,000-entry one, and hand-setting five archetypes was a way
+// of saying that badly.
 const CONTEST_FORMATS = [
-  {key:'se_mini',   name:'SE mini',   desc:'Single-entry, mini field (500–1,000)', fieldSize:750, firstShare:0.12, paidFrac:0.23, se:true, mme:false},
-  {key:'se_small',  name:'SE small',  desc:'Single-entry, small field',  fieldSize:4000,   firstShare:0.10, paidFrac:0.25, se:true,  mme:false},
-  {key:'se_large',  name:'SE large',  desc:'Single-entry, large field',  fieldSize:25000,  firstShare:0.12, paidFrac:0.25, se:true,  mme:false},
-  {key:'mme_small', name:'MME small', desc:'Multi-entry (20/150-max), small field', fieldSize:8000,   firstShare:0.15, paidFrac:0.22, se:false, mme:true},
-  {key:'mme_large', name:'MME large', desc:'Multi-entry (20/150-max), large field', fieldSize:150000, firstShare:0.20, paidFrac:0.22, se:false, mme:true},
+  {key:'mme', name:'MME', desc:'Multi-entry (20/150-max)', se:false, mme:true},
+  {key:'se',  name:'SE',  desc:'Single-entry',             se:true,  mme:false},
 ];
+const CONTEST_FIELD_DEFAULT = 8000;
+// The five archetypes, kept ONLY as a migration table: a stored slate carrying
+// `_contest = {format:'mme_small'}` has to load onto the new axes without the
+// user noticing, and its field size is the one thing the old key really meant.
+const CONTEST_LEGACY_FORMATS = {
+  se_mini:  {format:'se',  fieldSize:750},
+  se_small: {format:'se',  fieldSize:4000},
+  se_large: {format:'se',  fieldSize:25000},
+  mme_small:{format:'mme', fieldSize:8000},
+  mme_large:{format:'mme', fieldSize:150000},
+};
+// STAKES survives internally — UFC, PGA and NASCAR share this picker and their
+// saved contests carry a fee — but it drives NOTHING about the payout shape or
+// the field model any more, and it is not on the NFL panel. It is a label for a
+// fee, derived from the fee when one exists.
 const CONTEST_STAKES = [
-  {key:'micro', name:'Micro', desc:'under $1',  fee:0.50, sharpShare:0.05, ownTemp:0.85},
-  {key:'low',   name:'Low',   desc:'$1-10',     fee:5,    sharpShare:0.10, ownTemp:1.00},
-  {key:'mid',   name:'Mid',   desc:'$10-50',    fee:25,   sharpShare:0.20, ownTemp:1.05},
-  {key:'high',  name:'High',  desc:'$50+',      fee:100,  sharpShare:0.35, ownTemp:1.10},
+  {key:'micro', name:'Micro', desc:'under $1',  fee:0.50},
+  {key:'low',   name:'Low',   desc:'$1-10',     fee:5},
+  {key:'mid',   name:'Mid',   desc:'$10-50',    fee:25},
+  {key:'high',  name:'High',  desc:'$50+',      fee:100},
 ];
+function contestStakesForFee(fee){
+  const f = parseFloat(fee);
+  if(!(f > 0)) return 'low';
+  return f < 1 ? 'micro' : f < 10 ? 'low' : f < 50 ? 'mid' : 'high';
+}
+// ── THE STANDARD GPP CURVE, SCALED BY FIELD SIZE ───────────────────────────
+// Both shape parameters are stated as the quantities the published reference
+// reports (DFS Army's DK payout analysis: top 1% of the field takes 25–40% of
+// the pool, min cash 1.5–2× the entry, 1st ≈10% of the pool or less except in
+// promoted mega-fields, rake 15.9%), and both move smoothly with log field
+// size rather than jumping between hand-set archetypes.
+//
+// TOP-1% SHARE. Anchored at the two ends of checkpoint 70's own family, which
+// is where the hand-set values had the most support: MME at 8,000 entries sits
+// at 30% and MME at 150,000 at 40%, so the slope is 0.10 per 1.273 decades.
+// Single-entry fields spread wider — nobody is firing 150 bullets at 1st — so
+// they carry a flat 2.5-point discount. Clamped to the published band, which
+// binds below ~1,500 entries and above ~400,000.
+const CONTEST_TOP1_AT8K = 0.30, CONTEST_TOP1_SLOPE = 0.0786;
+const CONTEST_TOP1_SE_ADJ = -0.025;
+const CONTEST_TOP1_MIN = 0.25, CONTEST_TOP1_MAX = 0.40;
+function contestTop1Share(F, mme){
+  const v = CONTEST_TOP1_AT8K + CONTEST_TOP1_SLOPE * Math.log10(Math.max(10, F)/8000)
+          + (mme ? 0 : CONTEST_TOP1_SE_ADJ);
+  return Math.min(CONTEST_TOP1_MAX, Math.max(CONTEST_TOP1_MIN, v));
+}
+// MIN CASH, as a multiple of the entry. Falls with field size — a bigger field
+// spreads the same rake-adjusted pool over more places — and multi-entry fields
+// sit a touch thinner at the bottom because more of their pool is bought by
+// people chasing the head. Clamped to the published 1.5–2× band.
+const CONTEST_MINCASH_AT1K = 2.0, CONTEST_MINCASH_SLOPE = -0.22;
+const CONTEST_MINCASH_MME_ADJ = -0.05;
+const CONTEST_MINCASH_MIN = 1.5, CONTEST_MINCASH_MAX = 2.0;
+function contestMinCashMult(F, mme){
+  const v = CONTEST_MINCASH_AT1K + CONTEST_MINCASH_SLOPE * Math.log10(Math.max(10, F)/1000)
+          + (mme ? CONTEST_MINCASH_MME_ADJ : 0);
+  return Math.min(CONTEST_MINCASH_MAX, Math.max(CONTEST_MINCASH_MIN, v));
+}
+// HEAD SHAPE. A promoted mega-GPP drops 1st→2nd like the Milly Maker; a routine
+// contest is much flatter at the top. The threshold is a field size, because
+// that is what "promoted" means in practice — DraftKings does not run a
+// 4,000-entry contest with a seven-figure top prize.
+const CONTEST_PROMO_FIELD = 50000;
+function contestHeadShapeKey(F){ return F >= CONTEST_PROMO_FIELD ? 'promo' : 'flat'; }
+// ── THE FIELD MODEL, FROM THE SAME TWO AXES ────────────────────────────────
+// `sharpShare` used to come from the stakes tier. It comes from field size and
+// MME/SE now, and the justification is that the marquee contests are where the
+// professional multi-entry crowd actually plays: a 500-entry local GPP is
+// mostly casual money, a 150,000-entry one is not. Anchored so that MME at
+// 8,000 entries reproduces checkpoint 70's mme_small × Low exactly (0.15), which
+// keeps the one comparison that has a measured board behind it.
+const CONTEST_SHARP_AT8K = 0.10, CONTEST_SHARP_SLOPE = 0.055;
+const CONTEST_SHARP_FLOOR = 0.05;
 const CONTEST_MME_SHARP_BONUS = 0.05;   // multi-entry fields carry more optimizers
 const CONTEST_SHARP_CAP = 0.40;         // never model the field as more than 40% sharp
-const CONTEST_DEFAULT_STAKES = 'mid';
-function contestFormat(k){ return CONTEST_FORMATS.find(f=>f.key===k)||null; }
-// "MME large · 150k" — short enough to survive a 160px select on a phone.
-function contestFormatLabel(f){ return `${f.name} · ${f.fieldSize>=1000?Math.round(f.fieldSize/1000)+'k':f.fieldSize}`; }
-function contestStake(k){ return CONTEST_STAKES.find(x=>x.key===k)||null; }
-function contestSharpFor(F, S){
-  return Math.min(CONTEST_SHARP_CAP, S.sharpShare + (F.mme?CONTEST_MME_SHARP_BONUS:0));
+// OWNERSHIP TEMPERATURE is STATED FLAT AT 1.00, deliberately. It used to come
+// off the stakes tier (0.85 at micro, 1.10 at high), which was a claim about
+// WHO enters rather than how many, and there is no honest field-size story to
+// replace it with: the concentration on chalk is about the entrant, not the
+// entry count. Rather than invent a relationship, the tool now says the field
+// plays the ownership column as projected. If a measured slate ever shows
+// otherwise this is the one knob to turn, and it is one number.
+const CONTEST_OWN_TEMP = 1.00;
+function contestSharpFor(F, mme){
+  const base = CONTEST_SHARP_AT8K + CONTEST_SHARP_SLOPE * Math.log10(Math.max(10, F)/8000);
+  return Math.min(CONTEST_SHARP_CAP, Math.max(CONTEST_SHARP_FLOOR, base) + (mme ? CONTEST_MME_SHARP_BONUS : 0));
 }
+const CONTEST_DEFAULT_STAKES = 'low';
+function contestFormat(k){ return CONTEST_FORMATS.find(f=>f.key===k)||null; }
+function contestFormatLabel(f){ return f.name; }
+function contestStake(k){ return CONTEST_STAKES.find(x=>x.key===k)||null; }
 // Legacy hand-builder preset keys, mapped onto the two axes so a stored slate
 // keeps pricing against something recognizable.
 const HB_LEGACY_PRESETS = {
-  large:  {format:'mme_large', stakes:'mid'},
-  single: {format:'se_large',  stakes:'mid'},
-  high:   {format:'mme_small', stakes:'high'},
+  large:  {format:'mme', fieldSize:150000},
+  single: {format:'se',  fieldSize:25000},
+  high:   {format:'mme', fieldSize:8000},
 };
+// ── THE ENTRY FEE IS OPTIONAL ──────────────────────────────────────────────
+// It cancels out of ROI, out of any payout written as a multiple of the entry,
+// and out of the field model, so the tool runs on fee = 1 and reports in
+// ENTRIES. A fee is only needed to translate that into dollars, so it is an
+// Advanced box that starts empty; when it is filled, and only then, dollar
+// figures appear beside the multiples. `feeSet` is the one reader for "has the
+// user told us what an entry costs".
+function contestFeeSet(slate){
+  const v = parseFloat(((slate && slate._ufcEv) || {}).fee);
+  return Number.isFinite(v) && v > 0;
+}
+function contestFeeOf(slate){
+  const v = parseFloat(((slate && slate._ufcEv) || {}).fee);
+  return (Number.isFinite(v) && v > 0) ? v : 1;
+}
+// ── HOW MONEY IS PRINTED ───────────────────────────────────────────────────
+// Internally everything runs on fee = 1, so a "dollar" IS an entry. Reported as
+// a multiple of the entry unless the user has told us what an entry costs, in
+// which case the dollars come along beside it. `signed` puts a + on a positive
+// number, which is what an EV wants and a stake does not.
+function evMoney(v, slate, signed){
+  const sgn = signed ? (v >= 0 ? '+' : '−') : (v < 0 ? '−' : '');
+  const a = Math.abs(v);
+  const ent = a >= 100 ? Math.round(a).toLocaleString() : a >= 10 ? a.toFixed(1) : a.toFixed(2);
+  if(!contestFeeSet(slate)) return `${sgn}${ent}×`;
+  const d = a * contestFeeOf(slate);
+  const ds = d >= 1000 ? Math.round(d).toLocaleString() : d >= 10 ? d.toFixed(0) : d.toFixed(2);
+  return `${sgn}${ent}× ($${ds})`;
+}
+// The same thing for a bare count of entries with no dollar option — used where
+// the number is already a ratio and a dollar sign would be a category error.
+function evEntries(v){ const a = Math.abs(v);
+  return (v < 0 ? '−' : '') + (a >= 100 ? Math.round(a).toLocaleString() : a >= 10 ? a.toFixed(1) : a.toFixed(2)) + '×'; }
+// MIGRATION. A stored slate carries `_contest = {format:'mme_small', stakes:'low'}`
+// and a `_ufcEv.fee`. The five old keys map onto {MME|SE, field size}; the fee
+// is preserved into the optional box, so anyone who had one keeps his dollars.
+// Done at READ time and written back, so a slate migrates the first time it is
+// looked at and never again.
+function contestMigrate(slate){
+  const c = slate && slate._contest;
+  if(!c || !c.format) return;
+  const leg = CONTEST_LEGACY_FORMATS[c.format];
+  if(!leg) return;
+  const ev = slate._ufcEv = Object.assign({}, slate._ufcEv);
+  // `exact:true` meant "use the archetype's own field size"; that field size is
+  // now just a number in the box.
+  if(c.exact !== false || !(parseInt(ev.fieldSize) > 0)) ev.fieldSize = leg.fieldSize;
+  // The stakes tier's fee was implicit; make it explicit so dollar reporting
+  // survives the migration for anyone who was relying on it.
+  if(!(parseFloat(ev.fee) > 0)){
+    const S = contestStake(c.stakes);
+    if(S) ev.fee = S.fee;
+  }
+  slate._contest = {format: leg.format, exact:false};
+  if(typeof save === 'function') save();
+}
 // The live contest description, or null when this slate has never picked one
 // (in which case every caller falls back to the historic constants).
 function contestSettings(slate){
   if(!slate) return null;
+  if(slate._contest && CONTEST_LEGACY_FORMATS[slate._contest.format]) contestMigrate(slate);
   const c = slate._contest;
   if(!c || !c.format) return null;
   const F = contestFormat(c.format); if(!F) return null;
-  const S = contestStake(c.stakes) || contestStake(CONTEST_DEFAULT_STAKES);
-  const exact = c.exact !== false;
   const ev = slate._ufcEv || {};
-  const fieldSize = exact ? F.fieldSize : Math.max(10, parseInt(ev.fieldSize)||F.fieldSize);
-  const fee       = exact ? S.fee       : Math.max(0.01, parseFloat(ev.fee)||S.fee);
-  return {format:F.key, stakes:S.key, formatName:F.name, stakesName:S.name,
-          fieldSize, fee, firstShare:F.firstShare, paidFrac:F.paidFrac, se:F.se, exact,
-          sharpShare:contestSharpFor(F,S), ownTemp:S.ownTemp,
-          key:F.key+'|'+S.key+(exact?'':'|lib'),
-          label:`${F.name} · ${S.name} stakes`};
+  const fieldSize = Math.max(10, parseInt(ev.fieldSize) || CONTEST_FIELD_DEFAULT);
+  const fee = contestFeeOf(slate);
+  const stakes = contestStakesForFee(contestFeeSet(slate) ? fee : null);
+  return {format:F.key, formatName:F.name, stakes, stakesName:(contestStake(stakes)||{}).name || '',
+          fieldSize, fee, feeSet: contestFeeSet(slate),
+          top1Share: contestTop1Share(fieldSize, F.mme),
+          minCashMult: contestMinCashMult(fieldSize, F.mme),
+          head: contestHeadShapeKey(fieldSize),
+          se:F.se, mme:F.mme, exact:true,
+          sharpShare: contestSharpFor(fieldSize, F.mme), ownTemp: CONTEST_OWN_TEMP,
+          key: F.key + '|' + fieldSize,
+          label: `${F.name} · ${fieldSize.toLocaleString()} entries`};
 }
 // The two field-model numbers, with the historic defaults when no contest has
 // been picked. EVERY call site that used to hard-code 0.15 reads these.
@@ -12761,12 +13091,15 @@ function evOwnTemper(base, temp){
 // contest from the built-in library, or hand-typed field/fee/tiers) keeps
 // buildPayoutFn and its own table.
 function contestPayoutFn(slate, F, fee){
+  const ev=(slate&&slate._ufcEv)||{};
+  // A pasted exact table wins over everything, at any field size or fee.
+  if(ev.preset === 'custom' && ev.custom)
+    return buildPayoutFn({fieldSize:F, fee, preset:'custom', custom:ev.custom});
   const cs=contestSettings(slate);
-  if(cs && cs.exact && F===cs.fieldSize && Math.abs(fee-cs.fee)<1e-9){
-    const rec=contestPayoutRec(cs.format, cs.stakes);
+  if(cs){
+    const rec=contestPayoutRec(cs.format, F, fee);
     if(rec) return hbBuildPayout(rec);
   }
-  const ev=(slate&&slate._ufcEv)||{};
   return buildPayoutFn({fieldSize:F, fee, preset:ev.preset||'gpp', custom:ev.custom});
 }
 function contestFeeStr(fee){ return fee<1 ? '$'+(+fee).toFixed(2) : '$'+(+(+fee).toFixed(2)).toLocaleString(); }
@@ -12789,24 +13122,33 @@ function contestLabelForRec(rec){
 // Write the picked contest onto the slate — _contest plus the derived _ufcEv
 // fields the generator reads — and mirror it into whatever inputs are on
 // screen. THE one writer; nothing else should assemble _contest by hand.
-function setSlateContest(slate, format, stakes, exact){
+// THE one writer. `format` is 'mme' or 'se' (or a legacy archetype key, which
+// is migrated); `fieldSize` is the number of entries. The third argument used
+// to be a stakes key and is accepted for compatibility — a caller that passes
+// one is handing over a FEE, which is optional and only affects reporting.
+function setSlateContest(slate, format, fieldSize, exact){
   if(!slate) return null;
-  const F = contestFormat(format); if(!F) return null;
-  const S = contestStake(stakes) || contestStake(CONTEST_DEFAULT_STAKES);
-  slate._contest = {format:F.key, stakes:S.key, exact:exact!==false};
-  const cs = contestSettings(slate);
-  const ev = Object.assign({}, slate._ufcEv);
-  if(cs.exact){
-    ev.fieldSize = cs.fieldSize;
-    ev.fee = cs.fee;
-    ev.preset = 'gpp';
-    ev.custom = '';
-    ev.se = !!cs.se;
-    delete ev.contestId;
+  let key = format, size = fieldSize, fee = null;
+  const leg = CONTEST_LEGACY_FORMATS[format];
+  if(leg){ key = leg.format; if(!(parseInt(size) > 0)) size = leg.fieldSize; }
+  // Compatibility: an old call site passing a stakes key as the second
+  // argument means "this contest's fee", not "this many entries".
+  if(typeof fieldSize === 'string' && contestStake(fieldSize)){
+    fee = contestStake(fieldSize).fee;
+    size = leg ? leg.fieldSize : (parseInt((slate._ufcEv||{}).fieldSize) || CONTEST_FIELD_DEFAULT);
   }
+  const F = contestFormat(key); if(!F) return null;
+  const ev = Object.assign({}, slate._ufcEv);
+  ev.fieldSize = Math.max(10, parseInt(size) || CONTEST_FIELD_DEFAULT);
+  if(fee != null && !(parseFloat(ev.fee) > 0)) ev.fee = fee;
+  if(ev.preset !== 'custom'){ ev.preset = 'gpp'; ev.custom = ''; }
+  ev.se = !!F.se;
+  delete ev.contestId;
+  slate._ufcEv = ev;
+  slate._contest = {format:F.key, exact:true};
+  const cs = contestSettings(slate);
   ev.sharpShare = cs.sharpShare;
   ev.ownTemp = cs.ownTemp;
-  slate._ufcEv = ev;
   if(typeof save==='function') save();
   return cs;
 }
@@ -12832,19 +13174,21 @@ function syncContestPickerUI(){
       + '<option value="">Custom</option>';
     fs.value = cs ? cs.format : '';
   }
-  const st = document.getElementById('ufcEvStakes');
-  if(st){
-    st.innerHTML = CONTEST_STAKES.map(x=>`<option value="${x.key}">${x.name} · ${contestFeeStr(x.fee)}</option>`).join('');
-    st.value = cs ? cs.stakes : CONTEST_DEFAULT_STAKES;
-    st.disabled = !cs;
-  }
+  // The FIELD SIZE box on the main panel — the second of the two axes.
+  const fld = document.getElementById('ufcEvFieldMain');
+  if(fld && cs) fld.value = cs.fieldSize;
   const note = document.getElementById('ufcEvPickerNote');
   if(note){
-    note.textContent = cs
-      ? (cs.exact ? '' : 'Library contest, labeled ')
-        + `${cs.label} — ${cs.fieldSize.toLocaleString()} × ${contestFeeStr(cs.fee)}, ${Math.round(cs.sharpShare*100)}% of the field modeled as optimizers`
-        + (cs.exact ? '' : ' (the contest table below is authoritative; the label only sets the field model — re-pick a format for the standard shape)')
-      : 'Custom — field size, fee and payout below define the contest; the field is modeled at the default 15% sharp share.';
+    if(!cs){
+      note.textContent = 'Custom — field size, fee and payout below define the contest; the field is modeled at the default 15% sharp share.';
+    } else {
+      const pay = hbBuildPayout(contestPayoutRec(cs.format, cs.fieldSize, cs.fee));
+      const one = Math.max(1, Math.round(cs.fieldSize*0.01));
+      let top1 = 0; for(let r=1;r<=one;r++) top1 += pay.at(r);
+      note.textContent = `Standard GPP curve: top 1% takes ${Math.round(100*top1/pay.pool)}% of the pool, `
+        + `min cash ${(pay.minCash/cs.fee).toFixed(1)}× the entry, paying ${pay.paid.toLocaleString()} `
+        + `(${Math.round(100*pay.paid/cs.fieldSize)}%). Field: ${Math.round(cs.sharpShare*100)}% modeled as optimizers.`;
+    }
   }
   if(typeof renderHbEvHeader==='function') renderHbEvHeader();
 }
@@ -12852,7 +13196,9 @@ function syncContestPickerUI(){
 function setContestPickerFromUI(){
   const s = (typeof activeSlate==='function') ? activeSlate() : null; if(!s) return;
   const fmt = (document.getElementById('ufcEvFormat')||{}).value || '';
-  const stk = (document.getElementById('ufcEvStakes')||{}).value || CONTEST_DEFAULT_STAKES;
+  const fldEl = document.getElementById('ufcEvFieldMain');
+  const stk = fldEl ? (Math.max(10, parseInt(fldEl.value) || CONTEST_FIELD_DEFAULT))
+                    : (Math.max(10, parseInt((s._ufcEv||{}).fieldSize) || CONTEST_FIELD_DEFAULT));
   if(!fmt){
     delete s._contest;
     if(s._ufcEv){ delete s._ufcEv.sharpShare; delete s._ufcEv.ownTemp; }
@@ -12863,8 +13209,8 @@ function setContestPickerFromUI(){
     if(hbPresetKey(s)!=='off') s._hbEvPreset = fmt;
     save();
     const evF=document.getElementById('ufcEvField'); if(evF) evF.value=s._ufcEv.fieldSize;
-    const evFee=document.getElementById('ufcEvFee'); if(evFee) evFee.value=s._ufcEv.fee;
-    const evC=document.getElementById('ufcEvCustom'); if(evC){ evC.value=''; evC.style.display='none'; }
+    const evFee=document.getElementById('ufcEvFee'); if(evFee && s._ufcEv.fee!=null) evFee.value=s._ufcEv.fee;
+    const evC=document.getElementById('ufcEvCustom'); if(evC && (s._ufcEv.preset!=='custom')){ evC.value=''; evC.style.display='none'; }
     [['gpp','ufcEvPresetGpp'],['double','ufcEvPresetDouble'],['custom','ufcEvPresetCustom']].forEach(([k,bid])=>{
       const b=document.getElementById(bid); if(b) b.classList.toggle('active', k==='gpp');
     });
@@ -13029,7 +13375,7 @@ async function runUFCContestEV(ctx){
   const minOverrides = slate.playerMinOverrides||{};
   const cfg  = slate._ufcEv||{};
   const F    = Math.max(target, parseInt(cfg.fieldSize)||10000);
-  const fee  = parseFloat(cfg.fee)||20;
+  const fee  = parseFloat(cfg.fee)||1;
   const payout = contestPayoutFn(slate, F, fee);
   const tick = ()=>new Promise(r=>setTimeout(r,0));
   // ── LEVERAGE-YIELD WORLD WEIGHTING (UFC, 2026-08-04) ──────────────────────
@@ -13343,7 +13689,7 @@ async function runUFCContestEV(ctx){
   // Own% chalk. Always logged — "no sharp slice" is itself a fact about the run.
   {
     const _cs = contestSettings(slate);
-    log(`Field realism: ${_cs ? _cs.label : 'Custom contest'} — ${F.toLocaleString()} × ${contestFeeStr(fee)}, `
+    log(`Field realism: ${_cs ? _cs.label : 'Custom contest'} — ${F.toLocaleString()} entries${contestFeeSet(slate) ? ' × ' + contestFeeStr(fee) : ''}, `
       + `${Math.round(sharpShare*100)}% of entries modeled as optimizers`
       + (sharpPool ? ' (drawn from the candidate pool), not Own% chalk.'
                    : ' — but no candidate pool was available, so the field is pure Own% chalk.')
@@ -20359,6 +20705,49 @@ function nflBaseShare(p, cols){
 function nflHasBaseline(p){
   return NFL_BASE_COLS.some(s => nflBaseShare(p, s.cols) != null);
 }
+// ── THE TEAM'S STARTING QUARTERBACK ─────────────────────────────────────────
+// ONE definition, shared by the baseline fill, the OUT redistribution and the
+// share model, because the failure mode is those three disagreeing.
+// Measured on Matt's Week 1 sheet before this existed: Arizona's rushing pie was
+// Jeremiyah Love 64% · Tyler Allgeier 22% · Jacoby Brissett 11% · Carson Beck
+// 1.7% · Gardner Minshew 0.2% — three quarterbacks sharing one ground game, of
+// whom exactly one plays. Las Vegas was worse: Fernando Mendoza, who is NOT the
+// starter and carries no line of any kind, had been handed 15.5 rushing yards
+// off a 12.4% Base Rush% cell — three times the starter Kirk Cousins' 5.4.
+//
+// A quarterback who is not the starter must never be INFERRED into production.
+// He keeps whatever the book has genuinely priced him for — that is the market
+// speaking, and the pre-news override still applies — he simply never receives a
+// baseline or leftover slice, and never absorbs a scratched teammate's share.
+// This is checkpoint 56's `_teamQb1` principle (which shipped after backup
+// quarterbacks turned up with negative means) applied to the fill side.
+//
+// THE ORDER, and every step of it is tested:
+//   1. A market PASSING line is the market naming the starter — highest line.
+//   2. If no quarterback on the team carries one, the depth chart: highest
+//      Base Rush%, since a starter's scramble share dwarfs a backup's.
+//   3. Then DK salary, which prices the expected starter above the third string.
+//   4. Then player id, so the answer is deterministic rather than input-ordered.
+// OUT players are excluded BY THE CALLER, which is what keeps the scratched-
+// starter case working: with the starter out, the next man is the starter and
+// inherits the passing pie exactly as he did before.
+// `mem` is [{p, e}] over the team's eligible players.
+function nflStarterQbId(mem){
+  let best = null, bk = null;
+  for(const x of mem){
+    const e = x.e; if(!e || e.pos !== 'QB') continue;
+    const b = nflBaseShare(x.p, ['base_rush']);
+    const k = [ (e.mkt && e.mkt.passYds) ? (e.passYds || 0) : -1,
+                b == null ? -1 : b,
+                x.p.salary || 0 ];
+    const better = !best || k[0] > bk[0]
+      || (k[0] === bk[0] && (k[1] > bk[1]
+      || (k[1] === bk[1] && (k[2] > bk[2]
+      || (k[2] === bk[2] && String(x.p.id) < String(best.p.id))))));
+    if(better){ best = x; bk = k; }
+  }
+  return best ? best.p.id : null;
+}
 function nflFillFromBaseline(pool, entries, teamInfo, model){
   teamInfo.forEach(ti => { ti.baseFill = null; ti._covPin = null; ti.orderCut = null; });
   if(!model) return false;
@@ -20385,6 +20774,25 @@ function nflFillFromBaseline(pool, entries, teamInfo, model){
   // of the contract's sentence holds exactly: a player who DOES carry a line
   // for a stat keeps it untouched.
   const mOf = (e, key) => key === 'td' ? nflTdLam(e.atd) : (e[key] || 0);
+  // WHO IS THE STARTING QUARTERBACK, per team — see nflStarterQbId. Computed
+  // over the pool (a quarterback with no salary is not starting anybody's game)
+  // and over the players who are actually playing, so a scratched starter hands
+  // the job to his backup here exactly as he does everywhere else.
+  const starterQb = new Map();
+  {
+    const byTeam = new Map();
+    pool.forEach((p, i) => { const e = entries[i];
+      if(!e || e.pos !== 'QB' || outS.has(p.id)) return;
+      const t = teamOfP(p); if(!t) return;
+      const g = byTeam.get(t); if(g) g.push({ p, e }); else byTeam.set(t, [{ p, e }]);
+    });
+    for(const [t, g] of byTeam) starterQb.set(t, nflStarterQbId(g));
+  }
+  // A quarterback who is not his team's starter is never inferred into
+  // production. He keeps his own market lines; he takes no baseline slice and no
+  // leftover slice, of any stat.
+  const qbBlocked = (p, e) => e && e.pos === 'QB' && starterQb.has(teamOfP(p))
+                              && starterQb.get(teamOfP(p)) !== p.id;
   // Candidates come off the SLATE, so a hidden player still holds his end.
   const absorbers = new Map();
   for(const p of slate.players){
@@ -20411,7 +20819,11 @@ function nflFillFromBaseline(pool, entries, teamInfo, model){
       const remFrac = T.remainder[st.key] || 0;
       const gap = (T.base[st.key] || 0) * remFrac;
       if(!(gap > 0)) continue;
-      const cand = all.filter(c => !(mOf(c.e, st.key) > 0));
+      // A non-starting quarterback is not a candidate — and, unlike an OUT
+      // player, he does not hold a CLAIM either: his baseline cell describes a
+      // role he is not going to have, so it must not shrink what the men who
+      // are playing receive.
+      const cand = all.filter(c => !(mOf(c.e, st.key) > 0) && !qbBlocked(c.p, c.e));
       if(!cand.length) continue;
       // How much of the team these absorbers claim, in the stat's own units:
       // a baseline is a percentage OF THE TEAM, so his amount is that
@@ -20488,6 +20900,7 @@ function nflFillFromBaseline(pool, entries, teamInfo, model){
         T.players.forEach(pl => {
           if(pl.skip) return;
           const e = entries[pl.i]; if(!e || e.out) return;
+          if(qbBlocked(pl.p, e)) return;    // never inferred into production
           const cur = mOf(e, st.key); if(!(cur > 0)) return;
           const isFilled = !!(e._baseFill && e._baseFill[st.key] != null);
           // A baseline-filled player holds a projection, not a market line, so
@@ -22321,6 +22734,13 @@ function nflRedistributeOut(slate){
         // unpriced, there is no one to give it to and the old behaviour is the
         // honest fallback — the summary line says which of the three happened.
         const isMkt = m => !!(m.e && m.e.mkt && m.e.mkt[key]);
+        // A quarterback who is not the starter never absorbs. `mates` already
+        // excludes the OUT players, so when the STARTER is the man who was
+        // scratched his backup IS the starter here and inherits the passing pie
+        // exactly as before — that case is what the successor rule below is for.
+        const _qb1 = nflStarterQbId(mates.map(m => ({ p: m.p, e: m.e })));
+        grp = grp.filter(m => m.e.pos !== 'QB' || _qb1 == null || m.p.id === _qb1);
+        if(!grp.length) continue;
         const unpriced = grp.filter(m => !isMkt(m));
         const preNews = nflOutPreNews(slate, pl.p.id);
         let absorbMode = 'unpriced';
@@ -23894,8 +24314,15 @@ function nflBuildShareSim(pool, entries, adj, alphaTotal, teamInfo){
       // two sides of the same event agree.
       e._recTdFrac = e.pos === 'QB' ? 0 : e.pos === 'RB' ? 0.15 : 1;
       TS.recTdFrac.push(e._recTdFrac);
-      if(e.pos === 'QB' && (e.passYds || 0) > (bestQb >= 0 ? (members[bestQb].e.passYds || 0) : -1)) bestQb = k;
     });
+    // The starter, by the SHARED definition (nflStarterQbId) rather than a
+    // second inline "highest passing line" test. The two used to be written out
+    // separately and the fill had no equivalent at all, which is how three
+    // quarterbacks ended up sharing Arizona's ground game.
+    {
+      const sid = nflStarterQbId(members.filter(pl => !pl.e.out).map(pl => ({ p: pl.p, e: pl.e })));
+      if(sid != null) bestQb = members.findIndex(pl => pl.p.id === sid);
+    }
     TS.qb1 = bestQb;
     if(bestQb >= 0) members[bestQb].e._teamQb1 = true;
 
@@ -25260,28 +25687,54 @@ const NFL_GPP_DUP_MAXFRAC = 0.005;
 const NFL_GPP_B_STAKE_MULT = 20;
 function nflGppFallbackB(slate){
   const ev = (slate && slate._ufcEv) || {};
-  const fee = Math.max(0.01, parseFloat(ev.fee) || 20);
+  const fee = Math.max(0.01, parseFloat(ev.fee) || 1);
   const n = Math.max(1, parseInt((document.getElementById('genCount')||{}).value) || 20);
-  return Math.max(1, Math.round(n * fee * NFL_GPP_B_STAKE_MULT));
+  return Math.max(1e-9, n * fee * NFL_GPP_B_STAKE_MULT);
 }
-const NFL_GPP_B_KEY = 'dfs_nfl_gpp_bankroll';
+const NFL_GPP_B_KEY = 'dfs_nfl_gpp_bankroll';        // legacy: a dollar bankroll
+const NFL_GPP_BMULT_KEY = 'dfs_nfl_gpp_bankmult';    // current: a multiple of the stake
 
-// Bankroll B. Per-slate first, then the global default the user last typed,
-// then $1,000. Missing/zero is NOT silently treated as "risk-neutral": the
-// caller substitutes total stake × 20 and says so in the log.
-function nflGppBankroll(slate){
-  const v = slate && parseFloat(slate._gppBankroll);
+// ── BANKROLL, FEE-FREE (checkpoint 71) ─────────────────────────────────────
+// §6's objective is E[log(B + net)], and both B and net are in dollars — so
+// both divide by the entry fee and the objective is unchanged if the bankroll
+// is expressed as a MULTIPLE of what the board costs to enter. That is also the
+// question a user can actually answer without arithmetic: "how many times over
+// could you enter this board?" Default 20, which is what the old dollar
+// fallback already assumed.
+// MIGRATION: a slate carrying a dollar `_gppBankroll` is converted the first
+// time it is read, using the fee the contest migration preserved.
+function nflGppBankMult(slate){
+  const v = slate && parseFloat(slate._gppBankMult);
   if(Number.isFinite(v) && v > 0) return v;
+  // A stored dollar bankroll becomes a multiple of this board's stake.
+  const dollars = slate && parseFloat(slate._gppBankroll);
+  if(Number.isFinite(dollars) && dollars > 0){
+    const fee = Math.max(0.01, parseFloat(((slate && slate._ufcEv) || {}).fee) || 1);
+    const n = Math.max(1, parseInt((document.getElementById('genCount')||{}).value) || 20);
+    const mult = dollars / (n * fee);
+    if(mult > 0){ slate._gppBankMult = mult; delete slate._gppBankroll;
+                  if(typeof save === 'function') save(); return mult; }
+  }
   let g = NaN;
-  try { g = parseFloat(localStorage.getItem(NFL_GPP_B_KEY)); } catch(e){}
+  try { g = parseFloat(localStorage.getItem(NFL_GPP_BMULT_KEY)); } catch(e){}
   if(Number.isFinite(g) && g > 0) return g;
-  return null;                     // caller falls back to stake × 20 and logs it
+  return null;                     // caller falls back to NFL_GPP_B_STAKE_MULT and logs it
+}
+// The bankroll in the objective's own units (the same units as `net`), or null.
+function nflGppBankroll(slate){
+  const mult = nflGppBankMult(slate);
+  if(!(mult > 0)) return null;
+  const ev = (slate && slate._ufcEv) || {};
+  const fee = Math.max(0.01, parseFloat(ev.fee) || 1);
+  const n = Math.max(1, parseInt((document.getElementById('genCount')||{}).value) || 20);
+  return Math.max(1e-9, mult * n * fee);
 }
 function nflGppSetBankroll(v){
   const s = (typeof activeSlate === 'function') ? activeSlate() : null;
   const n = parseFloat(v);
-  if(s){ if(Number.isFinite(n) && n > 0) s._gppBankroll = n; else delete s._gppBankroll; save(); }
-  if(Number.isFinite(n) && n > 0){ try { localStorage.setItem(NFL_GPP_B_KEY, String(n)); } catch(e){} }
+  if(s){ if(Number.isFinite(n) && n > 0) s._gppBankMult = n; else delete s._gppBankMult;
+         delete s._gppBankroll; save(); }
+  if(Number.isFinite(n) && n > 0){ try { localStorage.setItem(NFL_GPP_BMULT_KEY, String(n)); } catch(e){} }
   if(typeof updateContestEvSummary === 'function') updateContestEvSummary();
 }
 
@@ -25351,15 +25804,14 @@ function renderNflEngineNote(){
   const classic = !!(s && isNflClassic(s));
   if(bRow) bRow.style.display = classic ? '' : 'none';
   if(bIn && classic){
-    const b = nflGppBankroll(s);
-    bIn.value = (b > 0) ? b : '';
-    // The placeholder is the number the run will ACTUALLY use when this is left
-    // blank, recomputed from the live lineup count and entry fee.
-    const auto = nflGppFallbackB(s);
-    bIn.placeholder = 'auto: ' + auto.toLocaleString() + ' = ' + NFL_GPP_B_STAKE_MULT + '× stake';
-    bIn.title = b > 0
-      ? 'Expected log bankroll growth is computed at this bankroll. Clear the field to fall back to ' + NFL_GPP_B_STAKE_MULT + '× the total stake.'
-      : 'Nothing set, so the run will use ' + NFL_GPP_B_STAKE_MULT + '× the total stake ($' + auto.toLocaleString() + ' at the current lineup count and entry fee).';
+    const mult = nflGppBankMult(s);
+    bIn.value = (mult > 0) ? +mult.toFixed(2) : '';
+    bIn.placeholder = String(NFL_GPP_B_STAKE_MULT);
+    const n = Math.max(1, parseInt((document.getElementById('genCount')||{}).value) || 20);
+    const dollars = contestFeeSet(s) ? ' ($' + Math.round((mult || NFL_GPP_B_STAKE_MULT) * n * contestFeeOf(s)).toLocaleString() + ' at the entry fee you entered)' : '';
+    bIn.title = (mult > 0)
+      ? 'Expected log bankroll growth is computed at ' + (+mult.toFixed(2)) + '× what this board costs to enter' + dollars + '. Clear it to fall back to ' + NFL_GPP_B_STAKE_MULT + '×.'
+      : 'Nothing set, so the run uses ' + NFL_GPP_B_STAKE_MULT + '× what the board costs to enter' + dollars + '.';
   }
   if(!el) return;
   if(!classic){ if(wrap) wrap.style.display = 'none'; return; }
@@ -26701,7 +27153,7 @@ async function runNflGppEngine(ctx){
   const bud = Object.assign({}, NFL_GPP_BUDGET, {budgetMs: nflGppSearchMs(slate)}, ctx.budget || {});
   const cfg = slate._ufcEv || {};
   const F   = Math.max(target, parseInt(cfg.fieldSize) || 10000);
-  const fee = parseFloat(cfg.fee) || 20;
+  const fee = parseFloat(cfg.fee) || 1;
   const payout = contestPayoutFn(slate, F, fee);
   const K = EV_SCEN_K;
   const NF = Math.min(2000, Math.max(200, F));
@@ -26714,16 +27166,21 @@ async function runNflGppEngine(ctx){
   if(!(B > 0)){ B = Math.max(1, Math.round(target * fee * NFL_GPP_B_STAKE_MULT)); bWhy = 'fallback'; }
 
   gppProgressPhase('precomputing worlds');
-  log(`GPP engine (spec §5–6): direct EV search + expected-log-growth portfolio. Bankroll B = $${Math.round(B).toLocaleString()}`
-    + (bWhy === 'fallback' ? ` — no bankroll set, so B = total stake × ${NFL_GPP_B_STAKE_MULT}; type one on the Contest EV panel.` : '.'));
+  log(`GPP engine (spec §5–6): direct EV search + expected-log-growth portfolio. Bankroll = ${evEntries(B/Math.max(1e-9, target*fee))} what this board costs to enter`
+    + (contestFeeSet(slate) ? ` ($${Math.round(B).toLocaleString()})` : '')
+    + (bWhy === 'fallback' ? ` — none set, so ${NFL_GPP_B_STAKE_MULT}×; type one on the Contest EV panel.` : '.'));
   // log(B + net − stake) is only defined while the bankroll can absorb a total
   // loss, and it is only INFORMATIVE while it can absorb it comfortably. Below
   // 3× the stake the objective is pinned against its own floor and the board it
   // picks is driven by that, not by the payout curve — worth saying out loud
   // rather than quietly returning a strange board.
   if(B < 3 * target * fee)
-    log(`  ⚠ Bankroll $${Math.round(B).toLocaleString()} is under 3× the $${(target*fee).toFixed(0)} you are about to enter. Expected log growth is a bankruptcy-averse objective, so at that ratio it will refuse almost every lineup; enter fewer lineups or raise the bankroll.`);
-  log(`Contest: ${payout.desc}. Field ${F.toLocaleString()} × ${contestFeeStr(fee)}.`);
+    log(`  ⚠ A bankroll of ${evEntries(B/Math.max(1e-9, target*fee))} the board is under 3× what you are about to enter. Expected log growth is a bankruptcy-averse objective, so at that ratio it will refuse almost every lineup; enter fewer lineups or raise the bankroll.`);
+  // WHICH payout, not just what it looks like: a modelled archetype and the
+  // contest's own table are different claims and the log has to say which one
+  // priced the board.
+  log(`Contest: ${payout.desc}. Field ${F.toLocaleString()} entries${contestFeeSet(slate) ? ' × ' + contestFeeStr(fee) : ''}. Payout source: ${nflPayoutSourceLabel(slate)}.`
+    + (nflPayoutIsExact(slate) ? '' : ' Paste the contest\'s own table on the Contest EV panel to price against the real structure.'));
 
   // ── Worlds ────────────────────────────────────────────────────────────────
   // The generation/pricing split is the existing one: even sims generate, odd
@@ -26995,9 +27452,24 @@ async function runNflGppEngine(ctx){
     + `(${roi >= 0 ? '+' : ''}${roi.toFixed(1)}% ± ${roiSE.toFixed(1)}% ROI, 1 s.e. over ${d.repWorlds.toLocaleString()} worlds), per-world net sd $${d.sdNet.toFixed(2)}.`);
   const seFrac = Math.abs(d.meanNet) > 1e-9 ? Math.abs(d.seNet / d.meanNet) : 1;
   if(seFrac > bud.seWarnFrac)
-    log(`  ⚠ That ROI is ±${Math.round(100*seFrac)}% of itself in relative terms — at ${F.toLocaleString()} entries with $${Math.round(payout.at(1)).toLocaleString()} to first, a portfolio's EV is mostly the probability of the top prize and ${d.repWorlds.toLocaleString()} worlds is not enough to pin it down. Read the sign and the order of magnitude, not the digits; more sims narrow it as 1/√n.`);
-  log(`Per-lineup EV on the report fold carries a standard error of $${d.meanSE.toFixed(2)}.`);
-  log(`Expected log growth G = ${d.G.toFixed(6)} on the report fold (selection fold ${d.selG.toFixed(6)}; log B = ${Math.log(d.B).toFixed(6)} — the whole risk adjustment is the concavity of log at B = $${Math.round(d.B).toLocaleString()}).`);
+    log(`  ⚠ That ROI is ±${Math.round(100*seFrac)}% of itself in relative terms — at ${F.toLocaleString()} entries with a top prize of ${evMoney(payout.at(1), slate)} the entry, a portfolio's EV is mostly the probability of the top prize and ${d.repWorlds.toLocaleString()} worlds is not enough to pin it down. Read the sign and the order of magnitude, not the digits; more sims narrow it as 1/√n.`);
+  log(`Per-lineup EV on the report fold carries a standard error of ${evMoney(d.meanSE, slate)} the entry.`);
+  log(`Expected log growth G = ${d.G.toFixed(6)} on the report fold (selection fold ${d.selG.toFixed(6)}; log B = ${Math.log(d.B).toFixed(6)} — the whole risk adjustment is the concavity of log at a bankroll of ${evEntries(d.B/Math.max(1e-9, d.stake))} the board).`);
+  // WHAT THE BANKROLL IS ACTUALLY BUYING, in dollars. G − log B is not a risk
+  // number on its own: it is E[log(1 + net/B)], which carries the mean too, so
+  // its sign follows the mean rather than the risk. The certainty equivalent
+  // separates them — CE = B(e^(G − log B) − 1) is the sure amount worth as much
+  // as this board, and Jensen makes (mean − CE) ≥ 0 with equality only at an
+  // infinite bankroll. Printed because the dial is otherwise invisible: measured
+  // on a real slate, moving B from 2× to 20× the stake changes about 13% of a
+  // 150-lineup board and 4 points of the top exposure, which is real but far
+  // smaller than the difference between two runs of the SAME settings. A user
+  // A/B-ing two boards will not see it; this line is how he sees it.
+  {
+    const _ce = d.B * Math.expm1(d.G - Math.log(d.B));
+    const _pen = d.meanNet - _ce;
+    log(`  Risk charge: this board's certainty equivalent is ${evMoney(_ce, slate)} against a mean of ${evMoney(d.meanNet, slate)} — the bankroll is charging ${evMoney(_pen, slate)} for the spread (${d.meanNet !== 0 ? Math.round(100*_pen/Math.abs(d.meanNet)) : 0}% of the mean). A risk-neutral bankroll charges nothing; the charge falls as 1/B. It shifts the board modestly — smaller than the run-to-run difference between two identical runs — so compare boards by this number, not by eyeballing two runs.`);
+  }
   return {res, payTable, payload, F, fee, B, payout};
 }
 
@@ -27138,8 +27610,11 @@ async function runNflGppBoard(ctx){
       .filter(x => x.dv > 0.01).slice(0, 5);
     renderGppCard({
       title: `${out.length} lineups · GPP engine`,
-      sub: `EV ${d.meanNet >= 0 ? '+' : '−'}$${Math.abs(d.meanNet).toFixed(0)} ± $${d.seNet.toFixed(0)} on $${d.stake.toFixed(0)} `
-         + `(${roiC >= 0 ? '+' : ''}${roiC.toFixed(0)}% ± ${roiSEC.toFixed(0)}% ROI, held out) · B $${Math.round(d.B).toLocaleString()}`,
+      // ROI first, because it is the fee-free number and the one that means the
+      // same thing in every contest; the entry-multiples carry the size.
+      sub: `${roiC >= 0 ? '+' : ''}${roiC.toFixed(0)}% ± ${roiSEC.toFixed(0)}% ROI (held out) · `
+         + `EV ${evMoney(d.meanNet, slate, true)} ± ${evMoney(d.seNet, slate)} on ${evMoney(d.stake, slate)} staked · `
+         + `bankroll ${evEntries(d.B / Math.max(1e-9, d.stake))} the board`,
       badges,
       shapes: rows.map(([k,v]) => ({label:k, n:v.n, ev:v.ev/v.n, naked:/^Naked/.test(k)})),
       exposure: Object.entries(expCnt).sort((a,b) => b[1]-a[1]).slice(0,8).map(([id,c]) => ({
@@ -27315,6 +27790,7 @@ async function runNflSimGen(){
       lev:(parseInt(document.getElementById('leverageSlider')?.value)||0), noOppose:false,
       engine: _gppOn ? 'gpp' : 'legacy',
       gppB: _gppOn ? (nflGppBankroll(slate) || nflGppFallbackB(slate)) : null,
+      payoutSrc: (typeof nflPayoutSourceLabel === 'function') ? nflPayoutSourceLabel(slate) : null,
       gppSeed: _gppOn ? (slate._gppSeed!=null ? slate._gppSeed : 0x5eed1) : null});
   }
 
@@ -29675,66 +30151,138 @@ function toggleSavedDetails(i, btn){
 // top-heavy 150k-entry GPP solves to a min cash near 2.4× the entry fee, while
 // the 2,500-entry high-stakes contest — same 1st share, far fewer paid spots —
 // solves to a fat flat tail, which is what those contests really look like.
-const HB_HEAD_SHAPE = [1, .20, .10, .075, .05, .035, .028, .022, .017, .012];
+// ── HEAD SHAPES ────────────────────────────────────────────────────────────
+// Two temperaments, because a routine GPP and a promoted mega-GPP do not look
+// alike at the very top and every format used to be given the promoted one.
+//   FLAT  — a Zipf head, prize(k) ∝ 1/k, so 2nd is half of 1st and 10th a
+//           tenth. That is what a routine small or single-entry GPP looks like:
+//           the drop from 1st is a step, not a cliff.
+//   PROMO — the Milly-Maker drop: 2nd ≈ a tenth of 1st, then a flattening
+//           through the rest of the top ten (10th ≈ 1.8% of 1st, against the
+//           Milly Maker's own ≈1.5%). Used for the one promoted format.
+// Both are shapes, not levels: hbBuildPayout scales them to hit the format's
+// published top-1% share.
+const HB_HEAD_SHAPE_FLAT  = [1, 1/2, 1/3, 1/4, 1/5, 1/6, 1/7, 1/8, 1/9, 1/10];
+const HB_HEAD_SHAPE_PROMO = [1, .10, .065, .05, .04, .033, .028, .024, .021, .018];
+const HB_HEAD_SHAPE = HB_HEAD_SHAPE_PROMO;   // legacy alias: the old single shape
 const HB_TAIL_ALPHA = 1.15;      // deep-tier decay exponent
 const HB_PAYOUT_RATIO = 0.842;   // prize pool / entry dollars (DK reference)
-// The three fixed archetypes this used to hold (Large-field / Single-entry /
-// High-stakes GPP) are gone: the contest is now picked on two axes and the
-// payout record is GENERATED from CONTEST_FORMATS × CONTEST_STAKES. Cached per
-// combination — hbBuildPayout memoizes on the record it is handed, and
-// renderSaved prices every saved lineup through here on each repaint.
 const _hbPayoutRecs = new Map();
-function contestPayoutRec(format, stakes){
-  const F=contestFormat(format), S=contestStake(stakes)||contestStake(CONTEST_DEFAULT_STAKES);
-  if(!F) return null;
-  const k=F.key+'|'+S.key;
-  let rec=_hbPayoutRecs.get(k);
+// The payout record for one point on the two axes. Field size and fee are
+// arguments now rather than properties of an archetype, and the shape
+// parameters are read off the smooth scalings (contestTop1Share etc.) so
+// there is exactly one curve family.
+function contestPayoutRec(format, fieldSize, fee){
+  const F = contestFormat(format); if(!F) return null;
+  const Fs = Math.max(10, parseInt(fieldSize) || CONTEST_FIELD_DEFAULT);
+  const fe = Math.max(1e-6, parseFloat(fee) || 1);
+  const k = F.key + '|' + Fs + '|' + fe;
+  let rec = _hbPayoutRecs.get(k);
   if(!rec){
-    rec={key:k, name:`${F.name} · ${S.name}`, fieldSize:F.fieldSize, fee:S.fee,
-         firstShare:F.firstShare, paidFrac:F.paidFrac};
+    rec = {key:k, name:`${F.name} · ${Fs.toLocaleString()} entries`, fieldSize:Fs, fee:fe,
+           top1Share: contestTop1Share(Fs, F.mme), minCashMult: contestMinCashMult(Fs, F.mme),
+           head: contestHeadShapeKey(Fs)};
     _hbPayoutRecs.set(k, rec);
   }
   return rec;
 }
+// ── THE SOLVE, AND WHICH QUANTITY GIVES ────────────────────────────────────
+// Four quantities describe a GPP structure and only three can be chosen: the
+// pool identity ties the fourth. Measured across the family (probe:
+// /tmp/review_g/payout.js, sweeping every format × min-cash × top-1% target),
+// the three pairwise corners for a 4,000-entry $5 single-entry field are:
+//   · top 1% = 25% and 25% of the field paid  ⟹ min cash 2.9× the fee
+//   · top 1% = 25% and min cash 2.0× the fee  ⟹ 32% of the field paid
+//   · 25% of the field paid and min cash 2.0× ⟹ top 1% = 39%, 1st = 9.5%
+// The old builder sat on the FIRST corner, which is exactly why its min cash
+// came out at 2.4–3.1× against a 1.5–2× reference and its head was starved.
+//
+// This one sits on the SECOND. The reason is which references it can then
+// honour: the top-1% share, the min-cash multiple, the 15.9% rake AND the "1st
+// is ~10% of the pool or less, promoted contests more top-heavy" statement all
+// come out right, and only the paid fraction is left free — it solves to 31–35%
+// against DK's typical 20–25%. The third corner honours the paid fraction
+// instead and misses two: it puts 44–62% of the pool above the 1% line and 31%
+// of it on 1st place in the promoted format, both far outside anything
+// published. Missing one reference by a third beats missing two by half.
+//
+// SO: `top1Share` and `minCashMult` are inputs; the head SCALE and the PAID
+// COUNT are solved; the paid fraction is an output, and `paidFrac` on the
+// format record is kept only as the reference value to compare it against.
+// KNOWN BIAS, stated because it will show up in any comparison against a real
+// contest page: this family of curves pays about a third of the field where DK
+// pays a quarter, so its cash line sits a little deeper and a little cheaper
+// than the real one. For an EV engine that is the safe direction — it slightly
+// UNDER-rewards min-cashing, which is the failure the recalibration exists to
+// stop — and pasting the contest's own table (the `custom` preset) removes the
+// question entirely.
 function hbBuildPayout(rec){
   if(rec._payout) return rec._payout;
   const F=rec.fieldSize, fee=rec.fee;
   const pool=F*fee*HB_PAYOUT_RATIO;
-  const paid=Math.max(10, Math.round(F*rec.paidFrac));
-  let head=HB_HEAD_SHAPE.map(f=>pool*rec.firstShare*f);
-  let a10=head[9];
-  const headSum=head.reduce((a,b)=>a+b,0);
-  // Total paid to ranks 10..paid for a given floor m. Closed form: the power
-  // piece runs to the crossover rank where the curve drops to m, the rest is
-  // flat at m. Monotone increasing in m, so one bisection lands it.
-  // The head places are floored at m as well (a mini field's min-cash can sit
-  // above what the power curve gives rank 6), so the head's contribution is a
-  // function of m too.
-  const headTot=m=>head.reduce((a,b)=>a+Math.max(m,b),0);
-  const tailTot=(m,A)=>{
-    if(m>=A) return m*(paid-10);                   // flat from rank 11 on
-    const rStar=Math.min(paid, 10*Math.pow(A/Math.max(1e-9,m), 1/HB_TAIL_ALPHA));
-    let s=A*10/(HB_TAIL_ALPHA-1)*(1-Math.pow(rStar/10, 1-HB_TAIL_ALPHA));
-    if(paid>rStar) s+=m*(paid-rStar);
+  const shape = (rec.head === 'promo') ? HB_HEAD_SHAPE_PROMO : HB_HEAD_SHAPE_FLAT;
+  const alpha = rec.tailAlpha || HB_TAIL_ALPHA;
+  // The floor is an INPUT now, not the thing the bisection solves for. Clamped
+  // so a pathological record cannot ask for a min cash the pool could not pay
+  // to ten people.
+  const m = Math.max(1e-6, Math.min(pool/20, (rec.minCashMult || 1.8) * fee));
+  const onePct = Math.max(1, Math.round(F*0.01));
+  const headOf = h => shape.map(f => Math.max(m, h*pool*f));
+  // Money in ranks 11..P, floored at m. Closed form: the power piece runs to the
+  // crossover rank where the curve reaches the floor, the rest is flat.
+  const tailTot = (a10, P) => {
+    if(P <= 10) return 0;
+    if(m >= a10) return m*(P-10);
+    const rStar = Math.min(P, 10*Math.pow(a10/Math.max(1e-9,m), 1/alpha));
+    let s = a10*10/(alpha-1)*(1-Math.pow(rStar/10, 1-alpha));
+    if(P > rStar) s += m*(P-rStar);
     return s;
   };
-  // Small fields (an SE mini at 750 entries pays ~170 places) cannot absorb
-  // the pool below rank 10's power-curve prize, so the floor is allowed to
-  // rise above a10 into a flat min-cash region — that is what DK's small-SE
-  // structures look like (1st ≈12%, then a wide flat band at ~2–3× the fee)
-  // — instead of scaling 1st place up to 28% of the pool.
-  let lo=0, hi=Math.max(a10, pool/Math.max(1,paid)), m=a10*0.5;
-  for(let it=0; it<80; it++){ m=(lo+hi)/2; if(headTot(m)+tailTot(m,a10)<pool) lo=m; else hi=m; }
-  m=(lo+hi)/2;
-  head=head.map(v=>Math.max(m,v));
-  // If even a floor at rank 10's prize can't absorb the pool (a very shallow
-  // paid count against a small head share), the bisection pins at a10 and the
-  // curve is short. Scaling the WHOLE curve by one factor fixes the pool
-  // exactly and preserves the shape — the 1st-place share is what gives, which
-  // is the right thing to trade for an honest prize pool.
-  const tot=head.reduce((a,b)=>a+b,0)+tailTot(m,a10);
-  if(tot>0 && Math.abs(tot-pool)>pool*1e-6){
-    const k=pool/tot; head=head.map(v=>v*k); a10*=k; m*=k;
+  const totalFor = (h, P) => { const hd = headOf(h);
+    return hd.reduce((a,b)=>a+b,0) + tailTot(Math.max(m, hd[9]), P); };
+  // Inner solve: the paid count that spends the pool exactly at this head scale.
+  const paidFor = h => {
+    let lo = 10, hi = F;
+    if(totalFor(h, hi) < pool) return hi;            // even paying everyone is short
+    if(totalFor(h, lo) > pool) return lo;            // the head alone overspends
+    for(let it=0; it<80; it++){ const mid=(lo+hi)/2; if(totalFor(h, mid) < pool) lo=mid; else hi=mid; }
+    return (lo+hi)/2;
+  };
+  // Outer solve: the head scale that puts top1Share of the pool above the line.
+  const top1For = h => {
+    const hd = headOf(h), a10 = Math.max(m, hd[9]), P = paidFor(h);
+    let s = 0;
+    for(let r=1; r<=Math.min(10, onePct); r++) s += hd[r-1];
+    if(onePct > 10) s += tailTot(a10, Math.min(onePct, P));
+    return s/pool;
+  };
+  const want = Math.max(0.02, Math.min(0.9, rec.top1Share || 0.30));
+  let hLo = 1e-5, hHi = 0.6, h;
+  if(top1For(hHi) < want) h = hHi;
+  else if(top1For(hLo) > want) h = hLo;
+  else { for(let it=0; it<70; it++){ h=(hLo+hHi)/2; if(top1For(h) < want) hLo=h; else hHi=h; } h=(hLo+hHi)/2; }
+  const head = headOf(h);
+  let a10 = Math.max(m, head[9]);
+  let paid = Math.max(10, Math.round(paidFor(h)));
+  // ── PIN THE POOL ON THE DISCRETE SUM, NOT THE INTEGRAL ────────────────────
+  // Everything above works in closed form, integrating the tail; the contest
+  // pays integer ranks. The gap is small but it is systematic (the integral
+  // sits under the step function), and it showed up as a 0.2–0.3% pool error on
+  // every format. So the last step re-solves against the sum the payout
+  // function will actually produce: the integer paid count that brackets the
+  // pool, then one scale factor on the tail to close the remainder exactly.
+  // The head is left alone — the top-1% target just fixed it.
+  {
+    const hd = head.reduce((a,b)=>a+b,0);
+    const tailSum = (A, P) => { let s = 0;
+      for(let r = 11; r <= P; r++) s += Math.max(m, A*Math.pow(r/10, -alpha));
+      return s; };
+    let lo = 10, hi = Math.min(F, Math.max(10, paid*3));
+    while(hi < F && hd + tailSum(a10, hi) < pool) hi = Math.min(F, hi*2);
+    while(lo < hi){ const mid = (lo+hi+1)>>1; if(hd + tailSum(a10, mid) <= pool) lo = mid; else hi = mid-1; }
+    paid = Math.max(10, lo);
+    const tt = tailSum(a10, paid);
+    if(tt > 0){ const k = Math.max(0.5, Math.min(2, (pool-hd)/tt)); a10 *= k; }
   }
   const at=r=>{
     if(!(r>=1)) r=1;
@@ -29745,9 +30293,9 @@ function hbBuildPayout(rec){
       const i=Math.floor(r); if(i>=10) return head[9];
       return head[i-1]+(head[i]-head[i-1])*(r-i);
     }
-    return Math.max(m, a10*Math.pow(r/10, -HB_TAIL_ALPHA));
+    return Math.max(m, a10*Math.pow(r/10, -alpha));
   };
-  rec._payout={at, paid, pool, first:head[0], minCash:m,
+  rec._payout={at, paid, pool, first:head[0], minCash:m, alpha:alpha, headScale:h,
     desc:`${rec.name}: $${Math.round(head[0]).toLocaleString()} to 1st, min cash $${m<10?m.toFixed(2):Math.round(m).toLocaleString()}, paying through ${paid.toLocaleString()} of ${F.toLocaleString()}`};
   return rec._payout;
 }
@@ -29758,14 +30306,16 @@ function hbPresetKey(slate){
   if(!slate) return 'off';
   const v=slate._hbEvPreset||'off';
   if(v==='off'||v==='custom') return v;
-  if(HB_LEGACY_PRESETS[v]) return HB_LEGACY_PRESETS[v].format;
+  const leg=HB_LEGACY_PRESETS[v] || CONTEST_LEGACY_FORMATS[v];
+  if(leg) return leg.format;
   return contestFormat(v) ? v : 'off';
 }
+function hbFieldSize(slate){
+  const ev=(slate&&slate._ufcEv)||{};
+  return Math.max(10, parseInt(ev.fieldSize) || CONTEST_FIELD_DEFAULT);
+}
 function hbStakesKey(slate){
-  if(!slate) return CONTEST_DEFAULT_STAKES;
-  if(slate._contest && contestStake(slate._contest.stakes)) return slate._contest.stakes;
-  const leg=HB_LEGACY_PRESETS[slate._hbEvPreset||''];
-  return leg ? leg.stakes : CONTEST_DEFAULT_STAKES;
+  return contestStakesForFee(contestFeeSet(slate) ? contestFeeOf(slate) : null);
 }
 // The live contest for this slate: the picked format × stakes, or "Custom…",
 // which reuses whatever the Auto-Gen Contest-EV block is configured with (so
@@ -29791,7 +30341,7 @@ function hbContest(slate){
     const _cs=contestSettings(slate);
     const ev=slate._ufcEv||{};
     const F=Math.max(10, parseInt(ev.fieldSize)||10000);
-    const fee=Math.max(0.01, parseFloat(ev.fee)||20);
+    const fee=Math.max(0.01, parseFloat(ev.fee)||1);
     const payout=buildPayoutFn({fieldSize:F, fee, preset:ev.preset||'gpp', custom:ev.custom});
     // buildPayoutFn doesn't report how deep it pays, so find it once by
     // scanning — the tables are contiguous, so a long dry run ends it. MEMOIZED:
@@ -29828,7 +30378,7 @@ function hbContest(slate){
             format:cs.format, stakes:cs.stakes, sharpShare:cs.sharpShare, ownTemp:cs.ownTemp,
             desc:`${cs.label}: ${cs.fieldSize.toLocaleString()} × ${contestFeeStr(cs.fee)}, paying through ${paid.toLocaleString()}`};
   }
-  const rec=contestPayoutRec(cs.format, cs.stakes); if(!rec) return null;
+  const rec=contestPayoutRec(cs.format, cs.fieldSize, cs.fee); if(!rec) return null;
   const pay=hbBuildPayout(rec);
   return {key:cs.key, name:cs.label, fieldSize:cs.fieldSize, fee:cs.fee, payout:pay.at, paid:pay.paid,
           format:cs.format, stakes:cs.stakes, sharpShare:cs.sharpShare, ownTemp:cs.ownTemp,
@@ -30152,10 +30702,13 @@ function hbPct(v){
 // accepted and mapped.
 function hbSetPreset(v){
   const s=activeSlate(); if(!s) return;
-  const leg=HB_LEGACY_PRESETS[v];
+  // The three legacy hand-builder keys and the five old archetype keys both
+  // land on {MME|SE, field size} — one table each, and nothing else in the app
+  // needs to know either of them exists.
+  const leg=HB_LEGACY_PRESETS[v] || CONTEST_LEGACY_FORMATS[v];
   const fmt=leg?leg.format:v;
   if(contestFormat(fmt)){
-    setSlateContest(s, fmt, leg?leg.stakes:hbStakesKey(s), true);
+    setSlateContest(s, fmt, leg ? leg.fieldSize : hbFieldSize(s), true);
     s._hbEvPreset=fmt;
   } else {
     s._hbEvPreset=(v==='custom')?'custom':'off';
@@ -30165,6 +30718,8 @@ function hbSetPreset(v){
   renderHbEv(); renderSaved();
 }
 // The builder's STAKES selector — same write, other axis.
+// The builder's second axis — a FIELD SIZE since checkpoint 71. Still accepts a
+// stakes key from an older caller, which setSlateContest reads as a fee.
 function hbSetStakes(v){
   const s=activeSlate(); if(!s) return;
   const fmt=hbPresetKey(s);
