@@ -308,6 +308,13 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .sdash-outbtn{background:none;border:1px solid transparent;color:var(--muted);border-radius:3px;font-size:9px;line-height:1;padding:2px 3px;cursor:pointer;opacity:.3;filter:grayscale(1);}
 .sdash-outbtn:hover{opacity:1;filter:none;border-color:var(--border);}
 .sdash-outbtn.on{opacity:1;filter:none;color:var(--red);border-color:rgba(239,68,68,.45);}
+.sdash-prenews{display:flex;flex-wrap:wrap;gap:4px 10px;margin:0 0 10px;}
+.sdash-prenews-row{display:inline-flex;align-items:center;gap:5px;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);cursor:pointer;border:1px solid var(--border);border-radius:5px;padding:2px 7px;}
+.sdash-prenews-row[data-on="1"]{border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.08);color:var(--text);}
+.sdash-prenews-row input{accent-color:#f59e0b;margin:0;}
+.sdash-prenews-row span:first-of-type{color:var(--text);font-weight:600;}
+.sdash-prenews-state{opacity:.8;}
+.sdash-prenews-btn.on{color:#f59e0b;border-color:rgba(245,158,11,.45);}
 .sdash-auto-tag{font-size:8px;color:var(--red);border:1px solid rgba(239,68,68,.4);border-radius:3px;padding:0 3px;margin-left:4px;white-space:nowrap;}
 /* ── Sim tab: game grid + detail panel ───────────────────────────────────────
    A 13-game main slate rendered as thirteen stacked per-game editors is a
@@ -3900,6 +3907,110 @@ function nflAssignSlots(slate, ids){
 // vacated share evenly over a whole roster, which is not how a depth chart
 // works: the WR2's targets go to the other receivers, not to the running back.
 // Stored per slate as an id array so it survives save()/reload.
+// ── "HAVE THE BOOKS REPRICED?" (per OUT player) ─────────────────────────────
+// The default is YES: a line posted after the news already contains it, so a
+// teammate who carries his own live line must not ALSO inherit the scratch's
+// share (see nflRedistributeOut). But the opposite case is real — a sheet
+// pulled before the announcement is pre-news, and then the priced teammates
+// genuinely should absorb too. One flag per OUT player, stored as exceptions
+// only so the common case costs nothing.
+function nflOutPreNews(slate, id){ return !!(slate && slate._outPreNews && slate._outPreNews[id]); }
+function nflOutSetPreNews(id, on){
+  const s = activeSlate(); if(!s) return;
+  s._outPreNews = s._outPreNews || {};
+  if(on) s._outPreNews[id] = true; else delete s._outPreNews[id];
+  if(!Object.keys(s._outPreNews).length) delete s._outPreNews;
+  nflRedistributeOut(s);
+  save();
+  if(typeof renderSimDash === 'function') renderSimDash();
+  if(typeof renderPool === 'function') renderPool();
+  if(typeof renderSlateCheck === 'function') renderSlateCheck();
+}
+// ── ROLE UNCERTAINTY AFTER A SCRATCH ────────────────────────────────────────
+// Matt, on the GB backfield with Jacobs out: "there is uncertainty as to how
+// that backfield is going to shake out — it is very possible Lloyd consolidates
+// the work." The share model is deterministic given the team's draw, so a
+// post-injury committee was being priced as a point estimate: the survivor's
+// share was exactly his market share in every one of the ten thousand worlds.
+// That is the one place the market genuinely has less information than usual,
+// and a GPP objective is precisely the thing that should be paid for holding
+// the player whose ceiling just widened.
+//
+// So a surviving PRICED player at a position his team just lost someone at
+// draws his slice through a per-world lognormal multiplier, renormalized inside
+// the team so the team's total production is preserved EXACTLY (asserted to
+// 1e-13, the same bar the OUT redistribution is held to). Nothing about the
+// team moves; only the split, and only its spread.
+//
+// TWO sigmas, because the room contains two kinds of player and they are not
+// equally uncertain:
+//   · a surviving PRICED teammate still has a book's number anchoring him —
+//     Lloyd's 45.5 is a real opinion about a real workload, it is just an
+//     opinion formed without knowing how the carries actually split;
+//   · an UNPRICED absorber has no anchor at all. Chris Brooks going from a 3.57
+//     sim mean to 8.18 is an inference from a baseline percentage about a player
+//     the market declined to price, and "how the backfield shakes out" is
+//     exactly that inference. He is the least certain quantity on the board and
+//     it would be perverse to draw him with less spread than the man who has a
+//     line.
+// So sigmaUnpriced > sigma. Both are JUDGEMENTS, not fits — there is no public
+// dataset of share dispersion conditional on the starter being ruled out.
+// sigma 0.35 puts the priced survivor's share deciles about ±1.57x around the
+// median, which is the range a beat writer's "could be a committee or he could
+// get 20 carries" actually describes. sigmaUnpriced 0.60 roughly doubles that
+// (deciles ±2.15x): a player nobody priced can plausibly see anywhere from a
+// token role to the lead, and the honest distribution for him is close to
+// uninformative over the room's range. A lognormal is right-skewed by
+// construction — median below mean, fat upper tail — which is the shape of the
+// claim either way: consolidation is the surprise, not the base case.
+// REFIT BOTH the first week a standings file lets realized post-scratch shares
+// be compared with the pre-game distribution — the same `nflStandingsDups` /
+// backtest pipeline that will refit the ownership betas and the duplication
+// exponent. Until then they are stated assumptions, printed on the Slate check.
+const NFL_ROLE_UNC = { sigma: 0.35, sigmaUnpriced: 0.60 };
+// Which (team, position) rooms are unsettled, and who is in them. A scratch only
+// unsettles a room if he actually carried market share there (a third-stringer
+// nobody priced changes nothing). EVERY surviving member of that room is
+// widened, priced or not — see the two sigmas above; `priced` says which.
+// Returns [{team, pos, outNames[], survivors:[{id,name,priced}]}].
+function nflRoleUnsettled(slate){
+  const out = [];
+  if(!slate || !isNfl(slate)) return out;
+  const moves = slate._outMoves || [];
+  if(!moves.length) return out;
+  const rooms = new Map();
+  for(const mv of moves){
+    if(!mv.pos || mv.pos === 'K' || mv.pos === 'DST') continue;
+    const key = mv.team + '|' + mv.pos;
+    const r = rooms.get(key) || {team:mv.team, pos:mv.pos, outNames:[], survivors:[]};
+    if(r.outNames.indexOf(mv.outName) < 0) r.outNames.push(mv.outName);
+    rooms.set(key, r);
+  }
+  if(!rooms.size) return out;
+  const outS = nflOutSet(slate);
+  const hid = new Set(slate.hiddenIds || []);
+  for(const p of (slate.players || [])){
+    if(!p || outS.has(p.id) || hid.has(p.id) || !((p.salary||0) > 0)) continue;
+    const t = nflTeamOf(p), pos = nflPosOf(p);
+    const r = rooms.get(t + '|' + pos);
+    if(!r) continue;
+    // "Anchored" means the market priced HIS WORKLOAD IN THIS ROOM, not that it
+    // priced him at all. The books post an anytime-touchdown price for most of a
+    // depth chart, so `hasProps` (which counts ATD) called Chris Brooks priced
+    // and gave him the narrow sigma — when a TD price says nothing about whether
+    // he gets 4 carries or 18. The test is the room's own workload market:
+    // rushing yards for a backfield, receiving yards/receptions for a pass-catching
+    // room, passing yards for a quarterback room. A rush+rec combo counts for
+    // either, because it prices both legs.
+    const combo = parseOuCell(p.rush_rec_ou);
+    const anchored = r.pos === 'QB' ? !!parseOuCell(p.pass_yds_ou)
+      : r.pos === 'RB' ? !!(parseOuCell(p.rush_yds_ou) || combo)
+      : !!(parseOuCell(p.rec_yds_ou) || parseOuCell(p.rec_ou) || combo);
+    r.survivors.push({id:p.id, name:p.name, priced:anchored});
+  }
+  for(const r of rooms.values()) if(r.survivors.length) out.push(r);
+  return out;
+}
 function nflOutIds(slate){ return (slate && slate._outIds) || []; }
 function nflIsOut(slate, id){ return !!(slate && slate._outIds && slate._outIds.indexOf(id) >= 0); }
 function nflOutSet(slate){ return new Set(nflOutIds(slate)); }
@@ -20072,6 +20183,7 @@ function buildNflSimInputs(pool, opts){
   // Sim dashboard: game / team / player-share adjustments re-derive the means.
   nflApplySimDash(pool, entries, teamInfo, _dash);
 
+
   // PLAYER OUT: a scratched player scores 0, exactly like an unpriced one. The
   // redistribution already pins his dashboard shares at 0, so this is normally
   // a no-op — but it is a HARD guarantee that survives "Reset all to Vegas", a
@@ -20181,7 +20293,7 @@ function nflHasBaseline(p){
   return NFL_BASE_COLS.some(s => nflBaseShare(p, s.cols) != null);
 }
 function nflFillFromBaseline(pool, entries, teamInfo, model){
-  teamInfo.forEach(ti => { ti.baseFill = null; ti._covPin = null; });
+  teamInfo.forEach(ti => { ti.baseFill = null; ti._covPin = null; ti.orderCut = null; });
   if(!model) return false;
   const slate = (typeof activeSlate === 'function') ? activeSlate() : null;
   if(!slate || !Array.isArray(slate.players)) return false;
@@ -20366,6 +20478,36 @@ function nflFillFromBaseline(pool, entries, teamInfo, model){
                          leftoverParts };
     }
     if(Object.keys(report).length) ti.baseFill = report;
+    // ── THE MARKET-ORDERING INVARIANT, ON WHAT THE FILL JUST WROTE ──────────
+    // Both halves of the fill — the baseline claim and the leftover water-fill —
+    // are inferences about men nobody priced, and either can push one past a
+    // priced teammate. It is applied here, once, to the finished fill rather
+    // than threaded through both, which is also the only place it CAN be
+    // measured: the leftover lifts priced players too, so a cap computed
+    // mid-fill would be checked against a stale ceiling.
+    // What comes off does NOT move to anybody. It stops being production: the
+    // re-measure below reads the reduced lines, coverage falls, and the slice
+    // goes back to being a remainder the pie reserves and nobody scores. That is
+    // deliberate — see the `out_unclaimed` finding, and note that a team where a
+    // lot lands here is telling you the anchored budget is too high FOR THAT
+    // TEAM, which is a signal worth having rather than a number to hide.
+    //
+    // WHY HERE, AND NOT ON THE FINISHED ENTRIES. The OUT redistribution's half
+    // of the same rule lives in nflRedistributeOut and is expressed in SHARE
+    // space, because the sim's pie reads its shares from the stored adjustments
+    // (nflAdjShares) and not from the entries. Trimming an entry the dashboard
+    // is about to overwrite achieves nothing; trimming one AFTER those
+    // adjustments were computed is worse, because it leaves the two
+    // inconsistent — measured, that combination had the pie handing Chris
+    // Brooks 30% of Green Bay's ground game and MarShawn Lloyd 12% while the
+    // displayed inputs read 10 and 45, since nflAdjShares renormalizes the free
+    // players into (1 − Σfixed − remainder) and the trim had grown the
+    // remainder underneath a fixed block computed before it. So: fill-sourced
+    // violations are trimmed here, in yards, before any of that; OUT-sourced
+    // ones are capped there, in shares. One rule, one application on each path,
+    // in the space where that path's numbers actually live.
+    if(nflEnforceMarketOrder(T.players.filter(pl => !pl.skip).map(pl => ({ p: pl.p, e: entries[pl.i] })), ti))
+      filledAny = true;
   }
   // Re-measure. The filled lines are now part of every denominator, so coverage
   // comes back at (or near) 1 and the guardrail stops reserving a remainder for
@@ -20432,6 +20574,15 @@ function nflPropEntry(p, t, gameKey){
       }
     }
     e.hasProps = [e.passYds,e.rushYds,e.recYds,e.rec,e.atd].some(v => v != null);
+    // WHICH LEGS THE MARKET ACTUALLY PRICED, captured here — after the combo
+    // market has filled a missing leg (a rush+rec line IS a statement about
+    // both) and BEFORE the position priors below invent the rest. This is the
+    // difference between "the book has an opinion about this player's rushing"
+    // and "we guessed his rushing from his receiving", and OUT redistribution
+    // turns on exactly that distinction: a teammate who carries his own live
+    // line already IS the market's post-news statement about him.
+    e.mkt = { passYds: e.passYds != null, rushYds: e.rushYds != null,
+              recYds: e.recYds != null, rec: e.rec != null, td: e.atd != null };
 
     // Position priors fill the gaps the market didn't price for a priced player
     // (e.g. a WR with rec yds but no reception line).
@@ -20576,6 +20727,234 @@ const NFL_COV_FILL_TARGET = 0.95;
 // remainder rather than becoming a projection nobody made.
 const NFL_LEFTOVER_CAP = 0.06;
 const NFL_LEFTOVER_CAP_FILL = 0.25;
+// ── THE SAME DISAGREEMENT BAR, BOTH WAYS ────────────────────────────────────
+// nflSlateAudit's share_vs_baseline check has always asked one question about
+// PRICED players: is this man's prop-implied share of his team so far from his
+// baseline share that the line probably belongs to someone else? The bar is
+// max(K × baseline, baseline + PTS points) — a small share has to be absurd in
+// RATIO and a large one absurd in MAGNITUDE before either is called out.
+//
+// The FILL side had no such bar, and that asymmetry is the defect: the audit
+// would shout if a book handed Chris Brooks 43% of Green Bay's ground game, but
+// the OUT redistribution could hand him exactly that in silence, purely because
+// he was the only unpriced man in the room when Josh Jacobs was scratched
+// (11.6% baseline renormalising to 88% of a scratched 48.6% share → 46 rushing
+// yards, level with the PRICED lead back on his own live 45.5 line). An
+// inference about a player the market never priced is the weakest number on the
+// board; it does not get to invert a depth chart.
+// Same constants for both sides so the two guardrails cannot disagree.
+const NFL_SHARE_BASE_K = 2.5;
+const NFL_SHARE_BASE_PTS = 15;
+function nflShareBaseCap(basePct){ return Math.max(NFL_SHARE_BASE_K * basePct, basePct + NFL_SHARE_BASE_PTS); }
+
+// ── THE FILL MAY NEVER CONTRADICT THE MARKET'S ORDERING ─────────────────────
+// Matt's principle, and it governs every inference this model makes about a
+// player nobody priced: "if Johnson/Brooks were expected to do much, Vegas would
+// have their props up. Lloyd is set as the highest active running back for a
+// reason — they are most confident in his role — it is just muted to 45.5 to
+// reflect the uncertainty of the role. We should never assume a player with
+// lower or even no odds set is actually going to be the top producer."
+//
+// So the ABSENCE of a line is not missing information, it is information: it is
+// the book saying this man's role is small enough not to be worth a market. Two
+// consequences, and they are a hard invariant rather than a preference:
+//
+//   1. ORDERING. No player without a market line for a stat may end up at or
+//      above ANY teammate at the same position who has one. With a MARGIN, not
+//      merely ≤ — an unpriced back level with the priced lead is the same error
+//      in a weaker form. NFL_FILL_ORDER_MARGIN is that margin.
+//   2. LEVEL. Well under, not fractionally under, and derived from the depth
+//      chart we already have rather than from a magic fraction. The priced
+//      players' REALISED share divided by their BASELINE share is the factor
+//      the market is applying to this room this week — Green Bay's is ~1.36
+//      (Lloyd's 42% of the ground game against a 30.9% baseline: the market has
+//      him consolidating). Applying that SAME factor to an unpriced teammate's
+//      baseline is the internally consistent answer, and it is the only one that
+//      keeps the relative depth chart intact: Brooks' 11.6% baseline becomes
+//      ~15.8% of the team, ~17 rushing yards — materially below Lloyd's 45.5 and
+//      in proportion to their baselines (11.6 : 30.9).
+//
+// ALTERNATIVES CONSIDERED. (a) A flat fraction of the lowest priced teammate —
+// simple, but it says nothing about the depth chart, so an unpriced RB3 and an
+// unpriced RB4 land on the same number. (b) A DK-salary-implied depth chart —
+// available for every player and needing no baseline column, but salary is a
+// price, not a projection, and it is set before the news. (c) Checkpoint 64's
+// nflShareBaseCap alone — it stops the absurd case but not the merely wrong one:
+// Brooks at 29% of the team was inside his 2.5× bar and still level with the
+// priced lead back. The factor is the primary rule, with (c) retained as a
+// ceiling so a room whose priced men are themselves miles over their baselines
+// cannot launder that multiple onto the unpriced, and (a) as the floor rule for
+// a player who has no baseline cell at all.
+//
+// SCOPE. Same team, same POSITION, same stat. A quarterback's scramble line is
+// not a statement about the running backs, and a tight end's absence from the
+// receiving book is not a statement about the wide receivers.
+const NFL_FILL_ORDER_MARGIN = 0.85;
+// ── THE GATE: ONLY WHERE MARKET AND DEPTH CHART AGREE ───────────────────────
+// The rule above rests on the market's ordering being a STATEMENT — the book
+// wrote a number for Lloyd and declined to write one for Brooks because it is
+// confident about the roles. That reading holds when the depth chart agrees:
+// Brooks' 11.6% baseline sits well under Lloyd's 30.9%, so market and baseline
+// tell the same story and the invariant is enforcing real information.
+//
+// It does NOT hold when the two contradict each other. Buffalo's book prices
+// Dawson Knox, a 6.5%-baseline tight end, and posts nothing at all for Dalton
+// Kincaid, the 17.1%-baseline starter. Read as a statement, that is the market
+// declaring Knox the better tight end; read as what it almost certainly is, it
+// is a gap in our odds pull. Demoting Kincaid under Knox would be inventing a
+// depth chart out of a missing cell.
+//
+// So an unpriced player is capped against a priced teammate ONLY when his own
+// baseline share is below that teammate's. Where every priced man in the room
+// sits BELOW him on the depth chart he is not demoted at all: the baseline fill
+// does its job under checkpoint 64's nflShareBaseCap alone, and the Slate check
+// raises a loud, specific `missing_prop` finding naming both players. A player
+// with no baseline cell has nothing to gate on and keeps the ordering floor as
+// before; so does a priced teammate with no baseline, because a missing cell is
+// not evidence of a contradiction either.
+//
+// members: [{ id, pos, priced, base (percent of team, or null), val }].
+// Returns a Map id → cap for the UNPRICED members, in whatever units `val` is
+// (yards, TD lambda, or a share fraction — the rule is scale-free). A position
+// group with no priced, producing member is absent from the map: the market has
+// said nothing about that room, so there is no ordering to contradict. So is a
+// player the gate exempted; `skipOut`, when given, collects
+// { id, pos, base, over: [{id, base}] } for each exemption so the caller can
+// report it.
+function nflMarketOrderCaps(members, skipOut){
+  const byPos = new Map();
+  for(const m of members){ const g = byPos.get(m.pos); if(g) g.push(m); else byPos.set(m.pos, [m]); }
+  const caps = new Map();
+  for(const g of byPos.values()){
+    const pr = g.filter(m => m.priced && m.val > 0);
+    if(!pr.length) continue;
+    let vSum = 0, bSum = 0;
+    // Only a priced man who HAS a baseline can measure the room's factor; one
+    // without a baseline still holds the ordering floor.
+    for(const m of pr) if(m.base != null && m.base > 0){ vSum += m.val; bSum += m.base; }
+    const factor = bSum > 0 ? vSum / bSum : null;
+    for(const m of g){
+      if(m.priced) continue;
+      // THE GATE. With no baseline of his own there is nothing to contradict,
+      // so every priced teammate counts, exactly as before.
+      const eligible = m.base == null ? pr : pr.filter(x => x.base == null || m.base < x.base);
+      if(!eligible.length){
+        if(skipOut) skipOut.push({ id: m.id, pos: m.pos, base: m.base,
+          over: pr.filter(x => x.base != null && x.base <= m.base).map(x => ({ id: x.id, base: x.base })) });
+        continue;
+      }
+      let lo = Infinity;
+      for(const x of eligible) if(x.val < lo) lo = x.val;
+      let cap = lo * NFL_FILL_ORDER_MARGIN;
+      if(factor != null && m.base != null) cap = Math.min(cap, Math.max(0, factor * m.base));
+      caps.set(m.id, cap);
+    }
+  }
+  return caps;
+}
+// PRODUCTION NOBODY ON THE ROSTER MAY HAVE, per team and stat, pooled from the
+// two places it arises: the ordering invariant trimming a fill (`ti.orderCut`,
+// in the stat's own units) and an OUT starter's share that no unpriced teammate
+// is priced to take (`slate._outUnclaimed`, a share fraction). They are the same
+// event from the user's side, so there is one reader and the panel, the run log
+// and the Slate check all quote the same number.
+// Returned as { TEAM: { stat: { frac, amount } } }, `frac` measured against the
+// team's anchored budget for that stat.
+function nflUnclaimedByTeam(slate, teamInfo){
+  const out = {};
+  const add = (t, k, frac, amount) => {
+    if(!(frac > 0) && !(amount > 0)) return;
+    const T = out[t] || (out[t] = {});
+    const e = T[k] || (T[k] = { frac: 0, amount: 0 });
+    e.frac += frac; e.amount += amount;
+  };
+  const budOf = (t, k) => { const ti = teamInfo && teamInfo.get ? teamInfo.get(t) : null;
+    return (ti && ti.budget && ti.budget[k] > 0) ? ti.budget[k] : 0; };
+  if(teamInfo && teamInfo.forEach) teamInfo.forEach((ti, t) => {
+    if(!ti.orderCut) return;
+    for(const k of Object.keys(ti.orderCut)){
+      const b = budOf(t, k);
+      add(t, k, b > 0 ? ti.orderCut[k] / b : 0, ti.orderCut[k]);
+    }
+  });
+  const uc = slate && slate._outUnclaimed;
+  if(uc) for(const t of Object.keys(uc)) for(const k of Object.keys(uc[t]))
+    add(t, k, uc[t][k], uc[t][k] * budOf(t, k));
+  return out;
+}
+// Enforce the invariant on one team's finished entries, for every stat that has
+// a baseline column. `mem` is [{p, e}] over the team's non-K/DST pool players.
+// Whatever is trimmed does NOT move to anybody: it stops being production. The
+// share model is re-measured afterwards, coverage falls, and the slice goes back
+// to being a remainder the pie reserves and nobody scores. A team where a lot of
+// production lands here is telling you its anchored budget is too high for THAT
+// team — a signal worth surfacing (see nflUnclaimedByTeam) rather than a number
+// to hide by forcing it onto a man the market never priced.
+// Accumulates onto `ti.orderCut` (stat → amount in that stat's own units) and
+// returns true when anything was trimmed.
+// WHICH STATS. Volume only — receiving yards, receptions, rushing yards.
+// Touchdowns are deliberately exempt: the anytime-TD book is systematically
+// incomplete (the audit's own atd_coverage finding fires whenever fewer than
+// 80% of a team's $4,000-plus skill players carry a price), so the absence of
+// an ATD price is NOT evidence of a small role the way the absence of a yardage
+// line is. Enforcing it there produced only noise — 0.06 against 0.05 expected
+// touchdowns — while the yardage constraint already dominates a player's value.
+// The two receiving legs RIDE EACH OTHER for priced-ness, the way receptions
+// already ride receiving-yards coverage in the guardrail: a receiver with a
+// yards line but no reception line has his catches derived from that line by a
+// fixed ratio, and one with a reception line but no yards line has his yards
+// derived the same way. Either is a market number wearing a different unit, not
+// an inference about a man nobody priced. (Measured: without this, NYJ's Omar
+// Cooper Jr. — a 1.4-reception line, no yards line — was treated as unpriced for
+// yards and trimmed from 17.8 to 7.2, on a sheet with no baselines at all.)
+const NFL_FILL_ORDER_STATS = [
+  { key: 'recYds',  cols: ['base_recyd', 'base_tgt'], mkt: e => !!(e.mkt && (e.mkt.recYds || e.mkt.rec)) },
+  { key: 'rec',     cols: ['base_tgt', 'base_recyd'], mkt: e => !!(e.mkt && (e.mkt.rec || e.mkt.recYds)) },
+  { key: 'rushYds', cols: ['base_rush'],              mkt: e => !!(e.mkt && e.mkt.rushYds) },
+];
+function nflEnforceMarketOrder(mem0, ti){
+  const mOf = (e, key) => key === 'td' ? nflTdLam(e.atd) : (e[key] || 0);
+  let any = false;
+  for(const st of NFL_FILL_ORDER_STATS){
+    const key = st.key;
+    const mem = [];
+    for(const x of mem0){
+      const e = x.e; if(!e || e.out || e.pos === 'K' || e.pos === 'DST') continue;
+      mem.push({ id: x.p.id, e, pos: e.pos, priced: st.mkt(e),
+                 base: nflBaseShare(x.p, st.cols), val: mOf(e, key) });
+    }
+    const caps = nflMarketOrderCaps(mem);
+    let removed = 0;
+    for(const m of mem){
+      const cap = caps.get(m.id);
+      if(cap == null || !(m.val > cap + 1e-12)) continue;
+      removed += m.val - cap;
+      if(key === 'td') m.e.atd = nflTdProb(cap); else m.e[key] = cap;
+      (m.e._orderCut || (m.e._orderCut = {}))[key] = ((m.e._orderCut || {})[key] || 0) + (m.val - cap);
+    }
+    // (3) The fill must not reorder PRICED players among themselves either:
+    // their own lines are the market's ordering and no spread may invert it.
+    // Structurally the leftover water-fill cannot (it is pro-rata by current
+    // share and caps every priced man at the same +6%), so this walk is normally
+    // a no-op — it is here because "normally" is not an invariant, and a future
+    // change to the spread rule should trip a test rather than ship a silent
+    // inversion. Ranked by the MARKET LINE, which is the value before the
+    // leftover lifted it: a priced player is never baseline-filled for a stat he
+    // already carries a line for, so the line is exactly val minus his leftover.
+    const lineOf = m => m.val - ((m.e._leftover && m.e._leftover[key]) || 0);
+    const pr = mem.filter(m => m.priced && m.val > 0)
+                  .sort((a, b) => lineOf(b) - lineOf(a) || (a.id < b.id ? -1 : 1));
+    for(let i = 1; i < pr.length; i++){
+      const cur = mOf(pr[i].e, key), prev = mOf(pr[i-1].e, key);
+      if(cur <= prev + 1e-12) continue;
+      removed += cur - prev;
+      if(key === 'td') pr[i].e.atd = nflTdProb(prev); else pr[i].e[key] = prev;
+    }
+    if(removed > 1e-9 && ti){ (ti.orderCut || (ti.orderCut = {}))[key] = ((ti.orderCut || {})[key] || 0) + removed; any = true; }
+    else if(removed > 1e-9) any = true;
+  }
+  return any;
+}
 // Which teams have at least one non-K/DST player carrying a baseline share —
 // the only teams the softer bar applies to.
 function nflBaselineTeams(slate){
@@ -20588,14 +20967,82 @@ function nflBaselineTeams(slate){
   }
   return out;
 }
-// Rushing anchor. The league average is ~112 rush yards on a 22.5-point team
-// (≈5.0 yds/pt), but this number is not a projection — it is a floor whose only
-// job is to notice that a team's LEAD BACK is missing from the sheet. Set at
-// 4.2 with a further 0.9 haircut (≈3.8 yds/pt) and gated at 0.85, it fires below
-// ~3.2 rush yards per implied point — a level no real offense posts once its
-// starting back is on the sheet, and the level a team hits the moment he isn't.
+// ── RUSHING ANCHOR ──────────────────────────────────────────────────────────
+// This was `implied × 4.2 × 0.9` — 3.78 yards per implied point, strictly
+// proportional through the origin. Two things were wrong with it, both measured
+// on Matt's Week 1 sheet (24 teams, /tmp/review_g/teamrush.js):
+//
+//   · THE LEVEL. The anchor averaged 96 rushing yards a team against an NFL
+//     average of ~113 (2024: 32 teams, ~1,930 team rushing yards over 17 games
+//     ≈ 113.5 per game). A floor set 15% under the league mean is not a floor,
+//     it is a ceiling on half the slate: it bound on 8 of the 24 teams and held
+//     every one of them below average.
+//   · THE FORM. Proportionality says a 16-point team runs for 60 yards and a
+//     30-point team for 113. Neither is true. Real offenses rush 90–130 nearly
+//     regardless of implied total, because the ground game is mostly a function
+//     of snaps and identity, not of scoring. What favourites genuinely do —
+//     run out a lead — this sim ALREADY models, separately and better, in
+//     nflScriptFor. The proportional anchor was charging game script twice and
+//     breaking at the bottom of the board: ARI 71, CLE 78, NO 81.
+//
+// So the anchor is affine and hinged at the league average rather than at the
+// origin: RUSH_BASE at LEAGUE_IMPLIED, moving by SLOPE yards per implied point
+// either side of it, clamped to a band no NFL team leaves for a whole game.
+//   · NFL_RUSH_BASE 113   — the 2024 league mean team rushing yards per game.
+//   · NFL_RUSH_LEAGUE_IMPLIED 22.5 — the 2024 league mean points per game, the
+//     point at which the anchor equals the league mean by construction.
+//   · NFL_RUSH_SLOPE 2.25 — a CALIBRATED JUDGEMENT, not a fitted coefficient.
+//     Team rush yards regressed on implied total lands in the 2.0–2.5 yds/pt
+//     range depending on season and whether kneel-downs are stripped; 2.25 is
+//     the middle of it. The old form implied 3.78, which double-counted script.
+//   · The 80–150 clamp is the band that contains essentially every team-game
+//     once garbage time is included, and it stops a 34-point Vegas outlier or a
+//     13-point one from producing an anchor nobody would write down.
+// REFIT PATH: the standings/backtest pipeline already stores per-game team
+// totals and closing implied points. Regress the first on the second across a
+// full season and read BASE (the intercept at LEAGUE_IMPLIED) and SLOPE off it;
+// until that runs these are stated numbers, not measured ones.
+//
+// TWO NUMBERS, NOT ONE. The old constant was doing two jobs at once, and that
+// is why it had to be set low: it was BOTH the team's rushing budget AND the
+// trigger for the coverage guardrail ("this sheet has lost a lead back"). A
+// trigger set at the league average would fire on half the league, because a
+// complete book prices ~85% of a team's ground game and never lists the
+// third-down back or the quarterback's scrambles. So the two are now separate:
+//   · nflRushAnchor  — the BUDGET, an honest estimate of team rushing yards.
+//   · NFL_RUSH_YDS_PER_PT × NFL_RUSH_ANCHOR (3.78 yds/pt) — the DETECTOR,
+//     unchanged, still firing below ~3.2 rush yards per implied point, which is
+//     a level no real offense posts once its starting back is on the sheet.
+// The audit's rush_coverage finding grades the sheet against the DETECTOR, so
+// exactly the slates that warned before still warn.
+//
+// And the budget only replaces the detector as the fill target on a team whose
+// sheet carries BASELINE shares. This is the same rule NFL_COV_FILL_MIN already
+// states one constant up: raising a team's rushing total to the league average
+// is only honest if we can name the men who run for the extra yards. Without a
+// baseline the gap would become an anonymous remainder — production removed
+// from every rosterable player and given to nobody — so a baseline-less sheet
+// keeps the old, deliberately low anchor and is bit-for-bit what it was.
+//
+// What has NOT changed either way: the anchor is still only a floor.
+// `max(anchor, lineSum)` keeps a well-covered team on its own market lines, so
+// raising the anchor moves no priced player on a team whose listed rushing
+// already clears it (measured: MIA and BAL on Matt's Week 1 sheet are
+// bit-identical across this change).
+// The DETECTOR, unchanged: implied points × 4.2 × 0.9 ≈ 3.78 yds/pt.
 const NFL_RUSH_YDS_PER_PT = 4.2;
 const NFL_RUSH_ANCHOR = 0.9;
+// The BUDGET.
+const NFL_RUSH_BASE = 113;
+const NFL_RUSH_LEAGUE_IMPLIED = 22.5;
+const NFL_RUSH_SLOPE = 2.25;
+const NFL_RUSH_MIN = 80;
+const NFL_RUSH_MAX = 150;
+function nflRushAnchor(imp){
+  if(imp == null || !(imp > 0)) return 0;
+  const a = NFL_RUSH_BASE + NFL_RUSH_SLOPE * (imp - NFL_RUSH_LEAGUE_IMPLIED);
+  return Math.min(NFL_RUSH_MAX, Math.max(NFL_RUSH_MIN, a));
+}
 const NFL_TD_PER_PT = 0.74 / 7;     // the same assumption nflDrawTeamPie's count uses
 
 // Base model per team from the pool: team totals per stat + each player's
@@ -20685,7 +21132,14 @@ function nflShareModel(slate, pool, entries, teamInfo){
       // full-anchor coverage alone paid out 1/0.95 of the listed receptions.
       T.base.rec = T.base.rec / Math.max(1e-6, c) * (hasBase ? NFL_COV_FILL_TARGET : 1);
     }
-    if(imp != null && imp > 0) denom('rushYds', imp * NFL_RUSH_YDS_PER_PT * NFL_RUSH_ANCHOR);
+    if(imp != null && imp > 0){
+      // Detector vs budget — see the NFL_RUSH_BASE comment. The detector's
+      // reading is kept on the side so nflSlateAudit's rush_coverage finding
+      // grades the sheet against the same bar it always did.
+      const rushDetect = imp * NFL_RUSH_YDS_PER_PT * NFL_RUSH_ANCHOR;
+      T.coverage.rushDetect = rushDetect > 0 ? T.base.rushYds / rushDetect : 1;
+      denom('rushYds', hasBase ? nflRushAnchor(imp) : rushDetect);
+    }
     // TOUCHDOWNS. Two anchors, and the pie takes the larger.
     //   · the team's implied touchdown budget (points × 0.74/7) — the exact
     //     number nflDrawTeamPie samples the TD COUNT from, so a book that has
@@ -20758,14 +21212,23 @@ function nflShareModel(slate, pool, entries, teamInfo){
         // guardrail engaged (see the ride-along above), so scale here only when
         // it did not.
         rec:     (T.remainder.recYds > 0) ? T.base.rec : T.base.rec / capC(T.coverage.recYds),
-        rushYds: mx((imp != null && imp > 0) ? imp * NFL_RUSH_YDS_PER_PT * NFL_RUSH_ANCHOR : 0, T.base.rushYds),
+        rushYds: mx((imp != null && imp > 0)
+                      ? (hasBase ? nflRushAnchor(imp) : imp * NFL_RUSH_YDS_PER_PT * NFL_RUSH_ANCHOR)
+                      : 0, T.base.rushYds),
         td:      mx((imp != null && imp > 0) ? imp * NFL_TD_PER_PT : 0, T.base.td),
       };
     }
     // Hand the measurement back to the caller's team info — the Sim inputs
     // pop-out prints it as an amber note and nflSlateAudit grades it.
     if(ti){ ti.coverage = T.coverage; ti.remainder = T.remainder; ti.lineSum = T.lineSum;
-            ti.passLine = qbLine; ti.covAtd = T.covAtd; ti.covYards = T.covYards; ti.budget = T.budget; }
+            ti.passLine = qbLine; ti.covAtd = T.covAtd; ti.covYards = T.covYards; ti.budget = T.budget;
+            // The rushing anchor this team ACTUALLY ran on — the affine budget
+            // where the sheet carries baselines, the old detector where it does
+            // not (see NFL_RUSH_BASE). Stamped rather than left to be recomputed,
+            // because "which of the two was it?" is now a real question and the
+            // panel and the harnesses must not have to guess at the answer.
+            ti.rushAnchor = (imp != null && imp > 0)
+              ? (hasBase ? nflRushAnchor(imp) : imp * NFL_RUSH_YDS_PER_PT * NFL_RUSH_ANCHOR) : 0; }
   }
   return teams;
 }
@@ -20795,16 +21258,30 @@ function nflCoverageNoteHtml(ti, team){
 // know that half of this team's receiving pie is carried by a projection rather
 // than by a posted line, and by whom.
 function nflBaseFillNoteHtml(ti, team){
-  const bf = ti && ti.baseFill; if(!bf) return '';
+  const bf = (ti && ti.baseFill) || null;
+  if(!bf && !(ti && ti.orderCut)) return '';
   const pc = v => Math.round(v * 100) + '%';
   const parts = [];
-  for(const st of NFL_BASE_COLS){
+  for(const st of (bf ? NFL_BASE_COLS : [])){
     const r = bf[st.key]; if(!r || st.key === 'rec') continue;   // receptions ride receiving yards
     const who = r.parts.slice(0, 4).map(x => `${esc(x.name)} ${pc(x.pct)}`).join(', ');
     const more = r.parts.length > 4 ? `, +${r.parts.length - 4} more` : '';
     const named = Math.max(0, r.filledFrac - (r.leftoverFrac || 0));
     const spreadTxt = (r.leftoverFrac || 0) > 0.004 ? ` (+${pc(r.leftoverFrac)} spread pro-rata)` : '';
     parts.push(`<b>${pc(named)}</b> of ${NFL_COV_LABEL[st.key]} — ${who}${more}${spreadTxt}`);
+  }
+  // What the market-ordering invariant refused. The baseline fill note is where
+  // it belongs: this is the same paragraph saying who carries this team by
+  // projection rather than by a posted line, and the trim is the sentence that
+  // says how far a projection was allowed to go.
+  if(ti.orderCut){
+    const bits = [];
+    for(const st of NFL_BASE_COLS){
+      const v = ti.orderCut[st.key]; if(!(v > 0) || st.key === 'rec') continue;
+      const b = ti.budget && ti.budget[st.key] > 0 ? ti.budget[st.key] : 0;
+      bits.push(`<b>${b > 0 ? pc(v / b) : ''}</b> of ${NFL_COV_LABEL[st.key]}`);
+    }
+    if(bits.length) parts.push(`${bits.join(' and ')} trimmed back and left unclaimed — a player with no line may not out-produce a teammate who has one`);
   }
   if(!parts.length) return '';
   return `<div class="sdash-cov" title="These players carry no market line for the stat. The share model had already carved their production out of the team as an anonymous remainder; the sheet's baseline columns say whose it is, so it was handed back to them in proportion to their baseline share. The team's totals did not move — only the names on them.">
@@ -20856,6 +21333,26 @@ function nflSlateAudit(slate){
   const money = v => '$' + (v || 0).toLocaleString();
   const SD = typeof isShowdown === 'function' && isShowdown(slate);
 
+  // ── 0. UNSETTLED ROOMS ─────────────────────────────────────────────────────
+  // Not a gap in the sheet — a statement about what the sim is doing with it.
+  // It belongs here because it is the one place the model deliberately widens a
+  // distribution the market has left vague, and the user should meet that on the
+  // Slate check rather than in a lineup he cannot explain.
+  if(typeof nflRoleUnsettled === 'function'){
+    const POSROOM0 = {RB:'backfield', WR:'receiving room', TE:'tight end room', QB:'quarterback room'};
+    for(const r of nflRoleUnsettled(slate)){
+      const pr0 = r.survivors.filter(x => x.priced), un0 = r.survivors.filter(x => !x.priced);
+      const list0 = a => a.slice(0, 3).map(x => surnameOf(x.name)).join(', ') + (a.length > 3 ? ` +${a.length-3} more` : '');
+      const bits0 = [];
+      if(pr0.length) bits0.push(`${list0(pr0)} at ±${Math.round(NFL_ROLE_UNC.sigma*100)}%`);
+      if(un0.length) bits0.push(`${list0(un0)} at ±${Math.round(NFL_ROLE_UNC.sigmaUnpriced*100)}% (nobody priced them, so they carry more)`);
+      push('info', 'role_unsettled',
+        `${r.team} ${POSROOM0[r.pos] || (r.pos + ' room')} unsettled — ${r.outNames.map(surnameOf).join(', ')} out, so the room's shares `
+        + `are drawn with extra spread: ${bits0.join('; ')}. Means and the team total are unchanged; only the ceiling widens.`,
+        {team: r.team});
+    }
+  }
+
   // ── 1. GAME COVERAGE ───────────────────────────────────────────────────────
   // The game environment is the top of the whole model: every team total, every
   // yardage factor and every touchdown count descends from it, so a game that is
@@ -20906,6 +21403,85 @@ function nflSlateAudit(slate){
     if(priced.length) teamInfo = buildNflSimInputs(priced, { skipDstCal: true }).teamInfo;
   } catch(e){ teamInfo = null; }
   const covOf = t => { const ti = teamInfo && teamInfo.get(t); return ti && ti.covMarket ? ti : null; };
+  // ── A PROP THE PULL PROBABLY MISSED ────────────────────────────────────────
+  // The market-ordering invariant (see nflMarketOrderCaps) is gated on market
+  // and depth chart agreeing. This is the finding for where they DON'T: a
+  // player with no market line for a stat whose baseline share sits at or above
+  // every priced teammate's at his position. That is not the book declaring a
+  // 6.5%-baseline tight end the better player; it is almost always a cell our
+  // odds pull did not fill. The model does not demote him for it — but the user
+  // has to be told, by name, that a starter is being carried by a projection
+  // and that the guardrail which would normally hold him down is standing
+  // aside. Computed off the sheet rather than off the fill, so it says the same
+  // thing whether or not the fill happened to engage.
+  // Derived independently of nflMarketOrderCaps because it is a statement about
+  // the SHEET; the two agree by construction (same test, opposite sense).
+  if(teamInfo) for(const t of [...poolTeams].sort()){
+    const mates = priced.filter(p => nflTeamOf(p) === t);
+    if(mates.length < 2) continue;
+    const ents = new Map();
+    for(const p of mates){ try { ents.set(p.id, nflPropEntry(p, t, null)); } catch(e){} }
+    for(const st of NFL_FILL_ORDER_STATS){
+      const grp = {};
+      for(const p of mates){
+        const e = ents.get(p.id); if(!e || e.pos === 'K' || e.pos === 'DST') continue;
+        const b = nflBaseShare(p, st.cols); if(b == null) continue;   // nothing to gate on
+        (grp[e.pos] || (grp[e.pos] = [])).push({ p, b, priced: st.mkt(e) });
+      }
+      for(const pos of Object.keys(grp)){
+        const g = grp[pos];
+        const pr = g.filter(x => x.priced);
+        if(!pr.length) continue;
+        for(const m of g.filter(x => !x.priced)){
+          const under = pr.filter(x => x.b <= m.b);
+          if(under.length !== pr.length) continue;      // some priced man is above him — gate agrees
+          // The GATE fires on any disagreement, however small, because it must
+          // never demote a man on thin evidence. The FINDING needs a floor, or
+          // it reports a wide receiver's 0.6% rushing baseline outranking his
+          // team-mate's 0.5% as a missing prop. Worth telling the user about
+          // means: a real role (5% of the stat) AND a real gap (2 points clear
+          // of every priced teammate).
+          const top = under.reduce((a, x) => x.b > a.b ? x : a, under[0]);
+          if(!(m.b >= 5) || !(m.b >= top.b + 2)) continue;
+          const who = under.sort((a, b2) => b2.b - a.b).slice(0, 2)
+            .map(x => `${x.p.name}'s ${x.b.toFixed(1)}%`).join(' and ');
+          push('warn', 'missing_prop',
+            `${t}: ${m.p.name} has no ${NFL_COV_LABEL[st.key] || st.key} line but a ${m.b.toFixed(1)}% baseline, against ${who} — `
+            + `likely a missing prop rather than a statement about his role, so his fill is NOT being capped by them. `
+            + `Check the sheet's cell for him before trusting the sim on this room.`,
+            { team: t, playerId: m.p.id, fix: { label: 'Show in pool', kind: 'search', arg: m.p.name } });
+        }
+      }
+    }
+  }
+  // ── VOLUME NOBODY CAN ABSORB ───────────────────────────────────────────────
+  // The fill-side twin of share_vs_baseline below. When an OUT starter's share
+  // is larger than his unpriced backups' baselines can justify, the excess is
+  // not forced onto anyone (that is the double count checkpoint 63 removed) and
+  // it is not silently kept either — the team's production for that stat drops
+  // by it. That is a real change to a team total, so it is a finding rather
+  // than a footnote. It sits here because it needs the anchored budget above.
+  // Both sources are pooled into one per-team, per-stat number, because from the
+  // user's side they are the same event — production the market's own ordering
+  // will not let anybody on this roster have — and one line per team per stat is
+  // the most that is readable. `nflUnclaimedByTeam` is the single reader; the
+  // Sim inputs coverage note and the run log use it too.
+  {
+    const uc = (typeof nflUnclaimedByTeam === 'function') ? nflUnclaimedByTeam(slate, teamInfo) : null;
+    if(uc) for(const t of Object.keys(uc)){
+      for(const k of Object.keys(uc[t])){
+        const { frac, amount } = uc[t][k];
+        if(!(frac > 0.02)) continue;
+        const lbl = (NFL_SHARE_STATS.find(s => s.key === k) || {label:k}).label.toLowerCase();
+        push('info', 'out_unclaimed',
+          `${t}: ${Math.round(frac*100)}% of the team's ${lbl} (≈${Math.round(amount)}) found no owner — `
+          + `the market prices no unpriced teammate to take it, and the fill may not put a man with no line above one with a line. `
+          + `The team produces that much less; the priced players are untouched. `
+          + `A large number here means the team's anchored budget is too high for THIS team.`,
+          { team: t });
+      }
+    }
+  }
   const noDst = [];
   for(const t of [...poolTeams].sort()){
     const ti = covOf(t);
@@ -20959,11 +21535,18 @@ function nflSlateAudit(slate){
       }
       {
         const f = fill('rushYds');
-        if(c.rushYds < 0.6)
-          push(sevDrop('error', f.drop), 'rush_coverage', `${t} rushing props cover ${pcCov(c.rushYds)} of the expected ground game — a lead back is probably missing${f.note}.`,
+        // Graded against the DETECTOR, not the budget: the budget is now the
+        // league-average anchor (see NFL_RUSH_BASE) and a complete book covers
+        // only ~85% of it, so measuring this finding against the budget would
+        // warn on half the league every Sunday. `rushDetect` is the same 3.78
+        // yds/pt reading this check has always used; the fallback keeps any
+        // caller holding an older coverage object working.
+        const cRush = Number.isFinite(c.rushDetect) ? c.rushDetect : c.rushYds;
+        if(cRush < 0.6)
+          push(sevDrop('error', f.drop), 'rush_coverage', `${t} rushing props cover ${pcCov(cRush)} of the expected ground game — a lead back is probably missing${f.note}.`,
                { team: t, fix: simFix });
-        else if(c.rushYds < 0.85)
-          push(sevDrop('warn', f.drop), 'rush_coverage', `${t} rushing props cover ${pcCov(c.rushYds)} of the expected ground game${f.note}.`,
+        else if(cRush < 0.85)
+          push(sevDrop('warn', f.drop), 'rush_coverage', `${t} rushing props cover ${pcCov(cRush)} of the expected ground game${f.note}.`,
                { team: t, fix: simFix });
       }
       // ── SHARE vs BASELINE — the mis-routed-prop detector ──────────────────
@@ -20977,7 +21560,8 @@ function nflSlateAudit(slate){
       // much is not a market read, it is a data error.
       //
       // The threshold is deliberately loose in BOTH directions at once —
-      // max(2.5× baseline, baseline + 15 points) — because neither test alone
+      // max(NFL_SHARE_BASE_K × baseline, baseline + NFL_SHARE_BASE_PTS points)
+      // — 2.5× and +15 points — because neither test alone
       // survives the range of real shares. A 2.5× multiple on a 3%-baseline WR4
       // fires at 7.5%, which a real game plan reaches; a flat +15 points on a
       // 30%-baseline WR1 fires at 45%, which a two-man passing attack reaches.
@@ -21007,7 +21591,7 @@ function nflSlateAudit(slate){
           const budget = ti.budgetMarket[st.k];
           if(!(budget > 0)) continue;
           const got = (mm[st.k] || 0) / budget * 100;
-          const lim = Math.max(2.5 * b, b + 15);
+          const lim = nflShareBaseCap(b);
           if(got > lim && (!worst || got - lim > worst.over)) worst = { st, b, got, lim, over: got - lim };
         }
         if(worst)
@@ -21303,7 +21887,7 @@ function nflAuditShort(f){
 // team. Errors are never folded: a 51% receiving coverage is a team problem
 // even when eighteen other teams are a little thin.
 const NFL_AUDIT_TEAM_CODES = new Set(['no_qb_line','rec_coverage','rush_coverage','atd_book','atd_coverage','player_no_props',
-                                      'share_vs_baseline',
+                                      'share_vs_baseline','missing_prop',
                                       'cheap_overrated','share_extreme','share_extreme_rush','team_total_off',
                                       'game_no_ou','game_no_spread','team_no_total','total_mismatch','team_no_game','opp_not_in_pool','unknown_team']);
 const NFL_AUDIT_PLAYER_CODES = new Set(['wrong_pos_prop','dup_name','name_mismatch']);
@@ -21512,7 +22096,26 @@ function nflAdjShares(T, statKey, adj){
     const tot = (T.base && T.base[statKey]) || 0;
     return tot > 0 ? Math.max(0, (off[statKey] || 0) / tot) : 0;
   })();
-  const capT = Math.max(0, 1 - ((T && T.remainder && T.remainder[statKey]) || 0) - _offSh);
+  // THE OUT RESIDUAL IS NOT A SECOND SLICE. When the fill cap refuses part of a
+  // scratched starter's share, nflRedistributeOut pins the refused part back on
+  // HIM (see the residual pin there) so the fixed block still sums to the share
+  // that left and the untouched roster does not drift. That pin is inside
+  // `fixed` above. But the very next pass over these entries measures a team
+  // whose lines now add to less than its anchor, so the model reports the same
+  // slice AGAIN as a coverage remainder — and subtracting both took MarShawn
+  // Lloyd's pie share from 43% to 18% while his displayed input stayed 45.5.
+  // The two readings are the same production, so the remainder counts only
+  // insofar as it exceeds the residual already pinned.
+  const _resid = (() => {
+    let r = 0;
+    for(const pl of T.players){
+      if(pl.skip) continue;
+      const a = adj && adj.players && adj.players[pl.p.id];
+      if(a && a.resid && Number.isFinite(a[statKey])) r += a[statKey];
+    }
+    return r;
+  })();
+  const capT = Math.max(0, 1 - Math.max(0, ((T && T.remainder && T.remainder[statKey]) || 0) - _resid) - _offSh);
   let room = capT - fixed;
   if(room < 0){ room = 0; over = true; }
   const k = restBase > 0 ? room / restBase : 0;
@@ -21576,6 +22179,7 @@ function nflRedistributeOut(slate){
     if(!Object.keys(adj.players).length && !Object.keys(adj.teams||{}).length) delete slate._simAdj;
   }
   slate._outMoves = null;
+  slate._outUnclaimed = null;
   const outIds = nflOutIds(slate);
   if(!outIds.length) return null;
   const pool = (slate.players||[]).filter(p => (p.salary||0) > 0);
@@ -21593,6 +22197,9 @@ function nflRedistributeOut(slate){
   const outSet = new Set(outIds);
   const manual = (id, key) => { const a = A.players[id]; return !!(a && a.auto !== 'out' && Number.isFinite(a[key])); };
   const moves = [];
+  // Share the fill cap refused, by OUT player + stat (pinned back on him so the
+  // renormalization constant holds) and by team + stat (reported to the user).
+  const outResid = new Map(), unclaimedBy = new Map();
   for(const T of Object.values(model)){
     const outs = T.players.filter(pl => !pl.skip && outSet.has(pl.p.id));
     if(!outs.length) continue;
@@ -21618,7 +22225,42 @@ function nflRedistributeOut(slate){
         }
         if(!grp || !grp.length) grp = mates;
         if(!grp.length) continue;
-        const tot = grp.reduce((s,m) => s + (cur[m.p.id] || 0), 0);
+        // ── WHO ABSORBS: only teammates the market has NOT already repriced ──
+        // MEASURED on Matt's Week 1 sheet: Josh Jacobs is OUT carrying a stale
+        // 52.5 rush line, and MarShawn Lloyd carries his own LIVE 45.5 — posted
+        // after the news. Handing Lloyd 46% of GB's rushing on top of that
+        // produced a 98.0 rushing-yards input, more than double the number the
+        // book had just written about him, and that single input drove his
+        // 84-90% exposure and a 16.6 sim mean against SaberSim's 12.12.
+        // So: a teammate with his own live line for this stat IS the market's
+        // post-news statement about him and is not inflated by inference. The
+        // share goes to the teammates the market has NOT priced for this stat —
+        // which keeps the case this was built for intact (a scratched starting
+        // QB's passing going to an unpriced backup: Darnold → Drew Lock, who has
+        // no line and still inherits the lot). If nobody in the group is
+        // unpriced, there is no one to give it to and the old behaviour is the
+        // honest fallback — the summary line says which of the three happened.
+        const isMkt = m => !!(m.e && m.e.mkt && m.e.mkt[key]);
+        const unpriced = grp.filter(m => !isMkt(m));
+        const preNews = nflOutPreNews(slate, pl.p.id);
+        let absorbMode = 'unpriced';
+        if(preNews) absorbMode = 'prenews';
+        else if(!unpriced.length) absorbMode = 'nounpriced';
+        const abs = (absorbMode === 'unpriced') ? unpriced : grp;
+        if(!abs.length) continue;
+        // Weights. Among UNPRICED teammates the market says nothing, so the
+        // baseline columns (Base Rush% / Tgt% / …) are the best available depth
+        // chart and an even split is the fallback. When priced teammates are
+        // absorbing too (pre-news, or nobody unpriced) the market share is the
+        // weight, exactly as before.
+        const bcols = (NFL_BASE_COLS.find(c => c.key === key) || {}).cols || null;
+        let baseTot = 0;
+        if(absorbMode === 'unpriced' && bcols)
+          for(const m of abs) baseTot += Math.max(0, nflBaseShare(m.p, bcols) || 0);
+        const useBase = baseTot > 0;
+        const tot = useBase ? 0 : abs.reduce((s,m) => s + (cur[m.p.id] || 0), 0);
+        const grpAll = grp;
+        grp = abs;
         // Nobody in the group carries a market share (the classic case: the
         // starting QB is out and every other QB on the slate is an unpriced
         // backup). Then the fallback is an even split — EXCEPT for passing
@@ -21629,30 +22271,108 @@ function nflRedistributeOut(slate){
         // above the third-stringer). Through the share model that alone prices
         // him: he goes from unpriced-scores-zero to the starter's yardage.
         let succ = null;
-        if(tot <= 0 && grp.length > 1 && key === 'passYds'){
+        if(tot <= 0 && !useBase && grp.length > 1 && key === 'passYds'){
           succ = grp.slice().sort((a,b)=>(b.p.salary||0)-(a.p.salary||0))[0];
         }
+        // ── THE FILL-SIDE CAP (the mirror of share_vs_baseline) ─────────────
+        // An UNPRICED absorber's post-fill share is a pure inference — a
+        // baseline column about a man the books never wrote a number for — so
+        // it answers to the same bar the audit holds priced players to:
+        // nflShareBaseCap(baseline). Brooks at an 11.6% baseline may reach 29%
+        // of Green Bay's ground game; he may not reach 43% and stand level with
+        // the priced lead back. The cap is measured against the team's ANCHORED
+        // budget, exactly as the audit measures, so the two agree by
+        // construction; shares here are fractions of T.base, hence the ratio.
+        // A priced absorber (pre-news mode) is NOT capped: he has a market
+        // number of his own, which is the thing a cap would be substituting for.
+        const budK = (T.budget && T.budget[key]) || 0, baseK = T.base[key] || 0;
+        const toBudget = (budK > 0 && baseK > 0) ? baseK / budK : 1;   // share → % of budget
+        // THE MARKET'S ORDERING (see nflMarketOrderCaps), in share units.
+        // It has to be applied HERE and not only on the finished means, because
+        // the sim's pie reads its shares from these stored adjustments, not from
+        // the entries — nflBuildShareSim calls nflAdjShares, whose explicit
+        // values override whatever the entries say. Trimming only the entries
+        // left the pie handing Chris Brooks 30% of Green Bay's ground game and
+        // MarShawn Lloyd 12%, the exact inversion this is here to stop, while
+        // the displayed inputs read 10 and 45. Doing it in share space keeps the
+        // renormalization constant intact (what the cap refuses is pinned back
+        // on the OUT player and evaporates when he is zeroed), so the priced
+        // survivor's own line survives to the last digit.
+        // Measured over every teammate still playing, using the PRE-redistribution
+        // shares — a priced teammate is not absorbing, so his share is already
+        // his final one and is the right thing to rank against.
+        const ordCap = nflMarketOrderCaps(mates.map(m => ({
+          id: m.p.id, pos: m.e.pos, priced: isMkt(m),
+          base: bcols ? nflBaseShare(m.p, bcols) : null, val: cur[m.p.id] || 0,
+        })));
+        const capOf = m => {
+          if(isMkt(m)) return Infinity;
+          let cap = ordCap.has(m.p.id) ? ordCap.get(m.p.id) : Infinity;
+          // Checkpoint 64's absurdity ceiling, kept: a room whose priced men are
+          // themselves miles over their baselines must not launder that multiple
+          // onto a man nobody priced.
+          const b = bcols ? nflBaseShare(m.p, bcols) : null;
+          if(b != null) cap = Math.min(cap, nflShareBaseCap(Math.max(0, b)) / 100 / Math.max(1e-9, toBudget));
+          return cap;
+        };
         const to = [];
+        let unclaimed = 0;
         for(const m of grp){
-          const w = succ ? (m === succ ? 1 : 0) : (tot > 0 ? (cur[m.p.id] || 0) / tot : 1 / grp.length);
-          const d = S * w;
+          const w = succ ? (m === succ ? 1 : 0)
+                  : useBase ? Math.max(0, nflBaseShare(m.p, bcols) || 0) / baseTot
+                  : (tot > 0 ? (cur[m.p.id] || 0) / tot : 1 / grp.length);
+          let d = S * w;
+          if(!(d > 0)) continue;
+          // What the cap refuses is NOT pushed onto the next man. Volume no
+          // plausible absorber can take is volume the depth chart does not
+          // support, and the honest answer is that the team runs for less —
+          // the anchor was a prior, not a promise. It leaves as a remainder
+          // (see the residual pin below), which is visible in the ⛔ summary
+          // line and in the Slate check rather than silently reappearing on
+          // somebody's projection. Handing it to the PRICED survivor instead is
+          // precisely the double count checkpoint 63 removed.
+          const cap = capOf(m), room = Math.max(0, cap - (cur[m.p.id] || 0));
+          if(d > room){ unclaimed += d - room; d = room; }
           if(!(d > 0)) continue;
           add.set(m.p.id, (add.get(m.p.id) || 0) + d);
-          to.push({id:m.p.id, name:m.p.name, share:(cur[m.p.id]||0) + d, add:d});
+          to.push({id:m.p.id, name:m.p.name, share:(cur[m.p.id]||0) + d, add:d,
+                   capped: d < S * w - 1e-12});
         }
-        if(to.length) moves.push({outId:pl.p.id, outName:pl.p.name, team:T.team, pos:pl.e.pos,
-          stat:key, statLabel:st.label, share:S,
+        // The residual stays pinned on the OUT player. That looks odd for two
+        // lines and is the only arrangement that works: nflAdjShares keeps the
+        // untouched roster where it is exactly because the fixed block still
+        // sums to the share that left, so zeroing him and handing out less would
+        // renormalize the difference straight back onto Lloyd — the leak we are
+        // here to stop. He is zeroed unconditionally a few steps later in
+        // buildNflSimInputs (after nflApplySimDash), so the residual evaporates
+        // at the right moment and the team simply produces less.
+        if(unclaimed > 1e-9){
+          outResid.set(pl.p.id + '|' + key, (outResid.get(pl.p.id + '|' + key) || 0) + unclaimed);
+          const u = unclaimedBy.get(T.team) || {}; u[key] = (u[key] || 0) + unclaimed;
+          unclaimedBy.set(T.team, u);
+        }
+        if(to.length || unclaimed > 1e-9) moves.push({outId:pl.p.id, outName:pl.p.name, team:T.team, pos:pl.e.pos,
+          stat:key, statLabel:st.label, share:S, mode:absorbMode,
+          weight: succ ? 'depth' : useBase ? 'baseline' : 'market',
+          nPriced: grpAll.length - unpriced.length, nUnpriced: unpriced.length,
+          unclaimed, unclaimedYds: unclaimed * (T.base[key] || 0),
           to: to.sort((a,b)=>b.add-a.add)});
       }
       if(!anyOut) continue;
-      // Write the explicit shares. The OUT player is pinned at 0 and every
-      // absorber at his new number; nflAdjShares then leaves the rest of the
-      // roster exactly where it was (its renormalization constant is unchanged
-      // by construction — the fixed block grew by precisely the share that left).
+      // Write the explicit shares. The OUT player is pinned at the residual the
+      // cap refused (normally 0) and every absorber at his new number;
+      // nflAdjShares then leaves the rest of the roster exactly where it was
+      // (its renormalization constant is unchanged by construction — the fixed
+      // block still holds precisely the share that left).
       for(const pl of outs){ if(manual(pl.p.id, key)) continue;
         A.players[pl.p.id] = A.players[pl.p.id] || {};
         A.players[pl.p.id].auto = 'out';
-        A.players[pl.p.id][key] = 0;
+        const rz = outResid.get(pl.p.id + '|' + key) || 0;
+        A.players[pl.p.id][key] = rz;
+        // Flagged so nflAdjShares can tell this pinned slice apart from a real
+        // share: on the next pass the same production also shows up as a
+        // coverage remainder, and counting it twice deflates the whole roster.
+        if(rz > 0) A.players[pl.p.id].resid = true;
       }
       for(const [id, d] of add.entries()){
         if(manual(id, key)) continue;
@@ -21663,6 +22383,7 @@ function nflRedistributeOut(slate){
     }
   }
   slate._outMoves = moves.length ? moves : null;
+  slate._outUnclaimed = unclaimedBy.size ? Object.fromEntries(unclaimedBy) : null;
   return moves;
 }
 // One line per OUT player for the run log and the Sim tab banner:
@@ -21696,12 +22417,43 @@ function nflOutSummaryLines(slate){
     // the share that left — the arithmetic is checkable at a glance.
     const to = m.to.slice(0, 4).map(t => `${short(t.name)} ${pct(t.add)}`).join(', ');
     const more = m.to.length > 4 ? `, +${m.to.length-4} more` : '';
-    out.push(`⛔ Out: ${short(m.outName)} — ${pct(m.share)} ${m.statLabel.toLowerCase()} → ${to}${more}`);
+    // WHERE the share went and WHY, because the answer changed: it goes to the
+    // teammates the market has not repriced, and the two other outcomes (a
+    // pre-news override, or nobody unpriced to give it to) are decisions the
+    // user should see rather than infer from the numbers.
+    const why = m.mode === 'prenews'
+        ? ` [pre-news: priced teammates absorb too]`
+      : m.mode === 'nounpriced'
+        ? ` [no unpriced teammate — split across all ${m.nPriced} priced by market share]`
+      : m.nPriced
+        ? ` [to the ${m.nUnpriced} unpriced${m.weight === 'baseline' ? ' by baseline share' : m.weight === 'depth' ? ' (depth chart)' : ''}; ${m.nPriced} with their own live line left alone]`
+        : '';
+    // Volume the depth chart could not absorb. Said out loud because the team
+    // now produces LESS than its anchor and the user has to be able to see that
+    // it was a decision, not a rounding error.
+    const un = (m.unclaimed > 0.005)
+      ? `; ${pct(m.unclaimed)}${/Yds$/.test(m.stat) ? ` (${Math.round(m.unclaimedYds)} yds)` : ''} unclaimed — no absorber's baseline supports it, so the team produces less`
+      : '';
+    out.push(`⛔ Out: ${short(m.outName)} — ${pct(m.share)} ${m.statLabel.toLowerCase()} → ${to}${more}${un}${why}`);
   }
   if(bare.length){
     const N = 8;
     out.push(`⛔ Out with no market share to redistribute (${bare.length}): `
       + bare.slice(0, N).join(', ') + (bare.length > N ? `, +${bare.length - N} more` : ''));
+  }
+  // ROLE UNCERTAINTY, said out loud. The multiplier moves no mean, so nothing
+  // on the board LOOKS different — which is exactly why it has to be printed:
+  // a silently wider distribution is the kind of change a user should be told
+  // about rather than discover.
+  const POSROOM = {RB:'backfield', WR:'receiving room', TE:'tight end room', QB:'quarterback room'};
+  for(const r of nflRoleUnsettled(slate)){
+    const pr = r.survivors.filter(x => x.priced), un = r.survivors.filter(x => !x.priced);
+    const list = a => a.slice(0, 3).map(x => short(x.name)).join(', ') + (a.length > 3 ? `, +${a.length-3} more` : '');
+    const bits = [];
+    if(pr.length) bits.push(`${list(pr)} ±${Math.round(NFL_ROLE_UNC.sigma*100)}%`);
+    if(un.length) bits.push(`${list(un)} ±${Math.round(NFL_ROLE_UNC.sigmaUnpriced*100)}% (no line of their own)`);
+    out.push(`🎲 ${r.team} ${POSROOM[r.pos] || (r.pos + ' room')} unsettled (${r.outNames.map(short).join(', ')} out)`
+      + ` — shares drawn with extra spread: ${bits.join(' · ')}. Means and the team total are unchanged; only the ceiling widens.`);
   }
   return out;
 }
@@ -22132,7 +22884,7 @@ function simDashTileHtml(ctx, g, isOpen){
 // can render precisely one of them instead of all thirteen; a showdown slate
 // calls it directly with its single game and sees no grid at all.
 function simDashGameHtml(ctx, g){
-  const { adj, cur, model, hidden, pool, open, pct, fmt1, rng } = ctx;
+  const { slate, adj, cur, model, hidden, pool, open, pct, fmt1, rng } = ctx;
   const _dashOut = ctx.dashOut, _outMoveFor = ctx.outMoveFor;
   let html = '';
     const { names, A, B, gs, gAdj } = simDashSides(ctx, g);
@@ -22277,6 +23029,9 @@ function simDashGameHtml(ctx, g){
             <button class="sdash-lock${a.lock?' on':''}" title="${a.lock?'Unlock — let renormalization move him':'Lock his share so other sliders never move him'}" onclick="simDashSet('player/${id}/lock')">${a.lock?'🔒':'🔓'}</button>
             <button class="sdash-mini" style="visibility:${isOv?'visible':'hidden'}" title="Back to market share" onclick="simDashSet('player/${id}/${st.key}','')">↺</button>
             <button class="sdash-outbtn${isOutRow?' on':''}" title="${isOutRow?'Undo OUT — put his market share back':'Mark OUT: he scores 0 and this share goes to his teammates'}" onclick="toggleOut('${id}',event)">⛔</button>
+            ${isOutRow?`<button class="sdash-outbtn sdash-prenews-btn${nflOutPreNews(slate,id)?' on':''}" title="${nflOutPreNews(slate,id)
+              ? 'Lines are PRE-NEWS: priced teammates absorb his share too. Click for the default (books repriced).'
+              : 'Books repriced (default): only teammates with no live line of their own absorb his share. Click if this sheet was pulled BEFORE the announcement.'}" onclick="event.stopPropagation();nflOutSetPreNews('${id}', ${nflOutPreNews(slate,id)?'false':'true'})">📰</button>`:''}
           </div>`;
         }
         if(extras.length){
@@ -22428,6 +23183,33 @@ function renderSimDash(){
       html += `<div class="sdash-out-head"><b>${nOut}</b> player${nOut===1?'':'s'} out — team totals are unchanged, the offense still runs its plays. Every ⛔ share below can be overridden by hand.
         <button onclick="simDashToggleOutNote()">${openNote?'Show less':'Show all'}</button></div>`;
       html += `<div class="sdash-out-note${openNote?' open':''}" id="sdashOutNote">${lines.map(l=>esc(l)).join('<br>')}</div>`;
+      // ── "Have the books repriced?" per OUT player ─────────────────────────
+      // The redistribution's answer to "who absorbs" hinges on it, and the
+      // honest default (yes) is wrong whenever the sheet was pulled before the
+      // announcement — so it is a control, one row per scratch who actually
+      // moves a share, not a global assumption.
+      {
+        const movers = [];
+        const seenM = new Set();
+        for(const mv of (slate._outMoves||[])){
+          if(seenM.has(mv.outId)) continue;
+          seenM.add(mv.outId);
+          movers.push(mv);
+        }
+        if(movers.length){
+          html += `<div class="sdash-out-head" style="margin-top:8px;"><b>Lines</b> — a teammate with his own live line is the market's post-news word on him and is left alone. Flip a scratch to <i>pre-news</i> when the sheet was pulled before the announcement.</div>`;
+          html += `<div class="sdash-prenews">` + movers.map(mv => {
+            const on = nflOutPreNews(slate, mv.outId);
+            return `<label class="sdash-prenews-row"${on?' data-on="1"':''} title="${esc(on
+              ? 'Pre-news: priced teammates absorb ' + mv.outName + "'s share too."
+              : 'Books repriced: only teammates with no line of their own absorb ' + mv.outName + "'s share.")}">`
+              + `<input type="checkbox" ${on?'checked':''} onchange="nflOutSetPreNews('${esc(mv.outId)}', this.checked)">`
+              + `<span>${esc(surnameOf(mv.outName))}</span>`
+              + `<span class="sdash-prenews-state">${on ? 'lines are pre-news — priced teammates absorb too' : 'books repriced (default)'}</span>`
+              + `</label>`;
+          }).join('') + `</div>`;
+        }
+      }
     }
   }
   if(!cur.games.length){ el.innerHTML = html + '<div class="no-data">No Team column — the sim needs teams (and O/U + spread from the odds puller) to build games.</div>'; return; }
@@ -22931,6 +23713,25 @@ function nflBuildShareSim(pool, entries, adj, alphaTotal, teamInfo){
   for(const e of entries){ e._pieK = -1; e._pieTeam = null; e._teamQb1 = false; }
   if(!(alphaTotal > 0)) return null;
   const model = nflShareModel(null, pool, entries, teamInfo);
+  // Which surviving priced players are in an unsettled room (a position their
+  // team just lost someone at). Computed once for the whole slate.
+  // id → the log-sd to widen him by. Priced survivors and unpriced absorbers
+  // carry different numbers (see NFL_ROLE_UNC).
+  let _ruWide = null;
+  try {
+    const _s = (typeof activeSlate === 'function') ? activeSlate() : null;
+    const _sg = Math.max(NFL_ROLE_UNC.sigma || 0, NFL_ROLE_UNC.sigmaUnpriced || 0);
+    if(_s && _sg > 0){
+      const rooms = nflRoleUnsettled(_s);
+      if(rooms.length){
+        _ruWide = new Map();
+        for(const r of rooms) for(const sv of r.survivors){
+          const g = sv.priced ? (NFL_ROLE_UNC.sigma || 0) : (NFL_ROLE_UNC.sigmaUnpriced || 0);
+          if(g > 0) _ruWide.set(sv.id, g);
+        }
+      }
+    }
+  } catch(e){ _ruWide = null; }
   const teams = {};
   for(const T of Object.values(model)){
     const members = T.players.filter(pl => !pl.skip && pl.e.hasProps);
@@ -22942,6 +23743,11 @@ function nflBuildShareSim(pool, entries, adj, alphaTotal, teamInfo){
       base: { recYds: T.base.recYds, rec: T.base.rec, rushYds: T.base.rushYds, td: T.base.td },
       sh:  { recYds: [], rec: [], rushYds: [], td: [] },
       aRec: [], aRush: [], aTd: [], recTdFrac: [],
+      // Per-member log-sd of the role-uncertainty multiplier; 0 for everyone
+      // whose room is settled, which is almost everyone. `roleAny` gates the
+      // whole thing so a team with no scratch consumes NO randomness and its
+      // draws are bit-for-bit what they were.
+      roleU: [], roleAny: false, roleD: null,
       qb1: -1,
       // Coverage guardrail: the fraction of each pie the players in this team's
       // pool actually own. 1 on a normal sheet, in which case every expression
@@ -23056,6 +23862,61 @@ function nflBuildShareSim(pool, entries, adj, alphaTotal, teamInfo){
       TS.aRush.push(TS.sh.rushYds[k] / cRu * alphaTotal);
       TS.aTd.push(TS.sh.td[k] / cT * alphaTotal * NFL_ALPHA_TD_MULT);
     }
+    // ROLE UNCERTAINTY (see NFL_ROLE_UNC): survivors of a room that just lost a
+    // priced player draw their slice with extra spread.
+    {
+      const wide = _ruWide;            // Map id → log-sd, built once above
+      for(let k = 0; k < n; k++){
+        const g = wide ? (wide.get(members[k].p.id) || 0) : 0;
+        TS.roleU.push(g);
+        if(g > 0) TS.roleAny = true;
+      }
+      // MEAN-PRESERVING CORRECTION. The multiplier is mean-1, but the shares are
+      // RENORMALIZED inside the team afterwards, and E[m_k / Σ p_j m_j] is not
+      // E[m_k] / Σ p_j E[m_j] — so a player drawn with a wider sigma than his
+      // room-mates quietly loses mean share to them. MEASURED on GB before this:
+      // Brooks (sigma 0.60) −6.6% and Lloyd (0.35) +4.2%, which is a projection
+      // change dressed up as a spread change and is exactly what this was not
+      // supposed to do. So a per-player factor d_k is solved at build time so the
+      // POST-renormalization mean lands back on the market share — the same
+      // device nflShootFit uses for the shootout tilt, and for the same reason.
+      // Deterministic RNG, so a run is still reproducible.
+      if(TS.roleAny){
+        let rs = 0x9E3779B9;
+        const u = () => { rs = (rs + 0x6D2B79F5) | 0;
+          let t = Math.imul(rs ^ (rs >>> 15), 1 | rs);
+          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+        const gz = () => { const x = Math.max(1e-9, u()), y = u();
+          return Math.sqrt(-2*Math.log(x)) * Math.cos(2*Math.PI*y); };
+        const fit = (shareArr) => {
+          let tot = 0; for(let k = 0; k < n; k++) tot += shareArr[k] || 0;
+          if(!(tot > 0)) return null;
+          const p = new Array(n); for(let k = 0; k < n; k++) p[k] = (shareArr[k] || 0) / tot;
+          const d = new Array(n).fill(1);
+          const M = 600;
+          for(let it = 0; it < 3; it++){
+            const acc = new Array(n).fill(0);
+            for(let w = 0; w < M; w++){
+              let S = 0; const m = new Array(n);
+              for(let k = 0; k < n; k++){
+                const g = TS.roleU[k];
+                m[k] = g > 0 ? d[k] * Math.exp(g * gz() - g*g/2) : 1;
+                S += p[k] * m[k];
+              }
+              if(!(S > 0)) continue;
+              for(let k = 0; k < n; k++) acc[k] += p[k] * m[k] / S;
+            }
+            for(let k = 0; k < n; k++){
+              const got = acc[k] / M;
+              if(got > 1e-12 && p[k] > 1e-12) d[k] *= p[k] / got;
+            }
+          }
+          return d;
+        };
+        TS.roleD = { recYds: fit(TS.sh.recYds), rushYds: fit(TS.sh.rushYds), td: fit(TS.sh.td) };
+      }
+    }
     // Touchdowns that land on the remainder still happened — the offense scored
     // them, so the quarterback threw the ones that were passes. Give a remainder
     // score the team's own (post-anchor) receiving fraction so his pass-TD count
@@ -23122,6 +23983,33 @@ function nflDrawTeamPie(TS, te, gauss){
   }
   const shRec  = nflDirichletTaped(aRec,      TS.bufRec,  gauss, TS.tapeRec,  true);
   const shRush = nflDirichletTaped(TS.aRush, TS.bufRush, gauss, TS.tapeRush, true);
+  // ── ROLE UNCERTAINTY ──────────────────────────────────────────────────────
+  // A per-world lognormal multiplier on the slices of players whose room just
+  // lost someone, renormalized back to the pie's own sum so the TEAM's total
+  // production is untouched to the last bit — only the split moves, and only
+  // its spread (the multiplier is mean-1 by construction). Gated on roleAny so
+  // a settled team consumes no randomness and its draws are unchanged.
+  const roleTilt = (sh, d) => {
+    let s0 = 0, s1 = 0;
+    for(let k = 0; k < n; k++) s0 += sh[k];
+    for(let k = 0; k < n; k++){
+      const g = TS.roleU[k];
+      // The correction is applied only to the WIDENED players. Applying it to
+      // the whole team was tried and reverted: the fit's baseline is TS.sh (the
+      // market share) while a settled player's realized Dirichlet mean is not
+      // exactly that, so "correcting" him moved him — GB's Jordan Love went from
+      // +7% to −12%. Correcting only the players whose distribution actually
+      // changed leaves the residual where it belongs, on the small shares that
+      // absorb the renormalization.
+      if(g > 0) sh[k] *= (d ? d[k] : 1) * Math.exp(g * gauss() - g * g / 2);
+      s1 += sh[k];
+    }
+    if(s1 > 0 && s0 > 0){ const f = s0 / s1; for(let k = 0; k < n; k++) sh[k] *= f; }
+  };
+  if(TS.roleAny){
+    roleTilt(shRec,  TS.roleD && TS.roleD.recYds);
+    roleTilt(shRush, TS.roleD && TS.roleD.rushYds);
+  }
   // COVERAGE REMAINDER. The Dirichlet above split the pie among the players the
   // sheet actually lists; scale each slice back by the covered fraction so the
   // rest of the team's production — the receivers nobody priced or nobody
@@ -23153,6 +24041,10 @@ function nflDrawTeamPie(TS, te, gauss){
   const teamTD = Math.max(0, Math.round(te.score * 0.74 / 7 + gauss() * 0.55));
   // Replays each player's own yardage tape — see nflTape.
   const shTd = nflDirichletTaped(TS.aTd, TS.bufTd, gauss, TS.tapeTd, false);
+  // Touchdowns are touches too: a back who consolidates the room gets the goal
+  // line with it. Same mean-1 multiplier, same renormalization, so the team's
+  // touchdown COUNT (drawn from its score, above) is untouched.
+  if(TS.roleAny) roleTilt(shTd, TS.roleD && TS.roleD.td);
   const recTD = new Array(n).fill(0), rushTD = new Array(n).fill(0);
   let tdSum = 0; for(let k = 0; k < n; k++) tdSum += shTd[k];
   let teamRecTD = 0;
@@ -24177,10 +25069,15 @@ async function runNflSims(pool, numSims, log){
 // derived from N rather than fixed, aimed at a menu of ~10x N, and bounded by a
 // wall-clock cap that the log reports when it binds.
 const NFL_GPP_BUDGET = {
-  genWorlds:    1000,  // even-sim worlds used to SEARCH (EV objective)
-  oosWorlds:    1000,  // odd-sim worlds used to PRICE (held-out EV, portfolio)
-  searchWorlds:    0,  // worlds the hill-climb scores on; 0 = every generation world
-  portWorlds:    400,  // worlds the portfolio greedy integrates log-growth over
+  // SEARCH worlds are capped: the hill climb only needs the ORDERING of
+  // neighbouring lineups, and measured on Matt's Week 1 slate the ordering is
+  // stable past ~1-2k worlds while the cost is linear in them. Everything the
+  // user is SHOWN is a different question and uses every world of its fold.
+  searchWorldsCap: 2000,
+  // Folds. The odd sims are split in half: SELECT prices the menu and runs the
+  // greedy, REPORT is never touched by either. 0 = every available world of the
+  // fold; the ceiling only bounds memory on an absurd sim count.
+  foldWorldsMax: 6000,
   seedsPerLineup: 14,  // seeds ≈ 14 x N, so ~0.85 optima/seed lands near 10x N
   seedsMin:      240,
   seedsMax:     3000,
@@ -24194,7 +25091,10 @@ const NFL_GPP_BUDGET = {
   sharpFromEngine: true, // seed the field's sharp slice with the ENGINE's own optima
   sharpPassSeeds:  220,  // seeds for that throwaway pass
   sharpPassMs:   14000,  // and its wall-clock ceiling
-  overfitFrac:   0.6,  // held-out gross EV below this × search gross EV ⇒ overfit, dropped
+  overfitFrac:   0.6,  // select-fold gross EV below this × search gross EV ⇒ overfit
+  // Above this ratio of (standard error ÷ EV) the reported ROI is not precise
+  // enough to quote without saying so, and the card carries a badge.
+  seWarnFrac:    0.10,
 };
 // The three derived sizes, in one place so the log and the kernel agree.
 function gppSeedPlan(bud, N){
@@ -24707,15 +25607,16 @@ function gppKernelFactory(){
   // "overfit" for it. So both field samples are POOLED into one estimate per
   // ownership scenario (2×NF entries, scaled by F/2NF) and every price the
   // engine quotes uses that one number.
-  function dupModelOf(nP, K, NF, own, linA, linB, F, dupK, theta, maxFrac){
-    const Ns = 2 * NF;
+  function dupModelOf(nP, K, NF, own, lins, F, dupK, theta, maxFrac){
+    if(!Array.isArray(lins)) lins = [lins];
+    const Ns = lins.length * NF;
     const keyCounts = new Array(K), lifts = new Array(K);
     const idx9 = new Int32Array(RSIZE);
     for(let k = 0; k < K; k++){
       const m = new Map();
       const c1 = new Float64Array(nP);
       const lift = new Float32Array(nP * nP);       // pair COUNTS first, lifts in place after
-      for(const lin of [linA, linB]){
+      for(const lin of lins){
         const base = k * NF * RSIZE;
         for(let f = 0; f < NF; f++){
           const lo = base + f*RSIZE;
@@ -24914,11 +25815,27 @@ function gppKernelFactory(){
     const nP = P.nP, pos = P.pos, sal = P.sal, sel = P.sel, team = P.team, opp = P.opp;
     const cap = P.maxSal, floor = P.minSal;
     const payFn = payFnOf(P.payTable);
+    // ── THREE FOLDS, NOT TWO (2026-09-09) ─────────────────────────────────
+    // The greedy used to SELECT on the held-out worlds and the card then
+    // REPORTED the portfolio's value on those same worlds — a winner's curse
+    // straight out of the textbook, and it showed: on Matt's Week 1 slate the
+    // card read +261% ROI against the ~+26% the third-fold engine_oof probe
+    // measures, and the number FELL as worlds were added (the signature). So
+    // the odd sims are split in half: SELECT prices the menu and runs the
+    // greedy, REPORT is never touched by either and every number the user is
+    // shown is recomputed on it, against its own independent field sample.
     const gen = worldSet(P.sg, P.Wg, P.NF, P.K, P.fldLinG, P.F, payFn, P.paidRank);
-    say({phase:'field', which:'generation', ms:Date.now()-t0});
-    const oos = worldSet(P.so, P.Wo, P.NF, P.K, P.fldLinO, P.F, payFn, P.paidRank);
-    say({phase:'field', which:'held-out', ms:Date.now()-t0});
-    const dm = dupModelOf(P.nP, P.K, P.NF, P.ownG, P.fldLinG, P.fldLinO,
+    say({phase:'field', which:'search', ms:Date.now()-t0});
+    const selW = worldSet(P.ss, P.Ws, P.NF, P.K, P.fldLinS, P.F, payFn, P.paidRank);
+    say({phase:'field', which:'select', ms:Date.now()-t0});
+    // The report fold is only built when there is something to report: the sharp
+    // pass runs this same kernel with searchOnly and would otherwise pay for a
+    // world set it never reads.
+    const repW = P.searchOnly ? null : worldSet(P.sr, P.Wr, P.NF, P.K, P.fldLinR, P.F, payFn, P.paidRank);
+    if(!P.searchOnly) say({phase:'field', which:'report', ms:Date.now()-t0});
+    // Duplication is a property of the lineup and the contest, so it is estimated
+    // ONCE, pooling all three field samples (3xNF entries).
+    const dm = dupModelOf(P.nP, P.K, P.NF, P.ownG, [P.fldLinG, P.fldLinS, P.fldLinR],
                           P.F, P.dupK, P.theta, P.maxDupFrac);
     const bud = P.budget;
     const rand = rngOf(P.seed);
@@ -24927,14 +25844,12 @@ function gppKernelFactory(){
     // climb visits ~200 neighbours per step and the objective's ORDERING is
     // what it needs, not its third decimal; the local optima it produces are
     // re-scored on every generation world afterwards.
-    // Search worlds. A SUBSAMPLE was tried here and reverted: at a 150,000-entry
-    // top-heavy payout a lineup's EV is a lottery on the handful of worlds where
-    // it finishes near the top, so thinning the worlds does not just add noise —
-    // it lets the hill climb chase whichever two worlds it was handed. Every
-    // generation world is scored (bud.searchWorlds = 0), which is also what makes
-    // the search EV and the held-out EV the same kind of estimate.
+    // The search scores every world it was GIVEN; the cap on how many it is
+    // given is applied when the payload is packed (searchWorldsCap), because the
+    // hill climb only needs the ordering of neighbouring lineups and that is
+    // stable long before the EV estimate is.
     const sw = [];
-    { const n = bud.searchWorlds > 0 ? Math.min(bud.searchWorlds, gen.W) : gen.W;
+    { const n = gen.W;
       const st = gen.W / n;
       for(let k = 0; k < n; k++) sw.push(Math.floor(k * st)); }
     const searchW = Int32Array.from(sw);
@@ -25259,33 +26174,53 @@ function gppKernelFactory(){
     // what §8's dominance check compares the search's answer against ("the
     // search's best held-out EV ≥ the best per-world-optimal candidate's, on
     // every seed"), and it costs one pass over the seeds.
-    const otot0 = new Float64Array(oos.W);
+    const otot0 = new Float64Array(selW.W);
     const seedPriced = seeds.map(function(sd){
       const d = dupsOf(dm, sd.ids);
-      totalsInto(oos, sd.ids, otot0);
-      return {ids:sd.ids.slice(), kind:sd.kind, heldGross:grossEV(oos, otot0, d, null, null)};
+      totalsInto(selW, sd.ids, otot0);
+      return {ids:sd.ids.slice(), kind:sd.kind, heldGross:grossEV(selW, otot0, d, null, null)};
     });
 
-    // ── Held-out pricing ──────────────────────────────────────────────────
-    // The odd worlds, with an INDEPENDENT field sample. A lineup whose held-out
-    // EV collapses against its search EV was fitted to the generation draws.
-    const otot = new Float64Array(oos.W);
+    // ── SELECT-fold pricing ───────────────────────────────────────────────
+    // Half the odd worlds, with an INDEPENDENT field sample. A lineup whose EV
+    // here collapses against its search EV was fitted to the generation draws.
+    // These numbers order the menu and drive the greedy; they are NOT what the
+    // user is shown (see the report fold below).
+    const otot = new Float64Array(selW.W);
     const priced = [];
     let _pn = 0;
     for(const o of optima.values()){
       if(((_pn++) & 63) === 0 && cancelled()) return {cancelled:true};
       const d = dupsOf(dm, o.ids);
-      totalsInto(oos, o.ids, otot);
+      totalsInto(selW, o.ids, otot);
       const st = {};
-      const g = grossEV(oos, otot, d, null, st);
-      let dsum = 0; for(let k = 0; k < oos.K; k++) dsum += d[k];
-      priced.push({ids:o.ids, searchGross:o.searchGross, heldGross:g, heldEV:g - P.fee,
-                   win:st.win, cash:st.cash, se:st.se, dups:dsum/oos.K, seedKind:o.seedKind});
+      const g = grossEV(selW, otot, d, null, st);
+      let dsum = 0; for(let k = 0; k < selW.K; k++) dsum += d[k];
+      priced.push({ids:o.ids, searchGross:o.searchGross, selGross:g, selEV:g - P.fee,
+                   heldEV:g - P.fee, win:st.win, cash:st.cash, se:st.se,
+                   dups:dsum/selW.K, seedKind:o.seedKind});
     }
     const nOptima = priced.length;
-    priced.sort(function(a,b){ return b.heldEV - a.heldEV; });
+    priced.sort(function(a,b){ return b.selEV - a.selEV; });
+    // ── THE OVERFIT RULE, CALIBRATED TO THE POPULATION ────────────────────
+    // §5 says to drop a local optimum whose held-out EV "falls far below" its
+    // search EV, and the first cut of this used an ABSOLUTE 60% of it. That
+    // threshold is unreachable by construction: the search EV is the value of a
+    // lineup ON THE WORLDS THE HILL CLIMB MAXIMIZED IT ON, an in-sample maximum
+    // over ~800 evaluations, so the whole population sits well below 1.0 and
+    // most of it below 0.6 — measured on Matt's Week 1 slate at 2,500 select
+    // worlds, 409 of 598 optima "failed", and the failure was the estimator's
+    // own bias, not a property of the lineups. So the ratio is compared to the
+    // MEDIAN ratio of the population instead: a lineup is overfit when it is far
+    // below what its peers manage, which is what §5 actually means. The median
+    // and the cut are both logged so the shape of the population is visible.
+    const ratios = [];
+    for(const x of priced) if(x.searchGross > 0) ratios.push(x.selGross / x.searchGross);
+    ratios.sort(function(a,b){ return a - b; });
+    const medRatio = ratios.length ? ratios[ratios.length >> 1] : 1;
+    const cut = Math.max(0.15, bud.overfitFrac * medRatio);
     let kept = priced.filter(function(x){
-      return x.searchGross <= 0 || x.heldGross >= bud.overfitFrac * x.searchGross; });
+      return x.searchGross <= 0 || x.selGross >= cut * x.searchGross; });
     const nFilter = kept.length;
     // MENU FLOOR. The overfit rule is a ratio of two Monte-Carlo means whose
     // standard error, at a top-heavy 150k payout, is the same order as the means
@@ -25296,10 +26231,10 @@ function gppKernelFactory(){
     const floorN = Math.min(nOptima, P.menuTarget);
     let floored = 0;
     if(kept.length < floorN){ floored = floorN - kept.length; kept = priced.slice(0, floorN); }
-    kept.sort(function(a,b){ return b.heldEV - a.heldEV; });
+    kept.sort(function(a,b){ return b.selEV - a.selEV; });
     let seSum = 0; for(const x of priced) seSum += (x.se || 0);
     say({phase:'priced', optima:nOptima, survived:kept.length, filtered:nFilter, floored:floored,
-         se: seSum/Math.max(1, priced.length)});
+         se: seSum/Math.max(1, priced.length), medRatio:medRatio, cut:cut});
     // SEARCH-ONLY pass. The field's "smart money" should be as good as ours
     // (§4's sharp share), and cloning the LEGACY generator's candidates into it
     // models a field this engine beats 2x — i.e. it flatters us. So the engine is
@@ -25312,88 +26247,156 @@ function gppKernelFactory(){
                      survived: kept.length, ms: Date.now() - t0}};
     }
 
-    // ── Portfolio: greedy expected log bankroll growth (§6) ───────────────
-    const menu = kept.slice(0, P.menuTarget);
-    const pw = [];
-    { const n = Math.min(bud.portWorlds, oos.W), st = oos.W / n;
-      for(let k = 0; k < n; k++) pw.push(Math.floor(k * st)); }
-    const PW = pw.length;
-    const M = menu.length;
-    // Per menu lineup × portfolio world: the rank posterior (shape, scale) and
-    // the score. Precomputed once — the greedy then only ever needs
-    // payAt(shape, scale, offset), i.e. "what does this lineup earn once k of
-    // ours are already ahead of it".
-    const mShape = new Float64Array(M*PW), mScale = new Float64Array(M*PW),
-          mScore = new Float64Array(M*PW), mDup = new Float64Array(M*PW);
-    const menuStackN = new Int8Array(M);
-    for(let m = 0; m < M; m++) menuStackN[m] = stackNOf(menu[m].ids);
-    for(let m = 0; m < M; m++){
-      totalsInto(oos, menu[m].ids, otot);
-      const d = dupsOf(dm, menu[m].ids);
-      for(let q = 0; q < PW; q++){
-        const w = pw[q];
-        const est = rankPost(otot[w], oos.views[w], oos.NF, oos.F, w, oos);
-        mShape[m*PW+q] = est.shape; mScale[m*PW+q] = est.scale;
-        mScore[m*PW+q] = otot[w];   mDup[m*PW+q] = d[w % oos.K];
+    // ── PORTFOLIO MACHINERY, ONE IMPLEMENTATION PER FOLD ──────────────────
+    // The SELECT greedy and the REPORT replay are the same arithmetic on
+    // different worlds, so they are the same code. `items` are the lineups this
+    // fold knows about; everything is precomputed once per lineup per world and
+    // the greedy is then a running sum.
+    //
+    // LIVE WORLDS. A lineup below a world's cash threshold earns nothing at any
+    // rank offset, and every one of OUR entries below it in that world is also
+    // unpaid — so its marginal contribution to G there is exactly zero and the
+    // log term is a constant that cancels. Each lineup therefore carries the
+    // list of worlds where it can be paid at all (~35-45% of them), and a greedy
+    // step costs one pass over the fold for the base sum plus one pass over each
+    // candidate's live worlds. That is what lets the fold be every world the
+    // sims produced instead of a 400-world subsample.
+    function foldPort(ws, items){
+      const W = ws.W, M = items.length, thr = ws.cashThr;
+      const mShape = new Float64Array(M*W), mScale = new Float64Array(M*W),
+            mScore = new Float64Array(M*W), mDup = new Float64Array(M*W);
+      const live = new Array(M);
+      const tt = new Float64Array(W);
+      for(let m = 0; m < M; m++){
+        totalsInto(ws, items[m].ids, tt);
+        const d = dupsOf(dm, items[m].ids);
+        const lv = [];
+        for(let q = 0; q < W; q++){
+          const base = m*W + q;
+          mScore[base] = tt[q]; mDup[base] = d[q % ws.K];
+          if(tt[q] < thr[q]) continue;                 // dead world: 0 at every offset
+          rankPostFast(tt[q], ws.views[q], ws.NF, ws.F, q, ws);
+          mShape[base] = RP_shape; mScale[base] = RP_scale;
+          lv.push(q);
+        }
+        live[m] = Int32Array.from(lv);
       }
+      const cur = new Float64Array(W);
+      const chosen = [];
+      let memScore = new Float64Array(0), memStep = new Float64Array(0), memSuf = new Float64Array(0), memN = 0;
+      const rebuild = function(){
+        memN = chosen.length;
+        memScore = new Float64Array(W*Math.max(1,memN));
+        memStep  = new Float64Array(W*Math.max(1,memN));
+        memSuf   = new Float64Array(W*(memN+1));
+        const ord = new Array(memN);
+        for(let q = 0; q < W; q++){
+          for(let k = 0; k < memN; k++) ord[k] = chosen[k];
+          ord.sort(function(a,b){ return mScore[b*W+q] - mScore[a*W+q]; });
+          let s2 = 0;
+          const t0q = thr[q];
+          for(let k = 0; k < memN; k++){
+            const m = ord[k], sc0 = mScore[m*W+q];
+            memScore[q*memN+k] = sc0;
+            // Dead members sort BELOW every live one (the threshold is a score),
+            // so once one is dead the rest are too and contribute nothing.
+            if(sc0 < t0q){ memStep[q*memN+k] = 0; continue; }
+            const dq = mDup[m*W+q];
+            const sh = mShape[m*W+q], sc = mScale[m*W+q], dv = 1 + dupDiv*dq, dof = dupOff*dq;
+            const now = payAt(sh, sc, 1+k+dof, payFn) / dv;
+            memStep[q*memN+k] = payAt(sh, sc, 2+k+dof, payFn) / dv - now;
+            s2 += now;
+          }
+          memSuf[q*(memN+1)+memN] = 0;
+          for(let k = memN-1; k >= 0; k--) memSuf[q*(memN+1)+k] = memSuf[q*(memN+1)+k+1] + memStep[q*memN+k];
+          cur[q] = s2;
+        }
+      };
+      rebuild();
+      // log(B + cur − stake) per world, cached once per greedy step.
+      const logCur = new Float64Array(W);
+      let baseSum = 0, curSum = 0;
+      const prepare = function(n){
+        const stake = n * fee;
+        baseSum = 0; curSum = 0;
+        for(let q = 0; q < W; q++){
+          const v = B + cur[q] - stake;
+          logCur[q] = Math.log(v > 1e-9 ? v : 1e-9);
+          baseSum += logCur[q]; curSum += cur[q];
+        }
+        return stake;
+      };
+      // G if candidate m were added as the n-th lineup.
+      const growthWith = function(m, n, stake){
+        const lv = live[m];
+        if(linear){
+          let add = 0;
+          for(let z = 0; z < lv.length; z++) add += deltaAt(m, lv[z]);
+          return (curSum + add)/W - stake;
+        }
+        let g = baseSum;
+        for(let z = 0; z < lv.length; z++){
+          const q = lv[z], dlt = deltaAt(m, q);
+          if(dlt === 0) continue;
+          const v = B + cur[q] + dlt - stake;
+          g += Math.log(v > 1e-9 ? v : 1e-9) - logCur[q];
+        }
+        return g / W;
+      };
+      // What adding m is worth in world q: its own payout at the rank our own
+      // entries push it to, plus the payout every entry below it LOSES.
+      const deltaAt = function(m, q){
+        const t = mScore[m*W+q];
+        let lo = 0, h = memN;
+        while(lo < h){ const mid = (lo + h) >> 1; if(memScore[q*memN+mid] > t) lo = mid + 1; else h = mid; }
+        const dq = mDup[m*W+q];
+        return payAt(mShape[m*W+q], mScale[m*W+q], 1+lo+dupOff*dq, payFn) / (1 + dupDiv*dq)
+             + memSuf[q*(memN+1)+lo];
+      };
+      const growthNow = function(n){
+        const stake = n * fee;
+        if(linear){ let s2 = 0; for(let q = 0; q < W; q++) s2 += cur[q]; return s2/W - stake; }
+        let g = 0;
+        for(let q = 0; q < W; q++){ const v = B + cur[q] - stake; g += Math.log(v > 1e-9 ? v : 1e-9); }
+        return g/W;
+      };
+      const add = function(m){ chosen.push(m); rebuild(); };
+      const report = function(){
+        const stake = chosen.length * fee;
+        const net = new Float64Array(W);
+        let mean = 0;
+        for(let q = 0; q < W; q++){ net[q] = cur[q] - stake; mean += net[q]; }
+        mean /= Math.max(1, W);
+        let v2 = 0; for(let q = 0; q < W; q++){ const d2 = net[q] - mean; v2 += d2*d2; }
+        const sd = Math.sqrt(v2/Math.max(1, W));
+        let g = 0;
+        for(let q = 0; q < W; q++){ const x = B + net[q]; g += Math.log(x > 1e-9 ? x : 1e-9); }
+        return {mean:mean, sd:sd, se: sd/Math.sqrt(Math.max(1, W)), G: g/Math.max(1, W),
+                stake:stake, worlds:W};
+      };
+      return {W:W, chosen:chosen, prepare:prepare, growthWith:growthWith, growthNow:growthNow,
+              add:add, report:report, liveOf:function(m){ return live[m]; }};
     }
+
+    // ── Portfolio: greedy expected log bankroll growth (§6), on SELECT ─────
+    const menu = kept.slice(0, P.menuTarget);
+    const M = menu.length;
     const N = Math.min(P.N, M);
     const B = P.B, fee = P.fee, linear = !!P.linear;
-    const chosen = [];
-    const cur = new Float64Array(PW);              // Σ payouts of the current portfolio, per world
-    // Per world: our members sorted by score DESC, with the payout they LOSE
-    // when one more of ours lands above them, and the suffix sums of that loss.
-    let memScore = new Float64Array(0), memStep = new Float64Array(0), memSuf = new Float64Array(0);
-    let memN = 0;
+    const menuStackN = new Int8Array(M);
+    for(let m = 0; m < M; m++) menuStackN[m] = stackNOf(menu[m].ids);
+    say({phase:'portfolio', n:0, of:N});
+    const FP = foldPort(selW, menu);
     const expCount = new Int32Array(nP);
     const capOf = function(i){ return P.capSlots[i]; };
-    // Rebuilt after every add: our entries' ranks against each other all move
-    // when a new one lands above them. The arrays are tiny (N ≤ 150 × PW), so
-    // this stays an honest recompute rather than a clever incremental update.
-    const rebuild2 = function(){
-      memN = chosen.length;
-      memScore = new Float64Array(PW*Math.max(1,memN));
-      memStep  = new Float64Array(PW*Math.max(1,memN));
-      memSuf   = new Float64Array(PW*(memN+1));
-      for(let q = 0; q < PW; q++){
-        const ord = chosen.slice();
-        ord.sort(function(a,b){ return mScore[b*PW+q] - mScore[a*PW+q]; });
-        let s = 0;
-        for(let k = 0; k < memN; k++){
-          const m = ord[k];
-          const dq = mDup[m*PW+q];
-          const sh = mShape[m*PW+q], sc = mScale[m*PW+q], dv = 1 + dupDiv*dq, dof = dupOff*dq;
-          memScore[q*memN+k] = mScore[m*PW+q];
-          const now = payAt(sh, sc, 1+k+dof, payFn) / dv;
-          memStep[q*memN+k] = payAt(sh, sc, 2+k+dof, payFn) / dv - now;
-          s += now;
-        }
-        memSuf[q*(memN+1)+memN] = 0;
-        for(let k = memN-1; k >= 0; k--) memSuf[q*(memN+1)+k] = memSuf[q*(memN+1)+k+1] + memStep[q*memN+k];
-        cur[q] = s;
-      }
-    };
-    rebuild2();
-    const growth = function(deltaArr, n){
-      const stake = n * fee;
-      let g = 0;
-      if(linear){
-        for(let q = 0; q < PW; q++) g += cur[q] + deltaArr[q];
-        return g/PW - stake;
-      }
-      for(let q = 0; q < PW; q++) g += Math.log(Math.max(1e-9, B + cur[q] + deltaArr[q] - stake));
-      return g/PW;
-    };
-    const dtmp = new Float64Array(PW);
-    const zero = new Float64Array(PW);
     const inPort = new Uint8Array(M);
     let stalled = 0, gPeak = -Infinity, peakN = 0;
     const nakedPicks = [];
-    while(chosen.length < N){
+    while(FP.chosen.length < N){
       if(cancelled()) return {cancelled:true};
-      let bestM = -1, bestG = -Infinity, bestDelta = null;
-      let bestStackM = -1, bestStackG = -Infinity;
-      const n1 = chosen.length + 1;
+      const n1 = FP.chosen.length + 1;
+      const stake1 = FP.prepare(n1);
+      let bestM = -1, bestG = -Infinity, bestStackM = -1, bestStackG = -Infinity;
       for(let m = 0; m < M; m++){
         if(inPort[m]) continue;
         // Hard caps: Max% exposure and per-player overrides, plus the house
@@ -25401,17 +26404,8 @@ function gppKernelFactory(){
         let blocked = false;
         for(const i of menu[m].ids) if(expCount[i] + 1 > capOf(i)){ blocked = true; break; }
         if(blocked) continue;
-        for(let q = 0; q < PW; q++){
-          const t = mScore[m*PW+q];
-          // how many of ours already beat it in this world (memScore desc)
-          let lo = 0, h = memN;
-          while(lo < h){ const mid = (lo + h) >> 1; if(memScore[q*memN+mid] > t) lo = mid + 1; else h = mid; }
-          const pushdown = memSuf[q*(memN+1)+lo];
-          const dq = mDup[m*PW+q];
-          dtmp[q] = payAt(mShape[m*PW+q], mScale[m*PW+q], 1+lo+dupOff*dq, payFn) / (1 + dupDiv*dq) + pushdown;
-        }
-        const g = growth(dtmp, n1);
-        if(g > bestG){ bestG = g; bestM = m; bestDelta = Float64Array.from(dtmp); }
+        const g = FP.growthWith(m, n1, stake1);
+        if(g > bestG){ bestG = g; bestM = m; }
         // The best STACKED alternative available at this same step, so a naked
         // pick can be reported as a margin over a real competitor instead of an
         // assertion. Nothing here influences the choice.
@@ -25423,62 +26417,103 @@ function gppKernelFactory(){
       // which is real information. The user asked for N lineups, so the greedy
       // still builds N; the peak is recorded and reported instead of silently
       // truncating a board the user is waiting for.
-      const gNow = growth(zero, chosen.length);
-      if(chosen.length === 0 || bestG >= gPeak){ gPeak = bestG; peakN = chosen.length + 1; }
-      if(chosen.length > 0 && bestG < gNow && !stalled) stalled = 2;
-      if(menuStackN[bestM] === 0){
-        nakedPicks.push({
-          step: chosen.length + 1,
-          gChosen: bestG,
-          gBestStacked: bestStackM >= 0 ? bestStackG : null,
-          dG: bestStackM >= 0 ? bestG - bestStackG : null,
-          evChosen: menu[bestM].heldEV,
-          evBestStacked: bestStackM >= 0 ? menu[bestStackM].heldEV : null,
-        });
-      }
+      const gNow = FP.growthNow(FP.chosen.length);
+      if(FP.chosen.length === 0 || bestG >= gPeak){ gPeak = bestG; peakN = FP.chosen.length + 1; }
+      if(FP.chosen.length > 0 && bestG < gNow && !stalled) stalled = 2;
+      if(menuStackN[bestM] === 0)
+        nakedPicks.push({step: FP.chosen.length + 1, m: bestM, altM: bestStackM});
       inPort[bestM] = 1;
-      chosen.push(bestM);
       for(const i of menu[bestM].ids) expCount[i]++;
-      rebuild2();
-      if((chosen.length & 7) === 0) say({phase:'portfolio', n:chosen.length, of:N});
+      FP.add(bestM);
+      if((FP.chosen.length & 7) === 0) say({phase:'portfolio', n:FP.chosen.length, of:N});
     }
+    const chosen = FP.chosen;
+    const selRep = FP.report();
 
-    // ── Portfolio report ──────────────────────────────────────────────────
-    const netW = new Float64Array(PW);
-    const stake = chosen.length * fee;
-    let meanNet = 0;
-    for(let q = 0; q < PW; q++){ netW[q] = cur[q] - stake; meanNet += netW[q]; }
-    meanNet /= Math.max(1, PW);
-    let v = 0; for(let q = 0; q < PW; q++){ const d = netW[q] - meanNet; v += d*d; }
-    const sdNet = Math.sqrt(v/Math.max(1, PW));
-    // The portfolio EV is a mean over worlds, so it carries the standard error
-    // of one. Worlds are the sampling unit (every lineup is scored in all of
-    // them), so this is sd/sqrt(PW) and it is what the ROI claim is worth.
-    const seNet = sdNet / Math.sqrt(Math.max(1, PW));
-    let G = 0;
-    for(let q = 0; q < PW; q++) G += Math.log(Math.max(1e-9, B + netW[q]));
-    G = G/Math.max(1, PW);
+    // ── REPORT fold: every number the user is shown ───────────────────────
+    // Untouched by the search, the menu ordering and the greedy. Per-lineup EV,
+    // win% and cash% are standalone here (a lineup priced on its own, which is
+    // what a lineup card has always meant); the portfolio aggregate is the joint
+    // ranking §6 specifies.
+    say({phase:'report', n:chosen.length});
+    const rtot = new Float64Array(repW.W);
+    const repLine = chosen.map(function(m){
+      const ids = menu[m].ids;
+      const d = dupsOf(dm, ids);
+      totalsInto(repW, ids, rtot);
+      const st = {};
+      const g = grossEV(repW, rtot, d, null, st);
+      let dsum = 0; for(let k = 0; k < repW.K; k++) dsum += d[k];
+      return {ids:ids, ev:g - P.fee, gross:g, win:st.win, cash:st.cash, se:st.se, dups:dsum/repW.K};
+    });
+    // The same greedy sequence replayed on the report fold, so the portfolio's
+    // joint-ranked value — and the naked-vs-stacked margins — are report-fold
+    // numbers too. The union carries the alternatives the log quotes.
+    const altSet = [];
+    for(const np of nakedPicks) if(np.altM >= 0 && altSet.indexOf(np.altM) < 0) altSet.push(np.altM);
+    const repItems = chosen.map(function(m){ return menu[m]; })
+                           .concat(altSet.map(function(m){ return menu[m]; }));
+    const repIdxOfMenu = new Map();
+    chosen.forEach(function(m, i){ repIdxOfMenu.set(m, i); });
+    altSet.forEach(function(m, i){ repIdxOfMenu.set(m, chosen.length + i); });
+    const RP = foldPort(repW, repItems);
+    const nakedOut = [];
+    for(let k = 0; k < chosen.length; k++){
+      const np = nakedPicks.find(function(x){ return x.step === k + 1; });
+      if(np){
+        const stakeK = RP.prepare(k + 1);
+        const gC = RP.growthWith(repIdxOfMenu.get(np.m), k + 1, stakeK);
+        const gA = (np.altM >= 0) ? RP.growthWith(repIdxOfMenu.get(np.altM), k + 1, stakeK) : null;
+        nakedOut.push({step: np.step, gChosen: gC, gBestStacked: gA,
+                       dG: gA == null ? null : gC - gA,
+                       evChosen: repLine[k].ev,
+                       evBestStacked: gA == null ? null : (function(){
+                         const j = chosen.indexOf(np.altM);
+                         if(j >= 0) return repLine[j].ev;
+                         const ids = menu[np.altM].ids;
+                         const d = dupsOf(dm, ids);
+                         totalsInto(repW, ids, rtot);
+                         return grossEV(repW, rtot, d, null, null) - P.fee;
+                       })()});
+      }
+      RP.add(k);           // the first chosen.length items of repItems are the board, in order
+    }
+    const repPort = RP.report();
 
+    // Per-lineup REPORT-fold standard error, averaged — the ± every EV below
+    // should be read against.
+    let repSE = 0; for(const x of repLine) repSE += (x.se || 0);
+    repSE /= Math.max(1, repLine.length);
     return {
-      lineups: chosen.map(function(m){
-        const x = menu[m];
-        return {ids:x.ids, heldEV:x.heldEV, heldGross:x.heldGross, searchGross:x.searchGross,
-                win:x.win, cash:x.cash, dups:x.dups, seedKind:x.seedKind};
+      lineups: chosen.map(function(m, i){
+        const x = menu[m], r = repLine[i];
+        // heldEV / win / cash / se are REPORT-fold, i.e. out of sample for the
+        // greedy. selEV is kept beside them so the optimism is measurable.
+        return {ids:x.ids, heldEV:r.ev, heldGross:r.gross, se:r.se,
+                selEV:x.selEV, selGross:x.selGross, searchGross:x.searchGross,
+                win:r.win, cash:r.cash, dups:r.dups, seedKind:x.seedKind};
       }),
       diag: {
         seeds: seeds.length, seedOpt: nOptSeeds, seedRand: nRandSeeds, seedStack: nStackSeeds,
         seedsPlanned: plan.total, seedsClimbed: climbedSeeds, capBound: capBound,
-        menuTarget: P.menuTarget, nakedPicks: nakedPicks,
+        menuTarget: P.menuTarget, nakedPicks: nakedOut,
         optima: nOptima, survived: kept.length, dropped: nOptima - nFilter, floored: floored,
-        meanSE: seSum/Math.max(1, priced.length),
+        medRatio: medRatio, overfitCut: cut,
+        meanSE: repSE, selMeanSE: seSum/Math.max(1, priced.length),
         evals: evalCount, climbs: climbed, ms: Date.now() - t0,
-        searchWorlds: searchW.length, genWorlds: gen.W, oosWorlds: oos.W, portWorlds: PW,
+        searchWorlds: searchW.length, genWorlds: gen.W,
+        selWorlds: selW.W, repWorlds: repW.W, portWorlds: selW.W,
         menu: M, stalled: stalled, peakN: peakN, gPeak: gPeak,
-        meanNet: meanNet, sdNet: sdNet, seNet: seNet, G: G, stake: stake, B: B, linear: linear,
+        // REPORT fold — what the card and the log show.
+        meanNet: repPort.mean, sdNet: repPort.sd, seNet: repPort.se, G: repPort.G,
+        // SELECT fold — what the greedy maximized. Kept so the winner's curse is
+        // a printed number instead of an argument.
+        selMeanNet: selRep.mean, selSeNet: selRep.se, selG: selRep.G,
+        stake: repPort.stake, B: B, linear: linear,
         seedPriced: seedPriced,
         // Every priced local optimum, for §8's dominance and out-of-fold checks.
         allPriced: priced.map(function(x){
-          return {ids:x.ids, heldEV:x.heldEV, heldGross:x.heldGross, searchGross:x.searchGross,
+          return {ids:x.ids, heldEV:x.selEV, heldGross:x.selGross, searchGross:x.searchGross,
                   win:x.win, cash:x.cash, dups:x.dups, seedKind:x.seedKind}; }),
       },
     };
@@ -25602,20 +26637,36 @@ async function runNflGppEngine(ctx){
   // The generation/pricing split is the existing one: even sims generate, odd
   // sims price. Everything the search sees comes from the even half, so a
   // lineup cannot cash the exact draws that created it.
-  const pickWorlds = (parity, want) => {
-    const avail = [];
-    for(let t = parity; t < simsDone; t += 2) avail.push(t);
-    const n = Math.min(want, avail.length), out = [];
-    const st = avail.length / Math.max(1, n);
-    for(let k = 0; k < n; k++) out.push(avail[Math.floor(k*st)]);
+  // THE BUDGET FOLLOWS THE SIM COUNT. It used to be hard-capped at 1000/1000/400
+  // however many sims were run, which threw away 90% of a 10,000-sim run exactly
+  // where it was needed: at 8,000 entries with $10,148 to first, 400 worlds gave
+  // a per-lineup EV standard error of $2.57 against a ~$8 mean, and 482 of 593
+  // local optima tripped the overfit rule on that noise alone. Only the SEARCH
+  // is capped now (ordering, not estimation); menu pricing, the greedy and every
+  // reported number use every world of their fold.
+  const stride = (arr, want) => {
+    if(!(want > 0) || want >= arr.length) return arr.slice();
+    const out = [], st = arr.length / want;
+    for(let k = 0; k < want; k++) out.push(arr[Math.floor(k*st)]);
     return out;
   };
-  const genIdx = pickWorlds(0, bud.genWorlds);
-  const oosIdx = pickWorlds(1, bud.oosWorlds);
-  if(genIdx.length < 32 || oosIdx.length < 32){
-    log(`⚠ Only ${genIdx.length}/${oosIdx.length} generation/pricing worlds available — raise the sim count.`);
-    if(!genIdx.length || !oosIdx.length) return null;
+  const evens = [], odds = [];
+  for(let t = 0; t < simsDone; t++) (t % 2 ? odds : evens).push(t);
+  const genIdx = stride(evens, Math.min(bud.searchWorldsCap, bud.foldWorldsMax));
+  // SELECT and REPORT interleave through the odd sims so neither fold is a
+  // contiguous block of the run (the sim stream has no time structure, but
+  // interleaving costs nothing and removes the question).
+  const selAll = odds.filter((_, i) => i % 2 === 0);
+  const repAll = odds.filter((_, i) => i % 2 === 1);
+  const selIdx = stride(selAll, bud.foldWorldsMax);
+  const repIdx = stride(repAll, bud.foldWorldsMax);
+  if(genIdx.length < 32 || selIdx.length < 32 || repIdx.length < 32){
+    log(`⚠ Only ${genIdx.length}/${selIdx.length}/${repIdx.length} search/select/report worlds available — raise the sim count.`);
+    if(!genIdx.length || !selIdx.length || !repIdx.length) return null;
   }
+  log(`Worlds: ${genIdx.length.toLocaleString()} search (even sims, capped at ${bud.searchWorldsCap.toLocaleString()} — the hill climb needs an ordering, not an estimate) · `
+    + `${selIdx.length.toLocaleString()} SELECT + ${repIdx.length.toLocaleString()} REPORT (the odd sims, split and disjoint). `
+    + `The greedy never sees the report fold; every number below it is out of sample.`);
   const packScores = (idxList) => {
     const W = idxList.length, out = new Float32Array(nP * W);
     for(let i = 0; i < nP; i++){
@@ -25626,9 +26677,10 @@ async function runNflGppEngine(ctx){
     }
     return out;
   };
-  gppProgressPhase(`packing ${(genIdx.length+oosIdx.length).toLocaleString()} world score vectors`);
+  gppProgressPhase(`packing ${(genIdx.length+selIdx.length+repIdx.length).toLocaleString()} world score vectors`);
   const sg = packScores(genIdx);
-  const so = packScores(oosIdx);
+  const ss = packScores(selIdx);
+  const sr = packScores(repIdx);
   await tick(); if(window._genCancelled) return null;
 
   // ── Ownership + field ─────────────────────────────────────────────────────
@@ -25688,12 +26740,14 @@ async function runNflGppEngine(ctx){
   gppProgressPhase('sampling the opponent field');
   const fldLinG = sampleSet('generation');
   await tick(); if(window._genCancelled) return null;
-  const fldLinO = sampleSet('held-out');
-  if(!fldLinG || !fldLinO){
+  const fldLinS = sampleSet('select');
+  await tick(); if(window._genCancelled) return null;
+  const fldLinR = sampleSet('report');
+  if(!fldLinG || !fldLinS || !fldLinR){
     log('⚠ Field sampler produced no lineups — check the ownership column and that the pool can fill a legal roster under the cap/floor.');
     return null;
   }
-  log(`Field: ${K}×${NF.toLocaleString()} lineups sampled for the generation worlds and an INDEPENDENT ${K}×${NF.toLocaleString()} for the held-out worlds`
+  log(`Field: three INDEPENDENT samples of ${K}×${NF.toLocaleString()} lineups — one per fold (search / select / report)`
     + (sharpPool ? `, ${Math.round(sharpShare*100)}% of entries drawn from the candidate pool (optimizers), not Own% chalk.` : ' (no sharp slice available — pure Own% chalk).'));
   await tick(); if(window._genCancelled) return null;
 
@@ -25732,12 +26786,12 @@ async function runNflGppEngine(ctx){
 
   const payload = {
     nP, pos, sal, sel, team, opp,
-    Wg: genIdx.length, Wo: oosIdx.length, sg, so,
+    Wg: genIdx.length, Ws: selIdx.length, Wr: repIdx.length, sg, ss, sr,
     NF, K, F, fee, dupK: evDupK('nfl'),
     ownG: Float32Array.from(scen.flatMap(v => Array.from(v))),
     ownO: Float32Array.from(scen.flatMap(v => Array.from(v))),
     theta: NFL_GPP_DUP_THETA, maxDupFrac: NFL_GPP_DUP_MAXFRAC,
-    fldLinG, fldLinO, payTable, paidRank: gppPaidRank(payout, F),
+    fldLinG, fldLinS, fldLinR, payTable, paidRank: gppPaidRank(payout, F),
     maxSal, minSal, N: target, B, capSlots,
     seedPlan: gppSeedPlan(bud, target), menuTarget: gppMenuTarget(bud, target),
     seedOpt: Int32Array.from(seedOptArr),
@@ -25768,17 +26822,22 @@ async function runNflGppEngine(ctx){
       budget: Object.assign({}, bud, {budgetMs: bud.sharpPassMs}),
     });
     const preOut = await gppRunKernel(pre, m => {
-      if(m && m.phase === 'search' && m.done) log(`  sharp pass: ${m.optima} of the engine's own local optima in ${(m.ms/1000).toFixed(1)}s — the field's smart money is now as good as ours`);
+      // Quiet by design: the sharp pass is a means, not a result, and letting it
+      // print the same search block as the real run made the log read as if the
+      // engine had searched twice.
+      if(m && m.phase === 'search' && !m.done) gppProgressPhase(`sharp pass — ${m.seed}/${m.of} seeds`);
+      if(m && m.phase === 'search' && m.done) log(`Sharp pass: ${m.optima} of the engine's own local optima in ${(m.ms/1000).toFixed(1)}s — the field's smart money is now as good as ours.`);
     });
     if(preOut && preOut.cancelled) return null;
     const sharpIdx = (preOut && preOut.result && preOut.result.sharp) || [];
     if(sharpIdx.length >= 20){
       const asIdx = sharpIdx.map(ids => ({idxs: Array.from(ids), w: 1}));
       const enginePool = {asIdx, totW: asIdx.length};
-      const g2 = sampleSet('generation', enginePool);
-      const o2 = sampleSet('held-out', enginePool);
-      if(g2 && o2){
-        payload.fldLinG = g2; payload.fldLinO = o2;
+      const g2 = sampleSet('search', enginePool);
+      const s2 = sampleSet('select', enginePool);
+      const r2 = sampleSet('report', enginePool);
+      if(g2 && s2 && r2){
+        payload.fldLinG = g2; payload.fldLinS = s2; payload.fldLinR = r2;
         log(`  field re-sampled: ${Math.round(sharpShare*100)}% of entries are now the ENGINE's own local optima (${sharpIdx.length} distinct), not the legacy generator's candidates. Every EV below is priced against that harder field (${((Date.now()-t1)/1000).toFixed(1)}s).`);
       }
     } else {
@@ -25793,20 +26852,20 @@ async function runNflGppEngine(ctx){
     if(!m) return;
     // Phase + counter for the progress line. The search is the long one, so it
     // reports seeds climbed out of seeds planned.
-    if(m.phase === 'field') gppProgressPhase(`pricing the field on the ${m.which} worlds`);
+    if(m.phase === 'field') gppProgressPhase(`pricing the field — ${m.which} fold`);
     else if(m.phase === 'seeds') gppProgressPhase(`${m.total.toLocaleString()} seeds built — starting the search`);
     else if(m.phase === 'search') gppProgressPhase(m.done
       ? `search done — ${m.optima.toLocaleString()} local optima`
       : `search — ${m.seed.toLocaleString()} of ${m.of.toLocaleString()} seeds, ${m.optima.toLocaleString()} local optima`);
-    else if(m.phase === 'priced') gppProgressPhase(`held-out pricing — ${m.optima.toLocaleString()} local optima priced`);
-    else if(m.phase === 'portfolio') gppProgressPhase('portfolio — greedy expected log growth');
+    else if(m.phase === 'priced') gppProgressPhase(`select-fold pricing — ${m.optima.toLocaleString()} local optima`);
+    else if(m.phase === 'portfolio') gppProgressPhase(`portfolio — greedy expected log growth (${m.n||0}/${m.of||0})`);
+    else if(m.phase === 'report') gppProgressPhase('re-pricing on the report fold');
     if(m.phase === 'fallback') log('  (no worker available — running the engine on the main thread; the UI will freeze for a few seconds)');
-    else if(m.phase === 'field') log(`  field priced on the ${m.which} worlds (${(m.ms/1000).toFixed(1)}s)`);
+    else if(m.phase === 'field' && m.which === 'report') log(`  all three folds' fields priced (${(m.ms/1000).toFixed(1)}s)`);
     else if(m.phase === 'seeds') log(`  seeds: ${m.total} of ${m.planned} planned (${m.optimal} per-world optimals, ${m.stacked} enumerated stacked shapes, ${m.random} ownership-weighted random) — starting points, not candidates`);
-    else if(m.phase === 'search' && (m.done || m.seed % 32 === 0)) log(`  search: ${m.seed}/${m.of} seeds climbed, ${m.optima} distinct local optima (${(m.ms/1000).toFixed(1)}s)`);
-    else if(m.phase === 'priced') log(`  held-out pricing: ${m.optima} local optima → ${m.filtered} passed the overfit rule`
-      + (m.floored ? `, +${m.floored} re-admitted to keep a buildable menu` : '') + ` (mean EV standard error $${(m.se||0).toFixed(2)}/lineup)`);
-    else if(m.phase === 'portfolio' && lastPhase !== 'portfolio'){ lastPhase = 'portfolio'; log('  portfolio: greedy expected log growth…'); }
+    else if(m.phase === 'search' && !m.done && m.seed > 0 && m.seed % 256 === 0) log(`  search: ${m.seed}/${m.of} seeds, ${m.optima} local optima (${(m.ms/1000).toFixed(1)}s)`);
+    else if(m.phase === 'portfolio' && lastPhase !== 'portfolio'){ lastPhase = 'portfolio'; log('  portfolio: greedy expected log growth on the select fold…'); }
+    else if(m.phase === 'report') log('  re-pricing the board on the untouched report fold…');
   });
   if(!out || out.cancelled){ return null; }
   if(out.error){ log('⚠ GPP engine failed: ' + esc(String(out.error).split('\n')[0])); return null; }
@@ -25814,27 +26873,39 @@ async function runNflGppEngine(ctx){
   const d = res.diag;
 
   // ── The log (spec §7) ─────────────────────────────────────────────────────
-  log(`Worlds: ${d.genWorlds.toLocaleString()} generation (even sims) / ${d.oosWorlds.toLocaleString()} held-out (odd sims); the hill climb scored on ${d.searchWorlds} of the generation worlds, the portfolio integrated log-growth over ${d.portWorlds} held-out worlds.`);
+  // Deduped 2026-09-09: the worlds line is printed once, up front, where the
+  // folds are decided; the search summary is one line, not three overlapping
+  // ones; and the sharp pass no longer emits its own per-seed progress block.
   if(d.capBound)
-    log(`  Search hit its ${Math.round(bud.budgetMs/1000)}s wall-clock cap: ${d.seedsClimbed} of ${d.seeds} seeds were climbed.`);
+    log(`Search hit its ${Math.round(bud.budgetMs/1000)}s wall-clock cap: ${d.seedsClimbed} of ${d.seeds} seeds were climbed.`);
+  log(`Search: ${d.seedsClimbed} of ${d.seeds} seeds → ${d.optima} distinct local optima → ${d.survived} on the menu (target ${d.menuTarget})`
+    + `, ${d.evals.toLocaleString()} evaluations in ${(d.ms/1000).toFixed(1)}s`
+    + (d.ms > 0 ? ` (${Math.round(d.evals/(d.ms/1000)/1000)}k/s on ${d.searchWorlds.toLocaleString()} worlds).` : '.'));
+  log(`Overfit rule: ${d.optima - d.dropped} of ${d.optima} local optima passed. The search EV is an IN-SAMPLE maximum, so the population's median select/search ratio is ${d.medRatio.toFixed(2)}, not 1 — the cut is ${Math.round(bud.overfitFrac*100)}% of that median (${d.overfitCut.toFixed(2)}), i.e. "far below what its peers manage".`
+    + (d.floored ? ` ${d.floored} more were re-admitted to reach the ${d.menuTarget} menu target.` : ''));
   if(d.survived < d.menuTarget)
-    log(`  ⚠ The menu is ${d.survived}, under the ${d.menuTarget} target (${bud.menuPerLineup}× the lineups asked for). A menu that is barely larger than N forces the greedy to take almost every candidate, and that is the one thing measured to cost this engine its out-of-fold edge — raise NFL_GPP_BUDGET.budgetMs, or ask for fewer lineups.`);
-  log(`Search: ${d.seedsClimbed} of ${d.seeds} seeds climbed → ${d.optima} distinct local optima → ${d.survived} on the portfolio menu (target ${d.menuTarget} = ${bud.menuPerLineup}× the ${target} lineups asked for)`
-    + (d.dropped ? ` (${d.dropped} flagged overfit: held-out EV under ${Math.round(bud.overfitFrac*100)}% of search EV` : ' (none flagged overfit')
-    + (d.floored ? `; ${d.floored} of them re-admitted — see the note below).` : ').')
-    + ` ${d.evals.toLocaleString()} lineup evaluations in ${(d.ms/1000).toFixed(1)}s`
-    + (d.ms > 0 ? ` (${Math.round(d.evals/(d.ms/1000)/1000)}k/s on ${d.searchWorlds} worlds).` : '.'));
+    log(`  ⚠ The menu is ${d.survived}, under the ${d.menuTarget} target (${bud.menuPerLineup}× the lineups asked for). A menu barely larger than N forces the greedy to take almost every candidate — measured to cost this engine its whole out-of-fold edge. Raise the search cap, or ask for fewer lineups.`);
   const L = res.lineups;
   if(!L.length){ log('⚠ The portfolio greedy selected nothing — loosen Max% or widen the pool.'); return null; }
   if(d.stalled === 1) log(`  (stopped at ${L.length} of ${target}: every remaining candidate would break a Max%/override cap, or the menu ran out)`);
   if(d.stalled === 2 && d.peakN < L.length) log(`  Expected log growth PEAKED at ${d.peakN} lineup${d.peakN===1?'':'s'} and falls after that — past ${d.peakN} each extra entry fee costs more growth than its share of the payout curve returns. The board below is the ${L.length} you asked for; the first ${d.peakN} are the ones the bankroll actually wants.`);
-  log(`Held-out EV is a Monte-Carlo mean with standard error $${d.meanSE.toFixed(2)} per lineup on ${d.oosWorlds.toLocaleString()} worlds`
-    + (d.floored ? ` — at ${F.toLocaleString()} entries with $${Math.round(payout.at(1)).toLocaleString()} to first, a lineup's EV is mostly the probability of the top prize, so ${d.floored} lineups the overfit ratio rejected were re-admitted rather than starve the menu. Read every EV below against that ±.` : `. Read every EV below against that ±.`));
   const roi = d.stake > 0 ? (d.meanNet / d.stake) * 100 : 0;
   const roiSE = d.stake > 0 ? (d.seNet / d.stake) * 100 : 0;
-  log(`Portfolio: ${L.length} lineups, EV ${d.meanNet >= 0 ? '+' : ''}$${d.meanNet.toFixed(2)} ± $${d.seNet.toFixed(2)} on $${d.stake.toFixed(2)} entered `
-    + `(${roi >= 0 ? '+' : ''}${roi.toFixed(1)}% ± ${roiSE.toFixed(1)}% ROI, 1 s.e. over ${d.portWorlds} worlds), per-world net sd $${d.sdNet.toFixed(2)}.`);
-  log(`Expected log growth G = ${d.G.toFixed(6)} (vs log B = ${Math.log(d.B).toFixed(6)}; the whole risk adjustment is the concavity of log at B = $${Math.round(d.B).toLocaleString()}).`);
+  const selRoi = d.stake > 0 ? (d.selMeanNet / d.stake) * 100 : 0;
+  // BOTH folds, labelled. The selection-fold number is the one the greedy
+  // maximized and it is optimistic by construction — printing it next to the
+  // honest one is what makes the size of the winner's curse visible instead of
+  // arguable.
+  log(`Portfolio (SELECTION fold — optimistic, this is what the greedy maximized): `
+    + `EV ${d.selMeanNet >= 0 ? '+' : ''}$${d.selMeanNet.toFixed(2)} on $${d.stake.toFixed(2)} (${selRoi >= 0 ? '+' : ''}${selRoi.toFixed(1)}% ROI).`);
+  log(`Portfolio (REPORT fold — held out from the search, the menu and the greedy; USE THIS ONE): `
+    + `EV ${d.meanNet >= 0 ? '+' : ''}$${d.meanNet.toFixed(2)} ± $${d.seNet.toFixed(2)} on $${d.stake.toFixed(2)} entered `
+    + `(${roi >= 0 ? '+' : ''}${roi.toFixed(1)}% ± ${roiSE.toFixed(1)}% ROI, 1 s.e. over ${d.repWorlds.toLocaleString()} worlds), per-world net sd $${d.sdNet.toFixed(2)}.`);
+  const seFrac = Math.abs(d.meanNet) > 1e-9 ? Math.abs(d.seNet / d.meanNet) : 1;
+  if(seFrac > bud.seWarnFrac)
+    log(`  ⚠ That ROI is ±${Math.round(100*seFrac)}% of itself in relative terms — at ${F.toLocaleString()} entries with $${Math.round(payout.at(1)).toLocaleString()} to first, a portfolio's EV is mostly the probability of the top prize and ${d.repWorlds.toLocaleString()} worlds is not enough to pin it down. Read the sign and the order of magnitude, not the digits; more sims narrow it as 1/√n.`);
+  log(`Per-lineup EV on the report fold carries a standard error of $${d.meanSE.toFixed(2)}.`);
+  log(`Expected log growth G = ${d.G.toFixed(6)} on the report fold (selection fold ${d.selG.toFixed(6)}; log B = ${Math.log(d.B).toFixed(6)} — the whole risk adjustment is the concavity of log at B = $${Math.round(d.B).toLocaleString()}).`);
   return {res, payTable, payload, F, fee, B, payout};
 }
 
@@ -25849,10 +26920,14 @@ async function runNflGppBoard(ctx){
   const fee = r.fee, d = r.res.diag;
   // Held-out world indices, re-derived exactly as the engine derived them, so
   // the Sim column on a card is a mean over the same worlds its EV was priced on.
+  // The REPORT fold, re-derived exactly as the engine derived it, so the Sim
+  // column on a card is a mean over the same worlds its EV was priced on.
   const oosIdx = [];
-  { const avail = []; for(let t = 1; t < simsDone; t += 2) avail.push(t);
-    const n = Math.min(NFL_GPP_BUDGET.oosWorlds, avail.length), st = avail.length/Math.max(1,n);
-    for(let k = 0; k < n; k++) oosIdx.push(avail[Math.floor(k*st)]); }
+  { const odds = []; for(let t = 1; t < simsDone; t += 2) odds.push(t);
+    const rep = odds.filter((_, i) => i % 2 === 1);
+    const want = NFL_GPP_BUDGET.foldWorldsMax;
+    if(!(want > 0) || want >= rep.length) oosIdx.push.apply(oosIdx, rep);
+    else { const st = rep.length/want; for(let k = 0; k < want; k++) oosIdx.push(rep[Math.floor(k*st)]); } }
 
   const out = r.res.lineups.map(x => {
     const l = x.ids.map(i => fieldPool[i]);
@@ -25955,13 +27030,24 @@ async function runNflGppBoard(ctx){
     else badges.push({kind:'ok', text:`menu ${d.survived}`, tip:`At or above the ${d.menuTarget} target (${NFL_GPP_BUDGET.menuPerLineup}× the lineups asked for).`});
     if(d.stalled === 2 && d.peakN < out.length) badges.push({kind:'warn', text:`growth peaks at ${d.peakN}`,
       tip:`Past ${d.peakN} lineups each extra entry fee costs more growth than its share of the payout curve returns.`});
+    // FALSE PRECISION IS A DEFECT. When the reported ROI's own standard error is
+    // a large fraction of it, say so on the card rather than printing digits the
+    // sample cannot support.
+    const seFracC = Math.abs(d.meanNet) > 1e-9 ? Math.abs(d.seNet / d.meanNet) : 1;
+    if(seFracC > NFL_GPP_BUDGET.seWarnFrac) badges.push({kind:'warn', text:`±${Math.round(100*seFracC)}% of itself`,
+      tip:`The reported EV is a Monte-Carlo mean over ${d.repWorlds.toLocaleString()} report-fold worlds and its standard error is ${Math.round(100*seFracC)}% of the estimate. Read the sign and the order of magnitude; more sims narrow it as 1/√n.`});
+    else badges.push({kind:'ok', text:`±${Math.round(100*seFracC)}% of itself`,
+      tip:`The reported EV's standard error is ${Math.round(100*seFracC)}% of the estimate over ${d.repWorlds.toLocaleString()} report-fold worlds.`});
+    // The size of the winner's curse, as a number.
+    if(d.selMeanNet != null && d.stake > 0) badges.push({kind:'ok', text:`select fold +${((d.selMeanNet/d.stake)*100).toFixed(0)}%`,
+      tip:`What the greedy maximized, on the worlds it selected on — optimistic by construction. The headline number is the report fold, which the greedy never saw.`});
     const expCnt = {}; out.forEach(l => l.forEach(p => { expCnt[p.id] = (expCnt[p.id]||0)+1; }));
     const dupRows = out.map((l,i) => ({l, i, dv:l._gpp.dups})).sort((a,b) => b.dv - a.dv)
       .filter(x => x.dv > 0.01).slice(0, 5);
     renderGppCard({
       title: `${out.length} lineups · GPP engine`,
       sub: `EV ${d.meanNet >= 0 ? '+' : '−'}$${Math.abs(d.meanNet).toFixed(0)} ± $${d.seNet.toFixed(0)} on $${d.stake.toFixed(0)} `
-         + `(${roiC >= 0 ? '+' : ''}${roiC.toFixed(0)}% ± ${roiSEC.toFixed(0)}% ROI) · B $${Math.round(d.B).toLocaleString()}`,
+         + `(${roiC >= 0 ? '+' : ''}${roiC.toFixed(0)}% ± ${roiSEC.toFixed(0)}% ROI, held out) · B $${Math.round(d.B).toLocaleString()}`,
       badges,
       shapes: rows.map(([k,v]) => ({label:k, n:v.n, ev:v.ev/v.n, naked:/^Naked/.test(k)})),
       exposure: Object.entries(expCnt).sort((a,b) => b[1]-a[1]).slice(0,8).map(([id,c]) => ({
