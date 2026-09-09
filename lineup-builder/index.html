@@ -20039,6 +20039,41 @@ function nflMeanFromOu(ou, cv){
   return ou.line * shift;
 }
 
+// ── A MARKET LINE IS A MEDIAN, NOT A MEAN ───────────────────────────────────
+// nflMeanFromOu above reads the PRICE — where the book sits relative to 50/50 —
+// and that is all it reads. At a fair -110/-110 it returns the line itself, so
+// the sim has been running every yardage line in as the player's MEAN. That is
+// the wrong moment of the distribution. A book sets a yardage line where it
+// wants two-sided action, i.e. at the 50th percentile, and rushing and receiving
+// yards are strongly right-skewed: the mean sits above the median by a factor
+// that grows with the player's own spread. Feeding the median in as the mean
+// understates every skill player, and it understates the ROLE-UNCERTAIN ones
+// most — which is exactly Matt's reading of MarShawn Lloyd's 45.5, "muted to
+// reflect the uncertainty of the role".
+//
+// For a lognormal with coefficient of variation CV, σ² = ln(1 + CV²) and
+//     mean = median × exp(σ²/2) = median × √(1 + CV²).
+// Role uncertainty is an ADDITIONAL, independent log-normal multiplier on the
+// same quantity (see NFL_ROLE_UNC), so its σ adds in log-variance:
+//     mean = median × exp( [ln(1 + CV²) + σ_role²] / 2 ).
+//
+// The CVs are not new numbers. They are the same per-stat spreads nflMeanFromOu
+// has always used to read the over/under price, stated once here so the two
+// uses cannot drift apart.
+//
+// WHICH STATS. Yardage only. Receptions, passing touchdowns and anytime-TD
+// prices are COUNTS (and a probability): a Poisson or negative-binomial count
+// has median ≈ mean at the levels these lines sit at, so there is no correction
+// to make and inventing one would be pure inflation. This is also why a
+// receiver's yards-per-catch rises very slightly under this change: his yards
+// carry the skew and his catches do not, which is what long receptions are.
+const NFL_STAT_CV = { passYds: 0.28, passTD: 0.55, rushYds: 0.45, recYds: 0.50, rec: 0.35, rushRec: 0.42 };
+const NFL_M2M_STATS = ['passYds', 'rushYds', 'recYds'];
+function nflMedianToMean(cv, extraSig){
+  const c = cv || 0, s = extraSig || 0;
+  return Math.exp((Math.log(1 + c * c) + s * s) / 2);
+}
+
 // Build the per-player sim inputs once (parsing props is expensive vs the loop).
 // Returns { teams, games, entries } where entries[i] aligns with pool[i].
 function buildNflSimInputs(pool, opts){
@@ -20153,6 +20188,38 @@ function buildNflSimInputs(pool, opts){
     const gameKey = ti ? (ti.opp ? [ti.team, ti.opp].sort().join('@') : ti.team) : null;
     return nflPropEntry(p, t, gameKey);
   });
+  // ── THE ROLE-UNCERTAINTY HALF OF THE MEDIAN→MEAN CONVERSION ──────────────
+  // nflPropEntry applied each stat's own CV. A player whose room just lost
+  // somebody carries an EXTRA, independent log-normal on the same quantity
+  // (NFL_ROLE_UNC), and log-variances add, so his median sits further below his
+  // mean than a settled player's does. This is the piece that says a book can
+  // write 45.5 on a back it expects to consolidate: the number is the middle of
+  // a wider distribution, not a smaller expectation. It is applied here rather
+  // than in nflPropEntry because the room depends on the slate's OUT list.
+  // The widening itself is mean-preserving by construction (see TS.roleD), so
+  // there is no double count: the sim spreads this mean, it does not raise it
+  // again.
+  try {
+    const _rs = (typeof activeSlate === 'function') ? activeSlate() : null;
+    if(_rs && typeof nflRoleUnsettled === 'function'){
+      const sig = new Map();
+      for(const r of nflRoleUnsettled(_rs)) for(const sv of r.survivors){
+        const g = sv.priced ? (NFL_ROLE_UNC.sigma || 0) : (NFL_ROLE_UNC.sigmaUnpriced || 0);
+        if(g > 0) sig.set(sv.id, Math.max(sig.get(sv.id) || 0, g));
+      }
+      if(sig.size) pool.forEach((p, i) => {
+        const g = sig.get(p.id); if(!(g > 0)) return;
+        const e = entries[i]; if(!e || e.pos === 'K' || e.pos === 'DST') return;
+        for(const k of NFL_M2M_STATS){
+          if(!(e[k] > 0)) continue;
+          // Only the role σ here — the stat CV was already applied.
+          const f = Math.exp(g * g / 2);
+          e[k] *= f;
+          if(e._m2m) e._m2m[k] = (e._m2m[k] || 1) * f;
+        }
+      });
+    }
+  } catch(err){ /* a slate without an OUT list simply has no unsettled rooms */ }
   // PROP COVERAGE, part 1: the off-pool lines. A player with props but no
   // salary is not rosterable and never enters the pool — but the ball he catches
   // is still caught, so his line has to sit in his team's denominator or the
@@ -20598,6 +20665,21 @@ function nflPropEntry(p, t, gameKey){
         if(e.rushYds == null) e.rushYds = 12;                   // generic QB scramble floor
       }
     }
+    // ── A MARKET LINE IS A MEDIAN, NOT A MEAN ────────────────────────────────
+    // See NFL_STAT_CV / nflMedianToMean. Applied here, at the very end, so the
+    // combo market has already filled a missing leg and the position priors have
+    // already derived one leg from another off the RAW lines — those are
+    // relationships between medians and stay intact; each finished number is
+    // then converted once. `e._m2m` records the factor per stat so the Sim
+    // inputs panel and the harnesses can read what was applied.
+    if(pos !== 'DST' && pos !== 'K'){
+      e._m2m = {};
+      for(const k of NFL_M2M_STATS){
+        if(!(e[k] > 0)) continue;
+        const f = nflMedianToMean(NFL_STAT_CV[k], 0);
+        e[k] *= f; e._m2m[k] = f;
+      }
+    }
     // A DST's inputs are its own small book, not the skill-position props.
     // Every leg falls back to a league average, so a sheet with no defensive
     // columns behaves exactly as before this existed.
@@ -20763,16 +20845,24 @@ function nflShareBaseCap(basePct){ return Math.max(NFL_SHARE_BASE_K * basePct, b
 //      above ANY teammate at the same position who has one. With a MARGIN, not
 //      merely ≤ — an unpriced back level with the priced lead is the same error
 //      in a weaker form. NFL_FILL_ORDER_MARGIN is that margin.
-//   2. LEVEL. Well under, not fractionally under, and derived from the depth
-//      chart we already have rather than from a magic fraction. The priced
-//      players' REALISED share divided by their BASELINE share is the factor
-//      the market is applying to this room this week — Green Bay's is ~1.36
-//      (Lloyd's 42% of the ground game against a 30.9% baseline: the market has
-//      him consolidating). Applying that SAME factor to an unpriced teammate's
-//      baseline is the internally consistent answer, and it is the only one that
-//      keeps the relative depth chart intact: Brooks' 11.6% baseline becomes
-//      ~15.8% of the team, ~17 rushing yards — materially below Lloyd's 45.5 and
-//      in proportion to their baselines (11.6 : 30.9).
+//   2. LEVEL — WITHDRAWN AT CHECKPOINT 67, and the reason is worth keeping.
+//      Checkpoint 65 also capped him at (the room's market factor × his
+//      baseline), which is a much tighter bound: Chris Brooks landed at 17
+//      rushing yards, exactly 0.375 of MarShawn Lloyd, in proportion to their
+//      Clay baselines. It was internally consistent and it was wrong, because it
+//      made a preseason projection OVERRIDE a calibrated league fact. Green Bay
+//      was anchored at 112 rushing yards on the argument that ~96 was starving
+//      teams, and then the depth-chart bound refused 37 of them, so the team
+//      produced 75 — less than before either change. Two rules were pulling
+//      against each other and the weaker prior was winning.
+//      The priority order now is explicit: convert the market's medians to means
+//      first (see NFL_STAT_CV), then let the unpriced absorb up to the ORDERING
+//      bound, and only what still cannot be placed reduces the team total. The
+//      baseline's job is to SPLIT the remainder among the unpriced, which it
+//      still does in both fill paths — not to cap the total any one of them may
+//      reach. Checkpoint 64's nflShareBaseCap survives as the absurdity ceiling
+//      on the OUT path, which is what keeps a backup from taking a whole
+//      vacated workload.
 //
 // ALTERNATIVES CONSIDERED. (a) A flat fraction of the lowest priced teammate —
 // simple, but it says nothing about the depth chart, so an unpriced RB3 and an
@@ -20828,11 +20918,6 @@ function nflMarketOrderCaps(members, skipOut){
   for(const g of byPos.values()){
     const pr = g.filter(m => m.priced && m.val > 0);
     if(!pr.length) continue;
-    let vSum = 0, bSum = 0;
-    // Only a priced man who HAS a baseline can measure the room's factor; one
-    // without a baseline still holds the ordering floor.
-    for(const m of pr) if(m.base != null && m.base > 0){ vSum += m.val; bSum += m.base; }
-    const factor = bSum > 0 ? vSum / bSum : null;
     for(const m of g){
       if(m.priced) continue;
       // THE GATE. With no baseline of his own there is nothing to contradict,
@@ -20845,9 +20930,7 @@ function nflMarketOrderCaps(members, skipOut){
       }
       let lo = Infinity;
       for(const x of eligible) if(x.val < lo) lo = x.val;
-      let cap = lo * NFL_FILL_ORDER_MARGIN;
-      if(factor != null && m.base != null) cap = Math.min(cap, Math.max(0, factor * m.base));
-      caps.set(m.id, cap);
+      caps.set(m.id, lo * NFL_FILL_ORDER_MARGIN);
     }
   }
   return caps;
@@ -22073,7 +22156,23 @@ function nflAdjShares(T, statKey, adj){
   for(const pl of T.players){
     if(pl.skip) continue;
     const id = pl.p.id, o = ov(id);
-    if(o != null){ out[id] = o; fixed += o; }
+    // THE OUT RESIDUAL IS A SUBSTITUTE, NOT AN ADDITION. When the fill caps
+    // refuse part of a scratched starter's share, nflRedistributeOut pins the
+    // refused part back on HIM, so the fixed block still sums to the share that
+    // left and the untouched roster does not drift. That works on the pass where
+    // his own line is still in the model: the pin stands in for part of his
+    // model share. On every LATER pass his entry has been zeroed, his model
+    // share is 0, and the same pin stands in for nothing — it becomes a slice
+    // taken out of the free players, who then shrink for a reason that has
+    // nothing to do with them. Measured on the showdown seed: every untouched
+    // Seahawk squeezed by 3.5%, which pushed an unpriced tight end back over a
+    // priced one. Capping the pin at his own model share makes it a
+    // substitution on both passes, and a no-op on the second.
+    const resid = !!(adj && adj.players && adj.players[id] && adj.players[id].resid);
+    if(o != null){
+      const v = resid ? Math.min(o, pl.share[statKey] || 0) : o;
+      out[id] = v; fixed += v;
+    }
     else if(locked(id)){ out[id] = pl.share[statKey]; fixed += pl.share[statKey]; }
     else restBase += pl.share[statKey];
   }
@@ -22096,26 +22195,7 @@ function nflAdjShares(T, statKey, adj){
     const tot = (T.base && T.base[statKey]) || 0;
     return tot > 0 ? Math.max(0, (off[statKey] || 0) / tot) : 0;
   })();
-  // THE OUT RESIDUAL IS NOT A SECOND SLICE. When the fill cap refuses part of a
-  // scratched starter's share, nflRedistributeOut pins the refused part back on
-  // HIM (see the residual pin there) so the fixed block still sums to the share
-  // that left and the untouched roster does not drift. That pin is inside
-  // `fixed` above. But the very next pass over these entries measures a team
-  // whose lines now add to less than its anchor, so the model reports the same
-  // slice AGAIN as a coverage remainder — and subtracting both took MarShawn
-  // Lloyd's pie share from 43% to 18% while his displayed input stayed 45.5.
-  // The two readings are the same production, so the remainder counts only
-  // insofar as it exceeds the residual already pinned.
-  const _resid = (() => {
-    let r = 0;
-    for(const pl of T.players){
-      if(pl.skip) continue;
-      const a = adj && adj.players && adj.players[pl.p.id];
-      if(a && a.resid && Number.isFinite(a[statKey])) r += a[statKey];
-    }
-    return r;
-  })();
-  const capT = Math.max(0, 1 - Math.max(0, ((T && T.remainder && T.remainder[statKey]) || 0) - _resid) - _offSh);
+  const capT = Math.max(0, 1 - ((T && T.remainder && T.remainder[statKey]) || 0) - _offSh);
   let room = capT - fixed;
   if(room < 0){ room = 0; over = true; }
   const k = restBase > 0 ? room / restBase : 0;
@@ -22301,12 +22381,24 @@ function nflRedistributeOut(slate){
         // Measured over every teammate still playing, using the PRE-redistribution
         // shares — a priced teammate is not absorbing, so his share is already
         // his final one and is the right thing to rank against.
-        const ordCap = nflMarketOrderCaps(mates.map(m => ({
-          id: m.p.id, pos: m.e.pos, priced: isMkt(m),
+        // PRICED-NESS FOR THE ORDERING RULE is not the same test as
+        // priced-ness for WHO ABSORBS. `isMkt` above asks whether the book has
+        // repriced this man for this stat, which is a question about the news.
+        // The ordering rule asks whether the market has an opinion about him at
+        // all, and there the two receiving legs ride each other — a receiver
+        // with a reception line but no yards line is a market number in a
+        // different unit (see NFL_FILL_ORDER_STATS). Using the narrower test
+        // here left AJ Barner, priced on receptions only, out of the cap's
+        // reference set entirely, so an unpriced tight end was measured against
+        // nobody and finished at 0.884 of him.
+        const _ordSt = NFL_FILL_ORDER_STATS.find(x => x.key === key);
+        const ordPriced = m => _ordSt ? _ordSt.mkt(m.e) : isMkt(m);
+        const ordCap = _ordSt ? nflMarketOrderCaps(mates.map(m => ({
+          id: m.p.id, pos: m.e.pos, priced: ordPriced(m),
           base: bcols ? nflBaseShare(m.p, bcols) : null, val: cur[m.p.id] || 0,
-        })));
+        }))) : new Map();
         const capOf = m => {
-          if(isMkt(m)) return Infinity;
+          if(ordPriced(m)) return Infinity;
           let cap = ordCap.has(m.p.id) ? ordCap.get(m.p.id) : Infinity;
           // Checkpoint 64's absurdity ceiling, kept: a room whose priced men are
           // themselves miles over their baselines must not launder that multiple
