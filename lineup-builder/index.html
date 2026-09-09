@@ -5036,7 +5036,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck71/2026-09-09';
+const BUILD_ID = '2.0/ck73/2026-09-09';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -12466,21 +12466,53 @@ function sampleUfcField(pool, N, ownArr, opts){
     return { n, bb: n>0 && Math.random() < shapeP.bb };
   };
   // Weighted pick from a list of pool indices (by current weights, excluding used).
-  const pickWeighted = (list, used, gamma) => {
+  const pickWeighted = (list, used, gamma, pw) => {
     let tw=0; const e=[], ew=[];
-    for(const i of list||[]){ if(used.has(i)) continue; const wi=Math.pow(w[i],gamma); e.push(i); ew.push(wi); tw+=wi; }
+    for(const i of list||[]){ if(used.has(i)) continue; const wi=pw?pw[i]:Math.pow(w[i],gamma); e.push(i); ew.push(wi); tw+=wi; }
     if(!e.length || tw<=0) return -1;
     let r=Math.random()*tw;
     for(let k=0;k<e.length;k++){ r-=ew[k]; if(r<=0) return e[k]; }
     return e[e.length-1];
   };
+  // PER-LINEUP CHALK TEMPERATURE, TABULATED (checkpoint 73). Every eligible
+  // player at every slot costs a Math.pow(w[i], gamma) — measured at ~1,400 of
+  // them per drawn lineup, and a 20,000-entry field is 20,000 lineups. Since
+  // gamma is a modelling device rather than a measured quantity, `opts.
+  // gammaBuckets` draws it from B equally-spaced points of the same 0.7-1.6
+  // range and precomputes one weight vector per point per calibration pass:
+  // B x nP pow calls for the whole pass instead of ~1,400 per lineup. Measured
+  // on Matt's Week 1 slate: the field sampler went from 67.5 s to a few seconds
+  // for the same 270,000 draws, and the realized ownership deviation the
+  // function reports (`maxDev`) is unchanged. Unset ⇒ the continuous draw, so
+  // every other sport is untouched.
+  const GB = (opts && opts.gammaBuckets > 0) ? (opts.gammaBuckets|0) : 0;
+  const gammaOf = b => 0.7 + 0.9*((b + 0.5)/GB);
+  const eligB = new Int32Array(pool.length), ewB = new Float64Array(pool.length);
 
   let w = target.slice();
   let field = [];
+  // CALIBRATE ON A PILOT, DRAW THE FULL SAMPLE ONCE (checkpoint 73). The three
+  // passes exist to re-weight the marginals onto the Own% column, and 2,000
+  // draws pin those weights as well as 30,000 do — but the loop cost is linear
+  // in N, so a 30,000-lineup field used to cost three full draws. `opts.calibN`
+  // runs the first two passes on a pilot of that size and only the last on the
+  // full N. Unset ⇒ CALIB = N ⇒ bit-identical to what every other sport draws.
+  const CALIB = (opts && opts.calibN > 0) ? Math.max(200, Math.min(N, opts.calibN|0)) : N;
   for(let iter=0; iter<3; iter++){
+    const Ni = (iter < 2) ? CALIB : N;
+    // The weights change between passes, so the gamma table is rebuilt with them.
+    let pwTab = null;
+    if(GB){
+      pwTab = new Array(GB);
+      for(let b=0;b<GB;b++){
+        const g = gammaOf(b), a = new Float64Array(pool.length);
+        for(let i=0;i<pool.length;i++) a[i] = Math.pow(w[i], g);
+        pwTab[b] = a;
+      }
+    }
     field = [];
     let guard = 0;
-    while(field.length < N && guard++ < N*50){
+    while(field.length < Ni && guard++ < Ni*50){
       // Per-lineup chalk temperature. A uniform ownership-weighted field is
       // MORE diverse than a real one: actual entrants cluster — some max-
       // chalk every slot, some deliberately contrarian. Drawing a sharpness
@@ -12490,7 +12522,9 @@ function sampleUfcField(pool, N, ownArr, opts){
       // Own%); what changes is the JOINT — chalk builds co-occur the way
       // they do in real fields, which is exactly the crowding that punishes
       // "stud + the obvious value block" lineups at the top of the curve.
-      const gamma = 0.7 + Math.random()*0.9;
+      const _gb = GB ? (Math.random()*GB)|0 : 0;
+      const gamma = GB ? gammaOf(_gb) : (0.7 + Math.random()*0.9);
+      const pw = GB ? pwTab[_gb] : null;
       // Per-entry hedge draw: this entry is one of the small minority willing to
       // roster both sides of a fight (see FIELD_HEDGE_RATE above).
       const hedging = hedgeLever>0 && Math.random() < hedgeLever;
@@ -12502,20 +12536,20 @@ function sampleUfcField(pool, N, ownArr, opts){
       if(slots && SM){
         const shape = drawShape();
         if(shape.n > 0){
-          const qb = pickWeighted(qbIdx, used, gamma);
+          const qb = pickWeighted(qbIdx, used, gamma, pw);
           if(qb < 0) dead = true;
           else {
             const seen = new Set([qb]);
             const t = teamOfP[qb], o = oppOfP[qb];
             const mates = [];
             for(let c=0; c<shape.n; c++){
-              const m = pickWeighted(byTeamCatcher[t], seen, gamma);
+              const m = pickWeighted(byTeamCatcher[t], seen, gamma, pw);
               if(m < 0) break;                 // team has no more pass catchers
               seen.add(m); mates.push(m);
             }
             const backs = [];
             if(shape.bb && o){
-              const b = pickWeighted(byTeamSkill[o], seen, gamma);
+              const b = pickWeighted(byTeamSkill[o], seen, gamma, pw);
               if(b >= 0){ seen.add(b); backs.push(b); }
             }
             forced = [qb, ...mates, ...backs];
@@ -12540,19 +12574,31 @@ function sampleUfcField(pool, N, ownArr, opts){
             continue;
           }
         }
-        let tw=0; const elig=[]; const ew=[];
-        const consider = (i) => {
-          if(used.has(i)) return;
-          if(!hedging && oppIdx[i]>=0 && used.has(oppIdx[i])) return;
-          if(sal+salaries[i]+headroom > CAP) return;
-          const wi = Math.pow(w[i], gamma);
-          elig.push(i); ew.push(wi); tw+=wi;
-        };
-        if(scan){ for(const i of scan) consider(i); }
-        else { for(let i=0;i<pool.length;i++) consider(i); }
-        if(!elig.length || tw<=0){ dead=true; break; }
-        let r=Math.random()*tw, pick=elig[elig.length-1];
-        for(let k=0;k<elig.length;k++){ r-=ew[k]; if(r<=0){ pick=elig[k]; break; } }
+        // ck73: preallocated scratch instead of two growable arrays and a
+        // closure per slot. ~1,400 pushes and 9 closures per drawn lineup, at
+        // 270,000 lineups for one GPP run — the draw order, the RNG draws and
+        // therefore the sampled field are identical, this is only allocation.
+        let tw=0, nE=0;
+        if(scan){
+          for(let z=0;z<scan.length;z++){ const i=scan[z];
+            if(used.has(i)) continue;
+            if(!hedging && oppIdx[i]>=0 && used.has(oppIdx[i])) continue;
+            if(sal+salaries[i]+headroom > CAP) continue;
+            const wi = pw ? pw[i] : Math.pow(w[i], gamma);
+            eligB[nE]=i; ewB[nE]=wi; nE++; tw+=wi;
+          }
+        } else {
+          for(let i=0;i<pool.length;i++){
+            if(used.has(i)) continue;
+            if(!hedging && oppIdx[i]>=0 && used.has(oppIdx[i])) continue;
+            if(sal+salaries[i]+headroom > CAP) continue;
+            const wi = pw ? pw[i] : Math.pow(w[i], gamma);
+            eligB[nE]=i; ewB[nE]=wi; nE++; tw+=wi;
+          }
+        }
+        if(!nE || tw<=0){ dead=true; break; }
+        let r=Math.random()*tw, pick=eligB[nE-1];
+        for(let k=0;k<nE;k++){ r-=ewB[k]; if(r<=0){ pick=eligB[k]; break; } }
         picks.push(pick); used.add(pick); sal+=salaries[pick];
       }
       if(dead || picks.length<SIZE) continue;
@@ -12756,22 +12802,120 @@ function sampleShowdownField(pool, N, flexTarget, cptTarget, opts){
 // the legacy count is already accurate (the curve is flat down there).
 // `refine` false keeps the legacy posterior for sports that have not been
 // re-benchmarked against it.
-function beatersEstimate(beating, tied, sampleN, arr, t, F, refine){
-  if(refine!==false && arr && t!=null && sampleN>200){
-    const M=Math.max(20, Math.min(100, Math.ceil(sampleN*0.02)));
-    const xM=arr[sampleN-M];
-    if(t>=xM){
-      let ex=0; for(let j=sampleN-M;j<sampleN;j++) ex+=arr[j]-xM;
-      // M-1, not M: arr[sampleN-M] IS the threshold, so it contributes a zero
-      // excess and there are only M-1 strict exceedances above it. Dividing by
-      // M shrank lambda ~2.5% at M=40, which shrinks pHat and therefore
-      // overstates the rank every top-of-curve lineup earns.
-      const lam=Math.max(1e-6, ex/Math.max(1, M-1));
-      const pHat=(M/sampleN)*Math.exp(-(t-xM)/lam);
-      return { shape: F*pHat + 0.5, scale: 1 };
+// ── THE TAIL FIT (checkpoint 73 — it was measurably wrong) ──────────────────
+// Until ck72 this was an EXPONENTIAL fitted to the top 2% of the sample. Both
+// halves of that were defects, and both were measured (probes
+// `/tmp/review_g/g73_an.js`, `g73_an4.js`, 50 worlds of Matt's Week 1 slate,
+// a 2,000-lineup fit predicting a 40,000-lineup sample's own quantiles):
+//
+//   quantile        fit said   truth    bias
+//   max (1/40k)      246.97    224.74   +22.2 pts (+9.9%), 46 of 50 worlds high
+//   p99.9 (40th)     203.57    202.54   +1.0
+//   p99  (400th)     180.59    181.19   -0.6
+//
+// i.e. calibrated through p99.9 and blown out exactly where a 150,000-entry
+// contest is decided. Restated as ranks — which is what the engine consumes —
+// at the TRUE 1-in-40,000 score the old fit claimed 29.5 of 150,000 entries
+// were ahead of you when the truth was 3.8: an ~8x rank inflation at the top of
+// the leaderboard. It is not caused by the sharp slice (a pure-ownership field
+// measures +20.5 pts and 5.8-vs-1 beaters); it is the threshold. The mean
+// excess of a real field's conditional tail is 9.86 above p98, 5.17 above
+// p99.9, 5.25 above p99.99 — nothing like the constant an exponential assumes,
+// and the fit was anchored at the flattest end of it.
+//
+// Consequence, measured on the board (`g73_an5.js`, all 2,500 report worlds,
+// 30,000-lineup empirical field per ownership scenario): 93% of a lineup's true
+// EV at 150,000 entries comes from ranks <= 10, and the inflation attacks
+// exactly that band — the model recovered ~100% of a naked quarterback's
+// empirical EV and 43% of a QB+2's. The stacked/naked EV ratio came out 0.995
+// where a large empirical field says 1.42, while at 8,000 entries model and
+// truth agreed (1.10 vs 1.07). That is the whole naked-QB-at-150k symptom.
+//
+// So: fit a TWO-PARAMETER generalised Pareto by probability-weighted moments
+// (Hosking & Wallis 1987) at a threshold of the top NFL_TAIL_FRAC of the
+// sample, not the top 2%. A field entry's score is a sum of nine bounded draws;
+// its conditional upper tail is genuinely SHORT (k > 0 below), and forcing k = 0
+// is what produced the overshoot. k > 0 gives a bounded tail, k = 0 recovers the
+// old exponential exactly, k < 0 a heavy one.
+const NFL_TAIL_FRAC = 0.0025;   // threshold = the sample's top 0.25%
+const NFL_TAIL_MIN  = 20;       // …but never fewer than 20 exceedances to fit on
+const NFL_TAIL_KMIN = -0.30;    // clamps: a 2-parameter fit on ~50 points has no
+const NFL_TAIL_KMAX = 0.90;     // business making an order-of-magnitude claim
+function gppTailM(sampleN){ return Math.max(NFL_TAIL_MIN, Math.ceil(sampleN * NFL_TAIL_FRAC)); }
+// PWM fit on the top-M excesses of an ASCENDING sorted sample.
+//   S(y) = (1 - k·y/alpha)^(1/k),  k -> 0 ⇒ exp(-y/alpha)      [Hosking's k = -ξ]
+// `len` is arr's own length when it holds only the TOP of the sample (the
+// kernel's world views keep the paid band, not all NF entries — see worldSet);
+// the threshold count M is always a property of the FULL sample size.
+function gppTailFit(arr, sampleN, len){
+  const n = (len == null) ? sampleN : len;
+  const M = gppTailM(sampleN), i0 = n - M, xM = arr[i0];
+  // a0 = E[Y], a1 = E[Y·(1−F(Y))] — Hosking & Wallis's PWM pair. For the GPD
+  // a_r = alpha/((r+1)(r+1+k)), so a0/a1 = 2(2+k)/(1+k) inverts in closed form.
+  // (The OTHER pair, b_r = E[Y·F(Y)^r], has its own pair of formulas and mixing
+  // the two is silent: it makes alpha negative for every real sample and the fit
+  // falls back to the exponential in every world — measured on Matt's slate as
+  // k = 0.000 everywhere before this was caught.)
+  let a0 = 0, a1 = 0;
+  for(let j = 0; j < M; j++){
+    const y = arr[i0 + j] - xM;
+    a0 += y; a1 += y * ((M - 1 - j) / (M - 1));
+  }
+  a0 /= M; a1 /= M;
+  const R = a1 > 0 ? a0/a1 : 0;
+  let alpha = Math.max(1e-6, a0 * (M / (M - 1))), k = 0;   // exponential fallback
+  if(a0 > 0 && R > 2 && isFinite(R)){
+    const k2 = (4 - R)/(R - 2), a2 = a0 * (1 + k2);
+    if(a2 > 0 && isFinite(k2)){
+      alpha = a2;
+      k = k2 < NFL_TAIL_KMIN ? NFL_TAIL_KMIN : (k2 > NFL_TAIL_KMAX ? NFL_TAIL_KMAX : k2);
+      if(k !== k2) alpha = a0 * (1 + k);
+      // A bounded fit whose right endpoint sits BELOW the largest excess we
+      // actually observed is self-contradicting; push the endpoint just past it.
+      if(k > 0){
+        const yMax = arr[n-1] - xM;
+        if(yMax > 0 && alpha/k < yMax*1.05){
+          k = alpha/(yMax*1.05);
+          if(k > NFL_TAIL_KMAX) k = NFL_TAIL_KMAX;
+        }
+      }
     }
   }
-  return { shape: beating + tied/2 + 0.5, scale: F/sampleN };
+  return {xM: xM, alpha: alpha, k: k, pre: M/sampleN, M: M};
+}
+// Conditional survival above the fit's threshold. One implementation, called by
+// BOTH `beatersEstimate` and the kernel's `rankPostFast`, so the two cannot
+// drift (§8's bit-for-bit assertion).
+function gppTailSurv(xM, alpha, k, t){
+  const y = t - xM;
+  if(!(y > 0)) return 1;
+  if(k === 0) return Math.exp(-y/alpha);
+  const z = 1 - k*y/alpha;
+  return z > 0 ? Math.pow(z, 1/k) : 0;
+}
+// ── ONE POSTERIOR, ONE SCALE (checkpoint 73) ────────────────────────────────
+// The two branches used to return incompatible Gamma parameterisations — the
+// tail branch (F·p̂ + 0.5, scale 1) and the count branch (count + 0.5, scale
+// F/n) — so `win% = (1+scale)^-shape` jumped by orders of magnitude across the
+// threshold (one board lineup priced at 2.3e-83). Both are now written as the
+// SAME object: mean m = expected beaters among all F entries, variance
+// m·(1 + m/n_eff) where n_eff is the number of observations the estimate rests
+// on — Poisson noise plus the estimation error of p̂. That is
+//     scale = 1 + m/n_eff,  shape = m/scale,
+// and at the threshold the two agree exactly, because there m/M = F/n:
+// the count branch's scale 1 + F/n and the tail branch's 1 + m/M are the same
+// number. The MEAN each branch reports is unchanged from ck72.
+function beatersEstimate(beating, tied, sampleN, arr, t, F, refine){
+  if(refine!==false && arr && t!=null && sampleN>200){
+    const ft = gppTailFit(arr, sampleN);
+    if(t >= ft.xM){
+      const m = F * ft.pre * gppTailSurv(ft.xM, ft.alpha, ft.k, t);
+      const sc = 1 + m/ft.M;
+      return { shape: m/sc, scale: sc, beat: m };
+    }
+  }
+  const r = F/sampleN, nEff = beating + tied/2 + 0.5, sc = 1 + r;
+  return { shape: nEff*r/sc, scale: sc, beat: (beating + tied/2)*r };
 }
 
 // ── SHARED FIELD-SCENARIO CONSTANTS (hoisted 2026-09-04) ────────────────────
@@ -12799,73 +12943,30 @@ function beatersEstimate(beating, tied, sampleN, arr, t, F, refine){
 //   Derived onto slate._ufcEv: fieldSize, fee, preset, se, sharpShare, ownTemp.
 //
 // ── TUNABLE ASSUMPTIONS ────────────────────────────────────────────────────
-// FORMAT → field size + payout shape. `firstShare` is 1st place's cut of the
-// prize pool and `paidFrac` the share of entries that cash; hbBuildPayout
-// generates the curve from those two numbers and solves the floor so the tiers
-// sum to entries × fee × HB_PAYOUT_RATIO. These are SHAPE ARCHETYPES fitted by
-// eye to recurring DK contests, not measurements of one specific contest — a
-// mass-multi-entry monster is more top-heavy and pays a shallower fraction than
-// a single-entry field, and single-entry fields spread the pool wider because
-// nobody is firing 150 bullets at 1st.
-//   MME large  150,000  1st 20%  pays 22%   (Milly-Maker shaped)
-//   MME small    8,000  1st 15%  pays 22%
-//   SE  large   25,000  1st 12%  pays 25%
-//   SE  small    4,000  1st 10%  pays 25%
-// STAKES → entry fee + FIELD MODEL. `sharpShare` is the fraction of modeled
-// entries drawn from our own candidate pool (i.e. playing like optimizers)
-// rather than from the Own% column; `ownTemp` is an exponent applied to the
-// Own% weights before they are normalized — below 1 the field is flatter and
-// noisier (micro-stakes entrants are not all on the same chalk), above 1 it is
-// more concentrated on the projected plays. MME formats add
-// CONTEST_MME_SHARP_BONUS to the sharp share (multi-entry contests are where
-// the mass-entry professionals live), capped at CONTEST_SHARP_CAP.
-//   Micro  <$1    $0.50    5% sharp   temp 0.85
-//   Low    $1-10  $5      10% sharp   temp 1.00
-//   Mid    $10-50 $25     20% sharp   temp 1.05
-//   High   $50+   $100    35% sharp   temp 1.10
-// None of the eight rows is a measurement. They are the knobs to turn when a
-// real contest's realized field is measured; nothing else in the engine should
-// hard-code a sharp share or an ownership exponent again.
-// ── RECALIBRATED AT CHECKPOINT 70, AGAINST THE PUBLISHED SHAPE ─────────────
-// The old parameterisation was `firstShare` + `paidFrac`, and neither of those
-// is a quantity anybody publishes. Measured against DFS Army's DK payout
-// analysis (https://www.dfsarmy.com/2019/01/payout-analysis-part-2-comparing-gpp-pay-structures-on-dk.html
+// FORMAT is MME or SE; the second axis is a field size the user types. Those
+// two numbers drive the payout shape (via the smooth scalings below, which
+// `hbBuildPayout` turns into a ladder) and the field model (`contestSharpFor`,
+// `CONTEST_OWN_TEMP`). Nothing here is a measurement of one specific contest:
+// they are calibrated judgements placed inside published bands, and the refit
+// path for any contest Matt actually enters is the paste box.
+//
+// ── CALIBRATED AT CHECKPOINT 70, AGAINST THE PUBLISHED SHAPE ───────────────
+// Measured against DFS Army's DK payout analysis (https://www.dfsarmy.com/2019/01/payout-analysis-part-2-comparing-gpp-pay-structures-on-dk.html
 // — DK GPPs rake ~15.9%, the top 1% of the field takes 25–40% of the prize
 // pool, a top prize is typically ~10% of the pool or less with promoted
-// contests more top-heavy, and min cash sits at 1.5–2× the entry fee), the five
-// archetypes were wrong in two directions at once: three of five put 18–23% of
-// the pool above the 1% line against a 25–40% band, and EVERY one paid a min
-// cash of 2.4–3.1× the fee against a 1.5–2× reference. Both errors move pool
-// out of the head and into the tail, which is exactly the shape that makes an
-// EV maximiser grind the cash line — Matt's mme_small boards were coming back
-// full of naked quarterbacks for a reason that was in the payout table.
-//
-// So each format is now stated as the two quantities the reference actually
-// reports, and hbBuildPayout SOLVES for the head scale and the paid count that
-// hit both while summing to the pool:
+// contests more top-heavy, and min cash sits at 1.5–2× the entry fee), the old
+// hand-set archetypes were wrong in two directions at once: three of five put
+// 18–23% of the pool above the 1% line against a 25–40% band, and EVERY one
+// paid a min cash of 2.4–3.1× the fee against a 1.5–2× reference. Both errors
+// move pool out of the head and into the tail, which is exactly the shape that
+// makes an EV maximiser grind the cash line — Matt's boards were coming back
+// full of naked quarterbacks for a reason that was in the payout table. So the
+// contest is stated as the quantities the reference actually reports:
 //   · `top1Share`   — fraction of the prize pool paid to the top 1% of entries.
 //   · `minCashMult` — min cash as a multiple of the entry fee.
 //   · `paidFrac`    — the share of the field that cashes (DK's ~20–25%).
-// `firstShare` is gone as an input; it is an OUTPUT now, and it lands where the
-// reference says it should. The three targets plus the pool identity are four
-// constraints, so the builder solves TWO free parameters — the head scale and
-// the tail's decay exponent — rather than one. That second solve is what was
-// missing: with the exponent pinned at 1.15 the graded region between the head
-// and the cash line was too short, almost the whole tail sat AT the floor, and
-// no combination of the other knobs could put 25–40% in the head, pay a 1.5–2×
-// min cash and still pay only a fifth of the field.
-//
-// THE NUMBERS, as calibrated judgements inside the published band:
-//   · Single-entry fields spread wider — nobody is firing 150 bullets at 1st —
-//     so they sit at the bottom of the 25–40% band and carry the fatter min
-//     cash (2× the fee). The mini field is the flattest thing DK runs.
-//   · Multi-entry fields are where the pool is bought by people chasing the
-//     head, and the large one is a promoted contest: 40%, the top of the band,
-//     with a 1.5× min cash.
-//   · HEAD SHAPE differs by temperament, which it did not before — every format
-//     used to run the promoted contest's steep drop. A routine GPP is much
-//     flatter at the very top (2nd ≈ half of 1st); a promoted mega-GPP drops
-//     1st→2nd like the Milly Maker (2nd ≈ a tenth of 1st).
+// `firstShare` is gone as an input; it is the quantity that gives (checkpoint
+// 72 — see THE SOLVE), and it lands where the reference says it should.
 // ── TWO AXES, AND ONLY TWO (checkpoint 71) ─────────────────────────────────
 // Matt: "MME or SE as the options, and use a standard GPP structure… I don't
 // even think we need to consider the fee." Checkpoint 70's own numbers back
@@ -12939,12 +13040,14 @@ function contestMinCashMult(F, mme){
           + (mme ? CONTEST_MINCASH_MME_ADJ : 0);
   return Math.min(CONTEST_MINCASH_MAX, Math.max(CONTEST_MINCASH_MIN, v));
 }
-// HEAD SHAPE. A promoted mega-GPP drops 1st→2nd like the Milly Maker; a routine
-// contest is much flatter at the top. The threshold is a field size, because
-// that is what "promoted" means in practice — DraftKings does not run a
-// 4,000-entry contest with a seven-figure top prize.
+// HEAD SHAPE is no longer a third scaling. Checkpoint 71 stepped between a
+// "flat" and a "promoted" head at 50,000 entries; checkpoint 72 SOLVES the head
+// exponent against the top-1% share above (see THE SOLVE), which produces the
+// same routine → promoted progression continuously and without a step in the
+// middle of the family. `CONTEST_PROMO_FIELD` survives only as the label the
+// notes and the harness use for "a field big enough that DraftKings promotes
+// it" — nothing in the payout reads it.
 const CONTEST_PROMO_FIELD = 50000;
-function contestHeadShapeKey(F){ return F >= CONTEST_PROMO_FIELD ? 'promo' : 'flat'; }
 // ── THE FIELD MODEL, FROM THE SAME TWO AXES ────────────────────────────────
 // `sharpShare` used to come from the stakes tier. It comes from field size and
 // MME/SE now, and the justification is that the marquee contests are where the
@@ -13051,7 +13154,7 @@ function contestSettings(slate){
           fieldSize, fee, feeSet: contestFeeSet(slate),
           top1Share: contestTop1Share(fieldSize, F.mme),
           minCashMult: contestMinCashMult(fieldSize, F.mme),
-          head: contestHeadShapeKey(fieldSize),
+          paidFrac: contestPaidFrac(fieldSize, F.mme),
           se:F.se, mme:F.mme, exact:true,
           sharpShare: contestSharpFor(fieldSize, F.mme), ownTemp: CONTEST_OWN_TEMP,
           key: F.key + '|' + fieldSize,
@@ -25608,13 +25711,35 @@ const NFL_GPP_BUDGET = {
   menuMin:       200,
   budgetMs:    75000,  // wall-clock ceiling on search; seeds stop being STARTED past it
   sharpFromEngine: true, // seed the field's sharp slice with the ENGINE's own optima
+  // ck73: the sharp pass used to run 220 seeds and hand back 300 lineups, so at
+  // a 22% sharp share a 2,000-entry sample held ~440 entries drawn from ~190
+  // DISTINCT builds — the field's top end was a few hundred cloned scores, and
+  // only 82% of the top 40 of a world's sample were even distinct values.
+  // Measured cost of that (probe `/tmp/review_g/g73_an4.js`): it added half
+  // again to the tail-fit bias — beaters-at-the-sample-max 8.98 against a truth
+  // of 1, where a pure-ownership field measured 5.84. More seeds, a much bigger
+  // pool, and the legacy per-sim optimals blended back in.
   sharpPassSeeds:  220,  // seeds for that throwaway pass
   sharpPassMs:   14000,  // and its wall-clock ceiling
+  sharpPool:      3000,  // distinct lineups the field's sharp slice draws from
   overfitFrac:   0.6,  // select-fold gross EV below this × search gross EV ⇒ overfit
   // Above this ratio of (standard error ÷ EV) the reported ROI is not precise
   // enough to quote without saying so, and the card carries a badge.
   seWarnFrac:    0.10,
 };
+// ── FIELD SAMPLE SIZE, PER FOLD (checkpoint 73) ────────────────────────────
+// The search fold and the two priced folds want different things out of the
+// modeled field, so they no longer get the same number of opponents. See the
+// block above `NFs`/`NFp` in runNflGppEngine.
+const NFL_GPP_NF_SEARCH = 2000;
+const NFL_GPP_NF_PRICE  = 20000;
+// The field sampler's three re-weighting passes converge on a pilot; only the
+// last pass draws the full sample (`opts.calibN`). Without this a 20,000-entry
+// field would cost three full draws instead of one.
+const NFL_GPP_CALIB_N   = 2000;
+// …and its per-lineup chalk temperature is drawn from this many tabulated
+// points instead of continuously, which is what makes the draw itself cheap.
+const NFL_GPP_GAMMA_BUCKETS = 32;
 // The three derived sizes, in one place so the log and the kernel agree.
 function gppSeedPlan(bud, N){
   const total = Math.max(bud.seedsMin, Math.min(bud.seedsMax, Math.round(bud.seedsPerLineup * N)));
@@ -25975,7 +26100,7 @@ function gppKernelFactory(){
   // lineups, so the caller flattens it to tiers and this indexes them.
   function payFnOf(tbl){
     // A CONTINUOUS curve (hbBuildPayout's generated structure: ten interpolated
-    // head places then a power-law tail onto a min-cash floor) is sampled on a
+    // head places then a power-law tail down to the min cash) is sampled on a
     // geometric grid of ranks and read back by interpolation — a power law is a
     // straight line in log-rank, so 1,024 knots over ranks 10..paid reproduce it
     // to ~1e-6 relative. A STEP table (the built-in DK tier list, or a payout
@@ -26040,30 +26165,39 @@ function gppKernelFactory(){
   //   • the second binary search (how many field entries TIE with us) is only
   //     run when the entry just below us actually equals our score. Ties are
   //     rare between two 9-player float sums, so this halves the search cost.
-  //   • the exponential tail fit inside beatersEstimate depends on the WORLD's
-  //     field, not on the lineup: xM and lambda are the same for every lineup
-  //     scored in that world, so they are fitted once in worldSet and read from
-  //     an array here. The arithmetic below is beatersEstimate's, term for term
-  //     — `test_gpp_engine` asserts the two agree bit-for-bit on random inputs,
-  //     which is what keeps this copy honest.
+  //   • the tail fit inside beatersEstimate depends on the WORLD's field, not on
+  //     the lineup: the GPD threshold and its two parameters are the same for
+  //     every lineup scored in that world, so they are fitted once in worldSet
+  //     and read from an array here. The survival itself is the SHARED
+  //     `gppTailSurv` — not a copy of it — and the posterior below is
+  //     beatersEstimate's, term for term; `test_gpp_engine` asserts the two
+  //     agree bit-for-bit on random inputs, which is what keeps this honest.
+  //   • ck73: the view holds the top `ws.NV` of the world's NF-entry sample,
+  //     not all of it (see worldSet). Everything below the kept window is out of
+  //     the money by construction, so a lineup that lands there earns nothing at
+  //     any offset; the count below charges it the whole unkept block anyway
+  //     rather than quietly pretending the sample was smaller than it is.
   // Results go into RP_shape / RP_scale rather than a fresh object per call.
   let RP_shape = 0, RP_scale = 1;
   function rankPostFast(t, view, NF, F, w, ws){
-    let lo = 0, h = NF;
-    while(lo < h){ const m = (lo + h) >> 1; if(view[m] <= t) lo = m + 1; else h = m; }
+    const NV = ws.NV;
     if(ws.tailOn && t >= ws.tailXM[w]){
-      RP_shape = F * (ws.tailPre * Math.exp(-(t - ws.tailXM[w]) / ws.tailLam[w])) + 0.5;
-      RP_scale = 1;
+      const m = F * ws.tailPre * gppTailSurv(ws.tailXM[w], ws.tailAl[w], ws.tailK[w], t);
+      const sc = 1 + m/ws.tailM;
+      RP_shape = m/sc; RP_scale = sc;
       return;
     }
+    let lo = 0, h = NV;
+    while(lo < h){ const m = (lo + h) >> 1; if(view[m] <= t) lo = m + 1; else h = m; }
     let tied = 0;
     if(lo > 0 && view[lo-1] === t){
       let lo2 = 0, h2 = lo;
       while(lo2 < h2){ const m = (lo2 + h2) >> 1; if(view[m] < t) lo2 = m + 1; else h2 = m; }
       tied = lo - lo2;
     }
-    RP_shape = (NF - lo) + tied/2 + 0.5;
-    RP_scale = F / NF;
+    const beating = (NV - lo) + (lo === 0 ? (NF - NV) : 0);
+    const r = F / NF, nEff = beating + tied/2 + 0.5, sc = 1 + r;
+    RP_shape = nEff*r/sc; RP_scale = sc;
   }
   // The same thing with an object result, for callers outside the hot loops
   // (the portfolio precompute, and the harness).
@@ -26089,22 +26223,50 @@ function gppKernelFactory(){
   // THE SAME-WORLD ASSUMPTION (spec §4, and §8's first acceptance test) lives
   // in these four lines: a field entry's score in world w is the sum of the
   // SAME per-player draws our own lineup reads, out of the same matrix S.
-  // views[w] is the sorted field sample for world w as a subarray view, so
+  // views[w] is the sorted TOP of the field sample for world w, so
   // beatersEstimate's arr[sampleN-M] tail fit indexes it directly.
+  //
+  // ── ck73: it is now cheap enough to price against 20,000 opponents ─────────
+  // The priced folds went from 2,000 sampled entries to NFL_GPP_NF_PRICE, which
+  // is a 10x bigger sort and a 10x bigger scan per world. Three changes pay for
+  // it, none of them approximations of the arithmetic:
+  //   1. COLUMN GATHER. `S[idx*W + w]` walks the score matrix with a stride of W
+  //      floats — at W = 2,500 that is a 10 KB stride and every one of the
+  //      NF x 9 reads is a cache miss. Gathering world w's column into a small
+  //      nP-length buffer first (nP strided reads) makes the inner 9-sum read a
+  //      3 KB array that sits in L1 for the whole world.
+  //   2. KEEP ONLY THE TOP. Every lineup below the world's cash threshold earns
+  //      zero at any rank offset and is skipped by `grossEV` before the view is
+  //      ever searched, so storing the bottom of the sample buys nothing. The
+  //      view keeps `NV` = the paid band plus a margin, which at DK's 22% paid
+  //      fraction is under a quarter of the memory (2,500 x 20,000 floats is
+  //      200 MB per fold; the kept view is 45 MB).
+  //   3. ONE SCRATCH SORT. The full sample is scored into a single reused
+  //      Float32Array and sorted there; only the kept tail is copied out.
   function worldSet(S, W, NF, K, fieldLin, F, payFn, paidRank){
-    const flat = new Float32Array(W * NF);
+    // How much of each world's sample can ever be read: everything from the
+    // last paying sample rank upward. `maxBeat` is the same quantity cashThr is
+    // built from, so the two cannot disagree about what is reachable.
+    const maxBeat = (paidRank > 0 && F > 0) ? Math.floor(paidRank * NF / F) : NF;
+    const NV = Math.min(NF, Math.max(gppTailM(NF) + 2, maxBeat + 8));
+    const flat = new Float32Array(W * NV);
     const views = new Array(W);
+    const scratch = new Float32Array(NF);
+    const col = new Float32Array((S.length / W) | 0);
+    const nPc = col.length;
     for(let w = 0; w < W; w++){
-      const base = (w % K) * NF * RSIZE, o = w * NF;
+      for(let i = 0; i < nPc; i++) col[i] = S[i*W + w];
+      const base = (w % K) * NF * RSIZE;
       for(let f = 0; f < NF; f++){
-        let t = 0;
         const lo = base + f*RSIZE;
-        for(let j = 0; j < RSIZE; j++) t += S[fieldLin[lo + j] * W + w];
-        flat[o + f] = t;
+        scratch[f] = col[fieldLin[lo]] + col[fieldLin[lo+1]] + col[fieldLin[lo+2]]
+                   + col[fieldLin[lo+3]] + col[fieldLin[lo+4]] + col[fieldLin[lo+5]]
+                   + col[fieldLin[lo+6]] + col[fieldLin[lo+7]] + col[fieldLin[lo+8]];
       }
-      const v = flat.subarray(o, o + NF);
-      v.sort();
-      views[w] = v;
+      scratch.sort();
+      const o = w * NV;
+      flat.set(scratch.subarray(NF - NV), o);
+      views[w] = flat.subarray(o, o + NV);
     }
     // CASH THRESHOLD per world — a one-comparison early exit for the ~60% of
     // worlds in which a lineup cannot be paid at all. Beating fewer than
@@ -26115,30 +26277,28 @@ function gppKernelFactory(){
     // never skip a world that would have paid.
     const cashThr = new Float64Array(W);
     if(paidRank > 0 && F > 0){
-      const maxBeat = Math.floor(paidRank * NF / F);
-      const k = NF - maxBeat - 1;
-      for(let w = 0; w < W; w++) cashThr[w] = (k >= 0 && k < NF) ? views[w][k] : -Infinity;
+      const k = NV - maxBeat - 1;
+      for(let w = 0; w < W; w++) cashThr[w] = (k >= 0 && k < NV) ? views[w][k] : -Infinity;
     } else {
       cashThr.fill(-Infinity);
     }
-    // The exponential tail fit beatersEstimate makes over the top 2% of each
+    // The GPD tail fit beatersEstimate makes over the top NFL_TAIL_FRAC of each
     // world's field sample. It is a property of the world, so it is fitted once
-    // here instead of once per lineup per world.
+    // here instead of once per lineup per world — via the SAME `gppTailFit` the
+    // shared estimator calls, on the same values (the fit only ever reads the
+    // top M, which the kept view always contains).
     const tailOn = NF > 200;
-    const M = Math.max(20, Math.min(100, Math.ceil(NF * 0.02)));
-    const tailXM = new Float64Array(W), tailLam = new Float64Array(W);
+    const M = gppTailM(NF);
+    const tailXM = new Float64Array(W), tailAl = new Float64Array(W), tailK = new Float64Array(W);
     if(tailOn){
       for(let w = 0; w < W; w++){
-        const v = views[w], xM = v[NF - M];
-        let ex = 0;
-        for(let j = NF - M; j < NF; j++) ex += v[j] - xM;
-        tailXM[w] = xM;
-        tailLam[w] = Math.max(1e-6, ex / Math.max(1, M - 1));
+        const ft = gppTailFit(views[w], NF, NV);
+        tailXM[w] = ft.xM; tailAl[w] = ft.alpha; tailK[w] = ft.k;
       }
     }
-    return {S:S, W:W, views:views, NF:NF, K:K, F:F, payFn:payFn, cashThr:cashThr,
-            tailOn:tailOn, tailXM:tailXM, tailLam:tailLam, tailPre:M/NF,
-            nP:(S.length / W) | 0};
+    return {S:S, W:W, views:views, NF:NF, NV:NV, K:K, F:F, payFn:payFn, cashThr:cashThr,
+            tailOn:tailOn, tailXM:tailXM, tailAl:tailAl, tailK:tailK,
+            tailPre:M/NF, tailM:M, nP:nPc};
   }
   // ── DUPLICATION: ONE ESTIMATE PER LINEUP, NOT ONE PER WORLD SET ────────────
   // Expected duplicates are a property of the LINEUP and the CONTEST — how many
@@ -26149,19 +26309,26 @@ function gppKernelFactory(){
   // none scales to the analytic floor, so the SAME lineup could be taxed 76×
   // on the search worlds and 1.3× on the held-out worlds and get thrown out as
   // "overfit" for it. So both field samples are POOLED into one estimate per
-  // ownership scenario (2×NF entries, scaled by F/2NF) and every price the
+  // ownership scenario (ΣNF entries, scaled by F/ΣNF) and every price the
   // engine quotes uses that one number.
+  //
+  // ck73: the three folds no longer share one sample size — the search fold is
+  // NFL_GPP_NF_SEARCH and the two priced folds are NFL_GPP_NF_PRICE — so each
+  // sample arrives as {lin, NF} and the pooled denominator is their sum.
+  // `NF` is the default sample size; an entry of `lins` may instead be
+  // {lin, NF} and carry its own (the three folds no longer agree on one).
   function dupModelOf(nP, K, NF, own, lins, F, dupK, theta, maxFrac){
     if(!Array.isArray(lins)) lins = [lins];
-    const Ns = lins.length * NF;
+    lins = lins.map(function(x){ return (x && x.lin) ? x : {lin:x, NF:NF}; });
+    let Ns = 0; for(const x of lins) Ns += x.NF;
     const keyCounts = new Array(K), lifts = new Array(K);
     const idx9 = new Int32Array(RSIZE);
     for(let k = 0; k < K; k++){
       const m = new Map();
       const c1 = new Float64Array(nP);
       const lift = new Float32Array(nP * nP);       // pair COUNTS first, lifts in place after
-      for(const lin of lins){
-        const base = k * NF * RSIZE;
+      for(const ent of lins){
+        const lin = ent.lin, NF = ent.NF, base = k * NF * RSIZE;
         for(let f = 0; f < NF; f++){
           const lo = base + f*RSIZE;
           for(let j = 0; j < RSIZE; j++) idx9[j] = lin[lo + j];
@@ -26368,18 +26535,33 @@ function gppKernelFactory(){
     // the odd sims are split in half: SELECT prices the menu and runs the
     // greedy, REPORT is never touched by either and every number the user is
     // shown is recomputed on it, against its own independent field sample.
-    const gen = worldSet(P.sg, P.Wg, P.NF, P.K, P.fldLinG, P.F, payFn, P.paidRank);
+    //
+    // ck73: the SEARCH fold keeps a 2,000-entry field (the hill climb needs the
+    // ORDERING of neighbouring lineups, which is stable long before the rank is)
+    // and the two PRICED folds get NFL_GPP_NF_PRICE, because a 2,000-entry
+    // sample cannot resolve the top ten ranks of a 150,000-entry contest and
+    // that is where 93% of the EV lives.
+    const NFg = P.NFg, NFp = P.NFp;
+    const gen = worldSet(P.sg, P.Wg, NFg, P.K, P.fldLinG, P.F, payFn, P.paidRank);
     say({phase:'field', which:'search', ms:Date.now()-t0});
-    const selW = worldSet(P.ss, P.Ws, P.NF, P.K, P.fldLinS, P.F, payFn, P.paidRank);
-    say({phase:'field', which:'select', ms:Date.now()-t0});
+    // The sharp pass is a throwaway that only has to produce a POOL of decent
+    // lineups for the field to be seeded with; it prices on the search fold
+    // rather than paying for a second NFL_GPP_NF_PRICE world set it will
+    // discard. Its overfit ratio is then 1 by construction, which is why it
+    // keeps everything and simply ranks by EV — the right behaviour for a pool.
+    const selW = P.searchOnly ? gen : worldSet(P.ss, P.Ws, NFp, P.K, P.fldLinS, P.F, payFn, P.paidRank);
+    if(!P.searchOnly) say({phase:'field', which:'select', ms:Date.now()-t0});
     // The report fold is only built when there is something to report: the sharp
     // pass runs this same kernel with searchOnly and would otherwise pay for a
     // world set it never reads.
-    const repW = P.searchOnly ? null : worldSet(P.sr, P.Wr, P.NF, P.K, P.fldLinR, P.F, payFn, P.paidRank);
+    const repW = P.searchOnly ? null : worldSet(P.sr, P.Wr, NFp, P.K, P.fldLinR, P.F, payFn, P.paidRank);
     if(!P.searchOnly) say({phase:'field', which:'report', ms:Date.now()-t0});
     // Duplication is a property of the lineup and the contest, so it is estimated
-    // ONCE, pooling all three field samples (3xNF entries).
-    const dm = dupModelOf(P.nP, P.K, P.NF, P.ownG, [P.fldLinG, P.fldLinS, P.fldLinR],
+    // ONCE, pooling all three field samples.
+    const dm = dupModelOf(P.nP, P.K, NFg, P.ownG,
+                          P.searchOnly
+                            ? [{lin:P.fldLinG, NF:NFg}]
+                            : [{lin:P.fldLinG, NF:NFg}, {lin:P.fldLinS, NF:NFp}, {lin:P.fldLinR, NF:NFp}],
                           P.F, P.dupK, P.theta, P.maxDupFrac);
     const bud = P.budget;
     const rand = rngOf(P.seed);
@@ -26786,7 +26968,7 @@ function gppKernelFactory(){
     // against a field seeded with THOSE lineups. This pass stops here.
     if(P.searchOnly){
       return {lineups: [], searchOnly: true,
-              sharp: kept.slice(0, P.sharpWanted || 300).map(function(x){ return x.ids; }),
+              sharp: kept.slice(0, P.sharpWanted || 3000).map(function(x){ return x.ids; }),
               diag: {seeds: seeds.length, seedsClimbed: climbedSeeds, optima: nOptima,
                      survived: kept.length, ms: Date.now() - t0}};
     }
@@ -27088,7 +27270,10 @@ function gppWorkerGlue(){
 // written out as a literal so the worker CANNOT drift from the main-thread
 // implementation this file's tests exercise.
 function gppWorkerSource(){
-  return [beatersEstimate.toString(), evDupExpect.toString(),
+  return ['const NFL_TAIL_FRAC=' + NFL_TAIL_FRAC + ', NFL_TAIL_MIN=' + NFL_TAIL_MIN +
+          ', NFL_TAIL_KMIN=' + NFL_TAIL_KMIN + ', NFL_TAIL_KMAX=' + NFL_TAIL_KMAX + ';',
+          gppTailM.toString(), gppTailFit.toString(), gppTailSurv.toString(),
+          beatersEstimate.toString(), evDupExpect.toString(),
           gppKernelFactory.toString(), '(' + gppWorkerGlue.toString() + ')();'].join('\n');
 }
 // Run the kernel, in a worker when the environment allows one (keeps the UI
@@ -27156,7 +27341,20 @@ async function runNflGppEngine(ctx){
   const fee = parseFloat(cfg.fee) || 1;
   const payout = contestPayoutFn(slate, F, fee);
   const K = EV_SCEN_K;
-  const NF = Math.min(2000, Math.max(200, F));
+  // ── HOW MANY OPPONENTS EACH FOLD IS PRICED AGAINST (checkpoint 73) ────────
+  // The SEARCH fold keeps 2,000: the hill climb consumes an ORDERING of
+  // neighbouring lineups, which is stable long before a rank estimate is, and
+  // its cost is linear in the sample.
+  // The PRICED folds get NFL_GPP_NF_PRICE, because a 2,000-entry sample stands
+  // in for 150,000 real entries at 75 of them per slot — it cannot resolve the
+  // top ten ranks at all, and 93% of a lineup's EV at that field size lives in
+  // ranks ≤ 10 (measured, `/tmp/review_g/g73_an5.js`). Everything above the
+  // sample's own top used to be a parametric extrapolation; at 20,000 the same
+  // fit is asked for a 375× extrapolation from a p99.75 threshold instead of a
+  // 3,000× one from p98, and the count branch resolves 7.5 ranks per slot
+  // instead of 75. Never larger than the contest itself.
+  const NFs = Math.min(NFL_GPP_NF_SEARCH, Math.max(200, F));
+  const NFp = Math.min(NFL_GPP_NF_PRICE,  Math.max(200, F));
   const nP = fieldPool.length;
   const tick = () => new Promise(r => setTimeout(r, 0));
 
@@ -27245,6 +27443,11 @@ async function runNflGppEngine(ctx){
   const scen = evOwnScenarios(baseOwn, K, EV_SCEN_SIGMA);
   const fieldOpts = evFieldOptsFor(slate, false, maxSal);
   if(ownSrc.source !== 'ss') fieldOpts.ownRef = rawOwn;
+  // Calibrate the sampler's marginals on a pilot; only the last of its three
+  // passes draws the full sample. This is what makes a 20,000-entry priced
+  // field affordable — see NFL_GPP_CALIB_N.
+  fieldOpts.calibN = NFL_GPP_CALIB_N;
+  fieldOpts.gammaBuckets = NFL_GPP_GAMMA_BUCKETS;
   log(`Ownership uncertainty: ${K} scenarios at ±${Math.round(EV_SCEN_SIGMA*100)}% (budget-preserving); worlds split across them.`);
   log(`Duplication: charged as ${(ctx.dupMode||NFL_GPP_DUP_MODE)==='divide' ? 'a prize divisor, 1/(1+dups) — spec §2 verbatim' : 'a rank offset of dups/2 (a DK tie splits the prizes for the ranks the tied entries occupy, so duplicates cost you the AVERAGE of that block, not one prize divided among them)'}.`);
 
@@ -27254,16 +27457,35 @@ async function runNflGppEngine(ctx){
   // BEFORE the search, so the search cannot chase its own reflection.
   const idxOfId = new Map(fieldPool.map((p,i) => [p.id, i]));
   const sharpShare = ctx.sharpShare || 0;
+  // ck73: the pool is capped at `bud.sharpPool`, not 300. A sharp slice of 22%
+  // drawn from 300 distinct builds is a few hundred cloned scores sitting on top
+  // of the sample, and it measurably fattened the tail fit.
+  const poolOf = (entries) => {
+    const asIdx = entries.filter(Boolean);
+    const totW = asIdx.reduce((s,x) => s + x.w, 0);
+    if(!asIdx.length || !(totW > 0)) return null;
+    // Prefix sums + binary search: the weighted pick used to be a LINEAR scan of
+    // the pool, which is fine at 300 entries and 13 M comparisons per scenario
+    // at 3,000.
+    const cum = new Float64Array(asIdx.length);
+    let s = 0;
+    for(let i = 0; i < asIdx.length; i++){ s += asIdx[i].w; cum[i] = s; }
+    return {asIdx, totW: s, cum};
+  };
   let sharpPool = null;
   if(sharpShare > 0 && ctx.ranked && ctx.ranked.length){
-    const asIdx = ctx.ranked.slice(0, 300).map(e => {
+    sharpPool = poolOf(ctx.ranked.slice(0, bud.sharpPool).map(e => {
       const ids = e.lineup.map(p => idxOfId.get(p.id)).filter(x => x != null);
       return ids.length === 9 ? {idxs:ids, w:Math.max(1, e.count||1)} : null;
-    }).filter(Boolean);
-    const totW = asIdx.reduce((s,x) => s + x.w, 0);
-    if(asIdx.length && totW > 0) sharpPool = {asIdx, totW};
+    }));
   }
-  const sampleSet = (label, pool) => {
+  const pickFrom = (sp) => {
+    const r = Math.random()*sp.totW, cum = sp.cum;
+    let lo = 0, hi = cum.length - 1;
+    while(lo < hi){ const m = (lo + hi) >> 1; if(cum[m] < r) lo = m + 1; else hi = m; }
+    return sp.asIdx[lo];
+  };
+  const sampleSet = (label, NF, pool) => {
     const sp = (pool !== undefined) ? pool : sharpPool;
     const lin = new Int32Array(K * NF * 9);
     for(let k = 0; k < K; k++){
@@ -27272,11 +27494,8 @@ async function runNflGppEngine(ctx){
       if(!field || !field.length) return null;
       if(sp){
         const nSharp = Math.floor(field.length * sharpShare);
-        for(let j = 0; j < nSharp; j++){
-          let rr = Math.random()*sp.totW, pick = sp.asIdx[0];
-          for(const x of sp.asIdx){ rr -= x.w; if(rr <= 0){ pick = x; break; } }
-          field[(Math.random()*field.length)|0] = pick.idxs.slice();
-        }
+        for(let j = 0; j < nSharp; j++)
+          field[(Math.random()*field.length)|0] = pickFrom(sp).idxs.slice();
       }
       const base = k * NF * 9;
       for(let f = 0; f < NF; f++){
@@ -27286,18 +27505,36 @@ async function runNflGppEngine(ctx){
     }
     return lin;
   };
+  // SAMPLE THE PRICED FOLDS ONCE, NOT TWICE (checkpoint 73). The sharp pass
+  // below re-draws every fold with its own optima in the sharp slice, so
+  // drawing the two 20,000-entry priced folds BEFORE it threw away a full
+  // sampling pass — 46 s of a 236 s run, measured. The sharp pass itself only
+  // ever reads the search fold (it prices on it and builds its duplication
+  // model from it), so only that one is drawn up front.
+  const needSharpPass = !!(bud.sharpFromEngine && sharpShare > 0 && !ctx.noSharpPass);
   gppProgressPhase('sampling the opponent field');
-  const fldLinG = sampleSet('generation');
+  const _tSample = Date.now();
+  const fldLinG = sampleSet('generation', NFs);
   await tick(); if(window._genCancelled) return null;
-  const fldLinS = sampleSet('select');
-  await tick(); if(window._genCancelled) return null;
-  const fldLinR = sampleSet('report');
+  let fldLinS = null, fldLinR = null;
+  if(!needSharpPass){
+    fldLinS = sampleSet('select', NFp);
+    await tick(); if(window._genCancelled) return null;
+    fldLinR = sampleSet('report', NFp);
+  } else {
+    // Placeholders: the searchOnly pass never reads them, and they are replaced
+    // wholesale below. Sharing one reference keeps the payload small.
+    fldLinS = fldLinG; fldLinR = fldLinG;
+  }
   if(!fldLinG || !fldLinS || !fldLinR){
     log('⚠ Field sampler produced no lineups — check the ownership column and that the pool can fill a legal roster under the cap/floor.');
     return null;
   }
-  log(`Field: three INDEPENDENT samples of ${K}×${NF.toLocaleString()} lineups — one per fold (search / select / report)`
-    + (sharpPool ? `, ${Math.round(sharpShare*100)}% of entries drawn from the candidate pool (optimizers), not Own% chalk.` : ' (no sharp slice available — pure Own% chalk).'));
+  const logFieldLine = (poolN, ms) =>
+    log(`Field: three INDEPENDENT samples — ${K}×${NFs.toLocaleString()} for the SEARCH fold (an ordering is all a hill climb needs) and ${K}×${NFp.toLocaleString()} for each PRICED fold`
+      + `, so a rank at ${F.toLocaleString()} entries resolves to ${(F/NFp).toFixed(1)} places per sample slot instead of ${(F/NFs).toFixed(1)} (${(ms/1000).toFixed(1)}s).`
+      + (poolN ? ` ${Math.round(sharpShare*100)}% of entries are drawn from a pool of ${poolN.toLocaleString()} distinct optimizer builds, not Own% chalk.` : ' (No sharp slice available — pure Own% chalk.)'));
+  if(!needSharpPass) logFieldLine(sharpPool ? sharpPool.asIdx.length : 0, Date.now()-_tSample);
   await tick(); if(window._genCancelled) return null;
 
   const payTable = gppPayTable(payout, F);
@@ -27336,7 +27573,7 @@ async function runNflGppEngine(ctx){
   const payload = {
     nP, pos, sal, sel, team, opp,
     Wg: genIdx.length, Ws: selIdx.length, Wr: repIdx.length, sg, ss, sr,
-    NF, K, F, fee, dupK: evDupK('nfl'),
+    NFg: NFs, NFp: NFp, K, F, fee, dupK: evDupK('nfl'),
     ownG: Float32Array.from(scen.flatMap(v => Array.from(v))),
     ownO: Float32Array.from(scen.flatMap(v => Array.from(v))),
     theta: NFL_GPP_DUP_THETA, maxDupFrac: NFL_GPP_DUP_MAXFRAC,
@@ -27361,11 +27598,12 @@ async function runNflGppEngine(ctx){
   // independent RNG seed, purely to produce a pool of its own local optima, and
   // the real run's field is re-sampled with THOSE as its sharp entries. The
   // throwaway pass costs ~14s and never reaches a portfolio.
-  if(bud.sharpFromEngine && sharpShare > 0 && !ctx.noSharpPass){
+  let badSharp = false;
+  if(needSharpPass){
     const t1 = Date.now();
     gppProgressPhase('sharp pass — giving the field optimizers as good as ours');
     const pre = Object.assign({}, payload, {
-      searchOnly: true, sharpWanted: 300, seed: (payload.seed ^ 0x9e3779b9) >>> 0,
+      searchOnly: true, sharpWanted: bud.sharpPool, seed: (payload.seed ^ 0x9e3779b9) >>> 0,
       seedPlan: gppSeedPlan(Object.assign({}, bud, {seedsPerLineup: 1, seedsMin: bud.sharpPassSeeds,
                                                     seedsMax: bud.sharpPassSeeds}), 1),
       budget: Object.assign({}, bud, {budgetMs: bud.sharpPassMs}),
@@ -27380,17 +27618,34 @@ async function runNflGppEngine(ctx){
     if(preOut && preOut.cancelled) return null;
     const sharpIdx = (preOut && preOut.result && preOut.result.sharp) || [];
     if(sharpIdx.length >= 20){
-      const asIdx = sharpIdx.map(ids => ({idxs: Array.from(ids), w: 1}));
-      const enginePool = {asIdx, totW: asIdx.length};
-      const g2 = sampleSet('search', enginePool);
-      const s2 = sampleSet('select', enginePool);
-      const r2 = sampleSet('report', enginePool);
+      // ck73: the engine's own optima AND the per-sim optimal pool, so the sharp
+      // slice is not one generator's output cloned a few hundred times. The
+      // legacy entries enter at half weight — they are the weaker optimizers,
+      // and §4's point is that the field contains both.
+      const ent = sharpIdx.map(ids => ({idxs: Array.from(ids), w: 1}));
+      if(sharpPool) for(const x of sharpPool.asIdx) ent.push({idxs: x.idxs, w: x.w * 0.5});
+      const enginePool = poolOf(ent);
+      const _t2 = Date.now();
+      const g2 = sampleSet('search', NFs, enginePool);
+      const s2 = sampleSet('select', NFp, enginePool);
+      const r2 = sampleSet('report', NFp, enginePool);
       if(g2 && s2 && r2){
         payload.fldLinG = g2; payload.fldLinS = s2; payload.fldLinR = r2;
-        log(`  field re-sampled: ${Math.round(sharpShare*100)}% of entries are now the ENGINE's own local optima (${sharpIdx.length} distinct), not the legacy generator's candidates. Every EV below is priced against that harder field (${((Date.now()-t1)/1000).toFixed(1)}s).`);
-      }
+        logFieldLine(enginePool.asIdx.length, Date.now()-_t2);
+        log(`  the sharp slice is ${sharpIdx.length.toLocaleString()} of the ENGINE's own local optima plus the per-sim optimal pool at half weight, so the field's top end is a broad pool of optimizer builds rather than a few hundred cloned scores (sharp pass + re-sample ${((Date.now()-t1)/1000).toFixed(1)}s).`);
+      } else { badSharp = true; }
     } else {
       log(`  ⚠ sharp pass produced only ${sharpIdx.length} lineups — keeping the per-sim-optimal sharp pool.`);
+      badSharp = true;
+    }
+    // The priced folds were not drawn up front; if the sharp pass could not
+    // supply a pool they still have to exist.
+    if(badSharp){
+      const _t3 = Date.now();
+      const s3 = sampleSet('select', NFp), r3 = sampleSet('report', NFp);
+      if(!s3 || !r3){ log('⚠ Field sampler produced no lineups.'); return null; }
+      payload.fldLinS = s3; payload.fldLinR = r3;
+      logFieldLine(sharpPool ? sharpPool.asIdx.length : 0, Date.now()-_t3);
     }
     if(window._genCancelled) return null;
   }
@@ -30135,37 +30390,37 @@ function toggleSavedDetails(i, btn){
 
 // ── Preset payout curves ────────────────────────────────────────────────────
 // The built-in DK contests (BUILTIN_CONTESTS) are exact tier tables for
-// SPECIFIC contests. The hand builder wants the opposite: three archetypes,
-// each described by the four numbers that actually shape strategy — entries,
-// fee, 1st place's share of the prize pool, and how deep it pays. The curve is
-// then GENERATED, so it stays sane at 2,500 entries and at 150,000, where a
-// scaled reference table degenerates (deep tiers collapse into each other once
-// the field is 20× smaller than the table's).
-//
-// Shape: ranks 1-10 are fixed multiples of 1st place (the measured top of DK's
-// $3.5M Milly Maker — 1st, then 20%, 10%, 7.5%, 5% … of it), and from rank 10
-// the curve decays as a power law r^-1.15 down to a FLOOR. The floor is the
-// one free parameter and it is SOLVED by bisection so the tiers sum to exactly
-// the prize pool (entries × fee × 84.2%, the payout ratio of the reference DK
-// table). That is why the archetypes differ in feel rather than in scale: a
-// top-heavy 150k-entry GPP solves to a min cash near 2.4× the entry fee, while
-// the 2,500-entry high-stakes contest — same 1st share, far fewer paid spots —
-// solves to a fat flat tail, which is what those contests really look like.
-// ── HEAD SHAPES ────────────────────────────────────────────────────────────
-// Two temperaments, because a routine GPP and a promoted mega-GPP do not look
-// alike at the very top and every format used to be given the promoted one.
-//   FLAT  — a Zipf head, prize(k) ∝ 1/k, so 2nd is half of 1st and 10th a
-//           tenth. That is what a routine small or single-entry GPP looks like:
-//           the drop from 1st is a step, not a cliff.
-//   PROMO — the Milly-Maker drop: 2nd ≈ a tenth of 1st, then a flattening
-//           through the rest of the top ten (10th ≈ 1.8% of 1st, against the
-//           Milly Maker's own ≈1.5%). Used for the one promoted format.
-// Both are shapes, not levels: hbBuildPayout scales them to hit the format's
-// published top-1% share.
-const HB_HEAD_SHAPE_FLAT  = [1, 1/2, 1/3, 1/4, 1/5, 1/6, 1/7, 1/8, 1/9, 1/10];
-const HB_HEAD_SHAPE_PROMO = [1, .10, .065, .05, .04, .033, .028, .024, .021, .018];
-const HB_HEAD_SHAPE = HB_HEAD_SHAPE_PROMO;   // legacy alias: the old single shape
-const HB_TAIL_ALPHA = 1.15;      // deep-tier decay exponent
+// SPECIFIC contests. The hand builder wants the opposite: a curve GENERATED
+// from the handful of numbers that actually shape strategy, so it stays sane at
+// 500 entries and at 500,000, where a scaled reference table degenerates (deep
+// tiers collapse into each other once the field is 20× smaller than the
+// table's). The generated curve is one ladder from 1st place to the last paid
+// rank: a power head over ranks 1..10 (prize ∝ k^−β), then a power tail
+// (prize ∝ r^−α) that lands exactly on the min cash at the last paid place.
+// Three of its four parameters are solved — see THE SOLVE below.
+// ── THE HEAD EXPONENT IS SOLVED, NOT SET (checkpoint 72) ───────────────────
+// The top ten places are a power law of rank, prize(k) ∝ k^(−β), and β is the
+// parameter that carries the published TOP-1% SHARE. It used to be two hand-set
+// constants (a "flat" Zipf head below 50,000 entries and a "promoted" steeper
+// one above), which had three problems, all of them measured:
+//   · the step at 50,000 entries put a DISCONTINUITY in the middle of the
+//     family — the top-1% share fell 30% → 29% as the field grew from 8k to
+//     25k and then jumped to 35% at 50k, so it did not rise monotonically with
+//     field size the way every reference says it does;
+//   · with the head fixed, the top-1% share became a pure OUTPUT and drifted
+//     out of anyone's control — nothing in the solve was answerable to the one
+//     band (25–40%) the reference actually publishes;
+//   · 1st place landed at 20% of the pool in a 500-entry contest and 7% in a
+//     500,000-entry one, i.e. exactly backwards.
+// Solving β against `top1Share` fixes all three at once, and it is the right
+// variable to spend on that target because the top 1% of a GPP field is mostly
+// head: β is what decides how much of the pool sits above the 1% line.
+// The solved β runs ≈0.9 at 500 entries to ≈2.8 at 500,000 (2nd is 53% of 1st
+// in a small field, 14% in a mega-field), which is the shape difference the two
+// hand-set constants were reaching for, expressed continuously and pinned to a
+// citable quantity instead of a story about 2nd place.
+const HB_HEAD_BETA_LO = 0.2, HB_HEAD_BETA_HI = 6;   // bisection bracket for β
+const hbHeadShape = beta => { const a = []; for(let k = 1; k <= 10; k++) a.push(Math.pow(k, -beta)); return a; };
 const HB_PAYOUT_RATIO = 0.842;   // prize pool / entry dollars (DK reference)
 const _hbPayoutRecs = new Map();
 // The payout record for one point on the two axes. Field size and fee are
@@ -30181,122 +30436,143 @@ function contestPayoutRec(format, fieldSize, fee){
   if(!rec){
     rec = {key:k, name:`${F.name} · ${Fs.toLocaleString()} entries`, fieldSize:Fs, fee:fe,
            top1Share: contestTop1Share(Fs, F.mme), minCashMult: contestMinCashMult(Fs, F.mme),
-           head: contestHeadShapeKey(Fs)};
+           paidFrac: contestPaidFrac(Fs, F.mme)};
     _hbPayoutRecs.set(k, rec);
   }
   return rec;
 }
-// ── THE SOLVE, AND WHICH QUANTITY GIVES ────────────────────────────────────
-// Four quantities describe a GPP structure and only three can be chosen: the
-// pool identity ties the fourth. Measured across the family (probe:
-// /tmp/review_g/payout.js, sweeping every format × min-cash × top-1% target),
-// the three pairwise corners for a 4,000-entry $5 single-entry field are:
-//   · top 1% = 25% and 25% of the field paid  ⟹ min cash 2.9× the fee
-//   · top 1% = 25% and min cash 2.0× the fee  ⟹ 32% of the field paid
-//   · 25% of the field paid and min cash 2.0× ⟹ top 1% = 39%, 1st = 9.5%
-// The old builder sat on the FIRST corner, which is exactly why its min cash
-// came out at 2.4–3.1× against a 1.5–2× reference and its head was starved.
+// ── THE SOLVE: A LADDER, NOT A SHELF (checkpoint 72) ───────────────────────
+// P0 found in checkpoint 70/71's curve, and it is what put a quarter of a
+// 150,000-entry board on naked quarterbacks. The tail exponent was pinned at
+// α = 1.15, which is far too fast a decay: the power curve fell to the min cash
+// by about rank 1,500, and the bisection then absorbed the ENTIRE remaining
+// pool as a dead-flat band. Measured (probe /tmp/review_g/shelf.js):
 //
-// This one sits on the SECOND. The reason is which references it can then
-// honour: the top-1% share, the min-cash multiple, the 15.9% rake AND the "1st
-// is ~10% of the pool or less, promoted contests more top-heavy" statement all
-// come out right, and only the paid fraction is left free — it solves to 31–35%
-// against DK's typical 20–25%. The third corner honours the paid fraction
-// instead and misses two: it puts 44–62% of the pool above the 1% line and 31%
-// of it on 1st place in the promoted format, both far outside anything
-// published. Missing one reference by a third beats missing two by half.
+//   MME 150,000 : 50,762 ranks all paying 1.5× — 33.8% of the field and
+//                 60.3% of the prize pool, with 2,000th paying exactly what
+//                 50,000th paid.
+//   MME 8,000   : 67.3% of the pool on the shelf.  SE 4,000 : 72.0%.
 //
-// SO: `top1Share` and `minCashMult` are inputs; the head SCALE and the PAID
-// COUNT are solved; the paid fraction is an output, and `paidFrac` on the
-// format record is kept only as the reference value to compare it against.
-// KNOWN BIAS, stated because it will show up in any comparison against a real
-// contest page: this family of curves pays about a third of the field where DK
-// pays a quarter, so its cash line sits a little deeper and a little cheaper
-// than the real one. For an EV engine that is the safe direction — it slightly
-// UNDER-rewards min-cashing, which is the failure the recalibration exists to
-// stop — and pasting the contest's own table (the `custom` preset) removes the
-// question entirely.
+// Two thirds of a GPP's prize pool on a flat shelf is precisely the thing Matt
+// said is never true: "the prizes increase as you move up the leaderboard".
+// It also made min-cashing the dominant source of EV, which is exactly what a
+// naked quarterback is optimised for, and the paid count was being solved
+// UPWARD (34–35% of the field, against DK's ~20–25%) to make the shelf swallow
+// the money.
+//
+// THE FIX, as a system of four constraints in four unknowns. Two of the four
+// are INPUTS, because DraftKings prints them on the contest page:
+//   · the paid count      — pinned at 22% of the field (see below);
+//   · the min cash        — `contestMinCashMult`, 1.5–2× the entry.
+// The other two constraints are the published statistics, and they determine
+// the three shape unknowns (head scale h, head exponent β, tail exponent α):
+//   1. the pool identity, Σ prize(r) = entries × fee × 84.2%   → solves h;
+//   2. the top-1% share, `contestTop1Share`, 25–40%            → solves β;
+//   3. "the prizes increase all the way up", i.e. the tail reaches the min cash
+//      exactly AT the last paid rank and not one place before it — which is
+//      not a target to bisect but a closed form,
+//          a10 · (paid/10)^(−α) = m   ⟹   α = ln(a10/m) / ln(paid/10),
+//      with a10 = rank ten's prize. This is the constraint that kills the
+//      shelf: there is no floor left for the curve to sit on.
+// Nested bisection: β outside (the top-1% share is monotone in it), h inside
+// (the total is monotone in it), α in closed form from whatever a10 falls out.
+//
+// α now lands around 0.41–0.50 rather than 1.15, which is the arithmetic the
+// old constant was hiding: to spend a 126,300-entry pool over ranks
+// 1,500–33,000 you need a mean of about 2.4× the entry across that band, and
+// only a slow decay gets you there.
+//
+// WHAT THE PAID FRACTION IS. Pinned at 22% of the field, in the middle of DK's
+// published 20–25%, for BOTH contest types and every field size. Flat, because
+// there is no published relationship to justify a scaling — and the same for
+// both types after measurement: paying single-entry fields deeper (25%) spread
+// the pool far enough that their top-1% share could no longer reach the
+// published 25% floor at small field sizes. Where single-entry and multi-entry
+// genuinely differ is in top-heaviness and min cash, and they still do.
+//
+// WHICH QUANTITY GIVES NOW. 1st place's share of the pool. Four quantities
+// describe a structure and the pool identity ties the fourth; checkpoint 70
+// let the paid fraction give (and lost it badly, 35% against DK's 20–25%),
+// this one lets 1st place give. It comes out at 6–10% of the pool for routine
+// fields — which is the published "~10% of the pool or less" — rising through
+// the teens to ~20% in a promoted mega-field, which is the right direction and
+// the right order of magnitude for a Milly-Maker-shaped contest. It is the
+// safest of the four to lose because it is the one number a user can read off
+// the contest page in one glance and correct with the paste box.
+const CONTEST_PAID_FRAC = 0.22;
+function contestPaidFrac(F, mme){ return CONTEST_PAID_FRAC; }
 function hbBuildPayout(rec){
   if(rec._payout) return rec._payout;
   const F=rec.fieldSize, fee=rec.fee;
   const pool=F*fee*HB_PAYOUT_RATIO;
-  const shape = (rec.head === 'promo') ? HB_HEAD_SHAPE_PROMO : HB_HEAD_SHAPE_FLAT;
-  const alpha = rec.tailAlpha || HB_TAIL_ALPHA;
-  // The floor is an INPUT now, not the thing the bisection solves for. Clamped
-  // so a pathological record cannot ask for a min cash the pool could not pay
-  // to ten people.
-  const m = Math.max(1e-6, Math.min(pool/20, (rec.minCashMult || 1.8) * fee));
+  // Min cash and paid count are INPUTS: both are printed on the contest page.
+  const m = Math.max(1e-9, Math.min(pool/20, (rec.minCashMult || 1.8) * fee));
+  const paid = Math.max(11, Math.min(F, Math.round(F * (rec.paidFrac > 0 ? rec.paidFrac : 0.22))));
   const onePct = Math.max(1, Math.round(F*0.01));
-  const headOf = h => shape.map(f => Math.max(m, h*pool*f));
-  // Money in ranks 11..P, floored at m. Closed form: the power piece runs to the
-  // crossover rank where the curve reaches the floor, the rest is flat.
-  const tailTot = (a10, P) => {
-    if(P <= 10) return 0;
-    if(m >= a10) return m*(P-10);
-    const rStar = Math.min(P, 10*Math.pow(a10/Math.max(1e-9,m), 1/alpha));
-    let s = a10*10/(alpha-1)*(1-Math.pow(rStar/10, 1-alpha));
-    if(P > rStar) s += m*(P-rStar);
-    return s;
+  const lnP = Math.log(paid/10);
+  // The exponent that lands the curve on the min cash at the last paid rank.
+  // Floored just above zero: a curve that would have to RISE to reach the floor
+  // means rank ten is already at the min cash, which only happens on a field
+  // too small to have a ladder at all.
+  const alphaOf = a10 => (a10 > m && lnP > 0) ? Math.max(1e-6, Math.log(a10/m)/lnP) : 1e-6;
+  // ∫ from rank 10 to `paid` of a10·(r/10)^(−α). Valid for any α ≠ 1; the α → 1
+  // limit is the logarithm, taken explicitly because the closed form divides by
+  // (1 − α) and α passes through 1 as the head scale moves.
+  const tailTot = (a10, alpha) => {
+    if(paid <= 10) return 0;
+    const R = paid/10;
+    if(Math.abs(1-alpha) < 1e-7) return a10*10*Math.log(R);
+    return a10*10*(Math.pow(R, 1-alpha) - 1)/(1-alpha);
   };
-  const totalFor = (h, P) => { const hd = headOf(h);
-    return hd.reduce((a,b)=>a+b,0) + tailTot(Math.max(m, hd[9]), P); };
-  // Inner solve: the paid count that spends the pool exactly at this head scale.
-  const paidFor = h => {
-    let lo = 10, hi = F;
-    if(totalFor(h, hi) < pool) return hi;            // even paying everyone is short
-    if(totalFor(h, lo) > pool) return lo;            // the head alone overspends
-    for(let it=0; it<80; it++){ const mid=(lo+hi)/2; if(totalFor(h, mid) < pool) lo=mid; else hi=mid; }
-    return (lo+hi)/2;
+  // One candidate ladder for a given head exponent: bisect the head scale
+  // against the pool identity, then pin the pool on the DISCRETE sum (the
+  // closed form integrates, the contest pays integer ranks, and the gap is
+  // systematic — the integral sits under the step function). The tail's scale
+  // takes that correction; the head, and therefore the ladder's shape, is left
+  // alone, and the min cash is re-derived from the corrected tail so the last
+  // paid rank still lands on it.
+  const ladderFor = beta => {
+    const shape = hbHeadShape(beta);
+    const headOf = h => shape.map(f => Math.max(m, h*pool*f));
+    const totalFor = h => { const hd = headOf(h), a10 = Math.max(m, hd[9]);
+      return hd.reduce((a,b)=>a+b,0) + tailTot(a10, alphaOf(a10)); };
+    let h, lo = 0, hi = 1;
+    while(totalFor(hi) < pool && hi < 1e9) hi *= 2;
+    for(let it=0; it<90; it++){ h=(lo+hi)/2; if(totalFor(h) < pool) lo=h; else hi=h; }
+    h=(lo+hi)/2;
+    const head = headOf(h);
+    let a10 = Math.max(m, head[9]);
+    const alpha = alphaOf(a10);
+    { const hd = head.reduce((a,b)=>a+b,0);
+      let t0 = 0; for(let r = 11; r <= paid; r++) t0 += a10*Math.pow(r/10, -alpha);
+      if(t0 > 0){ const k = Math.max(0.5, Math.min(2, (pool-hd)/t0)); a10 *= k; } }
+    return {beta, h, head, a10, alpha};
   };
-  // Outer solve: the head scale that puts top1Share of the pool above the line.
-  const top1For = h => {
-    const hd = headOf(h), a10 = Math.max(m, hd[9]), P = paidFor(h);
-    let s = 0;
-    for(let r=1; r<=Math.min(10, onePct); r++) s += hd[r-1];
-    if(onePct > 10) s += tailTot(a10, Math.min(onePct, P));
-    return s/pool;
-  };
-  const want = Math.max(0.02, Math.min(0.9, rec.top1Share || 0.30));
-  let hLo = 1e-5, hHi = 0.6, h;
-  if(top1For(hHi) < want) h = hHi;
-  else if(top1For(hLo) > want) h = hLo;
-  else { for(let it=0; it<70; it++){ h=(hLo+hHi)/2; if(top1For(h) < want) hLo=h; else hHi=h; } h=(hLo+hHi)/2; }
-  const head = headOf(h);
-  let a10 = Math.max(m, head[9]);
-  let paid = Math.max(10, Math.round(paidFor(h)));
-  // ── PIN THE POOL ON THE DISCRETE SUM, NOT THE INTEGRAL ────────────────────
-  // Everything above works in closed form, integrating the tail; the contest
-  // pays integer ranks. The gap is small but it is systematic (the integral
-  // sits under the step function), and it showed up as a 0.2–0.3% pool error on
-  // every format. So the last step re-solves against the sum the payout
-  // function will actually produce: the integer paid count that brackets the
-  // pool, then one scale factor on the tail to close the remainder exactly.
-  // The head is left alone — the top-1% target just fixed it.
-  {
-    const hd = head.reduce((a,b)=>a+b,0);
-    const tailSum = (A, P) => { let s = 0;
-      for(let r = 11; r <= P; r++) s += Math.max(m, A*Math.pow(r/10, -alpha));
-      return s; };
-    let lo = 10, hi = Math.min(F, Math.max(10, paid*3));
-    while(hi < F && hd + tailSum(a10, hi) < pool) hi = Math.min(F, hi*2);
-    while(lo < hi){ const mid = (lo+hi+1)>>1; if(hd + tailSum(a10, mid) <= pool) lo = mid; else hi = mid-1; }
-    paid = Math.max(10, lo);
-    const tt = tailSum(a10, paid);
-    if(tt > 0){ const k = Math.max(0.5, Math.min(2, (pool-hd)/tt)); a10 *= k; }
-  }
+  const at1pct = L => { let s = 0;
+    for(let r = 1; r <= onePct && r <= paid; r++)
+      s += r <= 10 ? L.head[r-1] : L.a10*Math.pow(r/10, -L.alpha);
+    return s/pool; };
+  // β outside: a steeper head puts more of the pool above the 1% line.
+  const tgt1 = Math.min(0.98, Math.max(0.01, rec.top1Share || 0.30));
+  let L;
+  { let lo = HB_HEAD_BETA_LO, hi = HB_HEAD_BETA_HI, b;
+    for(let it=0; it<60; it++){ b=(lo+hi)/2; if(at1pct(ladderFor(b)) < tgt1) lo=b; else hi=b; }
+    L = ladderFor((lo+hi)/2); }
+  const head = L.head, a10 = L.a10, alpha = L.alpha;
+  const mLast = a10*Math.pow(paid/10, -alpha);
   const at=r=>{
     if(!(r>=1)) r=1;
     if(r>paid+0.5) return 0;
     if(r<=10){
-      // Fractional ranks are real here — the rank posterior below is
-      // continuous — so interpolate rather than step.
+      // Fractional ranks are real here — the rank posterior is continuous — so
+      // interpolate rather than step.
       const i=Math.floor(r); if(i>=10) return head[9];
       return head[i-1]+(head[i]-head[i-1])*(r-i);
     }
-    return Math.max(m, a10*Math.pow(r/10, -alpha));
+    return a10*Math.pow(r/10, -alpha);
   };
-  rec._payout={at, paid, pool, first:head[0], minCash:m, alpha:alpha, headScale:h,
-    desc:`${rec.name}: $${Math.round(head[0]).toLocaleString()} to 1st, min cash $${m<10?m.toFixed(2):Math.round(m).toLocaleString()}, paying through ${paid.toLocaleString()} of ${F.toLocaleString()}`};
+  rec._payout={at, paid, pool, first:head[0], minCash:mLast, alpha:alpha, beta:L.beta, headScale:L.h,
+    desc:`${rec.name}: ${Math.round(head[0]).toLocaleString()}× to 1st, min cash ${mLast.toFixed(2)}×, paying through ${paid.toLocaleString()} of ${F.toLocaleString()}`};
   return rec._payout;
 }
 // The builder's FORMAT selector value, normalized: 'off', 'custom', or one of
@@ -30662,7 +30938,9 @@ function hbPriceLineup(players, cptId){
     // THE canonical estimator — the generator prices its candidates with this
     // exact function, so the two surfaces cannot drift apart again.
     const est=beatersEstimate(beating, tied, arr.length, arr, t, fieldSize, true);
-    const lam=(est.shape-0.5)*est.scale;   // expected beaters over all F entries
+    // Expected beaters over all F entries. ck73: the estimator reports it
+    // directly (`beat`) because the +0.5 prior no longer lives in `shape`.
+    const lam=(est.beat != null) ? est.beat : (est.shape-0.5)*est.scale;
     paySum[k]+=hbExpPayout(est.shape, est.scale, 1+dups/2, contest.payout);
     payCnt[k]++;
     // Win = nobody among the contest's F entries outscores it. The posterior
