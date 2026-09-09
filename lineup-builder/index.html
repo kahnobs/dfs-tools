@@ -299,7 +299,12 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .out-badge{font-size:8px;font-weight:700;letter-spacing:.4px;color:var(--red);border:1px solid rgba(239,68,68,.45);border-radius:3px;padding:0 3px;vertical-align:middle;}
 .q-badge{display:inline-block;margin-left:4px;padding:0 5px;border-radius:8px;font-size:9px;font-weight:700;letter-spacing:.06em;color:#f59e0b;border:1px solid rgba(245,158,11,.5);background:rgba(245,158,11,.10);vertical-align:1px;}
 .lock-badge{font-size:9px;opacity:.75;vertical-align:middle;cursor:help;}
-.sdash-out-note{margin:0 0 10px;padding:7px 10px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.07);border-radius:6px;font-size:11px;color:var(--text);line-height:1.6;font-family:'DM Mono',monospace;}
+.sdash-out-note{margin:0 0 10px;padding:7px 10px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.07);border-radius:6px;font-size:11px;color:var(--text);line-height:1.6;font-family:'DM Mono',monospace;max-height:132px;overflow-y:auto;}
+.sdash-out-note.open{max-height:46vh;}
+.sdash-out-head{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-family:'DM Sans',sans-serif;font-size:11px;color:var(--muted);}
+.sdash-out-head b{color:var(--text);font-weight:600;}
+.sdash-out-head button{background:none;border:1px solid var(--border);color:var(--muted);border-radius:4px;font-size:10px;padding:1px 7px;cursor:pointer;font-family:inherit;}
+.sdash-out-head button:hover{color:var(--text);border-color:var(--muted);}
 .sdash-outbtn{background:none;border:1px solid transparent;color:var(--muted);border-radius:3px;font-size:9px;line-height:1;padding:2px 3px;cursor:pointer;opacity:.3;filter:grayscale(1);}
 .sdash-outbtn:hover{opacity:1;filter:none;border-color:var(--border);}
 .sdash-outbtn.on{opacity:1;filter:none;color:var(--red);border-color:rgba(239,68,68,.45);}
@@ -21664,6 +21669,10 @@ function nflRedistributeOut(slate){
 // "⛔ Out: JSN — 42% rec yds → Kupp 18%, Shaheed 15%, Barner 9%".
 // The stat quoted is the one he owned the most of, which is the one the user
 // actually cares about (a WR's receiving yards, an RB's rushing yards).
+function simDashToggleOutNote(){
+  const s = activeSlate(); if(!s) return;
+  s._simDashOutOpen = !s._simDashOutOpen; save(); renderSimDash();
+}
 function nflOutSummaryLines(slate){
   const moves = (slate && slate._outMoves) || [];
   const byOut = new Map();
@@ -21673,16 +21682,26 @@ function nflOutSummaryLines(slate){
   }
   const short = surnameOf;
   const pct = v => (Math.round(v*1000)/10).toFixed(v >= 0.1 ? 0 : 1) + '%';
-  const out = [];
+  const out = [], bare = [];
   for(const id of nflOutIds(slate)){
     const p = playerById(slate, id);
     const m = byOut.get(id);
-    if(!m){ out.push(`⛔ Out: ${p ? p.name : id} — no market share to redistribute`); continue; }
+    // A scratched player who carried no market share moves nothing, and on a
+    // full Sunday slate there are 60-70 of them (every inactive third-stringer
+    // the sheet lists). One line each buried the handful that MATTER under a
+    // wall of noise — and, in the Sim Inputs panel, pushed the game grid off
+    // the screen entirely. They fold into a single counted line.
+    if(!m){ bare.push(p ? p.name : String(id)); continue; }
     // The numbers quoted are what each teammate GAINED, so they add back up to
     // the share that left — the arithmetic is checkable at a glance.
     const to = m.to.slice(0, 4).map(t => `${short(t.name)} ${pct(t.add)}`).join(', ');
     const more = m.to.length > 4 ? `, +${m.to.length-4} more` : '';
     out.push(`⛔ Out: ${short(m.outName)} — ${pct(m.share)} ${m.statLabel.toLowerCase()} → ${to}${more}`);
+  }
+  if(bare.length){
+    const N = 8;
+    out.push(`⛔ Out with no market share to redistribute (${bare.length}): `
+      + bare.slice(0, N).join(', ') + (bare.length > N ? `, +${bare.length - N} more` : ''));
   }
   return out;
 }
@@ -22403,8 +22422,13 @@ function renderSimDash(){
   // this panel the user did not make with a slider, so it has to announce itself.
   {
     const lines = nflOutSummaryLines(slate);
-    if(lines.length) html += `<div class="sdash-out-note" id="sdashOutNote">${lines.map(l=>esc(l)).join('<br>')}
-      <div style="font-family:'DM Sans',sans-serif;color:var(--muted);font-size:10px;margin-top:3px;">Team totals are unchanged — the offense still runs its plays. Every ⛔ share below can be overridden by hand.</div></div>`;
+    if(lines.length){
+      const nOut = nflOutIds(slate).length;
+      const openNote = !!slate._simDashOutOpen;
+      html += `<div class="sdash-out-head"><b>${nOut}</b> player${nOut===1?'':'s'} out — team totals are unchanged, the offense still runs its plays. Every ⛔ share below can be overridden by hand.
+        <button onclick="simDashToggleOutNote()">${openNote?'Show less':'Show all'}</button></div>`;
+      html += `<div class="sdash-out-note${openNote?' open':''}" id="sdashOutNote">${lines.map(l=>esc(l)).join('<br>')}</div>`;
+    }
   }
   if(!cur.games.length){ el.innerHTML = html + '<div class="no-data">No Team column — the sim needs teams (and O/U + spread from the odds puller) to build games.</div>'; return; }
 
@@ -22630,6 +22654,10 @@ const NFL_SIG_TEAM_YDS  = 0.22;   // team's own yardage swing (on top of yardF)
 const NFL_SIG_IDIO_REC  = 0.34;   // per-receiver efficiency inside his share
 const NFL_SIG_IDIO_RUSH = 0.36;
 const NFL_SIG_IDIO_PASS = 0.12;   // QB yards ride the receiving pie almost 1:1
+// A player with no market line at all, priced only by a typed Proj: one fat
+// lognormal around that number. Wider than any priced stat because a manual
+// projection carries no distributional information of its own.
+const NFL_SIG_PROJ      = 0.62;
 
 // Gamma(shape) by Marsaglia–Tsang (2000), with the standard α<1 boost
 // G(α) = G(α+1)·U^(1/α). Reuses the sim's own standard-normal source so the
@@ -23220,7 +23248,11 @@ function simNflPlayer(e, te, gauss, out){
     if(!(e.fallbackMean > 0)) return 0;
     // Manual Proj: ride the team factors so he still correlates, with a fat
     // lognormal around the projected mean.
-    const mult = Math.exp(gauss() * 0.62) * (0.5 + 0.5 * te.yardF);
+    // exp(N(0,σ)) has mean exp(σ²/2), so the raw multiplier ran every
+    // Proj-only player 21% ABOVE the projection the user typed. Subtract the
+    // Jensen term, the same way ln() does on the priced path.
+    const _s = NFL_SIG_PROJ;
+    const mult = Math.exp(gauss() * _s - _s * _s / 2) * (0.5 + 0.5 * te.yardF);
     return Math.max(0, e.fallbackMean * mult);
   }
 
