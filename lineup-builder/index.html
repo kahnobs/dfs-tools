@@ -3932,6 +3932,15 @@ function nflAssignSlots(slate, ids){
     FLEX:groups.RB[2]||groups.WR[3]||groups.TE[1]||null};
   return [out.QB,out.RB,out.RB2,out.WR,out.WR2,out.WR3,out.TE,out.FLEX,out.DST];
 }
+// Display order for an NFL classic lineup: QB / RB / RB / WR / WR / WR / TE /
+// FLEX / DST, the order DraftKings shows it in. Any id the slotter could not
+// place (an over-full position, a kicker) is appended so nothing disappears.
+function nflDisplayOrder(slate, ids){
+  if(!slate || slate.sport !== 'nfl' || isShowdown(slate) || !ids || ids.length !== 9) return ids;
+  const slots = nflAssignSlots(slate, ids).filter(Boolean);
+  const seen = new Set(slots);
+  return slots.concat(ids.filter(id => !seen.has(id)));
+}
 
 // ── PLAYER OUT ───────────────────────────────────────────────────────────────
 // A late scratch is not the same event as hiding a player. Hiding says "I don't
@@ -5044,7 +5053,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck75/2026-09-10';
+const BUILD_ID = '2.0/ck76/2026-09-10';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -7287,7 +7296,7 @@ function renderSaved(){
     const SDl=isShowdown(slate);
     const cptId=SDl?sdLineupCaptain(slate,lineup):null;
     // Showdown: captain first, charged/projected at 1.5×.
-    const players=(SDl?sdAssignSlots(slate,lineup,cptId):lineup).map(id=>playerById(slate,id)).filter(Boolean);
+    const players=(SDl?sdAssignSlots(slate,lineup,cptId):(slate.sport==='nfl'?nflDisplayOrder(slate,lineup):lineup)).map(id=>playerById(slate,id)).filter(Boolean);
     const sal=SDl?sdSalary(slate,lineup,cptId):players.reduce((s,p)=>s+(p.salary||0),0);
     const proj=players.reduce((s,p)=>s+(parseFloat(p.proj)||0)*(SDl&&p.id===cptId?CPT_MULT:1),0);
     const rtg=players.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
@@ -31991,7 +32000,8 @@ function renderPreviewLineupsList(){
     // all — that sum is what read as "Sim 435.0" here beside "Sim 328.2" on the
     // saved card for the same quality of lineup.
     const simTotal = previewLineupSim(slate, lineup);
-    const ordered = SDp ? [...lineup].sort((a,b)=>(b.id===cptId)-(a.id===cptId)) : lineup;
+    const ordered = SDp ? [...lineup].sort((a,b)=>(b.id===cptId)-(a.id===cptId))
+      : (slate.sport==='nfl' ? (()=>{ const byId={}; lineup.forEach(p=>byId[p.id]=p); return nflDisplayOrder(slate, lineup.map(p=>p.id)).map(id=>byId[id]).filter(Boolean); })() : lineup);
     // Same CPT/FLEX ownership split as the saved cards (see renderSaved).
     const ownTotal = lineup.reduce((s,p)=>s+(SDp?sdOwnOf(p,p.id===cptId):(parseFloat(p.own)||0)),0);
     const stats=[];
