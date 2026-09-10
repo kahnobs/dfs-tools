@@ -616,6 +616,8 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .stack-tag{display:inline-block;padding:0 6px;border-radius:8px;font-family:'DM Mono',monospace;font-size:9.5px;font-weight:700;letter-spacing:.04em;color:var(--accent);border:1px solid rgba(99,102,241,.45);background:rgba(99,102,241,.10);}
 .stack-tag.naked{color:var(--muted);border-color:var(--border);background:transparent;}
 .stack-warn{color:#f59e0b;font-weight:600;margin-left:3px;}
+.stack-rb{color:var(--muted);font-weight:600;margin-left:3px;}
+.stack-rb-ok{color:#22c55e;font-weight:700;margin-left:3px;}
 /* GPP ENGINE RESULT CARD (spec §7). The run log is a transcript and stays one;
    this is the same three answers — what shapes were chosen, who is on the board,
    and what is duplicated — as scannable chips above it, reusing .stack-tag so a
@@ -2046,7 +2048,13 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
             <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);cursor:pointer;margin-top:3px;">
               <input type="checkbox" id="nflStackRbCounts" style="accent-color:#a855f7;"
                 onchange="const _s=activeSlate();if(_s){_s._nflStackRbCounts=this.checked;save();renderNflQbStacks();}">
-              <span>Count a same-team RB toward the stack <span style="opacity:.65;">(off = WR/TE only, the real pass-game correlation)</span></span>
+              <span>Count <b>every</b> same-team RB toward the stack <span style="opacity:.65;">(an explicit override of the per-player receiving test below)</span></span>
+            </label>
+            <!-- ck75: the market decides the shape, per QB. Default ON. -->
+            <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);cursor:pointer;margin-top:3px;">
+              <input type="checkbox" id="nflMktStacks" checked style="accent-color:#a855f7;"
+                onchange="nflSetMarketStacks(this.checked);">
+              <span>Market-derived stack rules <span style="opacity:.65;">(default on — a QB the book prices as a runner may go naked; one it does not needs ≥1 teammate, and a pass-catching RB counts as that teammate)</span></span>
             </label>
 
             <!-- Per-QB stack overrides. The global "QB + N" is one number for a
@@ -5036,7 +5044,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck73/2026-09-09';
+const BUILD_ID = '2.0/ck75/2026-09-10';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -8076,9 +8084,7 @@ function nflLateSwapPlan(slate){
   // sdOptimalForSim has never read stack rules.
   const lsRules = (() => {
     if(SD) return null;
-    const g = { stackN: nflStackNOf(slate), bringBack: slate._nflBringBack|0,
-                noRbVsDst: !!slate._nflNoRbVsDst, rbCounts: !!slate._nflStackRbCounts };
-    g.perQb = nflResolveQbStacks(slate, g);
+    const g = nflResolvedStackRules(slate);
     return (nflAnyStackRule(g) || g.noRbVsDst) ? g : null;
   })();
   // Held-out sims, strided: the same population every other selector prices on.
@@ -9472,6 +9478,8 @@ function renderGroupRulesSummary(){
     if(nRb) nRb.checked = !!slate._nflNoRbVsDst;
     const rbC = document.getElementById('nflStackRbCounts');
     if(rbC) rbC.checked = !!slate._nflStackRbCounts;
+    const mkS = document.getElementById('nflMktStacks');
+    if(mkS) mkS.checked = nflMarketStacksOn(slate);
     // Per-QB overrides live under the global controls and read them (the RB
     // checkbox decides each row's default partner set), so render after both.
     if(typeof renderNflQbStacks==='function') renderNflQbStacks();
@@ -24949,31 +24957,63 @@ function nflTeamNorm(t){
 function nflTeamOf(p){ return nflTeamNorm(p && p.team); }
 // ── Build shape of a lineup ─────────────────────────────────────────────────
 // "QB+2 · 1 BB" — how many of the QB's own skill players ride with him and
-// how many opponents come back the other way. Skill = RB/WR/TE only: a DST
-// is never part of a stack (an opposing DST is the anti-stack, reported as
-// "opp DST"). A lineup with no QB (showdown without one) gets no label.
+// how many opponents come back the other way. A DST is never part of a stack
+// (an opposing DST is the anti-stack, reported as "opp DST"). A lineup with no
+// QB (showdown without one) gets no label.
+//
+// WHICH POSITIONS COUNT AS A PARTNER — one definition (checkpoint 74). This
+// used to be a hard-coded RB/WR/TE here while the stack RULE the tool enforces
+// (`nflQbDefaultPartners`) counted WR/TE unless "Count a same-team RB" was on.
+// So the same lineup read "QB+1" on the card and NAKED to the rule meant to
+// admit it, and on Matt's Week 1 slate the two counts differed by 15 points of
+// the board (15 naked by the label, 37 by the rule) — which is the whole reason
+// the naked rate looked non-monotone in field size. The label follows the
+// rule's own box now. A same-team RB is still reported (`nRb`, in the tip and
+// on the tag): it is real information, it just is not a stack.
+function nflStackPartnerPos(slate){
+  return (slate && slate._nflStackRbCounts) ? ['RB','WR','TE'] : ['WR','TE'];
+}
 function nflStackShape(slate, ids, cptId){
   const ps = (ids || []).map(id => playerById(slate, id)).filter(Boolean);
   const qbs = ps.filter(p => nflPosOf(p) === 'QB');
   if(!qbs.length) return null;
   const qb = qbs.length === 1 ? qbs[0] : (qbs.find(p => p.id === cptId) || qbs[0]);
   const team = nflTeamOf(qb), opp = nflOppOf(qb);
-  const skill = p => ['RB','WR','TE'].includes(nflPosOf(p));
-  const mates = ps.filter(p => p !== qb && skill(p) && nflTeamOf(p) === team);
+  const partnerPos = nflStackPartnerPos(slate);
+  const skill = p => partnerPos.includes(nflPosOf(p));
+  // ck75: with market-derived rules on (and the "count every RB" override off),
+  // a same-team RB the BOOK prices as a receiver is a real partner for this QB —
+  // he is counted in `n` and tagged `RB✓`. An RB with no receiving line stays
+  // the muted `+1 RB` chip he has been since ck74. The label GRAMMAR is
+  // unchanged and the rule this reports is the rule the generator enforces.
+  const mktRb = nflMarketStacksOn(slate) && partnerPos.indexOf('RB') < 0;
+  const rbOk = p => mktRb && nflRbStackPartnerOk(slate, p).ok;
+  const mates = ps.filter(p => p !== qb && nflTeamOf(p) === team &&
+                          (skill(p) || (nflPosOf(p) === 'RB' && rbOk(p))));
   const backs = ps.filter(p => skill(p) && nflTeamOf(p) === opp);
+  const rbPartners = mates.filter(p => nflPosOf(p) === 'RB');
+  const rbMates = partnerPos.indexOf('RB') >= 0 ? []
+      : ps.filter(p => p !== qb && nflPosOf(p) === 'RB' && nflTeamOf(p) === team &&
+                  mates.indexOf(p) < 0);
   const oppDst = ps.some(p => nflPosOf(p) === 'DST' && nflTeamOf(p) === opp);
   const ownDst = ps.some(p => nflPosOf(p) === 'DST' && nflTeamOf(p) === team);
-  const n = mates.length, bb = backs.length;
+  const n = mates.length, bb = backs.length, nRb = rbMates.length;
   const label = (n ? `QB+${n}` : 'Naked QB') + ' · ' + (bb ? `${bb} BB` : 'no BB');
-  return { qb, team, opp, n, bb, mates, backs, oppDst, ownDst, label,
-           tip: `${qb.name} (${team}) with ${n ? mates.map(m => m.name).join(', ') : 'no teammates'}` +
+  return { qb, team, opp, n, bb, nRb, mates, backs, rbMates, rbPartners, oppDst, ownDst, label, partnerPos,
+           tip: `${qb.name} (${team}) with ${n ? mates.map(m => m.name).join(', ') : 'no ' + partnerPos.join('/') + ' teammate'}` +
+                (rbPartners.length ? `; ${rbPartners.map(m => m.name).join(', ')} counts as a partner — the book prices his receiving (${rbPartners.map(m => nflRbStackPartnerOk(slate, m).why).join('; ')})` : '') +
+                (nRb ? `; ${rbMates.map(m => m.name).join(', ')} is a same-team RB the market does not price as a receiver, which this stack definition does not count — turn on "Count every same-team RB" if you want it to` : '') +
                 (bb ? `; bring-back ${backs.map(b => b.name).join(', ')}` : '; no bring-back') +
                 (oppDst ? `; opposing DST (fades your own QB)` : ownDst ? `; own DST` : '') };
 }
 function nflStackLabelHtml(slate, ids, cptId){
   const sh = nflStackShape(slate, ids, cptId); if(!sh) return '';
   const cls = sh.n === 0 ? ' naked' : '';
-  return `<span class="stack-tag${cls}" title="${esc(sh.tip)}">${esc(sh.label)}${sh.oppDst ? ' <span class="stack-warn" title="the DST plays against your QB">⚠ opp DST</span>' : ''}</span>`;
+  const rbOk = (sh.rbPartners||[]).length;
+  return `<span class="stack-tag${cls}" title="${esc(sh.tip)}">${esc(sh.label)}`
+    + (rbOk ? ` <span class="stack-rb-ok" title="${esc((sh.rbPartners||[]).map(m=>m.name).join(', '))} — a same-team RB the market prices as a receiver, counted as a real stack partner">RB✓</span>` : '')
+    + (sh.nRb ? ` <span class="stack-rb" title="${esc(sh.rbMates.map(m=>m.name).join(', '))} — a same-team RB, not counted as a stack partner under the current setting">+${sh.nRb} RB</span>` : '')
+    + (sh.oppDst ? ' <span class="stack-warn" title="the DST plays against your QB">⚠ opp DST</span>' : '') + `</span>`;
 }
 function nflOppOf(p){ return nflTeamNorm(p && p.opp); }
 
@@ -25010,6 +25050,143 @@ function nflQbDefaultPartners(slate, qb, rbCounts){
   const pos = rbCounts ? ['WR','TE','RB'] : ['WR','TE'];
   return nflQbTeammates(slate, qb).filter(p => pos.includes(nflPosOf(p)));
 }
+
+// ── MARKET-DERIVED PER-QB STACK RULES (checkpoint 75) ────────────────────────
+// Matt's rule, verbatim: "A QB that has decent rushing upside on his own is more
+// viable as a naked QB. Any RB with decent receiving upside should count as a
+// stacking partner with our QB. A QB that has no rushing expectation should
+// never be played naked — if he works out, it's because he was throwing to his
+// teammates, and we want at least 1 of them with him."
+//
+// Both halves are MARKET questions, so both are answered off the same
+// mean-converted prop entry the sim itself is built from (`nflPropEntry`), never
+// off a projection the tool invented. `e.mkt` records WHICH legs the book
+// actually priced, and that distinction is load-bearing: `nflPropEntry` gives a
+// QB with props but no rushing line a 12-yard "generic scramble floor" and
+// derives an ATD probability from total yards, so a pocket passer read off the
+// finished numbers would look like he had a rushing line when the book never
+// wrote one. A QB with no rushing MARKET is a pocket QB by definition.
+//
+// Every threshold is here, in one block, in the units the book quotes.
+const NFL_QB_STACK_RULE = {
+  // A QB is "rushing" — i.e. can carry a lineup without a pass catcher — if ANY
+  // of these three fire. Yards and ATD are the direct market statements; the
+  // share is what catches a cheap QB whose whole case is his legs.
+  rushYds:    30,     // mean-converted rushing-yards line
+  atd:        0.30,   // anytime-TD probability (a QB's ATD is a rushing TD)
+  rushShare:  0.25,   // rushing share of his projected DK points
+  // A same-team RB counts as a stacking partner if the book prices his receiving
+  // at either of these. Per player — this supersedes the slate-wide
+  // "Count a same-team RB" checkbox, which is now the explicit "count EVERY RB"
+  // override rather than the only way an RB can be a partner.
+  rbRecYds:   25,     // mean-converted receiving-yards line
+  rbRec:      3.5,    // …or receptions line
+  // What the two classes require.
+  minRushing: 0,      // naked is allowed
+  minPocket:  1,      // at least one teammate rides with him
+};
+// Market rules are ON by default; the slate-level toggle turns them off and the
+// tool is exactly ck74 again.
+function nflMarketStacksOn(slate){ return !(slate && slate._nflMktStacks === false); }
+function nflSetMarketStacks(on){
+  const s = activeSlate(); if(!s) return;
+  if(on) delete s._nflMktStacks; else s._nflMktStacks = false;
+  save(); if(typeof renderNflQbStacks === 'function') renderNflQbStacks();
+}
+// One player's mean-converted market entry, memoized per slate. `nflPropEntry`
+// is pure in the player row, so the only thing that can invalidate this is a
+// pool update, which bumps `_mktVer`.
+// The memo lives on the FUNCTION, not on the slate: a slate is serialized into
+// localStorage by `save()`, and a Map stored there comes back as `{}` on the
+// next load — which surfaces as `c.m.has is not a function` in whatever
+// unrelated panel happens to ask for a profile first.
+function nflMktEntry(slate, p){
+  if(!p) return null;
+  const key = (slate && slate.id) + '|' + ((slate && slate._mktVer)|0);
+  let c = nflMktEntry._c;
+  if(!c || c.k !== key) c = nflMktEntry._c = {k: key, m: new Map()};
+  if(c.m.has(p.id)) return c.m.get(p.id);
+  let e = null;
+  try { e = nflPropEntry(p, nflTeamOf(p), null); } catch(err){ e = null; }
+  c.m.set(p.id, e);
+  return e;
+}
+// Does the book price this RB's receiving at all, and does it clear the bar?
+// → {ok, why} — `why` is what the panel and the log quote back at the user.
+function nflRbStackPartnerOk(slate, rb){
+  const e = nflMktEntry(slate, rb);
+  const R = NFL_QB_STACK_RULE;
+  if(!e || !e.hasProps) return {ok:false, why:'no market lines'};
+  const priced = !!(e.mkt && (e.mkt.recYds || e.mkt.rec));
+  if(!priced) return {ok:false, why:'no receiving line'};
+  const ry = e.recYds || 0, rc = e.rec || 0;
+  const ok = ry >= R.rbRecYds || rc >= R.rbRec;
+  return {ok, why: `${ry.toFixed(1)} rec yds · ${rc.toFixed(1)} rec`, recYds:ry, rec:rc};
+}
+// THE PROFILE. → {rushing, minPartners, partners:Set<id>, reason, eligible:[...]}
+function nflQbStackProfile(slate, qb){
+  const R = NFL_QB_STACK_RULE;
+  const partners = new Set(), eligible = [], rbNotes = [];
+  const mates = (slate && qb) ? nflQbTeammates(slate, qb) : [];
+  for(const m of mates){
+    const mp = nflPosOf(m);
+    if(mp === 'WR' || mp === 'TE'){ partners.add(m.id); eligible.push({p:m, why:mp}); continue; }
+    if(mp !== 'RB') continue;
+    const r = nflRbStackPartnerOk(slate, m);
+    if(r.ok){ partners.add(m.id); eligible.push({p:m, why:`RB, ${r.why}`}); }
+    else rbNotes.push({p:m, why:r.why});
+  }
+  const e = nflMktEntry(slate, qb);
+  // "Smith-Njigba, Jr." is not a surname. Strip the generational suffixes before
+  // taking the last word, or half a slate's eligible list reads "Jr., III, Sr.".
+  const last = p => {
+    const w = String(p.name||'').replace(/[.,]/g,' ').split(/\s+/).filter(Boolean)
+      .filter(x => !/^(jr|sr|ii|iii|iv|v)$/i.test(x));
+    return w.length ? w[w.length-1] : (p.name || '?');
+  };
+  // The eligible list is salary-ordered (nflQbTeammates); the top six are the
+  // ones a lineup will actually reach for, and a nineteen-name list is unreadable.
+  const elig = eligible.slice(0, 6)
+    .map(x => x.why.indexOf('RB') === 0 ? `${last(x.p)} (${x.why})` : last(x.p));
+  const more = eligible.length - elig.length;
+  const tail = `; eligible: ${elig.length ? elig.join(', ') + (more > 0 ? ` +${more} more` : '') : '— none on the slate'}`;
+  // A QB the market never priced cannot be classified off invented numbers.
+  if(!e || !e.hasProps)
+    return {rushing:false, minPartners:R.minPocket, partners, eligible, rbNotes,
+            reason:`Pocket QB — no market lines at all, so nothing says he runs → min ${R.minPocket} partner${tail}`};
+  const hasRushMkt = !!(e.mkt && e.mkt.rushYds);
+  const hasTdMkt   = !!(e.mkt && e.mkt.td);
+  const ry  = hasRushMkt ? (e.rushYds || 0) : 0;
+  const atd = hasTdMkt   ? (e.atd || 0)     : 0;
+  // Rushing share of his projected DK points, off the same means: rushing is
+  // 0.1/yard plus a 6-point TD at the anytime price (a QB's ATD is a rush TD);
+  // passing is 0.04/yard plus 4 per passing TD.
+  const rushPts = 0.1*(e.rushYds || 0) + 6*(e.atd || 0);
+  const passPts = 0.04*(e.passYds || 0) + 4*(e.passTD || 0);
+  const tot = rushPts + passPts;
+  const share = (hasRushMkt && tot > 0) ? rushPts/tot : 0;
+  const hits = [];
+  if(hasRushMkt && ry >= R.rushYds) hits.push(`rush ${ry.toFixed(1)} ≥ ${R.rushYds}`);
+  if(hasTdMkt && atd >= R.atd) hits.push(`ATD ${Math.round(atd*100)}% ≥ ${Math.round(R.atd*100)}%`);
+  if(hasRushMkt && share >= R.rushShare) hits.push(`${Math.round(share*100)}% of his DK points are rushing ≥ ${Math.round(R.rushShare*100)}%`);
+  const facts = `rush ${hasRushMkt ? ry.toFixed(1) : 'no line'} · ATD ${hasTdMkt ? Math.round(atd*100)+'%' : 'no line'}`
+    + (hasRushMkt ? ` · rush share ${Math.round(share*100)}%` : '');
+  if(hits.length)
+    return {rushing:true, minPartners:R.minRushing, partners, eligible, rbNotes,
+            reason:`Rushing QB — ${facts} (${hits.join('; ')}) → naked allowed${tail}`,
+            rushYds:ry, atd, share};
+  return {rushing:false, minPartners:R.minPocket, partners, eligible, rbNotes,
+          reason:`Pocket QB — ${facts} → min ${R.minPocket} partner${tail}`,
+          rushYds:ry, atd, share};
+}
+// Every QB the panel and the log should describe, salary desc.
+function nflSlateQbs(slate){
+  const hidden = new Set((slate && slate.hiddenIds) || []);
+  return ((slate && slate.players) || [])
+    .filter(p => nflPosOf(p) === 'QB' && (p.salary||0) > 0 && !hidden.has(p.id) &&
+                 !(typeof nflIsOut === 'function' && nflIsOut(slate, p.id)))
+    .sort((a,b) => (b.salary||0) - (a.salary||0));
+}
 // Is this player actually available to the generator? The run builds its pool
 // as "not hidden, not OUT", so the PANEL has to count eligibility the same way —
 // otherwise a row reads "≥2 of Whitfield · Ferrell" as satisfied while one of
@@ -25023,18 +25200,47 @@ function nflQbStackPoolOk(slate){
 // A QB whose every field is null is NOT included: inheriting everything is
 // exactly what the global path already does, and an empty map lets every caller
 // keep its old fast path.
+//
+// ck75: the DEFAULT is no longer "inherit the global number and the global
+// position rule" — it is the QB's own market profile (`nflQbStackProfile`).
+// Precedence, per QB and per field:
+//   1. an explicit per-QB override (the segmented control / the partner chips);
+//   2. the global "QB + N" when it is set — one number the user typed for the
+//      whole slate beats a number the tool derived;
+//   3. the derived profile.
+// The PARTNER SET follows the same ladder with one extra rung: ticking
+// "Count a same-team RB" is an explicit "count EVERY RB" override and wins over
+// the per-player receiving test, exactly as its label now says.
 function nflResolveQbStacks(slate, g){
   const store = (slate && slate._qbStacks) || {};
   const out = {};
-  for(const id in store){
-    const s = store[id] || {};
+  const gN = (g && g.stackN)|0, gBB = (g && g.bringBack)|0;
+  const mktOn = nflMarketStacksOn(slate) && !!slate && slate.sport === 'nfl' &&
+                !(typeof isShowdown === 'function' && isShowdown(slate));
+  const seen = new Set();
+  const put = (id, s, prof) => {
     const hasN = s.n != null, hasP = Array.isArray(s.partners), hasB = s.bringBack != null;
-    if(!hasN && !hasP && !hasB) continue;
-    out[id] = {
-      n:          hasN ? (s.n|0)             : ((g && g.stackN)|0),
-      partnerIds: hasP ? new Set(s.partners) : null,
-      bringBack:  hasB ? (s.bringBack|0)     : ((g && g.bringBack)|0),
-    };
+    const n  = hasN ? (s.n|0)  : (gN > 0 ? gN : (prof ? prof.minPartners : gN));
+    const bb = hasB ? (s.bringBack|0) : gBB;
+    // A derived partner set only narrows anything when the RB checkbox is off;
+    // with it on the position rule already counts every RB.
+    const pIds = hasP ? new Set(s.partners)
+               : (prof && !(g && g.rbCounts) ? new Set(prof.partners) : null);
+    if(!(n > 0) && !(bb > 0) && !hasN && !hasP && !hasB) return;   // nothing to enforce
+    out[id] = {n, partnerIds: pIds, bringBack: bb, derived: !hasN && !hasP && !(gN > 0) && !!prof,
+               profile: prof || null};
+  };
+  if(mktOn){
+    for(const qb of nflSlateQbs(slate)){
+      seen.add(qb.id);
+      put(qb.id, store[qb.id] || {}, nflQbStackProfile(slate, qb));
+    }
+  }
+  for(const id in store){
+    if(seen.has(id)) continue;
+    const s = store[id] || {};
+    if(s.n == null && !Array.isArray(s.partners) && s.bringBack == null) continue;
+    put(id, s, null);
   }
   return out;
 }
@@ -25047,6 +25253,73 @@ function nflStackReqFor(rules, qbId){
 }
 // Is ANY stack requirement live? A per-QB override can demand a stack on a
 // slate whose global setting is "off", so "global is 0" is no longer the test.
+// The complete rules object for a slate — global numbers plus the resolved
+// per-QB map — built in ONE place so the generator, the late-swap planner, the
+// engine fork and the engine payload cannot disagree about what is in force.
+function nflResolvedStackRules(slate){
+  const SD = (typeof isShowdown === 'function') && isShowdown(slate);
+  const g = {
+    stackN:    (typeof nflStackNOf === 'function') ? nflStackNOf(slate) : 0,
+    bringBack: slate ? (slate._nflBringBack|0) : 0,
+    noRbVsDst: !!(slate && slate._nflNoRbVsDst),
+    rbCounts:  !!(slate && slate._nflStackRbCounts),
+  };
+  g.perQb = SD ? {} : nflResolveQbStacks(slate, g);
+  return g;
+}
+// Which parts of a rules object the GPP ENGINE cannot enforce inside its own
+// search. It honours per-QB (and global) partner MINIMUMS since ck75; a
+// bring-back and "no RB vs own DST" are still the legacy pipeline's job, and
+// the fork's log names whichever one sent the run there.
+function nflGppUnsupportedRules(rules){
+  const out = [];
+  if(!rules) return out;
+  if((rules.bringBack|0) > 0) out.push('a bring-back requirement');
+  const pq = rules.perQb || {};
+  for(const k in pq) if((pq[k].bringBack|0) > 0){ out.push('a per-QB bring-back requirement'); break; }
+  if(rules.noRbVsDst) out.push('“no RB against my own DST”');
+  return out;
+}
+// ck75: what the MARKET decided, before what the user typed. One line for the
+// slate, then one line per quarterback the market actually priced, so Matt can
+// sanity-check the thresholds against the props he is looking at. Extracted so
+// the generator and the harness print the identical block.
+function nflLogMarketStackRules(slate, pool, stackRules, log){
+  if(!nflMarketStacksOn(slate)) return;
+  pool = pool || (slate && slate.players) || [];
+  stackRules = stackRules || nflResolvedStackRules(slate);
+  log = log || function(){};
+    const _lastN = p => String(p.name||'').split(' ').slice(-1)[0] || p.name || '?';
+    const _qbs = nflSlateQbs(slate).filter(p => pool.some(x => x.id === p.id));
+    const _profs = _qbs.map(p => ({p, prof: nflQbStackProfile(slate, p)}));
+    const _rush = _profs.filter(x => x.prof.rushing), _pock = _profs.filter(x => !x.prof.rushing);
+    const _rbs = [];
+    for(const x of _profs) for(const e of x.prof.eligible)
+      if(nflPosOf(e.p) === 'RB' && _rbs.indexOf(e.p.name) < 0) _rbs.push(e.p.name);
+    log(`Stack rules: market-derived — ${_pock.length} pocket QB${_pock.length===1?'':'s'} (min ${NFL_QB_STACK_RULE.minPocket}), `
+      + `${_rush.length} rushing QB${_rush.length===1?'':'s'} (naked allowed); RB partners: ${_rbs.length ? _rbs.join(', ') : 'none — no same-team RB on this slate carries a receiving line that clears the bar'}.`);
+    log(`  Thresholds (Stacking panel, "Market-derived stack rules"): a QB is RUSHING at rush yds ≥ ${NFL_QB_STACK_RULE.rushYds}, ATD ≥ ${Math.round(NFL_QB_STACK_RULE.atd*100)}% or ${Math.round(NFL_QB_STACK_RULE.rushShare*100)}% of his DK points from rushing; an RB is a PARTNER at rec yds ≥ ${NFL_QB_STACK_RULE.rbRecYds} or receptions ≥ ${NFL_QB_STACK_RULE.rbRec}. Every number is the mean-converted market line the sim itself runs on; a QB with no rushing line at all is a pocket QB.`);
+    // One line per quarterback the MARKET priced. The rest — third-string QBs
+    // DK lists at $4,000 with no lines at all — are pocket QBs by the same rule
+    // and are named in one tail line rather than sixty.
+    const _unpriced = _profs.filter(x => /no market lines/.test(x.prof.reason));
+    for(const x of _profs.filter(x => !/no market lines/.test(x.prof.reason))){
+      const ov = (slate._qbStacks||{})[x.p.id] || {};
+      const overridden = ov.n != null || Array.isArray(ov.partners) || (stackRules.stackN|0) > 0;
+      const req = nflStackReqFor(stackRules, x.p.id);
+      log(`    ${_lastN(x.p)} (${nflTeamOf(x.p)||'—'}) — ${x.prof.reason}`
+        + (overridden ? `  ⟵ overridden: this run enforces ≥${req.n}` : ''));
+      // A rule the pool cannot satisfy makes the QB unrosterable, which is
+      // otherwise invisible: he simply never appears.
+      const _inPool = req.partnerIds
+        ? [...req.partnerIds].filter(id => pool.some(q => q.id === id)).length
+        : nflQbDefaultPartners(slate, x.p, stackRules.rbCounts).filter(q => pool.some(z => z.id === q.id)).length;
+      if(req.n > _inPool)
+        log(`      ⚠ ${x.p.name} needs ≥${req.n} partner${req.n>1?'s':''} but only ${_inPool} eligible teammate${_inPool===1?' is':'s are'} in the pool — he cannot appear. Loosen his row in Per-QB stacks or unhide a teammate.`);
+    }
+    if(_unpriced.length)
+      log(`    ${_unpriced.length} further quarterback${_unpriced.length===1?'':'s'} carr${_unpriced.length===1?'ies':'y'} no market lines at all, so ${_unpriced.length===1?'he is a':'they are'} pocket QB${_unpriced.length===1?'':'s'} by the same rule (min ${NFL_QB_STACK_RULE.minPocket}): ${_unpriced.slice(0,12).map(x=>_lastN(x.p)).join(', ')}${_unpriced.length>12?` +${_unpriced.length-12} more`:''}.`);
+}
 function nflAnyStackRule(rules){
   if(!rules) return false;
   if((rules.stackN|0)>0 || (rules.bringBack|0)>0) return true;
@@ -25090,7 +25363,11 @@ function toggleNflQbPartner(qbId, pid){
   const s = activeSlate(); if(!s) return;
   const qb = (s.players||[]).find(p=>p.id===qbId); if(!qb) return;
   const e = nflQbStackEntry(s, qbId);
-  const dflt = nflQbDefaultPartners(s, qb, !!s._nflStackRbCounts).map(p=>p.id);
+  // The DEFAULT set the row shows — market-derived when that is what the panel
+  // rendered, so "back to exactly the default" means the same thing in both.
+  const dflt = (nflMarketStacksOn(s) && !s._nflStackRbCounts)
+    ? [...nflQbStackProfile(s, qb).partners]
+    : nflQbDefaultPartners(s, qb, !!s._nflStackRbCounts).map(p=>p.id);
   // An untouched row shows the DEFAULT set already ticked, so the first click
   // has to materialize that set before removing one from it — otherwise the
   // click would read as "start from empty", which is not what the user sees.
@@ -25161,17 +25438,21 @@ function renderNflQbStacks(){
       style="flex:none;padding:2px 6px;border:none;${first?'':'border-left:1px solid var(--border);'}font-size:9px;font-family:'DM Sans',sans-serif;cursor:pointer;
       background:${active?'#a855f7':'transparent'};color:${active?'#fff':'var(--muted)'};font-weight:${active?'600':'400'};">${label}</button>`;
 
+  const mktOn = nflMarketStacksOn(slate);
   let html = `<div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">`
-    + `Each QB can override the global rule: <b>Global</b> inherits it, <b>Solo OK</b> requires nothing even when the global asks for a stack, and ≥1/≥2/≥3 demand that many partners from his own team. `
-    + `<b>✎ partners</b> narrows which teammates count (all on by default${rbC?'; RBs included because "Count a same-team RB" is on':'; RBs excluded — turn on "Count a same-team RB" or tick one here'}).`
+    + (mktOn
+       ? `<b>Market-derived rules are on</b>, so <b>Global</b> means "whatever this QB's own prop lines say": a QB the book prices as a runner (rush yds ≥ ${NFL_QB_STACK_RULE.rushYds}, ATD ≥ ${Math.round(NFL_QB_STACK_RULE.atd*100)}% or ${Math.round(NFL_QB_STACK_RULE.rushShare*100)}% of his DK points from rushing) may go naked; every other QB needs ≥${NFL_QB_STACK_RULE.minPocket} teammate. A same-team RB counts as that teammate when the book prices his receiving (rec yds ≥ ${NFL_QB_STACK_RULE.rbRecYds} or receptions ≥ ${NFL_QB_STACK_RULE.rbRec}). Setting "QB +" above, or any control on a row here, overrides the derived rule for that QB. `
+       : `Each QB can override the global rule: <b>Global</b> inherits it, <b>Solo OK</b> requires nothing even when the global asks for a stack, and ≥1/≥2/≥3 demand that many partners from his own team. `)
+    + `<b>✎ partners</b> narrows which teammates count (all on by default${rbC?'; every RB is included because "Count every same-team RB" is on':(mktOn?'; RBs included only where the market prices their receiving':'; RBs excluded — turn on "Count every same-team RB" or tick one here')}).`
     + `</div>`;
 
   for(const qb of qbs){
     const e = store[qb.id] || {};
-    const effN  = e.n!=null ? (e.n|0) : gN;
+    const prof = mktOn ? nflQbStackProfile(slate, qb) : null;
+    const effN  = e.n!=null ? (e.n|0) : (gN > 0 ? gN : (prof ? prof.minPartners : gN));
     const effBB = e.bringBack!=null ? (e.bringBack|0) : gBB;
     const mates = nflQbTeammates(slate, qb);
-    const dflt  = nflQbDefaultPartners(slate, qb, rbC).map(p=>p.id);
+    const dflt  = (prof && !rbC) ? [...prof.partners] : nflQbDefaultPartners(slate, qb, rbC).map(p=>p.id);
     const sel   = Array.isArray(e.partners) ? e.partners : dflt;
     // Ticked AND actually in the pool — a hidden/OUT teammate cannot satisfy
     // anything, so he must not be counted in the summary either.
@@ -25210,6 +25491,14 @@ function renderNflQbStacks(){
       +   `<button onclick="toggleNflQbPartnerEdit('${qb.id}')"`
       +     ` style="flex:none;padding:1px 6px;background:none;border:1px solid var(--border);color:var(--muted);border-radius:5px;font-size:9px;cursor:pointer;font-family:'DM Sans',sans-serif;">✎ partners</button>`
       + `</div>`
+      // ck75: the derived rule and the market facts behind it, for EVERY QB —
+      // whether or not this row is the one in force, so the user can see what he
+      // is overriding.
+      + (prof ? `<div style="margin-top:3px;font-size:9px;line-height:1.45;color:${prof.rushing?'#22c55e':'var(--muted)'};">`
+              + `<span style="opacity:.8;">${prof.rushing?'▲':'●'}</span> ${esc(prof.reason)}`
+              + ((e.n!=null || Array.isArray(e.partners) || gN>0)
+                 ? ` <span style="color:#f59e0b;">— overridden${gN>0 && e.n==null ? ' by the global QB + ' + gN : ''}, this run enforces ≥${effN}</span>` : '')
+              + `</div>` : '')
       + `<div id="qbchips_${qb.id}" style="display:none;flex-wrap:wrap;gap:3px;margin-top:4px;">`;
     if(!mates.length){
       html += `<span style="font-size:9px;color:var(--muted);font-style:italic;">No WR/TE/RB teammates on the slate.</span>`;
@@ -25709,7 +25998,32 @@ const NFL_GPP_BUDGET = {
   maxIters:       10,  // hill-climb steps per seed before we call it a local optimum
   menuPerLineup:  10,  // the portfolio greedy must get to choose: menu ≥ 10 x N
   menuMin:       200,
-  budgetMs:    75000,  // wall-clock ceiling on search; seeds stop being STARTED past it
+  // WALL-CLOCK CEILING ON THE SEARCH — seeds stop being STARTED past it.
+  // ck74: this SCALES WITH THE LINEUP COUNT. Everything else in the search
+  // budget already does — the seed plan is `seedsPerLineup × N` and the menu
+  // target is `menuPerLineup × N` — so a flat ceiling meant that the bigger the
+  // board you asked for, the smaller the fraction of its OWN target it could
+  // reach. Measured on Matt's Week 1 slate at MME 25,000, N = 150: a flat 75 s
+  // climbed 505 of 2,100 planned seeds (5.9–7.5 seeds/s) and left a 351–425 menu
+  // against a 1,500 target — 2.5× N where the engine wants 10× N. The same
+  // slate at 240 s climbed 1,776–1,807 seeds and REACHED the target (menu
+  // 1,482–1,500), which is where the 1.6 s per lineup below comes from: it is
+  // the measured time to a full menu at N = 150, not a guess (1.2 s per lineup
+  // was tried first and lands around 1,150 of 1,500).
+  // WHAT A FULL MENU BUYS, three runs each on that slate: the board's SHAPE does
+  // not move (naked 29/25/31% at 75 s against 26/30/30% at 240 s; ROI 214–232%
+  // against 223–237%), but its CONCENTRATION does (top exposure 81/75/83% →
+  // 73/73/75%, second name 59% → 43%). A full menu buys diversification, not a
+  // different objective.
+  // `budgetMs` is the FLOOR (a small board still gets a real search),
+  // `budgetMsPerLineup` the slope, `budgetMsMax` a ceiling so a 500-lineup board
+  // cannot silently ask for a quarter of an hour. The slope is a CALIBRATION,
+  // not a throughput measurement — seeds/s moves with slate size, world count
+  // and field size — so the run LOGS the cap it chose and what it got for it,
+  // and the Advanced box still overrides it outright.
+  budgetMs:    75000,
+  budgetMsPerLineup: 1600,
+  budgetMsMax: 480000,
   sharpFromEngine: true, // seed the field's sharp slice with the ENGINE's own optima
   // ck73: the sharp pass used to run 220 seeds and hand back 300 lineups, so at
   // a 22% sharp share a 2,000-entry sample held ~440 entries drawn from ~190
@@ -25726,6 +26040,18 @@ const NFL_GPP_BUDGET = {
   // Above this ratio of (standard error ÷ EV) the reported ROI is not precise
   // enough to quote without saying so, and the card carries a badge.
   seWarnFrac:    0.10,
+  // Above this share of the board, one player's exposure is the first thing a
+  // user asks about, so the card carries a badge naming him and the menu share
+  // that explains him (checkpoint 74). Not a cap — the engine never imposes one
+  // the user did not ask for; Max% and the per-player overrides are the caps.
+  expWarnFrac:   0.60,
+  // ck75: when the best single swap the scan found would break the active QB's
+  // partner minimum, the search tries to REPAIR it with a paired swap that
+  // brings an eligible partner in. This is how many partners it will try per
+  // repair (best by generation mean); the cost is bounded at
+  // stackRepairCands × 8 slots and it is only paid when a repair is on the
+  // table at all — measured at under 3% of throughput on Matt's slate.
+  stackRepairCands: 6,
 };
 // ── FIELD SAMPLE SIZE, PER FOLD (checkpoint 73) ────────────────────────────
 // The search fold and the two priced folds want different things out of the
@@ -25886,23 +26212,45 @@ function nflEngineDecide(slate, evOn){
   const own = (typeof nflOwnAnySource === 'function') ? nflOwnAnySource(slate, true) : false;
   if(!own) return {engine:'legacy', why:'no ownership input is available (map SS Own, or run a sim so the Own Model can be built)'};
   // STACK CONSTRAINTS. §7 keeps the stacking controls available as user
-  // constraints, and the GPP engine's search does not yet enforce them — its
-  // move set is unconstrained by construction, which is the whole point of the
-  // objective. Rather than silently ignore a rule the user set, hand the run to
-  // the legacy pipeline, which does enforce it, and say so. (The default is
-  // OFF, so this is not the common path.)
-  const stackOn = (typeof nflStackNOf === 'function' && nflStackNOf(slate) > 0) ||
-    (slate._nflBringBack|0) > 0 || !!slate._nflNoRbVsDst ||
-    Object.keys(slate._qbStacks || {}).length > 0;
-  if(stackOn) return {engine:'legacy', why:'stacking constraints are set, and the GPP engine searches without constraints by design — the legacy pipeline is what enforces them (clear the QB+ / bring-back / per-QB rules to use the engine)'};
+  // constraints. Up to ck74 ANY rule handed the run to the legacy pipeline,
+  // because the engine's move set was unconstrained by construction — which
+  // meant that market-derived per-QB rules, the whole point of ck75, would have
+  // switched the engine off on every slate. The search now enforces per-QB (and
+  // global) partner MINIMUMS itself: seeds respect them, a single swap that
+  // would break the active QB's minimum is rejected or repaired by a paired
+  // swap, the two-player QB move keeps feasibility for the QB it moves to, and
+  // the menu is validated before pricing. What it still cannot do is a
+  // bring-back or "no RB vs own DST" — those are counting rules over the
+  // OPPONENT's roster and over the DST, neither of which the swap machinery
+  // tracks — so a run that sets one of those still goes to legacy, and the log
+  // names which one did it rather than saying "stacking constraints" in the
+  // abstract.
+  const _rules = nflResolvedStackRules(slate);
+  const _unsup = nflGppUnsupportedRules(_rules);
+  if(_unsup.length) return {engine:'legacy', why:`the GPP engine cannot enforce ${_unsup.join(' or ')} inside its search — the legacy pipeline is what enforces ${_unsup.length > 1 ? 'those' : 'that'} (clear it to use the engine; per-QB and global stack MINIMUMS the engine does enforce)`};
   return {engine:'gpp', why:mode === 'gpp' ? 'pinned by the engine selector' : 'contest and ownership are both available'};
 }
-// SEARCH TIME CAP, as a setting. The default is NFL_GPP_BUDGET.budgetMs; a slate
-// can override it, because the cost of a thin menu (the whole out-of-fold edge)
-// is worth more seconds on a 16-game slate than on a 2-game one.
-function nflGppSearchMs(slate){
+// SEARCH TIME CAP, as a setting. A slate can override it outright, because the
+// cost of a thin menu (the whole out-of-fold edge) is worth more seconds on a
+// 16-game slate than on a 2-game one.
+// ck74: the DEFAULT is no longer a constant — it scales with the lineup count,
+// because the seed plan and the menu target both do. See NFL_GPP_BUDGET.
+function nflGppDefaultSearchMs(n){
+  const N = Math.max(1, parseInt(n, 10) || 0);
+  return Math.min(NFL_GPP_BUDGET.budgetMsMax,
+                  Math.max(NFL_GPP_BUDGET.budgetMs,
+                           Math.round(NFL_GPP_BUDGET.budgetMsPerLineup * N)));
+}
+// The lineup count the cap should be sized for, when a caller has not got one
+// to hand (the Advanced panel repaints outside a run).
+function nflGppTargetN(){
+  const el = (typeof document !== 'undefined') ? document.getElementById('genCount') : null;
+  return Math.max(1, parseInt(el && el.value, 10) || 20);
+}
+function nflGppSearchMs(slate, n){
   const v = slate && parseFloat(slate._gppSearchSec);
-  return (Number.isFinite(v) && v >= 5) ? Math.round(v * 1000) : NFL_GPP_BUDGET.budgetMs;
+  if(Number.isFinite(v) && v >= 5) return Math.round(v * 1000);
+  return nflGppDefaultSearchMs(n != null ? n : nflGppTargetN());
 }
 function nflGppSetSearchSec(v){
   const s = (typeof activeSlate === 'function') ? activeSlate() : null;
@@ -25945,7 +26293,15 @@ function renderNflEngineNote(){
   const cap = document.getElementById('nflGppSearchSec');
   if(cap){
     cap.value = (s._gppSearchSec > 0) ? s._gppSearchSec : '';
-    cap.placeholder = String(Math.round(NFL_GPP_BUDGET.budgetMs/1000));
+    // ck74: the placeholder is the cap this board would actually get, which
+    // moves with the lineup count, not the flat constant it used to print.
+    cap.placeholder = String(Math.round(nflGppDefaultSearchMs(nflGppTargetN())/1000));
+    cap.title = 'Wall-clock ceiling on the lineup search. Empty means the default for the '
+      + nflGppTargetN() + ' lineups asked for: ' + Math.round(nflGppDefaultSearchMs(nflGppTargetN())/1000)
+      + 's (' + Math.round(NFL_GPP_BUDGET.budgetMs/1000) + 's floor, '
+      + (NFL_GPP_BUDGET.budgetMsPerLineup/1000) + 's per lineup, '
+      + Math.round(NFL_GPP_BUDGET.budgetMsMax/1000) + 's ceiling). The search stops STARTING seeds past it; '
+      + 'a menu much smaller than ' + NFL_GPP_BUDGET.menuPerLineup + '× the lineups asked for costs the engine its out-of-fold edge.';
   }
   const evOn = !!(s._ufcEv && s._ufcEv.on);
   const d = nflEngineDecide(s, evOn);
@@ -26611,6 +26967,99 @@ function gppKernelFactory(){
     let cheapSkill = Infinity;
     for(let i = 0; i < nP; i++) if(sel[i] && pos[i] >= 1 && pos[i] <= 3 && sal[i] < cheapSkill) cheapSkill = sal[i];
 
+    // ── STACK CONSTRAINTS (checkpoint 75) ─────────────────────────────────
+    // Per-QB partner minimums, enforced INSIDE the search rather than by
+    // declining the run to the legacy pipeline. Three flat arrays arrive on the
+    // payload (see runNflGppEngine): `qbMinN[q]` is how many eligible partners
+    // the QB at index q must ride with, `qbRow[q]` addresses his row of
+    // `qbPartner`, and that row is one byte per player. Everything below is a
+    // pair of array reads, and every site is behind `stackOn` so a run with no
+    // rule executes exactly the ck74 instruction stream.
+    const qbMinN = P.qbMinN || null, qbRowA = P.qbRow || null, qbPartner = P.qbPartner || null;
+    const stackOn = !!(qbMinN && qbPartner && (P.nQbRow|0) > 0);
+    const isPartner = function(q, i){
+      const r = qbRowA[q];
+      return r < 0 ? 0 : qbPartner[r*nP + i];
+    };
+    const partnersIn = function(idxs, q){
+      const r = qbRowA[q];
+      if(r < 0) return 0;
+      const base = r*nP;
+      let c = 0;
+      for(let k = 0; k < idxs.length; k++){ const i = idxs[k]; if(i !== q && qbPartner[base + i]) c++; }
+      return c;
+    };
+    const qbOf = function(idxs){
+      for(let k = 0; k < idxs.length; k++) if(pos[idxs[k]] === 0) return idxs[k];
+      return -1;
+    };
+    const stackOkIdx = function(idxs){
+      if(!stackOn) return true;
+      const q = qbOf(idxs);
+      if(q < 0) return false;
+      const need = qbMinN[q];
+      return need <= 0 || partnersIn(idxs, q) >= need;
+    };
+    // Per constrained QB: his eligible partners, best by generation mean. Used
+    // by the seed repair and by the paired repair move; capped because a repair
+    // that has to try forty candidates is not a repair, it is a second search.
+    const REPAIR_CANDS = Math.max(1, P.stackRepairCands || 6);
+    const partnerList = new Map();
+    if(stackOn){
+      for(let q = 0; q < nP; q++){
+        if(pos[q] !== 0 || qbRowA[q] < 0 || qbMinN[q] <= 0) continue;
+        const base = qbRowA[q]*nP, ls = [];
+        for(let i = 0; i < nP; i++) if(qbPartner[base + i] && sel[i]) ls.push(i);
+        ls.sort(function(a,b){ return mean[b] - mean[a]; });
+        partnerList.set(q, ls);
+      }
+    }
+    let stackRejects = 0, stackRepairs = 0, stackSeedFix = 0, stackSeedDrop = 0, stackMenuDrop = 0;
+    // Bring an infeasible lineup back inside its QB's rule by swapping non-partner
+    // slots for eligible partners, cheapest legal upgrade first. Returns a new
+    // lineup or null when the pool cannot satisfy the rule under the cap/floor.
+    const stackRepair = function(l){
+      const q = qbOf(l);
+      if(q < 0) return null;
+      const need = stackOn ? qbMinN[q] : 0;
+      if(need <= 0) return l;
+      let cnt = partnersIn(l, q);
+      if(cnt >= need) return l;
+      const ls = partnerList.get(q);
+      if(!ls || !ls.length) return null;
+      const out = l.slice(), have = new Set(out);
+      let spent = 0; for(const i of out) spent += sal[i];
+      let guard = 0;
+      while(cnt < need && guard++ < RSIZE){
+        let best = -1, bestSlot = -1, bestScore = -Infinity;
+        const c0 = [0,0,0,0,0,0];
+        for(const i of out) c0[pos[i]]++;
+        for(let s = 0; s < RSIZE; s++){
+          const a = out[s];
+          if(pos[a] === 0 || isPartner(q, a)) continue;      // never drop the QB or a partner
+          for(let k = 0; k < ls.length; k++){
+            const b = ls[k];
+            if(have.has(b)) continue;
+            if(pos[b] !== pos[a]){
+              c0[pos[a]]--; c0[pos[b]]++;
+              const ok = posOk(c0);
+              c0[pos[b]]--; c0[pos[a]]++;
+              if(!ok) continue;
+            }
+            const ns = spent - sal[a] + sal[b];
+            if(ns > cap || ns < floor) continue;
+            const sc = mean[b] - mean[a];
+            if(sc > bestScore){ bestScore = sc; best = b; bestSlot = s; }
+          }
+        }
+        if(best < 0) return null;
+        have.delete(out[bestSlot]); spent += sal[best] - sal[out[bestSlot]];
+        out[bestSlot] = best; have.add(best);
+        cnt++;
+      }
+      return cnt >= need ? out : null;
+    };
+
     // ── Seeds ─────────────────────────────────────────────────────────────
     // Seeds are STARTING POINTS, never candidates: nothing below is admitted
     // to the menu unless the hill climb converged on it.
@@ -26622,6 +27071,19 @@ function gppKernelFactory(){
       for(const i of l){ if(!sel[i]) return false; c[pos[i]]++; s += sal[i]; }
       if(!posOk(c) || s > cap || s < floor) return false;
       if(new Set(l).size !== RSIZE) return false;
+      // ck75: a seed must satisfy its QB's rule. Repair it if a legal partner
+      // fits; drop it if none does. Seeds are supply, so a rejected one costs
+      // nothing but a draw — what would cost is starting a climb from a lineup
+      // no legal neighbour can rescue.
+      if(stackOn && !stackOkIdx(l)){
+        const fixed = stackRepair(l);
+        if(!fixed){ stackSeedDrop++; return false; }
+        stackSeedFix++;
+        l = fixed;
+        const c2 = [0,0,0,0,0,0]; let s2 = 0;
+        for(const i of l){ c2[pos[i]]++; s2 += sal[i]; }
+        if(!posOk(c2) || s2 > cap || s2 < floor || new Set(l).size !== RSIZE){ stackSeedDrop++; return false; }
+      }
       const k = keyOf(l);
       if(seedKeys.has(k)) return false;
       seedKeys.add(k);
@@ -26772,15 +27234,18 @@ function gppKernelFactory(){
     // ── Local search ──────────────────────────────────────────────────────
     const tot = new Float64Array(gen.W);
     const nd1 = new Float64Array(P.K);   // scratch: the candidate swap's dup vector
-    // How many of the QB's own skill teammates a lineup carries — the same count
-    // nflStackShape labels a card with (RB/WR/TE), computed here only so the
-    // portfolio can EXPLAIN a naked pick, never to score one.
+    // How many of the QB's own stack partners a lineup carries — the same count
+    // nflStackShape labels a card with, computed here only so the portfolio can
+    // EXPLAIN a naked pick, never to score one. ck74: `P.stackRb` carries the
+    // slate's "Count a same-team RB" box so this and the label cannot disagree
+    // (positions are 0 QB / 1 RB / 2 WR / 3 TE / 4 DST).
+    const stackLo = P.stackRb ? 1 : 2;
     const stackNOf = function(idxs){
       let q = -1;
       for(const i of idxs) if(pos[i] === 0){ q = i; break; }
       if(q < 0) return -1;
       let n = 0;
-      for(const i of idxs) if(i !== q && team[i] === team[q] && pos[i] >= 1 && pos[i] <= 3) n++;
+      for(const i of idxs) if(i !== q && team[i] === team[q] && pos[i] >= stackLo && pos[i] <= 3) n++;
       return n;
     };
     const optima = new Map();
@@ -26800,6 +27265,17 @@ function gppKernelFactory(){
         const inSet = new Set(cur);
         const counts = [0,0,0,0,0,0];
         for(const i of cur) counts[pos[i]]++;
+        // ck75: the active QB's rule, resolved once per iteration. `bestBad` is
+        // the best-scoring single swap that would BREAK it — kept rather than
+        // discarded, because a swap that gains EV and loses a partner is often
+        // one paired swap away from being legal, and that pair is the repair
+        // below. Everything here is skipped when no rule is in force.
+        let qCur = -1, needCur = 0, partCur = 0, bestBad = null;
+        if(stackOn){
+          qCur = qbOf(cur);
+          needCur = qCur >= 0 ? qbMinN[qCur] : 0;
+          if(needCur > 0) partCur = partnersIn(cur, qCur);
+        }
         // ── single swaps ──
         for(let sIdx = 0; sIdx < RSIZE; sIdx++){
           const a = cur[sIdx], pa = pos[a];
@@ -26825,10 +27301,87 @@ function gppKernelFactory(){
               // finally scored.
               for(let kk = 0; kk < gen.K; kk++)
                 nd1[kk] = dups[kk] * dupSwapRatio(dm, kk, cur, a, b);
+              // Does this swap keep the lineup inside its QB's rule? Two cases:
+              // swapping the QB himself re-asks the question for the NEW QB
+              // (posOk guarantees b is a QB there); any other slot adjusts the
+              // partner count by at most one in each direction.
+              let feas = true;
+              if(stackOn){
+                if(pa === 0){
+                  const nb = qbMinN[b];
+                  if(nb > 0){
+                    let c2 = 0;
+                    for(let z = 0; z < RSIZE; z++){ const zi = cur[z]; if(zi !== a && isPartner(b, zi)) c2++; }
+                    feas = c2 >= nb;
+                  }
+                } else if(needCur > 0){
+                  feas = (partCur - (isPartner(qCur, a) ? 1 : 0) + (isPartner(qCur, b) ? 1 : 0)) >= needCur;
+                }
+              }
               evalCount++;
               const e = grossEVSwap(gen, tot, a*gen.W, b*gen.W, nd1, searchW);
+              if(!feas){
+                stackRejects++;
+                if(e > bestEV + 1e-12 && (!bestBad || e > bestBad.ev)) bestBad = {ev:e, sIdx:sIdx, a:a, b:b};
+                continue;
+              }
               if(e > bestEV + 1e-12){ bestEV = e; bestMove = {kind:1, sIdx:sIdx, b:b}; }
             }
+          }
+        }
+        // ── ck75: the stack REPAIR move ──
+        // The best single swap the scan found raises EV but breaks the QB's
+        // partner minimum. Rather than simply forbid it — which is what makes a
+        // constrained hill climb get stuck one move from everywhere — pair it
+        // with a second swap that brings an eligible partner IN, and take the
+        // pair if it still beats the incumbent. Bounded work: REPAIR_CANDS
+        // partners × 8 slots, and only when a repair is actually on the table.
+        if(stackOn && bestBad && bestBad.ev > bestEV + 1e-12){
+          const a = bestBad.a, b = bestBad.b, aSlot = bestBad.sIdx;
+          const qNew = (pos[a] === 0) ? b : qCur;
+          const ls = (qNew >= 0) ? partnerList.get(qNew) : null;
+          const need = (qNew >= 0 && stackOn) ? qbMinN[qNew] : 0;
+          if(ls && need > 0){
+            const c0 = [0,0,0,0,0,0];
+            for(const i of cur) c0[pos[i]]++;
+            c0[pos[a]]--; c0[pos[b]]++;
+            const nLim = Math.min(ls.length, REPAIR_CANDS);
+            for(let k = 0; k < nLim; k++){
+              const p2 = ls[k];
+              if(inSet.has(p2) || p2 === b) continue;
+              for(let cSlot = 0; cSlot < RSIZE; cSlot++){
+                if(cSlot === aSlot) continue;
+                const c1 = cur[cSlot];
+                if(pos[c1] === 0) continue;                       // never drop a QB here
+                if(pos[p2] !== pos[c1]){
+                  c0[pos[c1]]--; c0[pos[p2]]++;
+                  const ok = posOk(c0);
+                  c0[pos[p2]]--; c0[pos[c1]]++;
+                  if(!ok) continue;
+                }
+                const ns = spent - sal[a] + sal[b] - sal[c1] + sal[p2];
+                if(ns > cap || ns < floor) continue;
+                // Feasibility of the lineup the PAIR leaves behind.
+                let c2 = 0;
+                for(let z = 0; z < RSIZE; z++){
+                  const zi = cur[z];
+                  const zz = (z === aSlot) ? b : (z === cSlot) ? p2 : zi;
+                  if(zz !== qNew && isPartner(qNew, zz)) c2++;
+                }
+                if(c2 < need) continue;
+                const mid = cur.map(function(z){ return z === a ? b : z; });
+                for(let kk = 0; kk < gen.K; kk++)
+                  nd1[kk] = dups[kk] * dupSwapRatio(dm, kk, cur, a, b)
+                                     * dupSwapRatio(dm, kk, mid, c1, p2);
+                evalCount++;
+                const e2 = grossEVSwap2(gen, tot, a*gen.W, c1*gen.W, b*gen.W, p2*gen.W, nd1, searchW);
+                if(e2 > bestEV + 1e-12){
+                  bestEV = e2;
+                  bestMove = {kind:2, sIdx:cSlot, qbSlot:aSlot, qb2:b, b:p2, repaired:true};
+                }
+              }
+            }
+            if(bestMove && bestMove.repaired) stackRepairs++;
           }
         }
         // ── the stack move ──
@@ -26856,6 +27409,23 @@ function gppKernelFactory(){
                   if(pos[i] !== pos[a2]) continue;
                   const ns = spent - sal[qa] - sal[a2] + sal[qb2] + sal[i];
                   if(ns > cap || ns < floor) continue;
+                  // ck75: the move must leave the NEW quarterback inside HIS
+                  // rule, which is a different rule from the one the lineup
+                  // arrived with. Checked before the swap is priced, so an
+                  // infeasible pair costs two array reads rather than an
+                  // evaluation.
+                  if(stackOn){
+                    const nb = qbMinN[qb2];
+                    if(nb > 0){
+                      let c2 = 0;
+                      for(let z = 0; z < RSIZE; z++){
+                        const zi = cur[z];
+                        const zz = (zi === qa) ? qb2 : (z === sIdx) ? i : zi;
+                        if(zz !== qb2 && isPartner(qb2, zz)) c2++;
+                      }
+                      if(c2 < nb){ stackRejects++; continue; }
+                    }
+                  }
                   for(let kk = 0; kk < gen.K; kk++){
                     // Two swaps at once: apply the first, then the second
                     // against the lineup the first one leaves behind.
@@ -26912,6 +27482,13 @@ function gppKernelFactory(){
     // here collapses against its search EV was fitted to the generation draws.
     // These numbers order the menu and drive the greedy; they are NOT what the
     // user is shown (see the report fold below).
+    // ck75: MENU VALIDATION. The search maintains feasibility move by move, so
+    // this should never remove anything — which is exactly why it is here: a
+    // silent leak would otherwise reach the board through the greedy, and the
+    // count is logged so "0 dropped" is a measured claim rather than a hope.
+    if(stackOn){
+      for(const [k, o] of optima){ if(!stackOkIdx(o.ids)){ optima.delete(k); stackMenuDrop++; } }
+    }
     const otot = new Float64Array(selW.W);
     const priced = [];
     let _pn = 0;
@@ -27230,6 +27807,10 @@ function gppKernelFactory(){
         searchWorlds: searchW.length, genWorlds: gen.W,
         selWorlds: selW.W, repWorlds: repW.W, portWorlds: selW.W,
         menu: M, stalled: stalled, peakN: peakN, gPeak: gPeak,
+        // ck75: what the stack constraints cost the search.
+        stackOn: stackOn, stackQbs: (P.nQbRow|0), stackRejects: stackRejects,
+        stackRepairs: stackRepairs, stackSeedFix: stackSeedFix,
+        stackSeedDrop: stackSeedDrop, stackMenuDrop: stackMenuDrop,
         // REPORT fold — what the card and the log show.
         meanNet: repPort.mean, sdNet: repPort.sd, seNet: repPort.se, G: repPort.G,
         // SELECT fold — what the greedy maximized. Kept so the winner's curse is
@@ -27335,7 +27916,7 @@ async function runNflGppEngine(ctx){
          maxSal, minSal} = ctx;
   const log = ctx.log || function(){};
   const fieldPool = ctx.fieldPool && ctx.fieldPool.length ? ctx.fieldPool : pool;
-  const bud = Object.assign({}, NFL_GPP_BUDGET, {budgetMs: nflGppSearchMs(slate)}, ctx.budget || {});
+  const bud = Object.assign({}, NFL_GPP_BUDGET, {budgetMs: nflGppSearchMs(slate, target)}, ctx.budget || {});
   const cfg = slate._ufcEv || {};
   const F   = Math.max(target, parseInt(cfg.fieldSize) || 10000);
   const fee = parseFloat(cfg.fee) || 1;
@@ -27414,6 +27995,26 @@ async function runNflGppEngine(ctx){
   log(`Worlds: ${genIdx.length.toLocaleString()} search (even sims, capped at ${bud.searchWorldsCap.toLocaleString()} — the hill climb needs an ordering, not an estimate) · `
     + `${selIdx.length.toLocaleString()} SELECT + ${repIdx.length.toLocaleString()} REPORT (the odd sims, split and disjoint). `
     + `The greedy never sees the report fold; every number below it is out of sample.`);
+  // ck74: the search cap SCALES with the lineup count, so say which one this run
+  // got and where it came from — a board that comes back with a thin menu should
+  // never leave the user guessing whether the cap was the reason.
+  { const userSec = parseFloat(slate._gppSearchSec);
+    const isUser = Number.isFinite(userSec) && userSec >= 5;
+    const defMs = nflGppDefaultSearchMs(target);
+    // Three sources and the line must never claim the wrong one: the Advanced
+    // box, the scaled default, or a caller that handed a budget in (the §8
+    // harness does exactly that, and a line reading "30s — the default for 12
+    // lineups" when the default is 75s is a lie the harness would have shipped).
+    const how = isUser
+      ? `set on the Advanced panel (the default for ${target} lineups would be ${Math.round(defMs/1000)}s).`
+      : (bud.budgetMs === defMs
+         ? `the default for ${target} lineups (${Math.round(NFL_GPP_BUDGET.budgetMs/1000)}s floor, `
+           + `${NFL_GPP_BUDGET.budgetMsPerLineup/1000}s per lineup, ${Math.round(NFL_GPP_BUDGET.budgetMsMax/1000)}s ceiling`
+           + `${defMs >= NFL_GPP_BUDGET.budgetMsMax ? ', and this board is at the ceiling' : ''}). `
+           + `The seed plan and the ${NFL_GPP_BUDGET.menuPerLineup}× menu target both scale with the lineup count, so the time allowed for them does too. Override it on the Advanced panel.`
+         : `passed in by the caller (the default for ${target} lineups would be ${Math.round(defMs/1000)}s).`);
+    log(`Search cap: ${Math.round(bud.budgetMs/1000)}s — ` + how);
+  }
   const packScores = (idxList) => {
     const W = idxList.length, out = new Float32Array(nP * W);
     for(let i = 0; i < nP; i++){
@@ -27554,6 +28155,42 @@ async function runNflGppEngine(ctx){
     team[i] = codeOf(p.team); opp[i] = codeOf(p.opp);
     sel[i] = (poolIds.has(p.id) && pos[i] < 5 && sal[i] > 0) ? 1 : 0;
   });
+  // ── STACK CONSTRAINTS, IN KERNEL INDEX SPACE (checkpoint 75) ─────────────
+  // The engine enforces per-QB (and global) partner MINIMUMS in its own search
+  // instead of declining the run. Two flat arrays are all it needs:
+  //   qbMinN[i]  — how many partners the QB at index i must ride with (0 = none)
+  //   qbPartner  — a row per constrained QB, one byte per player: is he a
+  //                partner of that QB? Rows are addressed by qbRow[i].
+  // `nflStackReqFor` is the same function `nflStackOk` consults, so a lineup the
+  // kernel calls legal is a lineup the post-run rule check calls legal.
+  const _rules = ctx.stackRules || nflResolvedStackRules(slate);
+  const qbMinN = new Int8Array(nP), qbRow = new Int32Array(nP).fill(-1);
+  const _rowMasks = [];
+  let nQbRow = 0, nQbConstrained = 0;
+  fieldPool.forEach((p, i) => {
+    if(pos[i] !== 0 || !sel[i]) return;
+    const req = nflStackReqFor(_rules, p.id);
+    const need = req.n|0;
+    if(need <= 0) return;
+    const t = nflTeamOf(p);
+    const mask = new Uint8Array(nP);
+    let cnt = 0;
+    fieldPool.forEach((q, j) => {
+      if(j === i || !sel[j]) return;
+      const ok = req.partnerIds
+        ? req.partnerIds.has(q.id)
+        : (nflTeamOf(q) === t && (_rules.rbCounts ? ['WR','TE','RB'] : ['WR','TE']).includes(nflPosOf(q)));
+      if(ok){ mask[j] = 1; cnt++; }
+    });
+    // A QB whose rule the pool cannot satisfy is simply unrosterable, and the
+    // log has already said so — carrying the row anyway is what makes the
+    // search skip him rather than ship an illegal lineup.
+    qbMinN[i] = need; qbRow[i] = nQbRow++; _rowMasks.push(mask);
+    nQbConstrained++;
+    if(cnt < need) qbMinN[i] = need;      // still infeasible; the search will drop him
+  });
+  const qbPartner = new Uint8Array(nQbRow * nP);
+  _rowMasks.forEach((m, r) => qbPartner.set(m, r * nP));
   // Hard caps: Max% and per-player overrides, expressed in lineup slots.
   const capSlots = new Int32Array(nP);
   fieldPool.forEach((p, i) => {
@@ -27579,6 +28216,11 @@ async function runNflGppEngine(ctx){
     theta: NFL_GPP_DUP_THETA, maxDupFrac: NFL_GPP_DUP_MAXFRAC,
     fldLinG, fldLinS, fldLinR, payTable, paidRank: gppPaidRank(payout, F),
     maxSal, minSal, N: target, B, capSlots,
+    // ck74: the partner definition the LABEL uses, so the kernel's naked-pick
+    // explanation and `nflStackShape` cannot disagree about what "naked" means.
+    stackRb: !!slate._nflStackRbCounts,
+    // ck75: the per-QB partner minimums the search must respect.
+    qbMinN, qbRow, qbPartner, nQbRow, stackRepairCands: bud.stackRepairCands,
     seedPlan: gppSeedPlan(bud, target), menuTarget: gppMenuTarget(bud, target),
     seedOpt: Int32Array.from(seedOptArr),
     budget: bud, seed: (ctx.seed != null ? ctx.seed : 0x5eed1),
@@ -27681,14 +28323,25 @@ async function runNflGppEngine(ctx){
   // folds are decided; the search summary is one line, not three overlapping
   // ones; and the sharp pass no longer emits its own per-seed progress block.
   if(d.capBound)
-    log(`Search hit its ${Math.round(bud.budgetMs/1000)}s wall-clock cap: ${d.seedsClimbed} of ${d.seeds} seeds were climbed.`);
+    log(`Search hit its ${Math.round(bud.budgetMs/1000)}s wall-clock cap: ${d.seedsClimbed} of ${d.seeds} seeds were climbed`
+      + (d.seedsClimbed > 0 && d.ms > 0
+         ? ` (${(1000*d.seedsClimbed/d.ms).toFixed(1)} seeds/s, so all ${d.seeds} would need about ${Math.ceil(d.seeds*d.ms/1000/d.seedsClimbed)}s)` : '')
+      + `. The cap is on the Advanced panel.`);
   log(`Search: ${d.seedsClimbed} of ${d.seeds} seeds → ${d.optima} distinct local optima → ${d.survived} on the menu (target ${d.menuTarget})`
     + `, ${d.evals.toLocaleString()} evaluations in ${(d.ms/1000).toFixed(1)}s`
     + (d.ms > 0 ? ` (${Math.round(d.evals/(d.ms/1000)/1000)}k/s on ${d.searchWorlds.toLocaleString()} worlds).` : '.'));
+  // ck75: what the constraints did inside the search. Printed whenever a rule is
+  // in force, because "the engine honoured it" is a claim that should carry its
+  // own counts — a menu-drop above zero means the search leaked.
+  if(d.stackOn)
+    log(`Stack constraints inside the search: ${d.stackQbs} quarterback${d.stackQbs===1?'':'s'} carry a partner minimum. `
+      + `${d.stackRejects.toLocaleString()} single swaps were rejected for breaking one, ${d.stackRepairs.toLocaleString()} of those were repaired by a paired swap that brought an eligible partner in; `
+      + `${d.stackSeedFix.toLocaleString()} seeds were repaired and ${d.stackSeedDrop.toLocaleString()} dropped as unrepairable; `
+      + `${d.stackMenuDrop.toLocaleString()} menu entries failed the pre-pricing validation (it should be 0 — the search maintains feasibility move by move).`);
   log(`Overfit rule: ${d.optima - d.dropped} of ${d.optima} local optima passed. The search EV is an IN-SAMPLE maximum, so the population's median select/search ratio is ${d.medRatio.toFixed(2)}, not 1 — the cut is ${Math.round(bud.overfitFrac*100)}% of that median (${d.overfitCut.toFixed(2)}), i.e. "far below what its peers manage".`
     + (d.floored ? ` ${d.floored} more were re-admitted to reach the ${d.menuTarget} menu target.` : ''));
   if(d.survived < d.menuTarget)
-    log(`  ⚠ The menu is ${d.survived}, under the ${d.menuTarget} target (${bud.menuPerLineup}× the lineups asked for). A menu barely larger than N forces the greedy to take almost every candidate — measured to cost this engine its whole out-of-fold edge. Raise the search cap, or ask for fewer lineups.`);
+    log(`  ⚠ The menu is ${d.survived}, under the ${d.menuTarget} target (${bud.menuPerLineup}× the lineups asked for). A menu barely larger than N forces the greedy to take almost every candidate — measured to cost this engine its whole out-of-fold edge. Raise the search cap (Advanced; this run's was ${Math.round(bud.budgetMs/1000)}s), or ask for fewer lineups.`);
   const L = res.lineups;
   if(!L.length){ log('⚠ The portfolio greedy selected nothing — loosen Max% or widen the pool.'); return null; }
   if(d.stalled === 1) log(`  (stopped at ${L.length} of ${target}: every remaining candidate would break a Max%/override cap, or the menu ran out)`);
@@ -27777,6 +28430,27 @@ async function runNflGppBoard(ctx){
   });
   const rows = [...byShape.entries()].sort((a,b) => b[1].n - a[1].n);
   log('Builds: ' + rows.map(([k,v]) => `${k} ×${v.n} (EV $${(v.ev/v.n).toFixed(2)})`).join(' · ') + '.');
+  // ck75: the board against the rule that was in force, per lineup. A run that
+  // enforced a minimum and shipped a lineup below it is a bug, and this is the
+  // line that would say so.
+  {
+    const _r = ctx.stackRules || nflResolvedStackRules(slate);
+    if(nflAnyStackRule(_r)){
+      const bad = out.filter(l => !nflStackOk(l, _r));
+      const pocketNaked = out.filter(l => {
+        const q = l.find(p => nflPosOf(p) === 'QB');
+        if(!q) return false;
+        const req = nflStackReqFor(_r, q.id);
+        const sh = nflStackShape(slate, l.map(p => p.id));
+        return req.n > 0 && sh && sh.n === 0;
+      });
+      log(`Stack-rule check on the board: ${out.length - bad.length} of ${out.length} lineups satisfy the QB rule in force`
+        + `, ${pocketNaked.length} carry a quarterback who required a partner and has none`
+        + (bad.length || pocketNaked.length
+            ? ` — ⚠ ${bad.length} VIOLATE the rule the engine was asked to enforce, which is a defect.`
+            : `. Nothing on the board breaks it.`));
+    }
+  }
   // Naked QBs are never suppressed. When one is chosen, say what it earned
   // against the best stacked lineup on the board rather than hiding it.
   {
@@ -27787,7 +28461,12 @@ async function runNflGppBoard(ctx){
       const bestNaked = Math.max(...naked.map(l => l._gpp.heldEV));
       log(`  ${naked.length} naked-QB lineup${naked.length>1?'s were':' was'} chosen: best held-out EV $${bestNaked.toFixed(2)}`
         + (bestStack != null ? ` against $${bestStack.toFixed(2)} for the best stacked lineup on the board.` : ' (no stacked lineup was chosen at all).')
-        + ' No stack rule was applied at any stage — this is what the payout arithmetic preferred.');
+        // ck75: "no stack rule was applied" is only true when none was. With
+        // market-derived rules on, every naked pick on the board is a QB the
+        // BOOK prices as a runner — which is the whole claim, so say it.
+        + (nflAnyStackRule(ctx.stackRules || nflResolvedStackRules(slate))
+            ? ` Every one of them is a quarterback the rule in force allows to go naked — a pocket QB could not have reached the board without a partner.`
+            : ' No stack rule was applied at any stage — this is what the payout arithmetic preferred.'));
       // WHY each naked lineup was taken, in the currency the greedy actually
       // maximizes: the log-growth gain it added AT THAT STEP against the best
       // STACKED candidate still on the menu at the same step. A positive margin
@@ -27808,9 +28487,37 @@ async function runNflGppBoard(ctx){
     }
   }
   { const cnt = {}; out.forEach(l => l.forEach(p => { cnt[p.id] = (cnt[p.id]||0)+1; }));
-    const top = Object.entries(cnt).sort((a,b) => b[1]-a[1]).slice(0,6)
+    const ranked = Object.entries(cnt).sort((a,b) => b[1]-a[1]);
+    const top = ranked.slice(0,6)
       .map(([id,c]) => `${surnameOf((fieldPool.find(p=>p.id===id)||{}).name||id)} ${Math.round(100*c/out.length)}%`);
-    if(top.length) log('Top exposure: ' + top.join(', ')); }
+    if(top.length) log('Top exposure: ' + top.join(', '));
+    // ── WHY THE BOARD IS CONCENTRATED (checkpoint 74) ──────────────────────
+    // A 76%-exposure player is the first thing anyone asks about, and nothing
+    // in the log answered it. The greedy can only pick from the MENU, so the
+    // honest answer is arithmetic: an exposure much above the player's share of
+    // the menu is a portfolio choice, and one that merely tracks his menu share
+    // is the search's choice — and when the menu is thin the greedy has to take
+    // almost every candidate, so the two are the same number by construction.
+    const menuAll = d.allPriced || [];
+    if(menuAll.length && ranked.length){
+      const top150 = menuAll.slice().sort((a,b) => b.heldEV - a.heldEV).slice(0, Math.max(1, out.length));
+      const shareIn = (arr, idx) => arr.reduce((s,x) => s + (x.ids.indexOf(idx) >= 0 ? 1 : 0), 0) / arr.length;
+      const rows = ranked.slice(0,3).map(([id,c]) => {
+        const idx = fieldPool.findIndex(p => p.id === id);
+        const nm = surnameOf((fieldPool[idx]||{}).name || id);
+        if(idx < 0) return `${nm} ${Math.round(100*c/out.length)}%`;
+        return `${nm} ${Math.round(100*c/out.length)}% of the board vs `
+             + `${Math.round(100*shareIn(menuAll, idx))}% of the ${menuAll.length}-lineup menu `
+             + `(${Math.round(100*shareIn(top150, idx))}% of its best ${top150.length})`;
+      });
+      log('Concentration — where the exposure comes from: ' + rows.join(' · ') + '.');
+      const thin = d.survived < d.menuTarget;
+      log(`  The greedy chooses only from the menu, so any exposure at or below the menu share was decided by the SEARCH, not by the portfolio.`
+        + (thin ? ` This menu is ${d.survived} for ${out.length} lineups, so it had little left to choose: expect the board to track the menu almost exactly. Raise the search cap (Advanced) or ask for fewer lineups to get a real choice.`
+                : ` This menu is ${d.survived} for ${out.length} lineups, so the greedy had room to diversify and an exposure well above the menu share is a deliberate one.`)
+        + ` Cap any player with Max% or a per-player override — the engine enforces both as hard slot caps.`);
+    }
+  }
   // The five most-duplicated lineups on the board with their estimate. This is
   // the model's most fragile number (see NFL_GPP_DUP_THETA — the field sampler
   // does not model consensus convergence, so the exponent is a calibration, not
@@ -27849,6 +28556,20 @@ async function runNflGppBoard(ctx){
     else badges.push({kind:'ok', text:`menu ${d.survived}`, tip:`At or above the ${d.menuTarget} target (${NFL_GPP_BUDGET.menuPerLineup}× the lineups asked for).`});
     if(d.stalled === 2 && d.peakN < out.length) badges.push({kind:'warn', text:`growth peaks at ${d.peakN}`,
       tip:`Past ${d.peakN} lineups each extra entry fee costs more growth than its share of the payout curve returns.`});
+    // ck74: the board's single most-asked question — why is one player in three
+    // quarters of my lineups — gets a badge with the menu number that answers it.
+    { const cntB = {}; out.forEach(l => l.forEach(p => { cntB[p.id] = (cntB[p.id]||0)+1; }));
+      const topB = Object.entries(cntB).sort((a,b) => b[1]-a[1])[0];
+      if(topB && topB[1]/out.length >= NFL_GPP_BUDGET.expWarnFrac){
+        const idxB = fieldPool.findIndex(p => p.id === topB[0]);
+        const mAll = d.allPriced || [];
+        const mShare = (idxB >= 0 && mAll.length)
+          ? Math.round(100 * mAll.reduce((s,x) => s + (x.ids.indexOf(idxB) >= 0 ? 1 : 0), 0) / mAll.length) : null;
+        badges.push({kind:'warn', text:`${surnameOf((fieldPool[idxB]||{}).name || topB[0])} ${Math.round(100*topB[1]/out.length)}%`,
+          tip:`Top exposure on this board.` + (mShare != null
+            ? ` He is in ${mShare}% of the ${mAll.length}-lineup menu the greedy could choose from, so the concentration is ${mShare >= 100*topB[1]/out.length - 8 ? 'the SEARCH\'s, not the portfolio\'s' : 'a portfolio choice on top of the search\'s'}.`
+            : '') + ` Cap him with Max% or a per-player override if you want less.`});
+      } }
     // FALSE PRECISION IS A DEFECT. When the reported ROI's own standard error is
     // a large fraction of it, say so on the card rather than printing digits the
     // sample cannot support.
@@ -28176,26 +28897,27 @@ async function runNflSimGen(){
   if(typeof renderHbEv==='function') renderHbEv();   // the builder's stats card can now score/price
 
   // ── Stacking rules ────────────────────────────────────────────────────────
-  const stackRules = {
-    stackN:    nflStackNOf(slate),
-    bringBack: slate._nflBringBack|0,
-    noRbVsDst: !!slate._nflNoRbVsDst,
-    rbCounts:  !!slate._nflStackRbCounts,
-  };
-  // Per-QB overrides (Showdown has no QB slot to constrain, so they are ignored
-  // there — the panel is hidden on showdown slates for the same reason).
-  stackRules.perQb = SD ? {} : nflResolveQbStacks(slate, stackRules);
+  // Global numbers + the resolved per-QB map (Showdown has no QB slot to
+  // constrain, so per-QB rules are ignored there — the panel is hidden on
+  // showdown slates for the same reason).
+  const stackRules = nflResolvedStackRules(slate);
+  if(!SD) nflLogMarketStackRules(slate, pool, stackRules, log);
   {
     const bits=[];
     if(stackRules.stackN)    bits.push(`QB + ${stackRules.stackN} ${stackRules.rbCounts?'same-team skill player':'pass catcher'}${stackRules.stackN>1?'s':''}`);
     if(stackRules.bringBack) bits.push(`${stackRules.bringBack} bring-back`);
     if(stackRules.noRbVsDst) bits.push('no RB vs own DST');
     log(bits.length ? `Stacking: ${bits.join(' · ')} — enforced in every generated lineup.`
-                    : 'Stacking: off (lineups take whatever shape the sims favor).');
+                    : (!SD && nflMarketStacksOn(slate)
+                        ? 'Stacking: no global rule — the per-QB market-derived rules above are what binds.'
+                        : 'Stacking: off (lineups take whatever shape the sims favor).'));
     // Say EXACTLY which quarterbacks were carved out of that global rule, and
     // whether the pool can actually satisfy each carve-out — a QB whose rule
     // cannot be met simply never appears, which is invisible without this line.
-    const _pqIds = Object.keys(stackRules.perQb||{});
+    // ck75: a DERIVED row is already described, QB by QB, in the market-derived
+    // block above — this line stays what it always was, the list of quarterbacks
+    // the USER carved out by hand.
+    const _pqIds = Object.keys(stackRules.perQb||{}).filter(k => !(stackRules.perQb[k]||{}).derived);
     if(_pqIds.length){
       const _lastName = p => String(p.name||'').split(' ').slice(-1)[0] || p.name || '?';
       const _parts = [], _infeasible = [];
@@ -28357,7 +29079,7 @@ async function runNflSimGen(){
   if(!SD && _eng.engine === 'gpp'){
     log(`Engine: GPP (spec §5–6) — ${_eng.why}.`);
     out = await runNflGppBoard({slate, pool, ranked, simScoresById, simsDone,
-      target, maxExpPct, overrides, maxSal, minSal, log,
+      target, maxExpPct, overrides, maxSal, minSal, log, stackRules,
       fieldPool: simPool.filter(p=>!nflIsOut(slate,p.id)),
       sharpShare:contestSharpShare(slate), ownTemp:contestOwnTemp(slate),
       seed: (slate._gppSeed!=null ? slate._gppSeed : 0x5eed1)});
@@ -32744,6 +33466,9 @@ function renderUpdatePoolPreview(){
 function applyPoolUpdate(){
   const slate = slates.find(s=>s.id===activeSlateId);
   if(!slate) return;
+  // ck75: the market-derived stack profiles memoize `nflPropEntry` per player;
+  // new props are exactly what invalidates that memo.
+  slate._mktVer = (slate._mktVer|0) + 1;
 
   const cm = updateColMapping;
   let matched=0, unmatched=0, added=0;
