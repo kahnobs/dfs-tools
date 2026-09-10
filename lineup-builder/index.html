@@ -5053,7 +5053,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck76/2026-09-10';
+const BUILD_ID = '2.0/ck78/2026-09-10';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -12355,6 +12355,56 @@ const NFL_FIELD_STACK = {
 // FLEX/DST), and `opts.stackModel` additionally makes the drawn field STACK
 // at the measured rates above. Without opts the function behaves exactly as it
 // always has for the 6-man sports — same draw order, same guards, same result.
+// ── THE FIELD'S SHARP SLICE, INJECTED (checkpoint 77) ───────────────────────
+// Both field paths (`runUFCContestEV` and the GPP engine) take a sampled Own%
+// field and replace `share` of its entries with builds drawn from a pool of
+// optimizer lineups. Two things about that injection were wrong until ck77, and
+// both made the printed share bigger than the share the field actually got:
+//
+//   1. THE COUNT WAS NOT THE COUNT. The overwrite drew its target POSITION with
+//      replacement, so writing floor(N·s) times lands on only N·(1 − e^−s)
+//      distinct entries. Measured on wk1d/25k: a 0.18 dial put 16.5% of the
+//      sample on sharp builds and a 0.60 dial put 44.8% — the top of the dial
+//      lost a quarter of what it asked for. A partial Fisher–Yates over the
+//      positions now picks floor(N·s) DISTINCT slots, so the realized share is
+//      the dial to the entry.
+//   2. IT COST NOTHING TO GET WRONG, because the pool it drew from was not
+//      sharp (see `gppSharpNeighbours` and the mix in `runNflGppEngine`).
+//
+// DUPLICATES ARE ENTRIES, NOT ONE ENTRY. 15,000 draws from a 3,000-build pool
+// is five copies of each build, and all five of them beat you. Nothing here or
+// downstream collapses them: `worldSet` scores every sampled row and sorts the
+// scores, so a build drawn five times occupies five ranks. This note exists so
+// the next reader does not "fix" the duplication away.
+function gppSharpPick(sp, rnd){
+  const R = rnd || Math.random;
+  if(!sp.cum){
+    const c = new Float64Array(sp.asIdx.length); let s = 0;
+    for(let i=0;i<sp.asIdx.length;i++){ s += sp.asIdx[i].w; c[i] = s; }
+    sp.cum = c; sp.totW = s;
+  }
+  const cum = sp.cum, r = R()*sp.totW;
+  let lo = 0, hi = cum.length - 1;
+  while(lo < hi){ const m = (lo + hi) >> 1; if(cum[m] < r) lo = m + 1; else hi = m; }
+  return sp.asIdx[lo];
+}
+// Returns how many entries were actually replaced — the callers log it, and the
+// §8 harness asserts it equals floor(field.length · share).
+function gppApplySharpSlice(field, sp, share, rnd){
+  const R = rnd || Math.random;
+  const N = field.length;
+  if(!sp || !sp.asIdx || !sp.asIdx.length || !(share > 0) || !N) return 0;
+  const n = Math.min(N, Math.floor(N*share + 1e-9));
+  if(!(n > 0)) return 0;
+  const ord = new Int32Array(N);
+  for(let i=0;i<N;i++) ord[i] = i;
+  for(let j=0;j<n;j++){
+    const k = j + ((R()*(N - j))|0);
+    const t = ord[j]; ord[j] = ord[k]; ord[k] = t;
+    field[ord[j]] = gppSharpPick(sp, R).idxs.slice();
+  }
+  return n;
+}
 function sampleUfcField(pool, N, ownArr, opts){
   const slots    = opts && opts.slots ? opts.slots : null;
   const SIZE     = slots ? slots.length : 6;
@@ -12922,17 +12972,60 @@ function gppTailSurv(xM, alpha, k, t){
 // and at the threshold the two agree exactly, because there m/M = F/n:
 // the count branch's scale 1 + F/n and the tail branch's 1 + m/M are the same
 // number. The MEAN each branch reports is unchanged from ck72.
+// ── COUNT WHAT YOU SAW, MODEL ONLY WHAT YOU DIDN'T (checkpoint 78) ──────────
+// Both branches used to throw the OBSERVED count away and re-derive the whole
+// rank from a model of all F entries:
+//   count branch   m = (beating + tied/2 + 0.5)·F/N,   scale = 1 + F/N
+//   tail  branch   m = F·pre·S(t),                     scale = 1 + m/M
+// Neither collapses when the sample IS the contest. At N = F both still smear
+// the rank over a Gamma with variance ~2m, and `payAt` integrates a payout
+// curve that is violently convex in rank, so Jensen pays us for uncertainty
+// that does not exist. MEASURED on wk1d/25k (ck77's open item): the engine
+// priced the same board 9-115% above what ranking it against a literal
+// 25,000-entry field pays.
+//
+// The sample is not an independent estimate of the contest — it is PART of it.
+// `beating` sampled entries really do beat us; the only unknown is the F - N
+// entries we did not draw. So:
+//     obs  = beating + tied/2                 exactly known
+//     p̂    = P(one entry exceeds t)           the count fraction, or the GPD
+//                                             survival above its threshold
+//     λ    = (F - N)·p̂                        the UNOBSERVED beaters
+//     m    = obs + λ            Var(m) = λ·(1 + λ/nEff)      scale = Var/m
+// where nEff is the number of observations p̂ rests on: `obs + 0.5` for the
+// count branch, the M exceedances for the GPD fit.
+//
+// Two limits, both required:
+//   • N = F ⇒ λ = 0 ⇒ scale = 0 ⇒ the posterior is the point mass at the true
+//     rank and the engine's EV IS the literal rank payout. Nothing to
+//     extrapolate; it just counts. (`payAt`/`hbExpPayout`/`expPayoutSplit`
+//     read a zero scale as a point mass, and win% becomes the exact
+//     1{nobody above us}.)
+//   • N << F ⇒ λ ~ m and λ/nEff ~ F/N, so scale -> 1 + F/N in the count branch
+//     and 1 + m/M in the tail branch: EXACTLY the ck73 numbers this replaces.
+// So it is a strict generalisation — calibrated where it has to estimate,
+// exact where it does not, and continuous in F/N in between.
 function beatersEstimate(beating, tied, sampleN, arr, t, F, refine){
+  const obs = beating + tied/2;
+  let pHat = -1, nEff = 0;
   if(refine!==false && arr && t!=null && sampleN>200){
     const ft = gppTailFit(arr, sampleN);
-    if(t >= ft.xM){
-      const m = F * ft.pre * gppTailSurv(ft.xM, ft.alpha, ft.k, t);
-      const sc = 1 + m/ft.M;
-      return { shape: m/sc, scale: sc, beat: m };
-    }
+    if(t >= ft.xM){ pHat = ft.pre * gppTailSurv(ft.xM, ft.alpha, ft.k, t); nEff = ft.M; }
   }
-  const r = F/sampleN, nEff = beating + tied/2 + 0.5, sc = 1 + r;
-  return { shape: nEff*r/sc, scale: sc, beat: (beating + tied/2)*r };
+  if(pHat < 0){ pHat = (obs + 0.5)/sampleN; nEff = obs + 0.5; }
+  const lam = Math.max(0, F - sampleN) * pHat;
+  const m = obs + lam;
+  if(!(m > 0)) return { shape: 0, scale: 0, beat: 0, obs: obs };
+  const varm = lam * (1 + lam/(nEff > 1e-9 ? nEff : 1e-9));
+  // The point mass is carried as a NEGLIGIBLE scale rather than a zero one, so
+  // every existing consumer keeps working unchanged: they all read shape·scale
+  // as the mean and every one of them short-circuits to `payFn(mean + offset)`
+  // above shape 30, which a scale of 1e-9·m guarantees. The alternative — a
+  // zero scale with the mean smuggled in a new field — would have needed a new
+  // branch in four integrators and in the worker's stringified copy of two of
+  // them. The relative error of the round trip is ~1e-16.
+  const sc = Math.max(varm/m, m*1e-9);
+  return { shape: m/sc, scale: sc, beat: m, obs: obs };
 }
 
 // ── SHARED FIELD-SCENARIO CONSTANTS (hoisted 2026-09-04) ────────────────────
@@ -13840,14 +13933,9 @@ async function runUFCContestEV(ctx){
       // has to read the draw, not the mixture.
       if(k===0 && cptRate) cpt0 = cptRate.slice();
       if(!field.length){ log('⚠ Field sampler produced no lineups — check the Own% column, that the field pool can fill a legal roster under the salary cap/floor' + (_fieldOpts?', and that it covers every position.':'.')); return null; }
-      if(sharpPool){
-        const nSharp=Math.floor(field.length*sharpShare);
-        for(let j=0;j<nSharp;j++){
-          let r=Math.random()*sharpPool.totW, pick=sharpPool.asIdx[0];
-          for(const x of sharpPool.asIdx){ r-=x.w; if(r<=0){ pick=x; break; } }
-          field[(Math.random()*field.length)|0]=pick.idxs.slice();
-        }
-      }
+      // ck77: exactly floor(N·share) DISTINCT entries, not floor(N·share) writes
+      // to positions drawn with replacement (which delivered N·(1−e^−share)).
+      if(sharpPool) gppApplySharpSlice(field, sharpPool, sharpShare);
       flds.push(field);
       const m=new Map();
       field.forEach(l=>{ const kk=_fkey(l); m.set(kk,(m.get(kk)||0)+1); });
@@ -14398,6 +14486,7 @@ async function runUFCContestEV(ctx){
     const shape  = est.shape;
     const scale  = est.scale;
     const offset = 1 + dups/2 + myBeats;
+    if(!(shape > 0)) return [payout.at(offset), headPartAt(offset), midPartAt(offset)];  // ck78
     if(shape > 30){
       const r = shape*scale + offset;
       return [payout.at(r), headPartAt(r), midPartAt(r)];
@@ -26062,6 +26151,46 @@ const NFL_GPP_BUDGET = {
   // table at all — measured at under 3% of throughput on Matt's slate.
   stackRepairCands: 6,
 };
+// ── WHAT THE SHARP SLICE IS DRAWN FROM (checkpoint 77) ─────────────────────
+// ck73 built the sharp pool as "the sharp pass's own local optima PLUS the
+// per-sim optimal pool at half weight" and printed the sum as "a pool of N
+// distinct optimizer builds". MEASURED on wk1d at MME 25,000, 4,000 sims
+// (/tmp/review_g/ck77/probe2.js), that sum was a fiction in two ways:
+//   • the sharp pass returned 98–111 optima, not the ~3,100 the ck73 notes
+//     claim. ck74 scaled the MAIN search budget with the lineup count and ck75
+//     put stack constraints inside the climb; the sharp pass's ceiling stayed a
+//     flat 14 s, and at the ~7.6 seeds/s that buys it climbs ~106 seeds.
+//   • the per-sim optimal pool was 2,000 entries carrying ~91% of the draw
+//     weight, and it is NOT sharp: scored on the report worlds its mean is
+//     120.4 against 121.8 for the plain Own% draw and its per-world max is
+//     213 against 225. A world-specific optimum is a lottery ticket — extreme
+//     in the one world it was built for and mediocre in every other.
+// So 91% of the "sharp" slice was weaker than the chalk it replaced, and the
+// dial did nothing: report-fold p99.9 moved 205.8 → 206.5 (+0.3%) between a
+// 0.18 and a 0.60 share, and held-out ROI moved 245% → 196% — most of that
+// being run-to-run noise, and the LOG still claiming 60% of the field came from
+// a menu like ours.
+//
+// THE FIX IS CARDINALITY, NOT JUST WEIGHT. Filling 45% of a 20,000-entry sample
+// from ~100 builds is 90 copies each: the sharp slice then has only 100 distinct
+// scores per world, its maximum is the pool's maximum, and 9,000 independent
+// Own% draws — whose lucky tails run to 225 — are what got REMOVED to make room.
+// That is why a bigger share could read as a SOFTER field. A field of optimizers
+// is only harder than a field of chalk if it is as diverse as the chalk is.
+// Since a hill climb costs ~7 optima a second, the diversity is generated the
+// way a room full of optimizers generates it: from the one-swap NEIGHBOURHOOD
+// of the engine's own optima (`gppSharpNeighbours`), which is thousands of
+// legal, stack-legal, near-optimal and DISTINCT builds for a fraction of a
+// second — the same family, not the same lineup cloned.
+const NFL_GPP_SHARP_NEIGH_WORLDS = 96;   // world subsample the neighbourhood is ranked on
+const NFL_GPP_SHARP_NEIGH_CANDS  = 40;   // swap-in shortlist per position, by ceiling
+const NFL_GPP_SHARP_NEIGH_TOPQ   = 0.2;  // "ceiling" = mean of the best this fraction of worlds
+// The per-sim optimal pool stays in the mix — §4's point is that a real field
+// contains both kinds of optimizer — but at a FIXED, small share of the draw
+// weight instead of whatever its raw sim counts happen to sum to. It measured
+// weaker than the Own% draw, so it is a floor on the field's strength, never
+// its top.
+const NFL_GPP_SHARP_LEGACY_W     = 0.20;
 // ── FIELD SAMPLE SIZE, PER FOLD (checkpoint 73) ────────────────────────────
 // The search fold and the two priced folds want different things out of the
 // modeled field, so they no longer get the same number of opponents. See the
@@ -26076,6 +26205,96 @@ const NFL_GPP_CALIB_N   = 2000;
 // points instead of continuously, which is what makes the draw itself cheap.
 const NFL_GPP_GAMMA_BUCKETS = 32;
 // The three derived sizes, in one place so the log and the kernel agree.
+// ── THE OPTIMIZERS' NEIGHBOURHOOD (checkpoint 77) ──────────────────────────
+// Given the sharp pass's local optima, enumerate their ONE-SWAP neighbours and
+// return the best `want` of them, ranked by ceiling (mean of the top
+// NFL_GPP_SHARP_NEIGH_TOPQ of a world subsample — the field's top end is what
+// prices a top-heavy curve, not its mean).
+//
+// Why one swap. Two independent optimizers running the same projections do not
+// return the same nine players; they return builds a slot or two apart. That
+// family is exactly the one-swap neighbourhood of a local optimum, and it is
+// free: a lineup's world vector is the sum of its nine players' world vectors,
+// so a neighbour's vector is the base vector minus one column plus another.
+//
+// Legality is preserved by construction and CHECKED, not assumed: the swap is
+// same-position (so the positional multiset, and therefore roster feasibility,
+// is unchanged), the salary is re-tested against the same cap and floor the
+// search uses, and the ck75 per-QB partner minimum is re-tested against the
+// same `qbMinN`/`qbPartner` arrays the kernel enforces. A sharp entry that
+// could not be submitted is not an opponent.
+function gppSharpNeighbours(optima, fr, want){
+  if(!optima || !optima.length || !(want > 0)) return [];
+  const nP = fr.nP, W = fr.W, S = fr.S, pos = fr.pos, sal = fr.sal, sel = fr.sel;
+  const maxSal = fr.maxSal || 50000, minSal = fr.minSal || 0;
+  const qbMinN = fr.qbMinN, qbRow = fr.qbRow, qbPartner = fr.qbPartner;
+  const nW = Math.max(8, Math.min(W, NFL_GPP_SHARP_NEIGH_WORLDS));
+  const wIdx = new Int32Array(nW);
+  for(let k=0;k<nW;k++) wIdx[k] = Math.floor(k*W/nW);
+  const M = Math.max(1, Math.round(nW*NFL_GPP_SHARP_NEIGH_TOPQ));
+  // Player-major world columns on the subsample, plus a per-player ceiling used
+  // only to shortlist swap-ins (a full scan of 800 players per slot per optimum
+  // is the one part of this that would not be free).
+  const cols = new Float32Array(nP*nW), ceil = new Float64Array(nP);
+  const buf = new Float64Array(nW);
+  for(let i=0;i<nP;i++){
+    const off = i*W, o2 = i*nW;
+    for(let k=0;k<nW;k++){ const v = S[off + wIdx[k]] || 0; cols[o2+k] = v; buf[k] = v; }
+    const a = Array.prototype.slice.call(buf).sort((x,y) => y - x);
+    let t = 0; for(let k=0;k<M;k++) t += a[k];
+    ceil[i] = t/M;
+  }
+  const byPos = [[],[],[],[],[],[]];
+  for(let i=0;i<nP;i++) if(sel[i] && pos[i] < 5) byPos[pos[i]].push(i);
+  const shortlist = byPos.map(a => a.sort((x,y) => ceil[y] - ceil[x]).slice(0, NFL_GPP_SHARP_NEIGH_CANDS));
+  const topMean = (v) => {
+    const a = Array.prototype.slice.call(v).sort((x,y) => y - x);
+    let t = 0; for(let k=0;k<M;k++) t += a[k];
+    return t/M;
+  };
+  const stackOk = (ids) => {
+    for(const q of ids){
+      if(pos[q] !== 0) continue;
+      const need = qbMinN ? (qbMinN[q]|0) : 0;
+      if(need <= 0) continue;
+      const row = qbRow ? qbRow[q] : -1;
+      if(row < 0) return false;
+      const base = row*nP; let c = 0;
+      for(const x of ids) if(x !== q && qbPartner[base + x]) c++;
+      if(c < need) return false;
+    }
+    return true;
+  };
+  const keyOf = a => Array.prototype.slice.call(a).sort((x,y) => x - y).join(',');
+  const seen = new Set(), out = [];
+  const v = new Float64Array(nW), nv = new Float64Array(nW);
+  for(const o of optima){
+    const ids = Array.prototype.slice.call(o);
+    if(ids.length !== 9) continue;
+    seen.add(keyOf(ids));
+    let s0 = 0; for(const i of ids) s0 += sal[i];
+    v.fill(0);
+    for(const i of ids){ const o2 = i*nW; for(let k=0;k<nW;k++) v[k] += cols[o2+k]; }
+    for(let j=0;j<9;j++){
+      const outP = ids[j], oo = outP*nW, list = shortlist[pos[outP]] || [];
+      for(const inP of list){
+        if(inP === outP || ids.indexOf(inP) >= 0) continue;
+        const s = s0 - sal[outP] + sal[inP];
+        if(s > maxSal || (minSal > 0 && s < minSal)) continue;
+        const cand = ids.slice(); cand[j] = inP;
+        const kk = keyOf(cand);
+        if(seen.has(kk)) continue;
+        if(!stackOk(cand)) continue;
+        seen.add(kk);
+        const i2 = inP*nW;
+        for(let k=0;k<nW;k++) nv[k] = v[k] - cols[oo+k] + cols[i2+k];
+        out.push({idxs: cand, s: topMean(nv)});
+      }
+    }
+  }
+  out.sort((a,b) => b.s - a.s);
+  return out.slice(0, want).map(x => x.idxs);
+}
 function gppSeedPlan(bud, N){
   const total = Math.max(bud.seedsMin, Math.min(bud.seedsMax, Math.round(bud.seedsPerLineup * N)));
   const opt   = Math.round(total * bud.seedOptimalFrac);
@@ -26511,6 +26730,10 @@ function gppKernelFactory(){
   // 2,000-sample field only bounds you to "top F/N" while payout(1) is 15× that
   // band. Deep ranks take the cheap point estimate (the curve is flat there).
   function payAt(shape, scale, offset, payFn){
+    // ck78: shape 0 is "nobody is above us and there is nothing left to
+    // estimate" (N = F, no beaters). It is a point mass at the offset, not a
+    // Gamma — the Wilson-Hilferty correction divides by the shape.
+    if(!(shape > 0)) return payFn(offset);
     if(shape > 30) return payFn(shape * scale + offset);
     let s = 0;
     const rt = 3 * Math.sqrt(shape), corr = 1 - 1/(9*shape);
@@ -26543,15 +26766,15 @@ function gppKernelFactory(){
   //     any offset; the count below charges it the whole unkept block anyway
   //     rather than quietly pretending the sample was smaller than it is.
   // Results go into RP_shape / RP_scale rather than a fresh object per call.
-  let RP_shape = 0, RP_scale = 1;
+  // ck78: the OBSERVED count is now part of the answer in BOTH branches, so the
+  // binary search runs before the branch instead of being skipped by it — see
+  // `beatersEstimate`, of which this is term-for-term a copy (§8 asserts they
+  // agree bit-for-bit). `RP_obs` is the exact number of sampled entries above
+  // us; win% reads it so that "somebody in the field already beat you" is a
+  // zero rather than a small positive number.
+  let RP_shape = 0, RP_scale = 1, RP_obs = 0;
   function rankPostFast(t, view, NF, F, w, ws){
     const NV = ws.NV;
-    if(ws.tailOn && t >= ws.tailXM[w]){
-      const m = F * ws.tailPre * gppTailSurv(ws.tailXM[w], ws.tailAl[w], ws.tailK[w], t);
-      const sc = 1 + m/ws.tailM;
-      RP_shape = m/sc; RP_scale = sc;
-      return;
-    }
     let lo = 0, h = NV;
     while(lo < h){ const m = (lo + h) >> 1; if(view[m] <= t) lo = m + 1; else h = m; }
     let tied = 0;
@@ -26561,8 +26784,21 @@ function gppKernelFactory(){
       tied = lo - lo2;
     }
     const beating = (NV - lo) + (lo === 0 ? (NF - NV) : 0);
-    const r = F / NF, nEff = beating + tied/2 + 0.5, sc = 1 + r;
-    RP_shape = nEff*r/sc; RP_scale = sc;
+    const obs = beating + tied/2;
+    RP_obs = obs;
+    let pHat, nEff;
+    if(ws.tailOn && t >= ws.tailXM[w]){
+      pHat = ws.tailPre * gppTailSurv(ws.tailXM[w], ws.tailAl[w], ws.tailK[w], t);
+      nEff = ws.tailM;
+    } else {
+      pHat = (obs + 0.5)/NF; nEff = obs + 0.5;
+    }
+    const lam = (F > NF ? F - NF : 0) * pHat;
+    const m = obs + lam;
+    if(!(m > 0)){ RP_shape = 0; RP_scale = 0; return; }
+    const varm = lam * (1 + lam/(nEff > 1e-9 ? nEff : 1e-9));
+    const sc = varm/m > m*1e-9 ? varm/m : m*1e-9;
+    RP_shape = m/sc; RP_scale = sc;
   }
   // The same thing with an object result, for callers outside the hot loops
   // (the portfolio precompute, and the harness).
@@ -26834,8 +27070,10 @@ function gppKernelFactory(){
         sq += p*p;
         if(p > 0) cash++;
         // P(nobody is ahead) under the same Gamma posterior the rank uses —
-        // the hand builder's win% is this identical expression.
-        win += Math.pow(1 + RP_scale, -RP_shape);
+        // the hand builder's win% is this identical expression. ck78: an entry
+        // we SAW above us is not a probability, so the observed count gates it;
+        // the Gamma term now prices only the unobserved F − NF entries.
+        win += RP_obs >= 1 ? 0 : (RP_scale > 0 ? Math.pow(1 + RP_scale, -RP_shape) : 1);
       }
     }
     if(stats){
@@ -28089,24 +28327,17 @@ async function runNflGppEngine(ctx){
       return ids.length === 9 ? {idxs:ids, w:Math.max(1, e.count||1)} : null;
     }));
   }
-  const pickFrom = (sp) => {
-    const r = Math.random()*sp.totW, cum = sp.cum;
-    let lo = 0, hi = cum.length - 1;
-    while(lo < hi){ const m = (lo + hi) >> 1; if(cum[m] < r) lo = m + 1; else hi = m; }
-    return sp.asIdx[lo];
-  };
+  let _sharpPlaced = 0, _sharpOf = 0;
   const sampleSet = (label, NF, pool) => {
     const sp = (pool !== undefined) ? pool : sharpPool;
+    _sharpPlaced = 0; _sharpOf = K*NF;
     const lin = new Int32Array(K * NF * 9);
     for(let k = 0; k < K; k++){
       const r = sampleUfcField(fieldPool, NF, scen[k], fieldOpts);
       const field = r && r.field;
       if(!field || !field.length) return null;
-      if(sp){
-        const nSharp = Math.floor(field.length * sharpShare);
-        for(let j = 0; j < nSharp; j++)
-          field[(Math.random()*field.length)|0] = pickFrom(sp).idxs.slice();
-      }
+      // ck77: an EXACT floor(NF·share) distinct entries (see gppApplySharpSlice).
+      if(sp) _sharpPlaced += gppApplySharpSlice(field, sp, sharpShare);
       const base = k * NF * 9;
       for(let f = 0; f < NF; f++){
         const l = field[f % field.length];
@@ -28143,7 +28374,10 @@ async function runNflGppEngine(ctx){
   const logFieldLine = (poolN, ms) =>
     log(`Field: three INDEPENDENT samples — ${K}×${NFs.toLocaleString()} for the SEARCH fold (an ordering is all a hill climb needs) and ${K}×${NFp.toLocaleString()} for each PRICED fold`
       + `, so a rank at ${F.toLocaleString()} entries resolves to ${(F/NFp).toFixed(1)} places per sample slot instead of ${(F/NFs).toFixed(1)} (${(ms/1000).toFixed(1)}s).`
-      + (poolN ? ` ${Math.round(sharpShare*100)}% of entries are drawn from a pool of ${poolN.toLocaleString()} distinct optimizer builds, not Own% chalk.` : ' (No sharp slice available — pure Own% chalk.)'));
+      // ck77: the share the sample ACTUALLY got, counted, not the dial's value —
+      // the injection used to land 1−e^−share of it and the line still printed
+      // the dial. `_sharpPlaced` is what gppApplySharpSlice reported.
+      + (poolN ? ` ${(100*_sharpPlaced/Math.max(1,_sharpOf)).toFixed(1)}% of the last fold's ${_sharpOf.toLocaleString()} sampled entries were replaced by draws from a pool of ${poolN.toLocaleString()} distinct optimizer builds (the dial is ${Math.round(sharpShare*100)}%), not Own% chalk.` : ' (No sharp slice available — pure Own% chalk.)'));
   if(!needSharpPass) logFieldLine(sharpPool ? sharpPool.asIdx.length : 0, Date.now()-_tSample);
   await tick(); if(window._genCancelled) return null;
 
@@ -28269,12 +28503,32 @@ async function runNflGppEngine(ctx){
     if(preOut && preOut.cancelled) return null;
     const sharpIdx = (preOut && preOut.result && preOut.result.sharp) || [];
     if(sharpIdx.length >= 20){
-      // ck73: the engine's own optima AND the per-sim optimal pool, so the sharp
-      // slice is not one generator's output cloned a few hundred times. The
-      // legacy entries enter at half weight — they are the weaker optimizers,
-      // and §4's point is that the field contains both.
-      const ent = sharpIdx.map(ids => ({idxs: Array.from(ids), w: 1}));
-      if(sharpPool) for(const x of sharpPool.asIdx) ent.push({idxs: x.idxs, w: x.w * 0.5});
+      // ── WHAT THE SHARP SLICE IS MADE OF (checkpoint 77) ─────────────────
+      // ck73's mix was `optima at weight 1` + `the per-sim optimal pool at half
+      // its sim counts`. On wk1d that was ~100 optima against ~1,000 units of
+      // legacy weight — 91% of every sharp draw came from a pool whose mean
+      // report-world score (120.4) is BELOW the Own% draw it was replacing
+      // (121.8). See the NFL_GPP_SHARP_* block for the measurements.
+      // Now: the optima, their one-swap neighbourhood (the family a room full
+      // of optimizers actually produces — thousands of DISTINCT builds, which
+      // is what stops the sharp slice from being ~100 scores cloned 90 times),
+      // and the per-sim optimals pinned to NFL_GPP_SHARP_LEGACY_W of the total
+      // draw weight rather than to whatever their counts sum to.
+      const _core  = sharpIdx.map(ids => Array.prototype.slice.call(ids));
+      const _tN = Date.now();
+      const _neigh = gppSharpNeighbours(_core, {
+        nP: nP, W: genIdx.length, S: sg, pos: pos, sal: sal, sel: sel,
+        maxSal: payload.maxSal, minSal: payload.minSal,
+        qbMinN: qbMinN, qbRow: qbRow, qbPartner: qbPartner
+      }, Math.max(0, bud.sharpPool - _core.length));
+      const _neighMs = Date.now() - _tN;
+      const ent = _core.concat(_neigh).map(idxs => ({idxs: idxs, w: 1}));
+      const _sharpW = ent.length;
+      if(sharpPool && sharpPool.asIdx.length && sharpPool.totW > 0 && NFL_GPP_SHARP_LEGACY_W > 0){
+        const _lw = NFL_GPP_SHARP_LEGACY_W;
+        const _scale = (_lw/(1 - _lw)) * _sharpW / sharpPool.totW;
+        for(const x of sharpPool.asIdx) ent.push({idxs: x.idxs, w: x.w * _scale});
+      }
       const enginePool = poolOf(ent);
       const _t2 = Date.now();
       const g2 = sampleSet('search', NFs, enginePool);
@@ -28283,10 +28537,14 @@ async function runNflGppEngine(ctx){
       if(g2 && s2 && r2){
         payload.fldLinG = g2; payload.fldLinS = s2; payload.fldLinR = r2;
         logFieldLine(enginePool.asIdx.length, Date.now()-_t2);
-        log(`  the sharp slice is ${sharpIdx.length.toLocaleString()} of the ENGINE's own local optima plus the per-sim optimal pool at half weight, so the field's top end is a broad pool of optimizer builds rather than a few hundred cloned scores (sharp pass + re-sample ${((Date.now()-t1)/1000).toFixed(1)}s).`);
+        log(`  the sharp slice draws from ${enginePool.asIdx.length.toLocaleString()} distinct builds: ${_core.length.toLocaleString()} of the ENGINE's own local optima, `
+          + `${_neigh.length.toLocaleString()} one-swap near-optima of those (${_neighMs} ms — same salary cap, same floor, same per-QB partner minimum), `
+          + `and the per-sim optimal pool holding ${Math.round(100*NFL_GPP_SHARP_LEGACY_W)}% of the draw weight. `
+          + `Cardinality is the point: filling ${Math.round(sharpShare*100)}% of ${NFp.toLocaleString()} entries from ~${_core.length} builds would be ${Math.round(sharpShare*NFp/Math.max(1,_core.length))} copies each, and a field with that few distinct scores has a THINNER top than the Own% draws it replaced `
+          + `(sharp pass + re-sample ${((Date.now()-t1)/1000).toFixed(1)}s).`);
       } else { badSharp = true; }
     } else {
-      log(`  ⚠ sharp pass produced only ${sharpIdx.length} lineups — keeping the per-sim-optimal sharp pool.`);
+      log(`  ⚠ sharp pass produced only ${sharpIdx.length} lineups — falling back to the per-sim-optimal pool alone. That pool measured WEAKER than the Own% draw on wk1d (mean 120.4 vs 121.8), so the sharp share is not a real dial on this run and every EV below is flattered. Raise the sim count or the search cap.`);
       badSharp = true;
     }
     // The priced folds were not drawn up front; if the sharp pass could not
@@ -31609,6 +31867,7 @@ function hbField(slate, ctx, contest){
 // between the two screens. Do not re-inline it.
 const HB_WH_Z=[-1.2816,-0.5244,0,0.5244,1.2816];
 function hbExpPayout(shape, scale, offset, payout){
+  if(!(shape>0)) return payout(offset);   // ck78: a point mass, not a Gamma
   if(shape>30) return payout(shape*scale+offset);
   let s=0;
   const rt=3*Math.sqrt(shape), corr=1-1/(9*shape);
@@ -31680,7 +31939,10 @@ function hbPriceLineup(players, cptId){
     // rather than a second, differently-biased one. Expect a genuinely tiny
     // number in a 150,000-entry field — one lineup's win chance IS tiny — so
     // the readout formats to whatever precision the value needs.
-    win+=Math.pow(1+est.scale, -est.shape);
+    // ck78: an entry we SAW above us is a fact, not a probability — the Gamma
+    // term prices only the F − N entries the sample did not draw.
+    win+=(est.obs != null && est.obs >= 1) ? 0
+         : (est.scale > 0 ? Math.pow(1+est.scale, -est.shape) : 1);
     const rank=1+lam+dups/2;
     if(rank<=contest.paid) cash++;
     pctl[s]=Math.min(1, rank/fieldSize);
