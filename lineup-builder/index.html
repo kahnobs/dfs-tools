@@ -5990,6 +5990,12 @@ function setPosFilter(f){
   slate._posFilter = (f && f!=='ALL') ? f : null;
   save(); renderPool();
 }
+// Exposure tab's own position filter (NFL). Kept independent of the pool filter.
+function setExpPosFilter(f){
+  const slate=activeSlate(); if(!slate) return;
+  slate._expPosFilter = (f && f!=='ALL') ? f : null;
+  save(); renderExposure();
+}
 function renderPosFilterBar(slate){
   const el=document.getElementById('posFilterBar'); if(!el) return;
   if(!slate || slate.sport!=='nfl'){ el.style.display='none'; el.innerHTML=''; return; }
@@ -8902,10 +8908,30 @@ function renderExposure(){
   const cc=SDx?sdCptCounts(slate):{};
 
   // All non-hidden players, sorted by exposure desc
-  const allPlayers=(slate.players||[])
+  const allVisible=(slate.players||[])
     .filter(p=>!hidden.has(p.id))
     .map(p=>({...p,count:ec[p.id]||0,cpt:cc[p.id]||0}))
     .sort((a,b)=>b.count-a.count);
+
+  // NFL: position filter chips (QB / RB / WR / TE / FLEX / DST [/ K]) above the
+  // list. Separate from the pool's position filter so you can build from one
+  // view and audit exposure from another. Persisted on the slate like _posFilter.
+  const nflX=slate.sport==='nfl';
+  const xf=nflX?(slate._expPosFilter||'ALL'):'ALL';
+  const allPlayers=nflX?allVisible.filter(p=>nflPosMatch(xf,p)):allVisible;
+  let posBarHTML='';
+  if(nflX){
+    const tabs=[['ALL','All'],['QB','QB'],['RB','RB'],['WR','WR'],['TE','TE'],['FLEX','FLEX'],['DST','DST']];
+    if(allVisible.some(p=>nflPosOf(p)==='K')) tabs.push(['K','K']);
+    posBarHTML=`<div class="pos-filter-bar" style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:6px 0 8px;padding:0;border:none;background:none;overflow:visible;">`
+      +`<span class="pf-lbl">POS</span>`
+      +tabs.map(([k,l])=>{
+        const grp=allVisible.filter(p=>nflPosMatch(k,p));
+        const used=grp.filter(p=>p.count>0).length;
+        return `<button class="pf-btn${xf===k?' active':''}" onclick="setExpPosFilter('${k}')" title="${k==='FLEX'?'RB / WR / TE — everyone FLEX-eligible':k==='ALL'?'Every position':'Only '+l} — ${used} of ${grp.length} used">${l}<span class="pf-n">${used}</span></button>`;
+      }).join('')
+      +`</div>`;
+  }
 
   const maxC=allPlayers.find(p=>p.count>0)?.count||1;
 
@@ -8977,9 +9003,9 @@ function renderExposure(){
 
   panel.innerHTML=`<div>
     <div class="exp-title" style="display:flex;align-items:center;justify-content:space-between;">
-      <span>Player Exposure <span class="exp-badge">${allPlayers.filter(p=>p.count>0).length}/${allPlayers.length} used</span></span>
+      <span>Player Exposure <span class="exp-badge">${allPlayers.filter(p=>p.count>0).length}/${allPlayers.length} used${xf!=='ALL'?' · '+xf:''}</span></span>
     </div>
-    ${legend}${dHTML}
+    ${posBarHTML}${legend}${dHTML||(xf!=='ALL'?'<div class="no-data">No '+xf+' players in this slate.</div>':'')}
   </div>
   <div style="margin-top:16px;">
     <div class="exp-title">Repeated Combos <span class="exp-badge">2+ times</span></div>
