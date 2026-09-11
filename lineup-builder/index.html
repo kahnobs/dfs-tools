@@ -3044,10 +3044,21 @@ function nflPctCell(v){
 // Slot tokens are UPPERCASE and always followed by a space, and player names are
 // Title Case, so a case-SENSITIVE token match cannot mistake "Te'o" for a TE
 // slot. Returns [{slot, name}] in DK's order.
+//
+// SHOWDOWN (checkpoint 80). The same column on a Showdown Captain Mode export
+// reads "CPT Jaxon Smith-Njigba FLEX Drake Maye FLEX … FLEX Seahawks  FLEX Mack
+// Hollins": the captain carries its own slot token, the DST is written as the
+// TEAM NICKNAME with no "DST" token in front of it, and DK emits a DOUBLE SPACE
+// after that nickname. The `\s+ -> ' '` collapse above already absorbs the
+// double space; `CPT` had to join the token alternation or the captain token and
+// his name were swallowed into the leading text and the entry parsed as 5 slots.
+// The nickname needs nothing here — it is just a name to this function, and the
+// matcher resolves it against the slate's DST row (whose `name` is the same
+// nickname on the salary export).
 function nflParseLineupString(s){
   const str = String(s || '').replace(/\s+/g, ' ').trim();
   if(!str) return [];
-  const re = /(?:^|\s)(QB|RB|WR|TE|FLEX|DST)(?=\s)/g;
+  const re = /(?:^|\s)(QB|RB|WR|TE|FLEX|DST|CPT)(?=\s)/g;
   const marks = []; let m;
   while((m = re.exec(str))){
     const tokStart = m.index + m[0].length - m[1].length;
@@ -3062,44 +3073,137 @@ function nflParseLineupString(s){
   }
   return out;
 }
-// Pure parser: text in, both tables out. No slate, no DOM — the harness drives
-// this directly on a fixture.
-function nflParseStandings(text){
-  const rows = nflCsvParse(text);
-  if(!rows.length) return { ok: false, error: 'The file is empty.' };
-  const hdr = rows[0].map(h => String(h || '').trim());
-  const col = re => hdr.findIndex(h => re.test(h));
-  const cRank = col(/^rank$/i), cEid = col(/^entry\s*id$/i), cEname = col(/^entry\s*name$/i),
-        cPts = col(/^points$/i), cLu = col(/^lineup$/i),
-        cPl = col(/^player$/i), cRp = col(/^roster\s*position$/i),
-        cDr = col(/^%?\s*drafted%?$/i), cFp = col(/^fpts$/i);
-  if(cLu < 0 && cPl < 0)
+// ── STREAMING STANDINGS SCANNER (checkpoint 80) ─────────────────────────────
+// The first REAL DK file this ever saw is 38 MB / 237,812 rows (NE@SEA showdown,
+// 2026-09-09). `nflCsvParse` materialises a 237,812 × 11 matrix of strings —
+// 2.6 M string objects, several hundred MB — before a single field is read, and
+// then `nflParseStandings` allocated a 6-element `slots` array of objects for
+// every entry on top of that. On the synthetic 40-row classic fixtures this was
+// invisible; on the real file it is a multi-second main-thread freeze and a real
+// chance of an out-of-memory tab.
+//
+// So the file is now walked ONCE, row by row, keeping only the five fields the
+// ingest reads, and the walk is RESUMABLE at a row boundary (`nflStandingsStep`
+// processes at most `maxRows` and returns) so `nflParseStandingsAsync` can yield
+// to the event loop every chunk and drive a progress line. The synchronous
+// `nflParseStandings` is unchanged as an API — it is begin + one unbounded step
+// — so every existing caller and test keeps working.
+//
+// `slots` is NOT stored per entry above `NFL_STANDINGS_SLOTS_MAX` entries: at
+// 237k entries the slot arrays alone are ~1.5 M objects, and both consumers
+// (`nflStandingsStacks`, `nflStandingsDups`) already fall back to parsing the
+// lineup string on demand. Two extra passes of `nflParseLineupString` cost ~1 s;
+// holding the arrays costs ~400 MB.
+const NFL_STANDINGS_SLOTS_MAX = 20000;
+const NFL_STANDINGS_CHUNK = 25000;      // rows per yield in the async driver
+// One CSV row starting at `i`. Returns {row, next} or null at end of text.
+// Same quoting rules as nflCsvParse (doubled quotes, embedded newlines, CRLF).
+function nflCsvRowAt(s, i){
+  const n = s.length;
+  if(i >= n) return null;
+  const row = []; let cur = '', inQ = false;
+  for(; i < n; i++){
+    const c = s[i];
+    if(inQ){
+      if(c === '"'){ if(s[i+1] === '"'){ cur += '"'; i++; } else inQ = false; }
+      else cur += c;
+      continue;
+    }
+    if(c === '"') inQ = true;
+    else if(c === ','){ row.push(cur); cur = ''; }
+    else if(c === '\r'){ /* CRLF: the \n does the work */ }
+    else if(c === '\n'){ row.push(cur); return { row, next: i + 1 }; }
+    else cur += c;
+  }
+  row.push(cur);
+  return { row, next: n };
+}
+// Header + column map. Returns the mutable scan state, or {ok:false, error}.
+function nflStandingsBegin(text){
+  const s = String(text || '').replace(/^﻿/, '');
+  const h = nflCsvRowAt(s, 0);
+  if(!h || !h.row.some(c => String(c).trim() !== '')) return { ok: false, error: 'The file is empty.' };
+  const hdr = h.row.map(c => String(c || '').trim());
+  const col = re => hdr.findIndex(c => re.test(c));
+  const cols = { rank: col(/^rank$/i), eid: col(/^entry\s*id$/i), ename: col(/^entry\s*name$/i),
+                 pts: col(/^points$/i), lu: col(/^lineup$/i), pl: col(/^player$/i),
+                 rp: col(/^roster\s*position$/i), dr: col(/^%?\s*drafted%?$/i), fp: col(/^fpts$/i) };
+  if(cols.lu < 0 && cols.pl < 0)
     return { ok: false, error: 'Not a DraftKings standings export — no "Lineup" or "Player" column in the header.' };
-  const entries = [], players = [];
-  for(let r = 1; r < rows.length; r++){
-    const row = rows[r];
+  return { ok: true, s, pos: h.next, headers: hdr, cols, entries: [], players: [],
+           // DK's ENTRY count and the count of entries that actually SUBMITTED a
+           // lineup are different numbers on a real file: the NE@SEA contest has
+           // 237,812 entries of which 816 are blank (score 0, all tied at the
+           // bottom rank). `fieldSize` is what the contest charged for and what
+           // the payout table is cut against; `entries.length` is what can be
+           // measured. Reporting one as the other was silently wrong by 0.34%.
+           fieldSize: 0, unfilled: 0, rows: 0, done: false };
+}
+// Consume up to `maxRows` data rows. Returns true when the scan is finished.
+function nflStandingsStep(st, maxRows){
+  const s = st.s, C = st.cols;
+  const keepSlots = st.entries.length < NFL_STANDINGS_SLOTS_MAX;
+  let budget = (maxRows == null) ? Infinity : maxRows;
+  while(budget-- > 0){
+    const r = nflCsvRowAt(s, st.pos);
+    if(!r){ st.done = true; break; }
+    st.pos = r.next;
+    const row = r.row;
+    let any = false;
+    for(let i = 0; i < row.length; i++){ if(String(row[i]).trim() !== ''){ any = true; break; } }
+    if(!any) continue;                       // nflCsvParse dropped all-blank rows; so do we
+    st.rows++;
     const cell = i => (i >= 0 && row[i] != null) ? String(row[i]).trim() : '';
-    if(cLu >= 0){
-      const lu = cell(cLu);
+    if(C.lu >= 0 || C.eid >= 0){
+      const lu = cell(C.lu);
+      const eid = cell(C.eid);
+      if(eid || lu) st.fieldSize++;
       if(lu){
-        const pts = parseFloat(cell(cPts));
-        entries.push({ rank: parseInt(cell(cRank), 10) || null, entryId: cell(cEid),
-                       entryName: cell(cEname), points: Number.isFinite(pts) ? pts : null,
-                       lineup: lu, slots: nflParseLineupString(lu) });
-      }
+        const pts = parseFloat(cell(C.pts));
+        const e = { rank: parseInt(cell(C.rank), 10) || null, entryId: eid,
+                    entryName: cell(C.ename), points: Number.isFinite(pts) ? pts : null,
+                    lineup: lu };
+        if(keepSlots && st.entries.length < NFL_STANDINGS_SLOTS_MAX) e.slots = nflParseLineupString(lu);
+        st.entries.push(e);
+      } else if(eid) st.unfilled++;
     }
     // The right-hand block is blank on every row past the last player, which is
     // the normal shape of the file, not an error.
-    if(cPl >= 0){
-      const nm = cell(cPl);
+    if(C.pl >= 0){
+      const nm = cell(C.pl);
       if(nm){
-        const fp = parseFloat(cell(cFp));
-        players.push({ name: nm, rosterPos: cell(cRp), drafted: nflPctCell(cell(cDr)),
-                       fpts: Number.isFinite(fp) ? fp : null });
+        const fp = parseFloat(cell(C.fp));
+        st.players.push({ name: nm, rosterPos: cell(C.rp), drafted: nflPctCell(cell(C.dr)),
+                          fpts: Number.isFinite(fp) ? fp : null });
       }
     }
   }
-  return { ok: true, entries, players, headers: hdr };
+  return st.done;
+}
+function nflStandingsFinish(st){
+  return { ok: true, entries: st.entries, players: st.players, headers: st.headers,
+           fieldSize: st.fieldSize, unfilled: st.unfilled, rows: st.rows };
+}
+// Pure parser: text in, both tables out. No slate, no DOM — the harness drives
+// this directly on a fixture.
+function nflParseStandings(text){
+  const st = nflStandingsBegin(text);
+  if(!st.ok) return st;
+  nflStandingsStep(st, null);
+  return nflStandingsFinish(st);
+}
+// Same output, chunked so a 38 MB file does not freeze the page. `onProgress`
+// is called with (rowsSoFar, bytesSoFar, totalBytes) once per chunk.
+async function nflParseStandingsAsync(text, onProgress){
+  const st = nflStandingsBegin(text);
+  if(!st.ok) return st;
+  const total = st.s.length;
+  while(!nflStandingsStep(st, NFL_STANDINGS_CHUNK)){
+    if(onProgress){ try { onProgress(st.rows, st.pos, total); } catch(e){} }
+    await new Promise(r => setTimeout(r, 0));
+  }
+  if(onProgress){ try { onProgress(st.rows, total, total); } catch(e){} }
+  return nflStandingsFinish(st);
 }
 
 // Name matching against the slate. nflNameKey is the file's existing
@@ -3125,12 +3229,23 @@ function nflStandingsMatcher(slate){
     // several players share and no first name resolves is left unmatched.
     const sur = nflNameKey(surnameOf(name));
     const cands = bySur.get(sur) || [];
-    if(cands.length === 1) return cands[0];
     const first = nflNameKey(String(name).trim().split(/\s+/)[0] || '');
-    const hit = cands.filter(p => {
+    // The first name must be COMPATIBLE even when the surname is unique on the
+    // slate. Until ck80 a unique surname was accepted outright, which is safe
+    // when the standings file's player list is a subset of the slate (a classic
+    // DK export) and wrong the moment it is not: the NE@SEA showdown standings
+    // name 62 players against a 17-player salary export, and "Emmanuel Henderson
+    // Jr." (0.01% drafted) bound itself to the slate's only Henderson —
+    // TreVeyon — and overwrote his realized ownership with it. Prefix matching
+    // still passes Josh/Joshua and Cam/Cameron, which is what this fallback is
+    // for; E vs T is not a nickname.
+    const compat = p => {
       const f = nflNameKey(String(p.name).trim().split(/\s+/)[0] || '');
-      return f && first && (f === first || f.startsWith(first) || first.startsWith(f));
-    });
+      if(!f || !first) return true;          // single-token name (a DST nickname)
+      return f === first || f.startsWith(first) || first.startsWith(f);
+    };
+    if(cands.length === 1) return compat(cands[0]) ? cands[0] : null;
+    const hit = cands.filter(compat);
     return hit.length === 1 ? hit[0] : null;
   };
 }
@@ -3174,13 +3289,46 @@ function nflStandingsStacks(slate, entries, match){
 // Duplicate counts for the best-finishing lineups: how many OTHER entries in
 // the whole file played the same nine players. This is the observable the field
 // model's dup divisor (spec §2) is supposed to reproduce.
-function nflStandingsDups(entries, topN){
+//
+// SHOWDOWN (ck80): the key MUST carry the captain. CPT Smith-Njigba + five and
+// FLEX Smith-Njigba + the same five are different salaries, different scores and
+// different DK entries — `evDupExpect`'s own `_fkey` already appends `|C<cpt>`
+// for exactly this reason, and collapsing them here would have compared the
+// model against a coarser observable than the one it predicts. On the NE@SEA
+// file, ignoring the captain merges 28,084 distinct lineups down to 22,090.
+//
+// The whole-file distribution (not just the top 20) is returned as well: it is
+// what the field model's duplication has to reproduce, and one contest's top-20
+// mean is far too small a sample to fit anything against.
+function nflStandingsDups(entries, topN, showdown){
   const keyOf = e => {
     const slots = e.slots && e.slots.length ? e.slots : nflParseLineupString(e.lineup);
-    return slots.map(s => nflNameKey(s.name)).filter(Boolean).sort().join('|');
+    const names = slots.map(s => nflNameKey(s.name)).filter(Boolean);
+    if(!names.length) return '';
+    if(!showdown) return names.slice().sort().join('|');
+    const ci = slots.findIndex(s => s.slot === 'CPT');
+    const cpt = ci >= 0 ? nflNameKey(slots[ci].name) : '';
+    const rest = names.filter((_, i) => i !== ci).sort().join('|');
+    return 'C' + cpt + '|' + rest;
   };
   const counts = new Map();
   for(const e of entries){ const k = keyOf(e); if(k) counts.set(k, (counts.get(k) || 0) + 1); }
+  // Whole-file duplication shape.
+  let maxDup = 0, entriesGe5 = 0, lineupsGe5 = 0, lineupsGe2 = 0, singles = 0, tot2 = 0;
+  const hist = {};
+  for(const v of counts.values()){
+    tot2 += v;
+    if(v > maxDup) maxDup = v;
+    if(v === 1) singles++; else lineupsGe2++;
+    if(v >= 5){ lineupsGe5++; entriesGe5 += v; }
+    const b = v === 1 ? '1' : v <= 2 ? '2' : v <= 4 ? '3-4' : v <= 9 ? '5-9' : v <= 24 ? '10-24'
+            : v <= 99 ? '25-99' : v <= 299 ? '100-299' : '300+';
+    hist[b] = (hist[b] || 0) + v;
+  }
+  const dist = { distinct: counts.size, entries: tot2, maxDup,
+                 meanCopies: counts.size ? tot2 / counts.size : 0,
+                 singletons: singles, lineupsGe2, lineupsGe5, entriesGe5,
+                 entriesGe5Share: tot2 ? entriesGe5 / tot2 : 0, entriesByCopies: hist };
   const ranked = entries.filter(e => e.rank != null).sort((a,b) => a.rank - b.rank).slice(0, topN || 20);
   const seen = new Set(); const rows = [];
   for(const e of ranked){
@@ -3190,7 +3338,177 @@ function nflStandingsDups(entries, topN){
     seen.add(k);
   }
   const tot = rows.reduce((a,r) => a + r.dups, 0);
-  return { rows, total: tot, mean: rows.length ? tot / rows.length : 0, distinct: seen.size };
+  return { rows, total: tot, mean: rows.length ? tot / rows.length : 0, distinct: seen.size, dist };
+}
+
+// ── SHOWDOWN FIELD STRUCTURE (checkpoint 80) ────────────────────────────────
+// `nflStandingsStacks` keys off the QB SLOT TOKEN, which a showdown lineup does
+// not have — every slot is CPT or FLEX. The same three observables (how many
+// same-team pass catchers a QB is played with, and whether the entry brought a
+// game back) are recovered from the matched players' POSITIONS instead, and the
+// showdown-only ones the classic report has no place for are added: the captain
+// distribution, the captain's position mix, and the 5-1 / 4-2 / 3-3 team split.
+function nflSdStandingsShape(slate, entries, match){
+  const st = { n: 0, skipped: 0, none: 0, single: 0, double: 0, triple: 0, bbGiven: 0, stacked: 0,
+               noQb: 0, cptBy: {}, cptPos: {}, teamSplit: {}, dstRate: 0, kRate: 0, qbRate: 0,
+               cptIsQb: 0, bothQb: 0, total: 0 };
+  let dst = 0, kk = 0, qbAny = 0;
+  for(const e of entries){
+    const slots = e.slots && e.slots.length ? e.slots : nflParseLineupString(e.lineup);
+    if(!slots.length) continue;
+    st.total++;
+    const ps = slots.map(s => ({ slot: s.slot, name: s.name, p: match(s.name) }));
+    const cpt = ps.find(x => x.slot === 'CPT') || ps[0];
+    if(cpt){
+      const key = cpt.p ? cpt.p.name : cpt.name;
+      st.cptBy[key] = (st.cptBy[key] || 0) + 1;
+      const cp = cpt.p ? (nflPosOf(cpt.p) || '?') : '?';
+      st.cptPos[cp] = (st.cptPos[cp] || 0) + 1;
+      if(cp === 'QB') st.cptIsQb++;
+    }
+    const tc = {};
+    let hasDst = false, hasK = false, qbs = [];
+    for(const x of ps){
+      if(!x.p) continue;
+      const t = (typeof nflTeamOf === 'function') ? nflTeamOf(x.p) : x.p.team;
+      if(t) tc[t] = (tc[t] || 0) + 1;
+      const pos = nflPosOf(x.p);
+      if(pos === 'DST') hasDst = true;
+      if(pos === 'K') hasK = true;
+      if(pos === 'QB') qbs.push(x);
+    }
+    if(hasDst) dst++;
+    if(hasK) kk++;
+    if(qbs.length) qbAny++;
+    if(qbs.length >= 2) st.bothQb++;
+    const cnts = Object.values(tc).sort((a,b) => b - a);
+    if(cnts.length){
+      const lab = cnts.length === 1 ? (cnts[0] + '-0') : (cnts[0] + '-' + cnts[1]);
+      st.teamSplit[lab] = (st.teamSplit[lab] || 0) + 1;
+    }
+    if(!qbs.length){ st.noQb++; st.skipped++; continue; }
+    // The stack is measured around the QB the entry is most committed to: the
+    // captain if he is a QB, otherwise the first one.
+    const qb = qbs.find(x => x.slot === 'CPT') || qbs[0];
+    const qt = (typeof nflTeamOf === 'function') ? nflTeamOf(qb.p) : qb.p.team;
+    if(!qt){ st.skipped++; continue; }
+    const qo = (typeof nflOppOf === 'function') ? nflOppOf(qb.p) : qb.p.opp;
+    st.n++;
+    let mates = 0, bb = 0;
+    for(const x of ps){
+      if(!x.p || x.p === qb.p) continue;
+      const t = (typeof nflTeamOf === 'function') ? nflTeamOf(x.p) : x.p.team;
+      const pos = nflPosOf(x.p);
+      if(t === qt && (pos === 'WR' || pos === 'TE')) mates++;
+      if(qo && t === qo && pos && pos !== 'DST') bb++;
+    }
+    if(mates === 0) st.none++;
+    else if(mates === 1) st.single++;
+    else if(mates === 2) st.double++;
+    else st.triple++;
+    if(mates > 0){ st.stacked++; if(bb > 0) st.bbGiven++; }
+  }
+  const d = Math.max(1, st.n), T = Math.max(1, st.total);
+  st.noneRate = st.none / d; st.singleRate = st.single / d;
+  st.doubleRate = st.double / d; st.tripleRate = st.triple / d;
+  st.singleOrNoneRate = (st.single + st.none) / d;
+  st.bringBackRate = st.stacked ? st.bbGiven / st.stacked : 0;
+  st.dstRate = dst / T; st.kRate = kk / T; st.qbRate = qbAny / T;
+  st.cptIsQbRate = st.cptIsQb / T; st.bothQbRate = st.bothQb / T;
+  // Captain concentration, which is the showdown field model's single biggest
+  // assumption (`_sdCptBase`'s fallback prior claims "real showdown fields put
+  // ~30% of entries on one captain").
+  const cr = Object.entries(st.cptBy).sort((a,b) => b[1] - a[1]);
+  st.cptTop = cr.slice(0, 12).map(([name, c]) => ({ name, pct: 100 * c / T }));
+  st.cptTop1 = cr.length ? 100 * cr[0][1] / T : 0;
+  st.cptTop3 = 100 * cr.slice(0, 3).reduce((a, x) => a + x[1], 0) / T;
+  st.cptTop5 = 100 * cr.slice(0, 5).reduce((a, x) => a + x[1], 0) / T;
+  st.cptDistinct = cr.length;
+  const hhi = cr.reduce((a, x) => a + Math.pow(x[1] / T, 2), 0);
+  st.cptHHI = hhi; st.cptEffective = hhi > 0 ? 1 / hhi : 0;
+  return st;
+}
+
+// ── PORTFOLIO STRUCTURE (checkpoint 80) ─────────────────────────────────────
+// DK writes a multi-entry user's entry name as "handle (7/25)". The handle is
+// the FIELD MEMBER — 1,161 users hold 71.6% of the NE@SEA entries — and the
+// field model draws every entry independently, which is the assumption this
+// function exists to measure. `bigMin` is the entries-per-user threshold that
+// counts as a portfolio.
+function nflStandingsUsers(entries, bigMin){
+  const MIN = bigMin || 100;
+  const per = new Map();
+  for(const e of entries){
+    const nm = String(e.entryName || '');
+    const m = nm.match(/^(.*?)\s*\(\d+\/\d+\)\s*$/);
+    const u = (m ? m[1] : nm).trim() || '(anonymous)';
+    per.set(u, (per.get(u) || 0) + 1);
+  }
+  const counts = [...per.values()];
+  const tot = counts.reduce((a,b) => a + b, 0) || 1;
+  const buckets = [[1,1],[2,3],[4,10],[11,50],[51,MIN-1],[MIN,1e9]];
+  const dist = buckets.map(([lo,hi]) => {
+    const sel = counts.filter(c => c >= lo && c <= hi);
+    return { lo, hi: hi > 1e8 ? null : hi, users: sel.length,
+             entries: sel.reduce((a,b) => a + b, 0),
+             userShare: sel.length / (counts.length || 1),
+             entryShare: sel.reduce((a,b) => a + b, 0) / tot };
+  });
+  const big = [...per.entries()].filter(([, c]) => c >= MIN).sort((a,b) => b[1] - a[1]);
+  return { users: per.size, entries: tot, bigMin: MIN, dist,
+           bigUsers: big.length, bigEntries: big.reduce((a,x) => a + x[1], 0),
+           bigEntryShare: big.reduce((a,x) => a + x[1], 0) / tot,
+           maxEntries: counts.reduce((a,b) => b > a ? b : a, 0),
+           top: big.slice(0, 10).map(([name, c]) => ({ name, entries: c })), perUser: per };
+}
+// How concentrated ONE user's board is: top exposures, captain spread, and how
+// many distinct lineups the board holds. Averaged over the big users, this is
+// the number the "portfolios as first-class field members" question needs.
+function nflStandingsBoards(entries, per, match, showdown, minEntries, maxUsers){
+  const MIN = minEntries || 100, LIM = maxUsers || 400;
+  const want = new Set();
+  for(const [u, c] of per.entries()){ if(c >= MIN) want.add(u); if(want.size >= LIM) break; }
+  const boards = new Map();
+  for(const e of entries){
+    const nm = String(e.entryName || '');
+    const m = nm.match(/^(.*?)\s*\(\d+\/\d+\)\s*$/);
+    const u = (m ? m[1] : nm).trim();
+    if(!want.has(u)) continue;
+    const slots = e.slots && e.slots.length ? e.slots : nflParseLineupString(e.lineup);
+    if(!slots.length) continue;
+    let b = boards.get(u);
+    if(!b){ b = { n: 0, exp: new Map(), cpt: new Map(), keys: new Set() }; boards.set(u, b); }
+    b.n++;
+    const names = [];
+    for(const s of slots){
+      const k = nflNameKey(s.name); if(!k) continue;
+      names.push(k);
+      b.exp.set(k, (b.exp.get(k) || 0) + 1);
+      if(showdown && s.slot === 'CPT') b.cpt.set(k, (b.cpt.get(k) || 0) + 1);
+    }
+    const ci = slots.findIndex(s => s.slot === 'CPT');
+    const key = showdown && ci >= 0
+      ? 'C' + nflNameKey(slots[ci].name) + '|' + names.filter((_, i) => i !== ci).sort().join('|')
+      : names.slice().sort().join('|');
+    b.keys.add(key);
+  }
+  const rows = [];
+  for(const [u, b] of boards.entries()){
+    const ex = [...b.exp.entries()].sort((a,c) => c[1] - a[1]);
+    const cp = [...b.cpt.entries()].sort((a,c) => c[1] - a[1]);
+    const hhiC = cp.reduce((a, x) => a + Math.pow(x[1] / b.n, 2), 0);
+    rows.push({ user: u, entries: b.n, distinct: b.keys.size,
+                distinctShare: b.keys.size / b.n,
+                topExp: ex.slice(0, 5).map(([k, c]) => ({ key: k, pct: 100 * c / b.n })),
+                maxExp: ex.length ? 100 * ex[0][1] / b.n : 0,
+                cptDistinct: cp.length, cptTop: cp.length ? 100 * cp[0][1] / b.n : 0,
+                cptEffective: hhiC > 0 ? 1 / hhiC : 0 });
+  }
+  rows.sort((a, b) => b.entries - a.entries);
+  const mean = k => rows.length ? rows.reduce((a, r) => a + r[k], 0) / rows.length : 0;
+  return { n: rows.length, meanEntries: mean('entries'), meanDistinctShare: mean('distinctShare'),
+           meanMaxExp: mean('maxExp'), meanCptDistinct: mean('cptDistinct'),
+           meanCptTop: mean('cptTop'), meanCptEffective: mean('cptEffective'), rows: rows.slice(0, 25) };
 }
 
 // Mean absolute error in PERCENTAGE POINTS between a predicted ownership map
@@ -3309,37 +3627,77 @@ function nflOwnFit(opts){
 // Everything above, wired together: parse → match → store on the slate →
 // append to the global history → refit → report. Pure enough to be driven from
 // a test with a string of CSV.
-function nflIngestStandings(slate, text, fileName){
-  if(!slate || !isNflClassic(slate)) return { ok: false, error: 'Standings ingest is NFL Classic only.' };
-  const P = nflParseStandings(text);
+function nflIngestStandings(slate, text, fileName, parsed){
+  // ck80: showdown is admitted. Everything downstream that is classic-only (the
+  // Own Model and therefore the β refit) is gated on `SD` individually rather
+  // than by refusing the file — the ownership, duplication, captain and
+  // portfolio structure in a showdown standings file are the only real
+  // measurements the SHOWDOWN field model has ever had.
+  if(!slate || !isNfl(slate)) return { ok: false, error: 'Standings ingest is NFL only.' };
+  const SD = isShowdown(slate);
+  const P = parsed && parsed.ok ? parsed : nflParseStandings(text);
   if(!P.ok) return P;
   const match = nflStandingsMatcher(slate);
   // Model the slate as it stands BEFORE the numbers land, so the features we
-  // store are the ones a live run would have used.
-  nflOwnEnsure(slate);
+  // store are the ones a live run would have used. (Classic only — nflOwnRows
+  // and nflOwnEnsure both refuse a showdown slate by construction: the roster
+  // shape they normalise to is QB/RB/WR/TE/DST budgets summing to 900%.)
+  if(!SD) nflOwnEnsure(slate);
   const rowsByPid = {};
-  const R = nflOwnRows(slate);
+  const R = SD ? null : nflOwnRows(slate);
   if(R) R.rows.forEach(r => { rowsByPid[r.p.id] = r; });
 
-  const ownership = {}, ownershipByName = {}, unmatched = [];
+  // ── OWNERSHIP: DK REPORTS CPT AND FLEX SEPARATELY ─────────────────────────
+  // Verified on the NE@SEA file: 45 rows carry Roster Position CPT and sum to
+  // 99.62%, 62 carry FLEX and sum to 498.26% — i.e. one captain slot and five
+  // flex slots, exactly as the roster implies, and the two numbers for the same
+  // player are wildly different (Smith-Njigba 19.45% CPT vs 50.77% FLEX). A
+  // showdown slate collapses the CPT/FLEX twins into ONE player row carrying
+  // `own` (flex) and `cptOwn` (captain), so the two blocks are stored as two
+  // maps against that one id. Reading them into a single `ownership` map — what
+  // the classic path does — would have written whichever block came last.
+  const ownership = {}, ownershipByName = {}, ownershipCpt = {}, ownershipCptByName = {},
+        fpts = {}, fptsByName = {}, unmatched = [];
   const histRows = [];
-  let matched = 0;
+  let matched = 0; const matchedIds = new Set();
   for(const pl of P.players){
     if(pl.drafted == null) continue;
-    ownershipByName[pl.name] = pl.drafted;
+    const rp = String(pl.rosterPos || '').toUpperCase();
+    const isCpt = SD && /CPT|CAPTAIN|MVP/.test(rp);
+    (isCpt ? ownershipCptByName : ownershipByName)[pl.name] = pl.drafted;
+    if(pl.fpts != null && !isCpt) fptsByName[pl.name] = pl.fpts;
     const p = match(pl.name);
-    if(!p){ unmatched.push(pl.name); continue; }
-    matched++;
-    ownership[p.id] = pl.drafted;
+    if(!p){ unmatched.push(pl.name + (SD ? ' [' + (rp || '?') + ']' : '')); continue; }
+    if(!matchedIds.has(p.id + '|' + (isCpt ? 'C' : 'F'))){ matched++; matchedIds.add(p.id + '|' + (isCpt ? 'C' : 'F')); }
+    if(isCpt) ownershipCpt[p.id] = pl.drafted;
+    else { ownership[p.id] = pl.drafted; if(pl.fpts != null) fpts[p.id] = pl.fpts; }
     const r = rowsByPid[p.id];
-    if(r) histRows.push({ pos: r.pos, y: pl.drafted,
+    if(r && !isCpt) histRows.push({ pos: r.pos, y: pl.drafted,
                           x: NFL_OWN_FEATS.map(k => Math.round((r[k] || 0) * 1000) / 1000) });
   }
 
   const entries = P.entries;
-  const fieldSize = entries.length;
+  // DK's ENTRY count vs the count that submitted a lineup — see nflStandingsBegin.
+  const lineups = entries.length;
+  const fieldSize = P.fieldSize && P.fieldSize >= lineups ? P.fieldSize : lineups;
+  const unfilled = P.unfilled != null ? P.unfilled : Math.max(0, fieldSize - lineups);
   const pts = entries.map(e => e.points).filter(v => Number.isFinite(v));
-  const winningScore = pts.length ? Math.max.apply(null, pts) : null;
+  // Math.max.apply on 236,996 arguments is a stack overflow, not a maximum —
+  // the synthetic 40-row fixtures never reached the ~120k argument limit.
+  let winningScore = null;
+  for(const v of pts){ if(winningScore == null || v > winningScore) winningScore = v; }
+  // The realized score distribution. Modelled-vs-actual at the TOP is the whole
+  // question a field model has to answer, so the quantiles are kept at the
+  // resolution the payout curve cares about, not at the resolution a histogram
+  // cares about. Persisted so a later run can compare without the 38 MB file.
+  const sortedPts = pts.slice().sort((a,b) => b - a);
+  const qAt = f => { if(!sortedPts.length) return null;
+    const i = Math.min(sortedPts.length - 1, Math.max(0, Math.round(f * sortedPts.length) - 1));
+    return sortedPts[i]; };
+  const scoreQ = { n: sortedPts.length, max: sortedPts[0] != null ? sortedPts[0] : null,
+                   p0001: qAt(0.00001), p001: qAt(0.0001), p01: qAt(0.001), p1: qAt(0.01),
+                   p10: qAt(0.10), p50: qAt(0.50), p90: qAt(0.90),
+                   top20: sortedPts.slice(0, 20) };
   // DK's export does not say where the money stopped, and the payout table is
   // not in this file. 20% of the field is the shape of a big DK GPP, so the
   // score at rank ceil(0.2·N) is stored as an APPROXIMATION and labelled as one
@@ -3348,10 +3706,14 @@ function nflIngestStandings(slate, text, fileName){
   const cashIdx = Math.max(0, Math.ceil(0.2 * ranked.length) - 1);
   const cashLine = ranked.length ? { rank: ranked[cashIdx].rank, score: ranked[cashIdx].points,
                                      approx: true, basis: 'score at rank ceil(0.2 × field) — DK does not export the paid-rank cutoff' } : null;
-  const stacksAll = nflStandingsStacks(slate, entries, match);
   const topN = Math.max(1, Math.ceil(0.01 * ranked.length));
-  const stacksTop = nflStandingsStacks(slate, ranked.slice(0, topN), match);
-  const dups = nflStandingsDups(entries, 20);
+  const stacksAll = SD ? nflSdStandingsShape(slate, entries, match) : nflStandingsStacks(slate, entries, match);
+  const stacksTop = SD ? nflSdStandingsShape(slate, ranked.slice(0, topN), match)
+                       : nflStandingsStacks(slate, ranked.slice(0, topN), match);
+  const dups = nflStandingsDups(entries, 20, SD);
+  const users = nflStandingsUsers(entries, 100);
+  const boards = nflStandingsBoards(entries, users.perUser, match, SD, 100, 400);
+  delete users.perUser;   // a 14k-entry Map has no business in localStorage
 
   // Contest key: DK names the file contest-standings-<id>.csv, which is the
   // only stable identifier in the whole export.
@@ -3361,17 +3723,21 @@ function nflIngestStandings(slate, text, fileName){
 
   const ts = Date.now();
   const rec = { file: fn, contestId: idm ? idm[1] : null, key, loadedAt: ts,
-                slateId: slate.id, slateName: slate.name || null,
-                fieldSize, entries: fieldSize, winningScore, cashLine,
-                ownership, ownershipByName, unmatched, matched,
+                slateId: slate.id, slateName: slate.name || null, showdown: SD,
+                fieldSize, entries: lineups, lineups, unfilled, winningScore, cashLine, scoreQ,
+                ownership, ownershipByName, ownershipCpt, ownershipCptByName, fpts, fptsByName,
+                unmatched, matched,
                 stacks: { all: stacksAll, top1pct: stacksTop, top1pctN: topN },
-                dupTop20: dups, games: (R && R.games) || null };
+                dupTop20: dups, users, boards, games: (R && R.games) || (SD ? 1 : null) };
 
   slate._standings = slate._standings || {};
   slate._standings[key] = rec;
 
   // History + refit. The refit only ever changes FUTURE Own Model values; the
-  // priors remain the fallback when the history is empty.
+  // priors remain the fallback when the history is empty. A SHOWDOWN contest
+  // contributes NOTHING here and must not pretend to: the Own Model's features
+  // and its softmax-per-position budgets are classic-only, so histRows is empty
+  // by construction and β is untouched. Said out loud in the report.
   let fit = null;
   if(histRows.length >= 20){
     const hist = nflOwnHistoryLoad().filter(c => c.key !== key);
@@ -3428,9 +3794,53 @@ function nflStandingsReport(slate, rec){
     none:         { real: st.noneRate,         assumed: assumed.singleOrNone * (1 - assumed.SINGLE_SHARE) },
     bringBack:    { real: st.bringBackRate,    assumed: assumed.bringBackRate },
   } : null;
-  return { model, sabersim, blend, ssAny, modelOk, modelCovered: mdAny, modelMatched: mdTot, stackCmp,
+  // ── SHOWDOWN (ck80) ───────────────────────────────────────────────────────
+  // A second MAE for the CAPTAIN column, which is a completely separate
+  // prediction (`p.cptOwn` / `sdOwnOf(p,true)`) against a completely separate
+  // block of DK's file, plus the captain-concentration and team-split
+  // observables the classic report has nowhere to put.
+  let sd = null;
+  if(rec.showdown){
+    const actC = rec.ownershipCpt || {};
+    const cpt = {}; let cptAny = false, cptPublished = 0, cptTot = 0;
+    for(const id in actC){
+      const p = byId[id]; if(!p) continue;
+      cptTot++;
+      if(Number.isFinite(parseFloat(p.cptOwn))) cptPublished++;
+      // Score the column the FIELD MODEL would actually have used, which is
+      // sdOwnOf(p, true) — captain ownership where it is published, flex
+      // ownership where it is not. Reading p.cptOwn raw scored an unpublished
+      // captain as 0%, which is not what any surface does with it.
+      cpt[id] = sdOwnOf(p, true);
+      if(cpt[id] > 0) cptAny = true;
+    }
+    const cptMae = cptAny ? nflOwnMae(actC, cpt) : { n: 0, mae: null };
+    sd = {
+      cptMae, cptAny, cptPublished, cptCovered: cptTot,
+      // The fallback captain prior in runUFCContestEV claims real showdown
+      // fields put ~30% of entries on one captain. This is that number, measured.
+      cptTop1: st ? st.cptTop1 : null, cptTop3: st ? st.cptTop3 : null,
+      cptTop5: st ? st.cptTop5 : null, cptEffective: st ? st.cptEffective : null,
+      cptDistinct: st ? st.cptDistinct : null,
+      cptConcentrationAssumed: 30,
+      cptTop: st ? st.cptTop : null, cptPos: st ? st.cptPos : null,
+      teamSplit: st ? st.teamSplit : null,
+      dstRate: st ? st.dstRate : null, kRate: st ? st.kRate : null,
+      qbRate: st ? st.qbRate : null, bothQbRate: st ? st.bothQbRate : null,
+      cptIsQbRate: st ? st.cptIsQbRate : null,
+      noQb: st ? st.noQb : null,
+    };
+  }
+  const dd = rec.dupTop20 && rec.dupTop20.dist;
+  return { model, sabersim, blend, ssAny, modelOk, modelCovered: mdAny, modelMatched: mdTot, stackCmp, sd,
+           showdown: !!rec.showdown,
+           // The Own Model is NFL-classic by construction; a showdown ingest
+           // never refits it and the card must not imply otherwise.
+           ownModelApplies: !rec.showdown,
            dupMean: rec.dupTop20 ? rec.dupTop20.mean : null,
            dupDistinct: rec.dupTop20 ? rec.dupTop20.distinct : null,
+           dupDist: dd || null,
+           users: rec.users || null, boards: rec.boards || null, scoreQ: rec.scoreQ || null,
            unmatched: (rec.unmatched || []).length };
 }
 
@@ -3439,24 +3849,34 @@ function nflBacktestJson(slate, key){
   const rec = ((slate && slate._standings) || {})[key];
   if(!rec) return null;
   const byId = {}; (slate.players || []).forEach(p => { byId[p.id] = p; });
-  const players = Object.keys(rec.ownership || {}).map(id => {
+  const ids = new Set(Object.keys(rec.ownership || {}).concat(Object.keys(rec.ownershipCpt || {})));
+  const players = [...ids].map(id => {
     const p = byId[id] || {};
     return { id, name: p.name || null, pos: p.name ? nflPosOf(p) : null,
              team: (p.name && typeof nflTeamOf === 'function') ? nflTeamOf(p) : null,
              salary: p.salary || null,
-             drafted: rec.ownership[id],
+             cptSalary: (rec.showdown && p.name) ? cptSalaryOf(p) : null,
+             drafted: (rec.ownership || {})[id] != null ? rec.ownership[id] : null,
+             // Showdown: DK publishes the two slots separately and so do we.
+             draftedCpt: rec.showdown ? ((rec.ownershipCpt || {})[id] != null ? rec.ownershipCpt[id] : null) : undefined,
+             fpts: (rec.fpts || {})[id] != null ? rec.fpts[id] : null,
              ownModel: Number.isFinite(parseFloat(p.own_model)) ? parseFloat(p.own_model) : null,
-             ssOwn: Number.isFinite(parseFloat(p.own)) ? parseFloat(p.own) : null };
+             ssOwn: Number.isFinite(parseFloat(p.own)) ? parseFloat(p.own) : null,
+             ssCptOwn: rec.showdown ? (Number.isFinite(parseFloat(p.cptOwn)) ? parseFloat(p.cptOwn) : null) : undefined };
   }).sort((a,b) => (b.drafted || 0) - (a.drafted || 0));
   return {
-    schema: 'dfs-builder/backtest/nfl-classic/1',
+    schema: rec.showdown ? 'dfs-builder/backtest/nfl-showdown/1' : 'dfs-builder/backtest/nfl-classic/1',
     contest: { key: rec.key, id: rec.contestId, file: rec.file, loadedAt: new Date(rec.loadedAt).toISOString(),
-               fieldSize: rec.fieldSize, winningScore: rec.winningScore, cashLine: rec.cashLine },
+               fieldSize: rec.fieldSize, lineups: rec.lineups != null ? rec.lineups : rec.entries,
+               unfilled: rec.unfilled || 0, showdown: !!rec.showdown,
+               winningScore: rec.winningScore, cashLine: rec.cashLine, scoreQuantiles: rec.scoreQ || null },
     slate: { id: rec.slateId, name: rec.slateName, games: rec.games },
     ownership: players,
     unmatched: rec.unmatched || [],
     stacks: rec.stacks,
     dupTop20: rec.dupTop20,
+    users: rec.users || null,
+    boards: rec.boards || null,
     fieldModelAssumptions: Object.assign({}, NFL_FIELD_STACK),
     report: nflStandingsReport(slate, rec),
     ownBeta: nflOwnBetas(),
@@ -3491,28 +3911,38 @@ function renderNflOwnSrc(){
     <div style="font-size:9px;color:${inp.ok ? 'var(--muted)' : '#eab308'};line-height:1.5;margin-top:3px;">${inp.ok ? esc(inp.label) : '⚠ no ownership source available — map SS Own, or run a sim so Own Model can be built'}</div>`;
 }
 function nflBacktestFileBtn(){ const el = document.getElementById('nflStandingsFile'); if(el) el.click(); }
-function onNflStandingsFile(input){
+// ck80: the real files are 38 MB. The parse is chunked (`nflParseStandingsAsync`)
+// and reports progress into the card's header, so the tab stays responsive
+// instead of white-screening for the length of the read.
+async function onNflStandingsFile(input){
   const f = input && input.files && input.files[0];
   if(!f) return;
   const slate = activeSlate();
-  const rd = new FileReader();
-  rd.onload = e => {
-    let r;
-    try { r = nflIngestStandings(slate, String(e.target.result || ''), f.name); }
-    catch(err){ r = { ok: false, error: String(err && err.message || err) }; }
-    input.value = '';
-    if(!r.ok){ showToast(r.error || 'Could not read that standings file', 'err'); return; }
-    slate._backtestOpen = true; save();
-    renderNflBacktest();
-    if(typeof renderPool === 'function') renderPool();
-    nflBacktestLog(slate, r.key).forEach(line => { try { console.log(line); } catch(_){} });
-    const gl = document.getElementById('genLog');
-    if(gl) nflBacktestLog(slate, r.key).forEach(line => {
-      const d = document.createElement('div'); d.textContent = line; gl.appendChild(d);
+  const setHead = txt => { const el = document.querySelector('#nflBacktest .slate-check-head');
+                           if(el) el.textContent = txt; };
+  input.value = '';
+  setHead(`Reading ${f.name}…`);
+  let text;
+  try { text = await f.text(); }
+  catch(err){ showToast('Could not read that file: ' + String(err && err.message || err), 'err'); renderNflBacktest(); return; }
+  let r;
+  try {
+    const P = await nflParseStandingsAsync(text, (rows, done, total) => {
+      setHead(`Parsing ${f.name} — ${rows.toLocaleString()} rows (${Math.round(100*done/Math.max(1,total))}%)`);
     });
-    showToast(`Standings loaded: ${r.rec.fieldSize.toLocaleString()} entries, ${r.rec.matched} players matched`, 'ok');
-  };
-  rd.readAsText(f);
+    r = P.ok ? nflIngestStandings(slate, text, f.name, P) : P;
+  }
+  catch(err){ r = { ok: false, error: String(err && err.message || err) }; }
+  if(!r.ok){ showToast(r.error || 'Could not read that standings file', 'err'); renderNflBacktest(); return; }
+  slate._backtestOpen = true; save();
+  renderNflBacktest();
+  if(typeof renderPool === 'function') renderPool();
+  nflBacktestLog(slate, r.key).forEach(line => { try { console.log(line); } catch(_){} });
+  const gl = document.getElementById('genLog');
+  if(gl) nflBacktestLog(slate, r.key).forEach(line => {
+    const d = document.createElement('div'); d.textContent = line; gl.appendChild(d);
+  });
+  showToast(`Standings loaded: ${r.rec.fieldSize.toLocaleString()} entries, ${r.rec.matched} player rows matched`, 'ok');
 }
 // The report as plain lines — the run log and the console print the same text
 // the card shows, so a screenshot and a log never disagree.
@@ -3522,20 +3952,46 @@ function nflBacktestLog(slate, key){
   const pc = v => (v == null ? '—' : (100 * v).toFixed(0) + '%');
   const mae = m => (m && m.mae != null) ? m.mae.toFixed(2) + 'pp (n=' + m.n + ')' : 'n/a';
   const out = [];
-  out.push(`Backtest ${rec.key}: ${rec.fieldSize.toLocaleString()} entries · winning score ${rec.winningScore != null ? rec.winningScore.toFixed(2) : '—'}`
+  out.push(`Backtest ${rec.key}${rec.showdown ? ' [SHOWDOWN]' : ''}: ${rec.fieldSize.toLocaleString()} entries`
+         + (rec.unfilled ? ` (${rec.unfilled.toLocaleString()} unfilled — ${(rec.lineups||rec.entries).toLocaleString()} lineups submitted)` : '')
+         + ` · winning score ${rec.winningScore != null ? rec.winningScore.toFixed(2) : '—'}`
          + (rec.cashLine ? ` · ~cash line ${rec.cashLine.score.toFixed(2)} (score at rank ${rec.cashLine.rank}, an APPROXIMATION — DK does not export the paid-rank cutoff)` : ''));
-  out.push(`   Ownership MAE vs %Drafted — Own Model ${mae(rp.model)} · SS Own ${mae(rp.sabersim)} · Blend ${mae(rp.blend)}`
-         + (rp.unmatched ? ` · ${rp.unmatched} standings player(s) not on this slate, skipped` : ''));
+  if(rec.scoreQ){
+    const q = rec.scoreQ, f = v => v == null ? '—' : v.toFixed(2);
+    out.push(`   Realized score curve: max ${f(q.max)} · p0.01% ${f(q.p001)} · p0.1% ${f(q.p01)} · p1% ${f(q.p1)} · p10% ${f(q.p10)} · median ${f(q.p50)} · p90 ${f(q.p90)}`);
+  }
+  if(rec.showdown){
+    out.push(`   Ownership MAE vs %Drafted — FLEX: SS Own ${mae(rp.sabersim)} · CPT: sdOwnOf(cpt) ${mae(rp.sd && rp.sd.cptMae)}`
+           + (rp.sd ? ` (only ${rp.sd.cptPublished}/${rp.sd.cptCovered} slate players carry a published CPT Own% — the rest fall back to flex ownership, which is what the field model does)` : '')
+           + (rp.unmatched ? ` · ${rp.unmatched} standings player row(s) not on this slate, skipped` : '')
+           + `. The Own Model is NFL-classic only (its softmax budgets are a classic roster), so it is neither scored nor refit here.`);
+    if(rp.sd) out.push(`   Captain concentration: top captain ${rp.sd.cptTop1.toFixed(1)}% of entries (the field model's fallback prior assumes ~${rp.sd.cptConcentrationAssumed}%), top 3 ${rp.sd.cptTop3.toFixed(1)}%, top 5 ${rp.sd.cptTop5.toFixed(1)}%, ${rp.sd.cptDistinct} distinct captains, effective ${rp.sd.cptEffective.toFixed(1)}.`);
+  } else {
+    out.push(`   Ownership MAE vs %Drafted — Own Model ${mae(rp.model)} · SS Own ${mae(rp.sabersim)} · Blend ${mae(rp.blend)}`
+           + (rp.unmatched ? ` · ${rp.unmatched} standings player(s) not on this slate, skipped` : ''));
+  }
   if(rp.stackCmp){
     const c = rp.stackCmp;
     out.push(`   Realized field stacks over ${c.n.toLocaleString()} entries (assumption in brackets): double ${pc(c.double.real)} [${pc(c.double.assumed)}] · triple+ ${pc(c.triple.real)} [${pc(c.triple.assumed)}] · single-or-none ${pc(c.singleOrNone.real)} [${pc(c.singleOrNone.assumed)}] · bring-back|stacked ${pc(c.bringBack.real)} [${pc(c.bringBack.assumed)}]`
-           + (c.skipped ? ` (${c.skipped} entries skipped — QB not on this slate)` : ''));
+           + (c.skipped ? ` (${c.skipped} entries skipped — no QB on this slate in them)` : '')
+           + (rec.showdown ? ' — NFL_FIELD_STACK was measured on CLASSIC Milly Makers; these brackets are the classic assumption shown for scale, not a showdown claim.' : ''));
+  }
+  if(rp.dupDist){
+    const d = rp.dupDist;
+    out.push(`   Duplication over the whole field: ${d.distinct.toLocaleString()} distinct lineups for ${d.entries.toLocaleString()} entries (${d.meanCopies.toFixed(2)} copies each, max ${d.maxDup.toLocaleString()}); ${d.singletons.toLocaleString()} played once; ${d.lineupsGe5.toLocaleString()} lineups have ≥5 copies and hold ${(100*d.entriesGe5Share).toFixed(1)}% of all entries.`);
   }
   if(rec.dupTop20)
     out.push(`   Duplicates of the top-20 lineups: mean ${rec.dupTop20.mean.toFixed(1)} copies, ${rec.dupTop20.distinct} distinct builds. Modeled dups are per-scenario inside a Contest EV run and are not carried out of it, so the predicted-vs-realized dup comparison is NOT computed here.`);
+  if(rp.users){
+    const u = rp.users;
+    out.push(`   Portfolios: ${u.users.toLocaleString()} distinct users, max ${u.maxEntries} entries each; ${u.bigUsers.toLocaleString()} users with ≥${u.bigMin} entries hold ${(100*u.bigEntryShare).toFixed(1)}% of the field. The field model draws every entry INDEPENDENTLY — that assumption is what this line contradicts.`);
+    if(rp.boards && rp.boards.n)
+      out.push(`   Their boards (${rp.boards.n} sampled): ${(100*rp.boards.meanDistinctShare).toFixed(1)}% of a board's entries are distinct lineups, top player exposure ${rp.boards.meanMaxExp.toFixed(0)}% on average`
+             + (rec.showdown ? `, ${rp.boards.meanCptDistinct.toFixed(1)} distinct captains per board (top captain ${rp.boards.meanCptTop.toFixed(0)}%).` : '.'));
+  }
   if(rec.fit && rec.fit.ok)
     out.push(`   Own Model refit on ${rec.fit.contests} contest(s): RMSE ${rec.fit.rmse0.toFixed(2)} → ${rec.fit.rmse.toFixed(2)}pp. New weights apply to future Own Model values only.`);
-  else
+  else if(!rec.showdown)
     out.push(`   Own Model not refit (needs ≥20 matched players with features) — priors still in force.`);
   return out;
 }
@@ -3557,17 +4013,22 @@ function nflBacktestForget(key){
 function renderNflBacktest(){
   const el = document.getElementById('nflBacktest'); if(!el) return;
   const s = (typeof activeSlate === 'function') ? activeSlate() : null;
-  if(!s || !isNflClassic(s) || !(s.players || []).length){ el.style.display = 'none'; el.innerHTML = ''; return; }
+  // ck80: showdown slates get the card too — the ingest works on them now. The
+  // Own Model section is classic-only and is replaced by a one-line statement
+  // of that fact rather than showing an empty β table next to showdown numbers.
+  const SDs = isShowdown(s);
+  if(!s || !isNfl(s) || !(s.players || []).length){ el.style.display = 'none'; el.innerHTML = ''; return; }
   let stat = null;
-  try { stat = nflOwnEnsure(s); } catch(e){ stat = null; }
+  try { stat = SDs ? null : nflOwnEnsure(s); } catch(e){ stat = null; }
   const keys = Object.keys(s._standings || {}).sort((a, b) => (s._standings[b].loadedAt || 0) - (s._standings[a].loadedAt || 0));
   const open = !!s._backtestOpen;
-  const inp = nflOwnInput(s);
+  const inp = SDs ? { ok: true, label: 'Showdown — CPT/FLEX Own% as published' } : nflOwnInput(s);
   const head = keys.length
     ? `${keys.length} contest${keys.length === 1 ? '' : 's'} ingested · ${esc(inp.ok ? inp.label : 'no ownership source')}`
     : `No DK standings loaded yet · ${esc(inp.ok ? inp.label : 'no ownership source')}`;
   const pc = v => (v == null ? '—' : (100 * v).toFixed(0) + '%');
   const mae = m => (m && m.mae != null) ? m.mae.toFixed(2) + 'pp' : 'n/a';
+  const qf = v => (v == null ? '—' : v.toFixed(1));
   const body = keys.map(k => {
     const rec = s._standings[k];
     const rp = nflStandingsReport(s, rec);
@@ -3575,11 +4036,17 @@ function renderNflBacktest(){
     return `<div class="sc-row info" style="flex-wrap:wrap;">
       <span class="sc-dot"></span>
       <span class="sc-msg" style="flex:1 1 100%;">
-        <b>${esc(rec.file)}</b> — ${rec.fieldSize.toLocaleString()} entries · winner ${rec.winningScore != null ? rec.winningScore.toFixed(2) : '—'}
+        <b>${esc(rec.file)}</b>${rec.showdown ? ' <span class="sc-code">showdown</span>' : ''} — ${rec.fieldSize.toLocaleString()} entries${rec.unfilled ? ` <span style="color:var(--muted);">(${rec.unfilled.toLocaleString()} unfilled)</span>` : ''} · winner ${rec.winningScore != null ? rec.winningScore.toFixed(2) : '—'}
         ${rec.cashLine ? ` · ~cash ${rec.cashLine.score.toFixed(2)} <span class="sc-code" title="${esc(rec.cashLine.basis)}">approx</span>` : ''}
-        <br>MAE vs %Drafted — Own Model ${rp.modelOk ? `<b>${mae(rp.model)}</b>` : `<span style="color:var(--muted);">not built (${rp.modelCovered}/${rp.modelMatched} players carry a modelled %)</span>`} · SS Own ${mae(rp.sabersim)} · Blend ${rp.modelOk ? mae(rp.blend) : '<span style="color:var(--muted);">n/a</span>'}
-        ${rp.unmatched ? `<br><span style="color:var(--muted);">${rp.unmatched} standings player(s) not on this slate — skipped.</span>` : ''}
-        ${c ? `<br>Field stacks (assumed): double ${pc(c.double.real)} (${pc(c.double.assumed)}) · triple+ ${pc(c.triple.real)} (${pc(c.triple.assumed)}) · single-or-none ${pc(c.singleOrNone.real)} (${pc(c.singleOrNone.assumed)}) · bring-back ${pc(c.bringBack.real)} (${pc(c.bringBack.assumed)})` : ''}
+        ${rec.scoreQ ? `<br><span style="color:var(--muted);">Score curve: max ${qf(rec.scoreQ.max)} · p0.01% ${qf(rec.scoreQ.p001)} · p0.1% ${qf(rec.scoreQ.p01)} · p1% ${qf(rec.scoreQ.p1)} · p10% ${qf(rec.scoreQ.p10)} · med ${qf(rec.scoreQ.p50)}</span>` : ''}
+        ${rec.showdown
+          ? `<br>MAE vs %Drafted — FLEX (SS Own) <b>${mae(rp.sabersim)}</b> · CPT (SS CPT Own) <b>${mae(rp.sd && rp.sd.cptMae)}</b> <span style="color:var(--muted);">— Own Model is NFL-classic only, not scored or refit on showdown.</span>`
+          : `<br>MAE vs %Drafted — Own Model ${rp.modelOk ? `<b>${mae(rp.model)}</b>` : `<span style="color:var(--muted);">not built (${rp.modelCovered}/${rp.modelMatched} players carry a modelled %)</span>`} · SS Own ${mae(rp.sabersim)} · Blend ${rp.modelOk ? mae(rp.blend) : '<span style="color:var(--muted);">n/a</span>'}`}
+        ${rp.sd ? `<br>Captains: top ${rp.sd.cptTop1.toFixed(1)}% <span style="color:var(--muted);">(field model's fallback prior assumes ~${rp.sd.cptConcentrationAssumed}%)</span> · top-3 ${rp.sd.cptTop3.toFixed(1)}% · ${rp.sd.cptDistinct} distinct · effective ${rp.sd.cptEffective.toFixed(1)}` : ''}
+        ${rp.unmatched ? `<br><span style="color:var(--muted);">${rp.unmatched} standings player row(s) not on this slate — skipped.</span>` : ''}
+        ${c ? `<br>Field stacks (assumed): double ${pc(c.double.real)} (${pc(c.double.assumed)}) · triple+ ${pc(c.triple.real)} (${pc(c.triple.assumed)}) · single-or-none ${pc(c.singleOrNone.real)} (${pc(c.singleOrNone.assumed)}) · bring-back ${pc(c.bringBack.real)} (${pc(c.bringBack.assumed)})${rec.showdown ? ' <span style="color:var(--muted);">— brackets are the CLASSIC assumption, shown for scale.</span>' : ''}` : ''}
+        ${rp.dupDist ? `<br>Duplication: ${rp.dupDist.distinct.toLocaleString()} distinct lineups, ${rp.dupDist.meanCopies.toFixed(2)} copies each, max ${rp.dupDist.maxDup.toLocaleString()}; ${(100*rp.dupDist.entriesGe5Share).toFixed(0)}% of entries sit on a lineup with ≥5 copies.` : ''}
+        ${rp.users ? `<br>Portfolios: ${rp.users.users.toLocaleString()} users, ${rp.users.bigUsers.toLocaleString()} with ≥${rp.users.bigMin} entries holding ${(100*rp.users.bigEntryShare).toFixed(1)}% of the field${rp.boards && rp.boards.n ? ` · their boards are ${(100*rp.boards.meanDistinctShare).toFixed(0)}% distinct lineups, top exposure ${rp.boards.meanMaxExp.toFixed(0)}%` : ''}. <span style="color:var(--muted);">The field model draws entries independently.</span>` : ''}
         ${rec.dupTop20 ? `<br>Top-20 dups: mean ${rec.dupTop20.mean.toFixed(1)}, ${rec.dupTop20.distinct} distinct. <span style="color:var(--muted);">Predicted dups are per-scenario inside a Contest EV run and are not persisted, so that comparison is not computed.</span>` : ''}
       </span>
       <button class="sc-fix" onclick="event.stopPropagation();nflBacktestDownload('${esc(k)}')">Download JSON</button>
@@ -3600,11 +4067,12 @@ function renderNflBacktest(){
     ${open ? `<div class="slate-check-list">
       <div class="sc-section">Own Model</div>
       <div class="sc-row info"><span class="sc-dot"></span><span class="sc-msg">
-        ${stat && stat.ok
+        ${SDs ? `<b>Not applicable</b> — the Own Model is NFL <b>Classic</b> only (its per-position softmax budgets sum to a classic roster's 900%). A showdown slate plays the published CPT/FLEX Own% columns, and a showdown standings ingest contributes no rows to the β history.`
+        : stat && stat.ok
           ? `<b>${nflOwnFitted() ? 'Refit' : 'Priors'}${stat.source === 'sim' ? '' : ', pre-sim (low confidence)'}</b> — ${stat.n} players, sums to ${stat.sum}% (target 900%), built from ${esc(stat.source === 'sim' ? 'sim means' : 'the Proj column')} on ${stat.games} game${stat.games === 1 ? '' : 's'}. Weights ${nflOwnFitted() ? `refit on ${nflOwnHistoryCount()} contest(s)` : 'from priors (no actuals yet)'}.`
           + (stat.source === 'sim' ? '' : ' <span style="color:var(--muted);">A Proj column is a thinner input than sim means — run a sim to rebuild it.</span>')
           : `<b>Not built</b> — ${esc((stat && stat.reason) || 'run a sim, or map a Proj column')}. No Own Model MAE is computed below.`}
-        <br><span style="color:var(--muted);font-family:'DM Mono',monospace;font-size:9px;">β: ${esc(betaLine)}</span>
+        ${SDs ? '' : `<br><span style="color:var(--muted);font-family:'DM Mono',monospace;font-size:9px;">β: ${esc(betaLine)}</span>`}
       </span></div>
       <div class="sc-section">Contests</div>
       ${body || '<div class="slate-check-none">Nothing loaded. DK keeps standings ~2 weeks — load them by Tuesday.</div>'}
@@ -4495,6 +4963,185 @@ function sdHasCptOwn(slate){
   return (slate.players||[]).some(p=>{ const c=parseFloat(p.cptOwn); return Number.isFinite(c) && c>0; });
 }
 
+// ── SHOWDOWN FIELD PRIORS, MEASURED (checkpoint 81) ─────────────────────────
+// Everything here comes from ONE contest — DK's NE @ SEA showdown of
+// 2026-09-09, 237,812 entries, the first real standings file this tool has been
+// calibrated against (AGENT_NOTES, "checkpoint 80"). n = 1. Each constant says
+// what it measures and what it replaced; the refit path is the standings
+// ingest, which already computes every one of these observables
+// (`nflSdStandingsShape`), so a second contest is a table lookup away.
+//
+// THE TWO BUDGETS. A showdown roster is one CPT slot and five FLEX slots, so the
+// field's captain marginals must sum to 100 and its flex marginals to 500. DK's
+// own file confirms it to the decimal (99.62% / 498.26%). Until ck81 the sampler
+// was handed neither: the captain vector summed to 204.3% (because
+// `sdOwnOf(p, true)` COPIED flex ownership for every player the sheet had no
+// captain number for) and the flex vector to 402.4% (because the salary export
+// covered 17 of the 62 players the field actually rostered). sampleShowdownField
+// renormalises by construction, so both errors came back out as a distortion of
+// every player's marginal — every real captain number roughly halved, every flex
+// marginal inflated ~24%. Measured consequence: the modelled field's most popular
+// captain was Andy Borregales at 11.4%, a KICKER 0.58% of the real field
+// captained, while Smith-Njigba (19.5% real) drew 10.8%.
+const SD_CPT_BUDGET = 100;    // one captain slot
+const SD_FLEX_BUDGET = 500;   // five flex slots
+// CPT/FLEX RATIO. For a player with no published captain number the least-wrong
+// estimate is his flex ownership times the ratio the field actually applies —
+// which falls hard with price, because the 1.5× is only worth paying for on a
+// player with a ceiling. Log-log least squares on the 14 NE@SEA players with a
+// measurable pair, against salary as a FRACTION of the slate's top salary (which
+// makes it scale-free across slates): ratio = 0.32 · (sal/salMax)^1.62, R² 0.57,
+// mean |residual| 0.052 on the ratio. Rounded to 0.32 / 1.6.
+//
+// The one systematic residual is KICKERS: both were over-predicted by ~2×
+// (Myers 0.071 actual vs 0.108 fitted, Borregales 0.037 vs 0.096). n = 2, so the
+// damper below is a JUDGEMENT, not a fit — the direction is what any DFS player
+// would tell you (a kicker has no ceiling worth 1.5×) and the downside is
+// bounded, but it is one contest and it is labelled as such.
+const SD_CPT_RATIO_A = 0.32, SD_CPT_RATIO_B = 1.6;
+const SD_CPT_RATIO_K = 0.5;
+const SD_CPT_RATIO_MIN = 0.01, SD_CPT_RATIO_MAX = 0.60;
+// CAPTAIN CONCENTRATION. The pre-ck81 comment claimed "real showdown fields put
+// ~30% of entries on one captain" and nothing enforced it. Measured on NE@SEA:
+// the top captain took 19.51% (top-3 49.6%, top-5 69.4%, 45 distinct captains,
+// effective count 8.8). Used ONLY by the no-captain-column fallback, as the
+// target its temperature is solved to.
+const SD_CPT_TOP1_PRIOR = 19.5;
+function sdCptFlexRatio(salary, salMax, pos){
+  const x = (salMax > 0) ? Math.max(0.02, Math.min(1, (salary || 0) / salMax)) : 0.5;
+  let r = SD_CPT_RATIO_A * Math.pow(x, SD_CPT_RATIO_B);
+  if(pos === 'K') r *= SD_CPT_RATIO_K;
+  return Math.max(SD_CPT_RATIO_MIN, Math.min(SD_CPT_RATIO_MAX, r));
+}
+// Renormalise a marginal vector onto its slot budget, preserving relative shape.
+// The RAW sum comes back too, because "what did the column we were handed
+// actually add up to" is a Slate-check finding, not an internal.
+function sdRenormalize(vec, budget, floor){
+  const f = (floor == null) ? 0.02 : floor;
+  const raw = vec.reduce((a, b) => a + (b > 0 ? b : 0), 0);
+  if(!(raw > 0)) return { vec: vec.map(() => budget / Math.max(1, vec.length)), raw: 0, scale: 0 };
+  const k = budget / raw;
+  return { vec: vec.map(v => Math.max(f, (v > 0 ? v : 0) * k)), raw, scale: k };
+}
+// THE captain target vector for a showdown field, one definition shared by the
+// generator (`runUFCContestEV`) and the hand builder (`hbCptTargets`) so the two
+// surfaces cannot price against different fields.
+//
+//   published  → use it. It is good: on the 9 NE@SEA players who carried one,
+//                the sheet's CPT Own scored MAE 1.15pp against realized %Drafted.
+//   missing    → flex own × sdCptFlexRatio. NOT flex own, which was wrong by a
+//                mean 13.8pp on the 8 players it covered.
+//   none at all→ the ceiling-tilted prior below, whose temperature is SOLVED so
+//                the top captain lands on SD_CPT_TOP1_PRIOR.
+//
+// Then the whole vector is renormalised to 100, which is the step that matters
+// most: without it the sampler is asked to spend 2.04 captain slots.
+function sdCptTargets(pool){
+  const n = pool.length;
+  const salMax = pool.reduce((m, p) => Math.max(m, p.salary || 0), 0) || 1;
+  const flexOf = p => { const v = parseFloat(p.own); return Number.isFinite(v) && v > 0 ? v : 0; };
+  const anyPub = pool.some(p => { const c = parseFloat(p.cptOwn); return Number.isFinite(c) && c > 0; });
+  let raw, source, derived = 0, published = 0, gamma = null;
+  if(anyPub){
+    source = 'published';
+    raw = pool.map(p => {
+      const c = parseFloat(p.cptOwn);
+      if(Number.isFinite(c) && c > 0){ published++; return c; }
+      derived++;
+      return flexOf(p) * sdCptFlexRatio(p.salary || 0, salMax, nflPosOf(p));
+    });
+  } else {
+    // NO captain column anywhere. Flex ownership tilted by the ratio shape is
+    // still the right centre; what the old prior added on top was a ceiling tilt
+    // with no stated concentration. Keep a (milder) ceiling tilt — entrants do
+    // captain upside — but SOLVE its exponent so the field's top captain lands
+    // on the measured concentration instead of wherever the product fell.
+    source = 'prior';
+    derived = n;
+    const ceil = pool.map(p => {
+      const v = p._simP50 != null ? parseFloat(p._simP50) : (parseFloat(p.proj) || 0);
+      return v > 0 ? v : Math.max(1, (p.salary || 0) / 1000);
+    });
+    const base = pool.map((p, i) => Math.max(0.02, flexOf(p) * sdCptFlexRatio(p.salary || 0, salMax, nflPosOf(p))
+                                                   * Math.pow(Math.max(0.1, ceil[i]), 0.35)));
+    // Bisection on a monotone function, 40 steps — deterministic, sub-ms.
+    const topAt = g => {
+      let s = 0, mx = 0;
+      for(const v of base){ const w = Math.pow(v, g); s += w; if(w > mx) mx = w; }
+      return s > 0 ? 100 * mx / s : 0;
+    };
+    let lo = 0.2, hi = 6;
+    if(topAt(lo) < SD_CPT_TOP1_PRIOR && topAt(hi) > SD_CPT_TOP1_PRIOR){
+      for(let it = 0; it < 40; it++){ const mid = (lo + hi) / 2; if(topAt(mid) < SD_CPT_TOP1_PRIOR) lo = mid; else hi = mid; }
+      gamma = (lo + hi) / 2;
+    } else gamma = 1;
+    raw = base.map(v => Math.pow(v, gamma));
+  }
+  const R = sdRenormalize(raw, SD_CPT_BUDGET, 0.02);
+  return { cpt: R.vec, rawSum: R.raw, source, published, derived, gamma, prior: source === 'prior' };
+}
+// The flex side. Same renormalisation; the raw sum is reported because a raw sum
+// far from 500 means the salary export does not cover the pool the field will
+// actually roster — a fact about the DATA, which belongs in the Slate check.
+function sdFlexTargets(ownArr){
+  const R = sdRenormalize(ownArr.map(v => (v > 0 ? v : 0)), SD_FLEX_BUDGET, 0.05);
+  return { flex: R.vec, rawSum: R.raw };
+}
+// ── SHOWDOWN DUPLICATION COMBINATORICS (checkpoint 81) ──────────────────────
+// `evDupExpect`'s analytic channel is Π(marginal) × a constant. On CLASSIC that
+// is nearly right: every slot carries its own marginal, so the product is
+// already a per-slot probability. On SHOWDOWN it is not, and the error is
+// enormous. The five FLEX slots are INTERCHANGEABLE, so if p_i is "fraction of
+// entries that roster i somewhere in the flex block", the per-slot probability
+// is p_i/5 and
+//     P(flex block is exactly {a…e}) = 5! · Π(p_i/500) = (5!/5⁵) · Π(p_i/100),
+// with the captain contributing his own separate keyed marginal. 5!/5⁵ = 0.0384.
+// The code used ×4 instead — off by 104× in the independent model.
+//
+// Measured against the 28,084 distinct lineups of the NE@SEA contest, using the
+// REALIZED %Drafted so this tests the FORMULA and not the ownership column
+// (median predicted / realized copies):
+//
+//   as shipped, Π(own)×4                     10.8× over (19.6× on lineups played once)
+//   exact combinatorics alone                 0.37×     (2.7× UNDER at the median)
+//   exact × 2.7, analytic only                0.56×     (still 20× under at ≥100 copies)
+//   exact × 2.7 PLUS the empirical channel at a 20,000-entry sample:
+//        overall 0.86×, by realized-copy bucket
+//        1 → 0.83 · 2-4 → 0.84 · 5-24 → 0.91 · 25-99 → 0.91 · ≥100 → 1.01
+//        WORST BUCKET 1.20× (the brief asked for ≤ 2×)
+//
+// The two halves are not independent, and no single analytic constant fits both
+// ends: real duplication is super-linear in chalkiness — an independent field
+// would put only 8.7% of its entries on the lineups people actually played. The
+// `max(analytic, empirical)` structure is what handles that, and it only works
+// when the sample is big enough to SEE the chalk, which is why the field sample
+// was raised in the same checkpoint (SD_FIELD_WORK). 2.7 is the clustering
+// multiple that centres the analytic channel on the lineups the empirical
+// channel cannot resolve. At the old 2,000-entry sample the same estimator's
+// worst bucket is 5.96×, so the sample size is half of this fix.
+const SD_DUP_COMB = 120 / 3125;   // 5!/5⁵
+const SD_DUP_CLUSTER = 2.7;       // measured, NE@SEA, n = 1
+const SD_DUP_K = SD_DUP_COMB * SD_DUP_CLUSTER;
+// ── SHOWDOWN FIELD SAMPLE SIZE (checkpoint 81) ─────────────────────────────
+// ck80 priced a 237,812-entry contest against 2,000 sampled opponents, so
+// `beatersEstimate` extrapolated 119× and the p0.01% of the modelled curve was
+// literally the sample maximum. The ck73 rule applies: COUNT what you can
+// afford to count, MODEL only the remainder. The cost is linear in
+// (field lineups × priced worlds) and `buildFieldSorted` runs at 1,500 worlds,
+// so the sample is set from a work budget rather than a constant — which makes
+// any contest at or below the cap EXACT (sampleN = F ⇒ beatersEstimate's
+// extrapolation term is zero) and leaves only the mega-GPPs modelled.
+// Measured on the NE@SEA 17-player pool: sampling 2,000 / 20,000 / 60,000 /
+// 237,812 costs 61 / 279 / 1,242 / 4,557 ms, and one buildFieldSorted pass over
+// 1,500 worlds costs 0.35 / 3.6 / 11.5 / 44 s. 3.0e7 buys 20,000 — a 10×
+// tail resolution and a 6× duplication granularity for ~+5 s on a 9 s run.
+const SD_FIELD_WORK = 3.0e7;
+const SD_NF_CAP = 60000;
+function sdFieldSampleN(F, worlds){
+  const budget = Math.floor(SD_FIELD_WORK / Math.max(1, worlds || 1500));
+  return Math.max(200, Math.min(F, SD_NF_CAP, Math.max(2000, budget)));
+}
+
 // ── Showdown CSV collapse ─────────────────────────────────────────────────────
 // A DK Showdown salary file lists every player TWICE: once at his FLEX price
 // and once at his CPT price (exactly 1.5×), with DIFFERENT player IDs. Left
@@ -5053,7 +5700,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck78/2026-09-10';
+const BUILD_ID = '2.0/ck81/2026-09-10';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -5989,12 +6636,6 @@ function setPosFilter(f){
   const slate=activeSlate(); if(!slate) return;
   slate._posFilter = (f && f!=='ALL') ? f : null;
   save(); renderPool();
-}
-// Exposure tab's own position filter (NFL). Kept independent of the pool filter.
-function setExpPosFilter(f){
-  const slate=activeSlate(); if(!slate) return;
-  slate._expPosFilter = (f && f!=='ALL') ? f : null;
-  save(); renderExposure();
 }
 function renderPosFilterBar(slate){
   const el=document.getElementById('posFilterBar'); if(!el) return;
@@ -8908,30 +9549,10 @@ function renderExposure(){
   const cc=SDx?sdCptCounts(slate):{};
 
   // All non-hidden players, sorted by exposure desc
-  const allVisible=(slate.players||[])
+  const allPlayers=(slate.players||[])
     .filter(p=>!hidden.has(p.id))
     .map(p=>({...p,count:ec[p.id]||0,cpt:cc[p.id]||0}))
     .sort((a,b)=>b.count-a.count);
-
-  // NFL: position filter chips (QB / RB / WR / TE / FLEX / DST [/ K]) above the
-  // list. Separate from the pool's position filter so you can build from one
-  // view and audit exposure from another. Persisted on the slate like _posFilter.
-  const nflX=slate.sport==='nfl';
-  const xf=nflX?(slate._expPosFilter||'ALL'):'ALL';
-  const allPlayers=nflX?allVisible.filter(p=>nflPosMatch(xf,p)):allVisible;
-  let posBarHTML='';
-  if(nflX){
-    const tabs=[['ALL','All'],['QB','QB'],['RB','RB'],['WR','WR'],['TE','TE'],['FLEX','FLEX'],['DST','DST']];
-    if(allVisible.some(p=>nflPosOf(p)==='K')) tabs.push(['K','K']);
-    posBarHTML=`<div class="pos-filter-bar" style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:6px 0 8px;padding:0;border:none;background:none;overflow:visible;">`
-      +`<span class="pf-lbl">POS</span>`
-      +tabs.map(([k,l])=>{
-        const grp=allVisible.filter(p=>nflPosMatch(k,p));
-        const used=grp.filter(p=>p.count>0).length;
-        return `<button class="pf-btn${xf===k?' active':''}" onclick="setExpPosFilter('${k}')" title="${k==='FLEX'?'RB / WR / TE — everyone FLEX-eligible':k==='ALL'?'Every position':'Only '+l} — ${used} of ${grp.length} used">${l}<span class="pf-n">${used}</span></button>`;
-      }).join('')
-      +`</div>`;
-  }
 
   const maxC=allPlayers.find(p=>p.count>0)?.count||1;
 
@@ -9003,9 +9624,9 @@ function renderExposure(){
 
   panel.innerHTML=`<div>
     <div class="exp-title" style="display:flex;align-items:center;justify-content:space-between;">
-      <span>Player Exposure <span class="exp-badge">${allPlayers.filter(p=>p.count>0).length}/${allPlayers.length} used${xf!=='ALL'?' · '+xf:''}</span></span>
+      <span>Player Exposure <span class="exp-badge">${allPlayers.filter(p=>p.count>0).length}/${allPlayers.length} used</span></span>
     </div>
-    ${posBarHTML}${legend}${dHTML||(xf!=='ALL'?'<div class="no-data">No '+xf+' players in this slate.</div>':'')}
+    ${legend}${dHTML}
   </div>
   <div style="margin-top:16px;">
     <div class="exp-title">Repeated Combos <span class="exp-badge">2+ times</span></div>
@@ -13477,10 +14098,16 @@ function evDupK(sport){ return sport==='ufc' ? 1.9 : sport==='nascar' ? 1.5 : 4;
 // `ownAt(i)` returns the ownership PERCENT this scenario assigns to player
 // index i — a function, not an array, because showdown's captain slot has its
 // own marginal and reads a different vector for exactly one index.
-function evDupExpect(idxs, ownAt, empCount, sampleN, F, dupK){
+// `sd` (ck81) switches the analytic channel to the showdown combinatorics —
+// idxs[0] is the CAPTAIN and reads the captain marginal through ownAt; the other
+// five are interchangeable flex slots, so the constant is 5!/5^5 times the
+// measured clustering multiple instead of the classic per-slot dupK. See the
+// SD_DUP_COMB block for the validation table.
+function evDupExpect(idxs, ownAt, empCount, sampleN, F, dupK, sd){
   let prod = 1;
   for(const i of idxs) prod *= Math.max(0.0005, ownAt(i)/100);
-  return Math.max(F*prod*dupK, (empCount||0) * (F/Math.max(1, sampleN)));
+  const k = sd ? SD_DUP_K : dupK;
+  return Math.max(F*prod*k, (empCount||0) * (F/Math.max(1, sampleN)));
 }
 // K budget-preserving ownership scenarios. Scenario 0 is always the projection
 // as given (shared by reference, which the captain-scenario cache relies on).
@@ -13826,7 +14453,19 @@ async function runUFCContestEV(ctx){
   // column it was actually asked to hit, not against p.own, or a model-driven
   // field would report a huge "miss" against an empty SS column.
   if(_nflOwnSrc && _nflOwnSrc.ok && _nflOwnSrc.source!=='ss' && _fieldOpts) _fieldOpts.ownRef = _ownRawV;
-  const baseOwn = evOwnTemper(_ownRawV, _ownTemp);
+  // ck81 — SHOWDOWN FLEX BUDGET. Five flex slots means the field's flex
+  // marginals sum to 500 (DK's own file: 498.26%). The column we are handed does
+  // not: on NE@SEA it summed to 402.4% because the salary export covered 17 of
+  // the 62 players the field rostered. sampleShowdownField renormalises anyway,
+  // so doing it HERE changes nothing about the draw — but it makes the number
+  // visible, puts the same vector in front of evDupExpect and the hand builder,
+  // and gives the Slate check something to complain about.
+  let _sdFlexRaw = null;
+  const baseOwn = (() => {
+    const v = evOwnTemper(_ownRawV, _ownTemp);
+    if(!_SD) return v;
+    const R = sdFlexTargets(v); _sdFlexRaw = R.rawSum; return R.flex;
+  })();
   const ownById = {}; fieldPool.forEach((p,i)=>{ ownById[p.id]=baseOwn[i]; });
   // ── SHOWDOWN CAPTAIN OWNERSHIP ────────────────────────────────────────────
   // baseOwn above is FLEX ownership (p.own means exactly that on a showdown
@@ -13835,32 +14474,26 @@ async function runUFCContestEV(ctx){
   // NOTE the field frame: the modeled opponents do NOT see the user's captain
   // pool (slate.sdCptOff is curation of OUR builds), so every player on the
   // slate is captainable to the field, exactly as DK allows.
-  let _sdCptBase = null, _sdCptPrior = false;
+  // ck81 — ONE definition of the captain target, shared with the hand builder
+  // (`hbCptTargets`). Published captain numbers where they exist; flex ownership
+  // times the MEASURED CPT/FLEX ratio where they do not (copying flex ownership
+  // was wrong by a mean 13.8pp on the 8 NE@SEA players it covered); the
+  // concentration-solved prior when there is no captain column at all. Always
+  // renormalised to 100, which is the half that moved the number: the pre-ck81
+  // vector summed to 204.3% and the sampler halved every real captain to fit it
+  // into one slot.
+  let _sdCptBase = null, _sdCptPrior = false, _sdCptInfo = null;
   if(_SD){
-    if(typeof sdHasCptOwn === 'function' && fieldPool.some(p=>{ const c=parseFloat(p.cptOwn); return Number.isFinite(c) && c>0; })){
-      _sdCptBase = fieldPool.map(p=>Math.max(0.02, sdOwnOf(p, true)));
-    } else {
-      // FALLBACK PRIOR (logged loudly — this is a guess, not a measurement).
-      // With no published captain column the least-wrong shape is "flex
-      // ownership tilted by ceiling": entrants captain the players they
-      // already like, in proportion to the upside the 1.5× is buying. The
-      // PRODUCT of the two is deliberately more concentrated than flex own —
-      // captains have one slot to flex's five, and real showdown fields put
-      // ~30% of entries on one captain — and it is renormalized to 100 points
-      // so the field still spends exactly one captain slot.
-      _sdCptPrior = true;
-      const ceil = fieldPool.map(p=>{
-        const v = p._simP50!=null ? parseFloat(p._simP50) : (parseFloat(p.proj)||0);
-        return v>0 ? v : Math.max(1, (p.salary||0)/1000);
-      });
-      const raw = fieldPool.map((p,i)=>Math.max(0.05, parseFloat(p.own)||0.2) * Math.max(0.1, ceil[i]));
-      const s0 = raw.reduce((a,b)=>a+b,0)||1;
-      _sdCptBase = raw.map(v=>Math.max(0.02, v*100/s0));
-    }
+    _sdCptInfo = sdCptTargets(fieldPool);
+    _sdCptBase = _sdCptInfo.cpt;
+    _sdCptPrior = _sdCptInfo.prior;
   }
   // Captains get the same temperature — it is a statement about the field, not
   // about one slot.
-  if(_SD && _sdCptBase) _sdCptBase = evOwnTemper(_sdCptBase, _ownTemp);
+  // The temperature is a statement about the field, not about one slot — but it
+  // is applied to a vector that has to keep summing to one captain slot, so the
+  // budget is restored after it (ck81).
+  if(_SD && _sdCptBase) _sdCptBase = sdRenormalize(evOwnTemper(_sdCptBase, _ownTemp), SD_CPT_BUDGET, 0.02).vec;
   // A captain target for one ownership scenario: scale each player's captain
   // number by the same relative perturbation the scenario applied to his flex
   // number (ownership error is a property of the projection, not of the slot),
@@ -13942,7 +14575,11 @@ async function runUFCContestEV(ctx){
   // at the field-size setting. (Classic/UFC/PGA/NASCAR keep the flat 2,000 —
   // every constant downstream, notably the tail-refined beater estimate, was
   // fitted against that sample size.)
-  const NF_SD = Math.max(200, Math.min(NF, F));
+  // ck81: work-budgeted rather than a flat 2,000 — see sdFieldSampleN. Any
+  // contest at or under the cap is COUNTED (sampleN === F makes
+  // beatersEstimate's extrapolation term exactly zero); only the mega-GPPs are
+  // still modelled, and from a 10× bigger sample than ck80 priced against.
+  const NF_SD = _SD ? sdFieldSampleN(F, simIdx.length) : Math.max(200, Math.min(NF, F));
   // The dup key must separate two lineups that differ only in who wears the C:
   // they are different salaries, different scores and different DK entries.
   const _fkey = l => l.slice().sort((a,b)=>a-b).join('|') + (_SD ? '|C'+l[0] : '');
@@ -13974,7 +14611,10 @@ async function runUFCContestEV(ctx){
   const smp0 = await sampleFields(scenarios);
   if(smp0===null) return null;
   let fields=smp0.fields, fieldKeyCounts=smp0.fieldKeyCounts;
-  log(`Field: ${K}×${(_SD?NF_SD:NF).toLocaleString()} lineups sampled (as-projected scenario worst marginal miss ${smp0.dev0.toFixed(1)}pts on ${smp0.dev0Name}).`);
+  log(`Field: ${K}×${(_SD?NF_SD:NF).toLocaleString()} lineups sampled (as-projected scenario worst marginal miss ${smp0.dev0.toFixed(1)}pts on ${smp0.dev0Name}).`
+    + (_SD ? (NF_SD >= F
+        ? ` The sample IS the contest (${F.toLocaleString()} entries), so beaters and duplicates are COUNTED, not extrapolated.`
+        : ` Beaters and duplicates are extrapolated ${(F/NF_SD).toFixed(0)}× to the contest's ${F.toLocaleString()} entries (ck80 priced the same contest off 2,000).`) : ''));
   // Showdown: the captain distribution IS the field model — say what was drawn,
   // and stash it where a test (or a curious console) can check the realized
   // rates against the published cptOwn column.
@@ -13984,9 +14624,20 @@ async function runUFCContestEV(ctx){
     const _nF=Math.max(1, fields[0].length);
     const _rows=[..._cc.entries()].map(([i,c])=>({i, pct:100*c/_nF})).sort((a,b)=>b.pct-a.pct);
     log(`Showdown field: ${_nF.toLocaleString()} lineups, captain distribution: ${_rows.slice(0,8).map(r=>`${fieldPool[r.i].name} ${r.pct.toFixed(0)}%`).join(', ')}`);
-    if(_sdCptPrior) log('⚠ No CPT Own% published on this slate — the captain distribution above came from a FALLBACK PRIOR (flex ownership × sim ceiling, renormalized to one captain slot), not from data. Map a CPT Own% column for a measured field.');
+    if(_sdCptInfo){
+      log(`Showdown ownership budgets: captain column summed to ${_sdCptInfo.rawSum.toFixed(1)}% and flex to ${(_sdFlexRaw==null?0:_sdFlexRaw).toFixed(1)}% — renormalised to ${SD_CPT_BUDGET}% / ${SD_FLEX_BUDGET}%, which is the one captain slot and five flex slots the roster actually has.`
+        + (_sdCptInfo.source==='published'
+            ? ` ${_sdCptInfo.published} player(s) carry a published CPT Own%; the other ${_sdCptInfo.derived} are estimated as flex own × the measured CPT/FLEX ratio (0.32·(sal/salMax)^1.6, NE@SEA 2026-09-09, n=1).`
+            : ` No CPT Own% anywhere, so the whole vector is the prior — flex own × the same ratio × a ceiling tilt, with its temperature solved (γ=${(_sdCptInfo.gamma||1).toFixed(2)}) so the top captain lands on the measured ${SD_CPT_TOP1_PRIOR}%.`));
+    }
+    if(_sdCptPrior) log('⚠ No CPT Own% published on this slate — the captain distribution above is a PRIOR anchored on one measured contest, not this slate\'s data. Map a CPT Own% column for a measured field.');
     window.__sdFieldDebug = {
-      n: _nF, prior: _sdCptPrior, sampleSize: NF_SD,
+      n: _nF, prior: _sdCptPrior, sampleSize: NF_SD, fieldSize: F,
+      counted: NF_SD >= F,
+      cptRawSum: _sdCptInfo ? _sdCptInfo.rawSum : null, flexRawSum: _sdFlexRaw,
+      cptSource: _sdCptInfo ? _sdCptInfo.source : null,
+      cptPublished: _sdCptInfo ? _sdCptInfo.published : 0,
+      cptDerived: _sdCptInfo ? _sdCptInfo.derived : 0,
       cptRate: Object.fromEntries(_rows.map(r=>[fieldPool[r.i].id, r.pct])),
       // Pre-sharp-slice draw — this is what the calibration loop actually fits.
       cptRateSampler: smp0.cptRate0
@@ -14543,7 +15194,7 @@ async function runUFCContestEV(ctx){
       // Shared with the GPP engine — see evDupExpect. Same arithmetic as the
       // inline version this replaced, to the last max().
       out.push(evDupExpect(idxs, i => ((cScen && i===ci) ? cScen[i] : scen[k][i]),
-                           keyCounts[k].get(key)||0, flds[k].length, F, DUP_K));
+                           keyCounts[k].get(key)||0, flds[k].length, F, DUP_K, _SD));
     }
     return out;
   };
@@ -22571,6 +23222,49 @@ function nflSlateAudit(slate){
       push('warn', 'status_q', `${qS.length} questionable player${qS.length === 1 ? '' : 's'} (Status = Q) simmed as playing: ${qS.slice(0, 8).map(p => `${p.name} ${money(p.salary)}`).join(', ')}${qS.length > 8 ? `, … ${qS.length - 8} more` : ''}. Re-check before lock; ⛔ anyone ruled out.`,
            { fix: qS.length === 1 ? { label: 'Mark OUT', kind: 'out', arg: qS[0].id } : null });
   }
+
+  // ── SHOWDOWN: DOES THE EXPORT COVER THE FIELD? (checkpoint 81) ─────────────
+  // A showdown roster spends exactly one captain slot and five flex slots, so
+  // the field's marginals must sum to 100% and 500%. DK's own standings confirm
+  // it to the decimal (99.62 / 498.26). That makes the two sums a free, exact
+  // measurement of whether the sheet in front of us describes the field the
+  // contest will actually have — and on the first real contest this tool was
+  // ever pointed at, they did not: the NE@SEA export summed to 402.4% of flex
+  // ownership because it listed 17 of the 62 players the field rostered, and
+  // only 36.8% of real entries could be built from it at all. Nothing said so.
+  // The sampler renormalises regardless, so a short column is not a crash — it
+  // is a silent 24% inflation of every player who IS on the sheet.
+  if(SD && priced.length){
+    const flexRaw = priced.reduce((a, p) => { const v = parseFloat(p.own); return a + (Number.isFinite(v) && v > 0 ? v : 0); }, 0);
+    const cptPub = priced.filter(p => { const c = parseFloat(p.cptOwn); return Number.isFinite(c) && c > 0; });
+    // Only meaningful when there IS a captain column: in the no-column case the
+    // raw sum is an artifact of the prior's own power transform, not a
+    // statement about the sheet, and reporting it would be noise.
+    const cptT = (typeof sdCptTargets === 'function') ? sdCptTargets(priced) : null;
+    const cptRaw = (cptT && cptT.source === 'published') ? cptT.rawSum : 0;
+    if(flexRaw > 0){
+      const missShare = Math.max(0, (SD_FLEX_BUDGET - flexRaw) / SD_FLEX_BUDGET);
+      if(flexRaw < SD_FLEX_BUDGET * 0.88)
+        push('warn', 'sd_pool_coverage',
+          `Showdown pool looks INCOMPLETE — the Own% column over the ${priced.length} priced players sums to ${flexRaw.toFixed(0)}% against the ${SD_FLEX_BUDGET}% a five-flex roster must spend. `
+          + `About ${pc(missShare)} of what the field will roster is not on this slate, so every player who IS here is inflated ~${pc(1/(flexRaw/SD_FLEX_BUDGET) - 1)} when the field is drawn, and any lineup the field plays with an off-slate player cannot be modelled at all. Re-export the full DK player list before pricing a contest off this.`,
+          {});
+      else if(flexRaw > SD_FLEX_BUDGET * 1.15)
+        push('warn', 'sd_pool_coverage',
+          `Showdown Own% sums to ${flexRaw.toFixed(0)}% against a ${SD_FLEX_BUDGET}% budget — more than five flex slots can spend. Either the column is captain-inclusive or it is not a per-entry percentage; the field sampler will scale it down by ${(flexRaw/SD_FLEX_BUDGET).toFixed(2)}×.`,
+          {});
+    }
+    if(cptRaw > 0 && (cptRaw > SD_CPT_BUDGET * 1.3 || cptRaw < SD_CPT_BUDGET * 0.7))
+      push('info', 'sd_cpt_budget',
+        `Captain ownership sums to ${cptRaw.toFixed(0)}% against the ${SD_CPT_BUDGET}% one captain slot can spend`
+        + (cptPub.length ? ` (${cptPub.length} of ${priced.length} players carry a published CPT Own%; the rest are estimated from flex own × the measured CPT/FLEX ratio)` : ' (no CPT Own% published — the whole vector is the ck81 prior)')
+        + `. It is renormalised before the field is drawn, which changes every player's captain share by ${(SD_CPT_BUDGET/cptRaw).toFixed(2)}×.`,
+        {});
+    if(!cptPub.length)
+      push('info', 'sd_cpt_prior',
+        `No CPT Own% column on this slate. The modelled field's captains come from a PRIOR — flex ownership × 0.32·(salary/top salary)^1.6, tilted by ceiling, with its concentration solved to the ${SD_CPT_TOP1_PRIOR}% top-captain share measured on one contest (NE@SEA, 2026-09-09). Map a CPT Own% column for a measured captain field.`,
+        {});
+  }
   return out;
 }
 
@@ -26157,8 +26851,15 @@ const NFL_GPP_BUDGET = {
   // again to the tail-fit bias — beaters-at-the-sample-max 8.98 against a truth
   // of 1, where a pure-ownership field measured 5.84. More seeds, a much bigger
   // pool, and the legacy per-sim optimals blended back in.
-  sharpPassSeeds:  220,  // seeds for that throwaway pass
+  // ck79: the seed count is no longer the binding constraint — sharpPassMs is.
+  // The pass prices on NFL_GPP_SHARP_PASS_WORLDS of the search worlds, which
+  // makes a seed ~5x cheaper, so 220 seeds were exhausted in a fraction of the
+  // budget and the base stayed ~110 optima wide. It is now allowed to spend the
+  // whole 14 s climbing, and it is the WIDTH of what comes back that matters.
+  sharpPassSeeds: 3000,  // seeds offered to that throwaway pass (the clock stops it)
   sharpPassMs:   14000,  // and its wall-clock ceiling
+  // ck79: `sharpPool` is now only the FLOOR on the pool; the target scales with
+  // the sharp entries the contest needs — see gppSharpPoolTarget.
   sharpPool:      3000,  // distinct lineups the field's sharp slice draws from
   overfitFrac:   0.6,  // select-fold gross EV below this × search gross EV ⇒ overfit
   // Above this ratio of (standard error ÷ EV) the reported ROI is not precise
@@ -26217,6 +26918,66 @@ const NFL_GPP_SHARP_NEIGH_TOPQ   = 0.2;  // "ceiling" = mean of the best this fr
 // weaker than the Own% draw, so it is a floor on the field's strength, never
 // its top.
 const NFL_GPP_SHARP_LEGACY_W     = 0.20;
+// ── CARDINALITY IS A RATIO, AND A NARROW BASE CAPS IT (checkpoint 79) ──────
+// ck77 gave the sharp slice a fixed pool of 3,000 builds. Two things are wrong
+// with a FIXED number, and one thing is wrong with where the builds came from.
+//
+// 1. A CONSTANT IS NOT A RATIO. The pool has to cover `share · F` sharp
+//    entries. At MME 25,000 and a 0.18 dial that is 4,500 entries against 3,000
+//    builds (1.5 copies each, fine); at 150,000 and 0.60 it is 90,000 entries
+//    against the same 3,000 (30 copies each, which is ck77's own defect back
+//    again at the field size where it costs the most). So the target now SCALES
+//    with the entries it has to fill: at least one distinct build per
+//    NFL_GPP_SHARP_PER_ENTRY sharp entries, clamped and time-boxed.
+// 2. THE BASE WAS 100 LINEUPS, AND A NEIGHBOURHOOD CANNOT BE WIDER THAN ITS
+//    BASE. MEASURED on wk1d/25k (`/tmp/review_g/ck79/p2.json`): every one-swap
+//    and two-swap expansion of the sharp pass's ~110 optima carries the SAME
+//    exposure to the digit — Mayer 85%, Tucker 63%, Maye 56%, Gibbs 55% — and
+//    growing it from 6,000 to 41,000 distinct builds moved the sharp slice's
+//    per-world maximum by 2.4 points and our board's literal win% not at all.
+//    Swap the base for 1,500 DIVERSE optima at the same cardinality (Mayer 47%,
+//    Gibbs 41%, Chase 32%) and the sharp slice's max goes 222.2 → 229.6 at a
+//    0.60 share — past the chalk slice's, the first time the sharp entries set
+//    the field's top — and the board's literal win% falls 0.029% → 0.004%.
+//    Count was never the binding constraint; the base's DIVERSITY was.
+// So the base is widened two ways, both of which are free:
+//   (a) the sharp pass prices its climbs on NFL_GPP_SHARP_PASS_WORLDS of the
+//       search worlds instead of all 2,000. A hill climb consumes an ORDERING
+//       (the same argument NFL_GPP_NF_SEARCH rests on), and a cheaper objective
+//       buys ~5× the seeds in the same 14 s — i.e. a base of many hundreds of
+//       genuine local optima instead of ~110. Noisier optima are not a defect
+//       here: a room full of optimizers running slightly different projections
+//       is exactly what the sharp slice is meant to be;
+//   (b) the top of the per-sim optimal pool BY CEILING joins the base. Those
+//       builds are individually weak (ck77: mean 120.4 against the Own% draw's
+//       121.8 — a per-sim optimal is a lottery ticket) but they are diverse,
+//       and the neighbourhood keeps only what has a ceiling, so what survives
+//       is a strong build from a part of the slate the sharp pass never visited.
+const NFL_GPP_SHARP_PER_ENTRY    = 2;      // ≥ 1 distinct build per this many sharp entries
+const NFL_GPP_SHARP_POOL_MIN     = 3000;   // …but never fewer than ck77's fixed pool
+const NFL_GPP_SHARP_POOL_MAX     = 60000;  // …and never more than the enumeration can afford
+// Wall-clock ceiling on growing the neighbourhood. MEASURED on wk1d: the
+// enumeration runs at ~165,000 candidate builds a second, and a base of B
+// lineups offers B x 9 x NFL_GPP_SHARP_NEIGH_CANDS of them, so the ceiling has
+// to scale with what was asked for or a 150,000-entry contest silently gets a
+// truncated pool. It is a CEILING, not a cost: a 25,000-entry run spends ~0.3 s
+// of it.
+function gppSharpNeighMs(want){ return Math.min(20000, 4000 + Math.ceil(Math.max(0, want)/4)); }
+// The base is deliberately generous — measurement says WIDTH is what moves the
+// field's top end, and a wide base costs nothing but the enumeration budget.
+const NFL_GPP_SHARP_BASE_DIV     = 8;      // base size = target/this (a build has ~9x40 neighbours)
+const NFL_GPP_SHARP_BASE_MIN     = 1200;
+const NFL_GPP_SHARP_BASE_MAX     = 4000;
+const NFL_GPP_SHARP_PASS_WORLDS  = 400;    // search worlds the throwaway sharp pass prices on
+// How many DISTINCT builds the sharp slice must draw from, given the share and
+// the contest. `share·F` is what the literal contest needs; `share·NFp` is what
+// one priced fold's sample needs, and on a small field NFp is the larger of the
+// two. Both are covered by taking the max.
+function gppSharpPoolTarget(share, F, NFp){
+  const entries = Math.max(share * (F || 0), share * (NFp || 0));
+  const want = Math.ceil(entries / Math.max(1, NFL_GPP_SHARP_PER_ENTRY));
+  return Math.max(NFL_GPP_SHARP_POOL_MIN, Math.min(NFL_GPP_SHARP_POOL_MAX, want));
+}
 // ── FIELD SAMPLE SIZE, PER FOLD (checkpoint 73) ────────────────────────────
 // The search fold and the two priced folds want different things out of the
 // modeled field, so they no longer get the same number of opponents. See the
@@ -26249,8 +27010,17 @@ const NFL_GPP_GAMMA_BUCKETS = 32;
 // search uses, and the ck75 per-QB partner minimum is re-tested against the
 // same `qbMinN`/`qbPartner` arrays the kernel enforces. A sharp entry that
 // could not be submitted is not an opponent.
-function gppSharpNeighbours(optima, fr, want){
+//
+// ck79: `opts.budgetMs` time-boxes the enumeration. The base can now be
+// thousands of optima (see NFL_GPP_SHARP_BASE_*), and 4,000 bases × 9 slots ×
+// NFL_GPP_SHARP_NEIGH_CANDS is 1.4 M candidate builds — worth having, but not
+// worth an unbounded wait. The base is walked in order, so a truncated
+// enumeration is the neighbourhood of a PREFIX of the base, never a partial
+// neighbourhood of all of it.
+function gppSharpNeighbours(optima, fr, want, opts){
   if(!optima || !optima.length || !(want > 0)) return [];
+  const tStart = Date.now();
+  const budgetMs = (opts && opts.budgetMs > 0) ? opts.budgetMs : Infinity;
   const nP = fr.nP, W = fr.W, S = fr.S, pos = fr.pos, sal = fr.sal, sel = fr.sel;
   const maxSal = fr.maxSal || 50000, minSal = fr.minSal || 0;
   const qbMinN = fr.qbMinN, qbRow = fr.qbRow, qbPartner = fr.qbPartner;
@@ -26293,8 +27063,12 @@ function gppSharpNeighbours(optima, fr, want){
   };
   const keyOf = a => Array.prototype.slice.call(a).sort((x,y) => x - y).join(',');
   const seen = new Set(), out = [];
+  const cap = Math.max(4*want, 50000);
   const v = new Float64Array(nW), nv = new Float64Array(nW);
+  let _bi = 0;
   for(const o of optima){
+    // One clock read per base lineup, not per candidate.
+    if(((_bi++) & 31) === 0 && Date.now() - tStart > budgetMs) break;
     const ids = Array.prototype.slice.call(o);
     if(ids.length !== 9) continue;
     seen.add(keyOf(ids));
@@ -26315,11 +27089,40 @@ function gppSharpNeighbours(optima, fr, want){
         const i2 = inP*nW;
         for(let k=0;k<nW;k++) nv[k] = v[k] - cols[oo+k] + cols[i2+k];
         out.push({idxs: cand, s: topMean(nv)});
+        // ck79: a 4,000-lineup base offers ~1.4 M candidates. Keeping them all
+        // is hundreds of megabytes for an answer that is `want` long, so the
+        // list is compacted to the best `want` whenever it grows past a
+        // multiple of it. The result is the same selection; only the peak
+        // footprint changes.
+        if(out.length > cap){ out.sort((a,b) => b.s - a.s); out.length = want; }
       }
     }
   }
   out.sort((a,b) => b.s - a.s);
   return out.slice(0, want).map(x => x.idxs);
+}
+// The same ceiling gppSharpNeighbours ranks its output on, applied to a list of
+// whole lineups — used to pick which builds the neighbourhood is grown FROM
+// (checkpoint 79). Returns the best `n`, best first.
+function gppSharpRankByCeiling(lineups, fr, n){
+  if(!lineups || !lineups.length || !(n > 0)) return [];
+  const W = fr.W, S = fr.S;
+  const nW = Math.max(8, Math.min(W, NFL_GPP_SHARP_NEIGH_WORLDS));
+  const wIdx = new Int32Array(nW);
+  for(let k=0;k<nW;k++) wIdx[k] = Math.floor(k*W/nW);
+  const M = Math.max(1, Math.round(nW*NFL_GPP_SHARP_NEIGH_TOPQ));
+  const v = new Float64Array(nW);
+  const scored = [];
+  for(const l of lineups){
+    if(!l || l.length !== 9) continue;
+    v.fill(0);
+    for(const i of l){ const off = i*W; for(let k=0;k<nW;k++) v[k] += S[off + wIdx[k]] || 0; }
+    const a = Array.prototype.slice.call(v).sort((x,y) => y - x);
+    let t = 0; for(let k=0;k<M;k++) t += a[k];
+    scored.push({l: l, s: t/M});
+  }
+  scored.sort((a,b) => b.s - a.s);
+  return scored.slice(0, n).map(x => x.l);
 }
 function gppSeedPlan(bud, N){
   const total = Math.max(bud.seedsMin, Math.min(bud.seedsMax, Math.round(bud.seedsPerLineup * N)));
@@ -28513,10 +29316,26 @@ async function runNflGppEngine(ctx){
   if(needSharpPass){
     const t1 = Date.now();
     gppProgressPhase('sharp pass — giving the field optimizers as good as ours');
+    // ck79: how many DISTINCT builds this contest's sharp slice has to cover,
+    // and how wide a base the neighbourhood has to be grown from to get there.
+    const _poolTarget = gppSharpPoolTarget(sharpShare, F, NFp);
+    const _baseTarget = Math.max(NFL_GPP_SHARP_BASE_MIN,
+                        Math.min(NFL_GPP_SHARP_BASE_MAX,
+                                 Math.ceil(_poolTarget / NFL_GPP_SHARP_BASE_DIV)));
+    // ck79: the throwaway pass prices its climbs on a subsample of the search
+    // worlds. A hill climb consumes an ORDERING, so a 400-world objective buys
+    // ~5x the seeds — and a base of many hundreds of DISTINCT optima instead of
+    // ~110 is the whole point (see the NFL_GPP_SHARP_* block: expanding a
+    // 110-lineup base to 41,000 builds changed nothing measurable, because
+    // every one of them carried the same nine players).
+    const _preIdx = stride(genIdx, Math.min(genIdx.length, NFL_GPP_SHARP_PASS_WORLDS));
+    const _preSg  = (_preIdx.length < genIdx.length) ? packScores(_preIdx) : sg;
     const pre = Object.assign({}, payload, {
-      searchOnly: true, sharpWanted: bud.sharpPool, seed: (payload.seed ^ 0x9e3779b9) >>> 0,
+      searchOnly: true, sharpWanted: _baseTarget, seed: (payload.seed ^ 0x9e3779b9) >>> 0,
+      sg: _preSg, Wg: _preIdx.length, ss: _preSg, Ws: _preIdx.length,
       seedPlan: gppSeedPlan(Object.assign({}, bud, {seedsPerLineup: 1, seedsMin: bud.sharpPassSeeds,
                                                     seedsMax: bud.sharpPassSeeds}), 1),
+      menuTarget: _baseTarget,
       budget: Object.assign({}, bud, {budgetMs: bud.sharpPassMs}),
     });
     const preOut = await gppRunKernel(pre, m => {
@@ -28541,14 +29360,37 @@ async function runNflGppEngine(ctx){
       // and the per-sim optimals pinned to NFL_GPP_SHARP_LEGACY_W of the total
       // draw weight rather than to whatever their counts sum to.
       const _core  = sharpIdx.map(ids => Array.prototype.slice.call(ids));
-      const _tN = Date.now();
-      const _neigh = gppSharpNeighbours(_core, {
+      const _frame = {
         nP: nP, W: genIdx.length, S: sg, pos: pos, sal: sal, sel: sel,
         maxSal: payload.maxSal, minSal: payload.minSal,
         qbMinN: qbMinN, qbRow: qbRow, qbPartner: qbPartner
-      }, Math.max(0, bud.sharpPool - _core.length));
+      };
+      // ck79: the base the neighbourhood is grown FROM is the sharp pass's own
+      // optima PLUS the best of the per-sim optimal pool by ceiling. Those are
+      // individually weak (they are lottery tickets — ck77 §2) but they are
+      // drawn from parts of the slate the sharp pass never visited, and the
+      // neighbourhood keeps only what has a ceiling, so what survives is a
+      // strong build the sharp pass's own family does not contain. This is the
+      // half of the fix that actually moves the field's top end.
+      const _seenB = new Set(), _base = [];
+      const _kB = a => Array.prototype.slice.call(a).sort((x,y) => x - y).join(',');
+      for(const l of _core){ const k = _kB(l); if(!_seenB.has(k)){ _seenB.add(k); _base.push(l); } }
+      let _wide = 0;
+      if(sharpPool && sharpPool.asIdx.length && _base.length < _baseTarget){
+        const cand = gppSharpRankByCeiling(sharpPool.asIdx.map(x => x.idxs), _frame,
+                                           _baseTarget - _base.length + 200);
+        for(const l of cand){
+          if(_base.length >= _baseTarget) break;
+          const k = _kB(l); if(_seenB.has(k)) continue;
+          _seenB.add(k); _base.push(l); _wide++;
+        }
+      }
+      const _tN = Date.now();
+      const _neighWant = Math.max(0, _poolTarget - _base.length);
+      const _neigh = gppSharpNeighbours(_base, _frame, _neighWant,
+                                        {budgetMs: gppSharpNeighMs(_neighWant)});
       const _neighMs = Date.now() - _tN;
-      const ent = _core.concat(_neigh).map(idxs => ({idxs: idxs, w: 1}));
+      const ent = _base.concat(_neigh).map(idxs => ({idxs: idxs, w: 1}));
       const _sharpW = ent.length;
       if(sharpPool && sharpPool.asIdx.length && sharpPool.totW > 0 && NFL_GPP_SHARP_LEGACY_W > 0){
         const _lw = NFL_GPP_SHARP_LEGACY_W;
@@ -28563,10 +29405,19 @@ async function runNflGppEngine(ctx){
       if(g2 && s2 && r2){
         payload.fldLinG = g2; payload.fldLinS = s2; payload.fldLinR = r2;
         logFieldLine(enginePool.asIdx.length, Date.now()-_t2);
-        log(`  the sharp slice draws from ${enginePool.asIdx.length.toLocaleString()} distinct builds: ${_core.length.toLocaleString()} of the ENGINE's own local optima, `
-          + `${_neigh.length.toLocaleString()} one-swap near-optima of those (${_neighMs} ms — same salary cap, same floor, same per-QB partner minimum), `
-          + `and the per-sim optimal pool holding ${Math.round(100*NFL_GPP_SHARP_LEGACY_W)}% of the draw weight. `
-          + `Cardinality is the point: filling ${Math.round(sharpShare*100)}% of ${NFp.toLocaleString()} entries from ~${_core.length} builds would be ${Math.round(sharpShare*NFp/Math.max(1,_core.length))} copies each, and a field with that few distinct scores has a THINNER top than the Own% draws it replaced `
+        // ck79: the contract this line reports is a RATIO — at least one
+        // distinct build per NFL_GPP_SHARP_PER_ENTRY sharp entries the contest
+        // needs — and the second half of it is that the base those builds were
+        // grown from is WIDE. A neighbourhood cannot be more diverse than the
+        // lineups it neighbours, and on wk1d a 110-lineup base carried Mayer at
+        // 85% no matter how many builds were enumerated off it.
+        const _sharpEnt = Math.max(Math.round(sharpShare*F), Math.round(sharpShare*NFp));
+        const _ratio = _sharpEnt / Math.max(1, enginePool.asIdx.length);
+        log(`  Sharp pool: ${enginePool.asIdx.length.toLocaleString()} distinct builds for ${_sharpEnt.toLocaleString()} sharp entries `
+          + `— ${_ratio.toFixed(2)} entries per distinct build (target ≤ ${NFL_GPP_SHARP_PER_ENTRY}${_ratio > NFL_GPP_SHARP_PER_ENTRY ? ' — NOT MET, the pool is capped at ' + NFL_GPP_SHARP_POOL_MAX.toLocaleString() : ''}). `
+          + `Base ${_base.length.toLocaleString()} builds: ${_core.length.toLocaleString()} local optima from the sharp pass (priced on ${_preIdx.length.toLocaleString()} of the ${genIdx.length.toLocaleString()} search worlds, which is what buys the width) `
+          + `+ ${_wide.toLocaleString()} of the per-sim optimal pool by ceiling; ${_neigh.length.toLocaleString()} one-swap near-optima grown off it in ${_neighMs} ms `
+          + `(same salary cap, same floor, same per-QB partner minimum). The per-sim optimal pool also holds ${Math.round(100*NFL_GPP_SHARP_LEGACY_W)}% of the draw weight. `
           + `(sharp pass + re-sample ${((Date.now()-t1)/1000).toFixed(1)}s).`);
       } else { badSharp = true; }
     } else {
@@ -31687,17 +32538,9 @@ function hbSimCtx(){ return slateSimCtx(activeSlate()); }
 // ceiling, renormalized to one captain slot). Duplicated rather than hoisted
 // out of runUFCContestEV on purpose: that function is 2,000 lines of selector
 // state and must not be restructured for a read-only consumer.
-function hbCptTargets(pool){
-  if(pool.some(p=>{ const c=parseFloat(p.cptOwn); return Number.isFinite(c) && c>0; }))
-    return pool.map(p=>Math.max(0.02, sdOwnOf(p, true)));
-  const raw=pool.map(p=>{
-    const ceil=(p._simP50!=null?parseFloat(p._simP50):(parseFloat(p.proj)||0));
-    const c=ceil>0?ceil:Math.max(1,(p.salary||0)/1000);
-    return Math.max(0.05, parseFloat(p.own)||0.2)*Math.max(0.1,c);
-  });
-  const s0=raw.reduce((a,b)=>a+b,0)||1;
-  return raw.map(v=>Math.max(0.02, v*100/s0));
-}
+// ck81: one definition, shared with runUFCContestEV — the two surfaces must
+// price against the same field or their EVs are not comparable.
+function hbCptTargets(pool){ return sdCptTargets(pool).cpt; }
 // The field build is the expensive step (sample N opponents, then score every
 // one of them on every held-out sim), so it is cached on window._hbField and
 // reused for as long as the sim run AND the contest are unchanged. Sims are
@@ -31789,11 +32632,14 @@ function hbField(slate, ctx, contest){
     // Same ownership INPUT the generator uses (nflOwnInput) on NFL Classic, or
     // the two surfaces would price against two different fields.
     const _hbOwnSrc=(slate.sport==='nfl' && !SD && typeof nflOwnInput==='function') ? nflOwnInput(slate) : null;
-    const baseOwn=evOwnTemper((_hbOwnSrc && _hbOwnSrc.ok)
+    const _hbRawOwn=evOwnTemper((_hbOwnSrc && _hbOwnSrc.ok)
       ? pool.map(p=>Math.max(0.2, _hbOwnSrc.own[p.id]||0))
       : pool.map(p=>Math.max(0.2, parseFloat(p.own)||0.2)), _temp);
+    // ck81: showdown flex marginals are renormalised onto the five-slot budget,
+    // exactly where and how runUFCContestEV does it.
+    const baseOwn=SD ? sdFlexTargets(_hbRawOwn).flex : _hbRawOwn;
     scenarios=evOwnScenarios(baseOwn, KK, EV_SCEN_SIGMA);
-    const cptBase=SD ? evOwnTemper(hbCptTargets(pool), _temp) : null;
+    const cptBase=SD ? sdRenormalize(evOwnTemper(hbCptTargets(pool), _temp), SD_CPT_BUDGET, 0.02).vec : null;
     cptScen=SD ? scenarios.map(s=>evCptScenario(cptBase, s, baseOwn)) : null;
     // Same cap the generator hands its field sampler (ctx.maxSal || SALARY_CAP).
     // A user who dials Max Salary below the DK cap was otherwise getting a
@@ -31928,7 +32774,9 @@ function hbPriceLineup(players, cptId){
     const ci=(cptId!=null && SD) ? F.idxById.get(cptId) : null;
     const ord=(ci!=null) ? [ci, ...myIdx.filter(i=>i!==ci)] : myIdx;
     const kk=ord.slice().sort((a,b)=>a-b).join('|')+(SD?'|C'+ord[0]:'');
-    const dupK=evDupK(slate.sport);
+    // ck81: showdown takes the 5!/5^5 combinatorics, not the classic per-slot
+    // dupK. `ord` is already captain-first, so idxs[0] reads the captain vector.
+    const dupK=SD?SD_DUP_K:evDupK(slate.sport);
     for(let k=0;k<K;k++){
       const scen=F.scenarios[k], cScen=F.cptScen?F.cptScen[k]:null;
       let prod=1;
