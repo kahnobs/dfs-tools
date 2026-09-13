@@ -6513,7 +6513,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck102/2026-09-13';
+const BUILD_ID = '2.0/ck103/2026-09-13';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -15042,7 +15042,31 @@ function sampleUfcField(pool, N, ownArr, opts){
     minRest = new Array(SIZE+1).fill(0);
     for(let k=SIZE-1;k>=0;k--) minRest[k] = minRest[k+1] + cheapestFor(k);
     posIdxSet = posIdx.map(a => new Set(a));
+    // ck103: the per-slot eligibility list is walked once per SLOT of every
+    // drawn lineup — ~1,700 element reads per entry, and a priced fold draws
+    // 5 x 20,000 entries four times over. A packed Int32Array is the SAME list
+    // in the SAME order (so the draw is bit-identical) read as a typed array.
+    posIdx = posIdx.map(a => Int32Array.from(a));
   }
+  // ck103: `salaries` is read once per candidate per slot — same list, typed.
+  const salF = Float64Array.from(salaries);
+  // ck103: MEMBERSHIP WITHOUT A HASH. `used` holds at most SIZE indices and is
+  // probed ~1,700 times per drawn lineup; `used.has(i)` on a boxed integer was
+  // the hottest single operation in the sampler. `useMark[i] === useStamp` is
+  // the same predicate as a typed-array read, and the stamp means no clearing
+  // pass between draws. The Set is still built and maintained for the handful
+  // of cold call sites that take one (pickWeighted's `seen`, the forced-stack
+  // scan, the hedge/stack diagnostics), so nothing about the draw changes.
+  const useMark = new Int32Array(pool.length); let useStamp = 0;
+  // ck103: NFL/PGA/NASCAR pools have no opposing-entrant pairs at all
+  // (`_hasPairs` false ⇒ every `oppIdx` is -1 and `hedgeLever` is 0), so the
+  // hedge test in the slot scan is dead weight on every sport but UFC. Hoisted
+  // into a loop VARIANT rather than evaluated per candidate.
+  const oppIdxA = Int32Array.from(oppIdx);
+  // ck103: the positionless (6-man) scan walks the whole pool; one identity
+  // index array lets both modes share a single loop body.
+  const flatIdx = slots ? null : (() => { const a = new Int32Array(pool.length);
+    for(let i=0;i<pool.length;i++) a[i]=i; return a; })();
 
   // ── Field stacking (NFL) ──────────────────────────────────────────────────
   // Draw a stack SHAPE per entry, seed the forced players, then let the normal
@@ -15114,6 +15138,24 @@ function sampleUfcField(pool, N, ownArr, opts){
   const GB = (opts && opts.gammaBuckets > 0) ? (opts.gammaBuckets|0) : 0;
   const gammaOf = b => 0.7 + 0.9*((b + 0.5)/GB);
   const eligB = new Int32Array(pool.length), ewB = new Float64Array(pool.length);
+  // ── ck103: THE GAMMA TABLE IS BUILT ON DEMAND ─────────────────────────────
+  // ck73 tabulated w^gamma at GB points so a draw costs a table read instead of
+  // nP pow calls. But the table is per WEIGHT VECTOR, and ck82/ck83 made the
+  // weight vector per BOARD — and a 5-entry small board (1,148 of the 1,245
+  // boards in a 20,000-entry field) draws at most 5 of the 32 buckets while
+  // paying for all 32 x 746 pow calls up front. `gtab` fills a bucket the first
+  // time that bucket is drawn; Math.pow returns the same double whenever it is
+  // called, so every drawn lineup is bit-identical to the eager table.
+  const gtab = src => ({src, a: new Array(GB)});
+  const gcol = (tab, b) => {
+    let a = tab.a[b];
+    if(a) return a;
+    const g = gammaOf(b), v = tab.src, n = v.length;
+    a = new Float64Array(n);
+    for(let i=0;i<n;i++) a[i] = Math.pow(v[i], g);
+    tab.a[b] = a;
+    return a;
+  };
 
   let w = target.slice();
   let field = [];
@@ -15130,12 +15172,18 @@ function sampleUfcField(pool, N, ownArr, opts){
   const drawOne = (pwArg, wv, gFix) => {
       const _gb = (gFix == null && GB) ? (Math.random()*GB)|0 : 0;
       const gamma = (gFix != null) ? gFix : (GB ? gammaOf(_gb) : (0.7 + Math.random()*0.9));
-      const pw = (gFix != null) ? (pwArg || null) : (GB ? pwArg[_gb] : null);
+      const pw = (gFix != null) ? (pwArg || null) : (GB ? gcol(pwArg, _gb) : null);
       const wq = wv || w;
       // Per-entry hedge draw: this entry is one of the small minority willing to
       // roster both sides of a fight (see FIELD_HEDGE_RATE above).
       const hedging = hedgeLever>0 && Math.random() < hedgeLever;
       const picks=[]; const used=new Set(); let sal=0; let dead=false;
+      // ck103: the typed membership stamp for this draw (see `useMark`). The
+      // Set above is kept in step with it for the cold call sites.
+      const stamp = ++useStamp;
+      // ck103: the opposing-entrant test only has anything to say when the pool
+      // HAS pairs and this entry is not hedging — hoisted out of the slot scan.
+      const needOpp = !hedging && _hasPairs;
 
       // Decide this entry's stack shape and pre-select the forced players.
       // They then claim the first compatible slot in the normal fill below.
@@ -15176,7 +15224,7 @@ function sampleUfcField(pool, N, ownArr, opts){
             sal + salaries[i] + headroom <= CAP);
           if(fi >= 0){
             const p = forced[fi];
-            picks.push(p); used.add(p); sal += salaries[p];
+            picks.push(p); used.add(p); useMark[p]=stamp; sal += salaries[p];
             forced.splice(fi, 1);
             continue;
           }
@@ -15185,28 +15233,54 @@ function sampleUfcField(pool, N, ownArr, opts){
         // closure per slot. ~1,400 pushes and 9 closures per drawn lineup, at
         // 270,000 lineups for one GPP run — the draw order, the RNG draws and
         // therefore the sampled field are identical, this is only allocation.
+        // ck103: the SAME scan, four ways. The three tests inside it were a
+        // hash probe, a dead opposing-entrant test and a branch on `pw` — all
+        // per candidate, ~1,700 times per drawn entry. The hash probe is now a
+        // typed-array compare, the opposing test is hoisted into a variant, and
+        // the `pw` branch is hoisted into a variant. Candidate ORDER, the
+        // arithmetic and the RNG draws are untouched, so the field is
+        // bit-identical to ck102's.
         let tw=0, nE=0;
-        if(scan){
-          for(let z=0;z<scan.length;z++){ const i=scan[z];
-            if(used.has(i)) continue;
-            if(!hedging && oppIdx[i]>=0 && used.has(oppIdx[i])) continue;
-            if(sal+salaries[i]+headroom > CAP) continue;
-            const wi = pw ? pw[i] : Math.pow(wq[i], gamma);
-            eligB[nE]=i; ewB[nE]=wi; nE++; tw+=wi;
+        const scanA = scan || flatIdx, nS = scanA.length;
+        if(pw){
+          if(needOpp){
+            for(let z=0;z<nS;z++){ const i=scanA[z];
+              if(useMark[i]===stamp) continue;
+              const oi=oppIdxA[i]; if(oi>=0 && useMark[oi]===stamp) continue;
+              if(sal+salF[i]+headroom > CAP) continue;
+              const wi = pw[i];
+              eligB[nE]=i; ewB[nE]=wi; nE++; tw+=wi;
+            }
+          } else {
+            for(let z=0;z<nS;z++){ const i=scanA[z];
+              if(useMark[i]===stamp) continue;
+              if(sal+salF[i]+headroom > CAP) continue;
+              const wi = pw[i];
+              eligB[nE]=i; ewB[nE]=wi; nE++; tw+=wi;
+            }
           }
         } else {
-          for(let i=0;i<pool.length;i++){
-            if(used.has(i)) continue;
-            if(!hedging && oppIdx[i]>=0 && used.has(oppIdx[i])) continue;
-            if(sal+salaries[i]+headroom > CAP) continue;
-            const wi = pw ? pw[i] : Math.pow(wq[i], gamma);
-            eligB[nE]=i; ewB[nE]=wi; nE++; tw+=wi;
+          if(needOpp){
+            for(let z=0;z<nS;z++){ const i=scanA[z];
+              if(useMark[i]===stamp) continue;
+              const oi=oppIdxA[i]; if(oi>=0 && useMark[oi]===stamp) continue;
+              if(sal+salF[i]+headroom > CAP) continue;
+              const wi = Math.pow(wq[i], gamma);
+              eligB[nE]=i; ewB[nE]=wi; nE++; tw+=wi;
+            }
+          } else {
+            for(let z=0;z<nS;z++){ const i=scanA[z];
+              if(useMark[i]===stamp) continue;
+              if(sal+salF[i]+headroom > CAP) continue;
+              const wi = Math.pow(wq[i], gamma);
+              eligB[nE]=i; ewB[nE]=wi; nE++; tw+=wi;
+            }
           }
         }
         if(!nE || tw<=0){ dead=true; break; }
         let r=Math.random()*tw, pick=eligB[nE-1];
         for(let k=0;k<nE;k++){ r-=ewB[k]; if(r<=0){ pick=eligB[k]; break; } }
-        picks.push(pick); used.add(pick); sal+=salaries[pick];
+        picks.push(pick); used.add(pick); useMark[pick]=stamp; sal+=salaries[pick];
       }
       if(dead || picks.length<SIZE) return null;
       if(forced && forced.length) return null;   // stack didn't fit — redraw
@@ -15449,12 +15523,11 @@ function sampleUfcField(pool, N, ownArr, opts){
       // lineups. Measured both ways on wk1d/25k (below); one gamma per board
       // is the more concentrated model and it moves the board's modelled win
       // rate FURTHER from fair, so the per-lineup draw is kept.
-      const bwTab = GB ? new Array(GB) : null;
-      if(GB) for(let g=0; g<GB; g++){
-        const a = new Float64Array(pool.length), gv = gammaOf(g);
-        for(let i=0;i<pool.length;i++) a[i] = Math.pow(vec[i], gv);
-        bwTab[g] = a;
-      }
+      // ck103: LAZY (see `gtab`). A 5-entry small board draws at most 5 of the
+      // 32 buckets; building all 32 x nP powers for it was most of this
+      // sampler's pow calls, and 1,148 of a 20,000-entry field's 1,245 boards
+      // are 5-entry ones.
+      const bwTab = GB ? gtab(vec) : null;
       const seen = new Set(); const cnt = new Int32Array(pool.length);
       let rej = 0, tries = 0;
       while(field.length - start < size1 && tries++ < size1*40){
@@ -15548,15 +15621,7 @@ function sampleUfcField(pool, N, ownArr, opts){
   for(let iter=0; iter<PASSES; iter++){
     const Ni = (iter < PASSES-1) ? CALIB : N;
     // The weights change between passes, so the gamma table is rebuilt with them.
-    let pwTab = null;
-    if(GB){
-      pwTab = new Array(GB);
-      for(let b=0;b<GB;b++){
-        const g = gammaOf(b), a = new Float64Array(pool.length);
-        for(let i=0;i<pool.length;i++) a[i] = Math.pow(w[i], g);
-        pwTab[b] = a;
-      }
-    }
+    const pwTab = GB ? gtab(w) : null;   // ck103: filled bucket by bucket on demand
     field = [];
     let guard = 0;
     // Boards first (they are the bulk of the field), then the remainder as
@@ -15668,6 +15733,172 @@ function sampleUfcField(pool, N, ownArr, opts){
           clusterShare: CL ? clDrawn/Math.max(1, field.length) : null,
           clusterK: clList ? clList.length : 0,
           clusterZipf: CL ? CL.zipf : null};
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE FIELD SAMPLER, OFF THE MAIN THREAD (checkpoint 103)
+// ═══════════════════════════════════════════════════════════════════════════
+// MEASURED, wk1 main slate (746 players), 150 lineups, 10,000 sims, MME 25,000:
+// `sampleUfcField` was 152 s of a 412 s run and — because a draw is one
+// uninterruptible call — it was also the whole of the 80 s synchronous block
+// that raises Chrome's "page unresponsive" dialog. Nothing about the draw needs
+// the DOM: it is a pure function of (pool, N, ownership vector, opts) and
+// Math.random. So the K ownership scenarios are drawn in PARALLEL Blob workers,
+// each seeded with its own deterministic stream.
+//
+// WHAT THIS CHANGES, said plainly. The draws no longer consume the page's
+// run stream (`runNflSimGen`'s mulberry32) — each gets a stream of its own,
+// derived from the run seed and the call site — so a board built after ck103 is
+// NOT bit-identical to one built before it at the same `__runSeed`. It is still
+// fully reproducible: same seed and same settings ⇒ same fields ⇒ same board.
+// The sampler ITSELF is unchanged, byte for byte (it is stringified into the
+// worker), so every property the field model was fitted and tested on holds;
+// `test_ck103_fieldworker` asserts the worker and the page draw the identical
+// field from the identical seed.
+//
+// The synchronous fallback runs the SAME per-scenario seeds, so an environment
+// without Workers produces the same board as one with them.
+function fieldWorkerGlue(){
+  self.onmessage = function(e){
+    const d = e.data || {};
+    const opts = d.opts || {};
+    if(opts.__posOf) opts.posOf = function(p){ return p._pos; };
+    const orig = Math.random;
+    let r = null, err = null;
+    try { Math.random = mulberry32(d.seed >>> 0); r = sampleUfcField(d.pool, d.N, d.own, opts); }
+    catch(x){ err = String((x && x.stack) || x); }
+    finally { Math.random = orig; }
+    if(err || !r || !r.field || !r.field.length){ self.postMessage({k:d.k, error: err || 'empty field'}); return; }
+    // One flat buffer instead of N small arrays: a 20,000-entry field is
+    // 20,000 arrays of 9, and structured-cloning those costs more than the draw.
+    const SZ = r.field[0].length, n = r.field.length;
+    const flat = new Int32Array(SZ*n);
+    for(let i=0;i<n;i++){ const l = r.field[i]; for(let j=0;j<SZ;j++) flat[i*SZ+j] = l[j]; }
+    const xfer = [flat.buffer];
+    const boards = r.boards ? r.boards.map(function(b){
+      if(b.tilt && b.tilt.buffer) xfer.push(b.tilt.buffer);
+      return {start:b.start, end:b.end, tilt:b.tilt, opt:!!b.opt,
+              distinct:b.distinct, topExposure:b.topExposure};
+    }) : null;
+    self.postMessage({k:d.k, n:n, SZ:SZ, flat:flat, boards:boards,
+      meta:{maxDev:r.maxDev, maxName:r.maxName, boardSigma:r.boardSigma,
+            boardTopExposure:r.boardTopExposure, optShare:r.optShare,
+            optTheta:r.optTheta, optTemp:r.optTemp, optPoolN:r.optPoolN,
+            clusterShare:r.clusterShare, clusterK:r.clusterK, clusterZipf:r.clusterZipf}}, xfer);
+  };
+}
+function fieldWorkerSource(){
+  return ['const FIELD_CLUSTER=' + JSON.stringify(FIELD_CLUSTER) + ';',
+          'const FIELD_CLUSTER_BY_SPORT=' + JSON.stringify(FIELD_CLUSTER_BY_SPORT) + ';',
+          'const FIELD_OPT_KAPPA=' + FIELD_OPT_KAPPA + ', FIELD_OPT_POOL_MAX=' + FIELD_OPT_POOL_MAX +
+            ', FIELD_OPT_POOL_TEMP=' + FIELD_OPT_POOL_TEMP + ', OPT_DISTINCT_TRIES=' + OPT_DISTINCT_TRIES + ';',
+          mulberry32.toString(), sdFloorGate.toString(), ufcSameFight.toString(),
+          fieldClusterFor.toString(), fieldConsensusTopK.toString(), fieldBoardTilts.toString(),
+          sampleUfcField.toString(),
+          '(' + fieldWorkerGlue.toString() + ')();'].join('\n');
+}
+// The player rows the sampler actually reads, and nothing else — a slate player
+// object carries the whole sim state and must not be cloned into five workers.
+function fieldWorkerPool(pool, posOf){
+  const out = new Array(pool.length);
+  for(let i=0;i<pool.length;i++){ const p = pool[i];
+    out[i] = {salary:p.salary||0, own:p.own, proj:p.proj, name:p.name||'',
+              team:p.team||'', opp:p.opp||'', fightNum:p.fightNum||0,
+              _pos: posOf ? posOf(p) : null}; }
+  return out;
+}
+// `opts.posOf` is a function (nflPosOf) and cannot be cloned; the position it
+// returns rides on the marshalled row instead.
+function fieldWorkerOpts(opts){
+  const o = {};
+  for(const k in (opts||{})) if(typeof opts[k] !== 'function') o[k] = opts[k];
+  o.__posOf = !!(opts && opts.posOf);
+  return o;
+}
+// One 32-bit stream id per (run seed, call site, scenario). Deterministic, and
+// different enough between scenarios that two of them never share a draw.
+function fieldSeedMix(a, b){
+  let h = (a >>> 0) ^ Math.imul((b >>> 0) + 1, 0x9E3779B1);
+  h = Math.imul(h ^ (h >>> 16), 0x85EBCA6B);
+  h = Math.imul(h ^ (h >>> 13), 0xC2B2AE35);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+let _fieldWorkerUrl = null;
+function fieldWorkerUrl(){
+  if(_fieldWorkerUrl) return _fieldWorkerUrl;
+  _fieldWorkerUrl = URL.createObjectURL(new Blob([fieldWorkerSource()], {type:'text/javascript'}));
+  return _fieldWorkerUrl;
+}
+// How many draws to run at once. The main thread has nothing to do while they
+// run, so it counts as a lane; `reserve` holds lanes back for a kernel worker
+// that is searching at the same time.
+function fieldWorkerLanes(K, reserve){
+  const hw = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
+  return Math.max(1, Math.min(K, hw - (reserve||0)));
+}
+function fieldWorkersUsable(){
+  try { return typeof Worker === 'function' && typeof Blob === 'function'
+           && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'; }
+  catch(e){ return false; }
+}
+// Draw one field per ownership scenario. Returns the same shape sampleUfcField
+// returns, one per scenario, or null if any scenario came back empty.
+async function sampleFieldSet(pool, N, scenarios, opts, seed, reserve){
+  const K = scenarios.length;
+  const seeds = [];
+  for(let k=0;k<K;k++) seeds.push(fieldSeedMix(seed, k));
+  const runSync = () => {
+    const out = [];
+    const orig = Math.random;
+    try {
+      for(let k=0;k<K;k++){
+        Math.random = mulberry32(seeds[k]);
+        const r = sampleUfcField(pool, N, scenarios[k], opts);
+        if(!r || !r.field || !r.field.length) return null;
+        out.push(r);
+      }
+    } finally { Math.random = orig; }
+    return out;
+  };
+  if(!fieldWorkersUsable()) return runSync();
+  const marshalled = fieldWorkerPool(pool, opts && opts.posOf);
+  const wOpts = fieldWorkerOpts(opts);
+  const lanes = fieldWorkerLanes(K, reserve);
+  const out = new Array(K);
+  let next = 0, failed = null;
+  let url; try { url = fieldWorkerUrl(); } catch(e){ return runSync(); }
+  const lane = () => new Promise(resolve => {
+    let w = null;
+    try { w = new Worker(url); } catch(e){ resolve('no-worker'); return; }
+    const feed = () => {
+      if(failed || next >= K){ try { w.terminate(); } catch(e){} resolve(null); return; }
+      const k = next++;
+      w.postMessage({k, N, seed:seeds[k], own:scenarios[k], pool:marshalled, opts:wOpts});
+    };
+    w.onerror = e => { failed = failed || ('worker: ' + ((e && e.message) || 'failed'));
+      try { w.terminate(); } catch(x){} resolve(null); };
+    w.onmessage = e => {
+      const d = e.data || {};
+      if(d.error){ failed = failed || d.error; try { w.terminate(); } catch(x){} resolve(null); return; }
+      const field = new Array(d.n), SZ = d.SZ, flat = d.flat;
+      for(let i=0;i<d.n;i++){ const l = new Array(SZ), off = i*SZ;
+        for(let j=0;j<SZ;j++) l[j] = flat[off+j];
+        field[i] = l; }
+      out[d.k] = Object.assign({field, boards:d.boards}, d.meta);
+      feed();
+    };
+    feed();
+  });
+  const lanesOut = [];
+  for(let i=0;i<lanes;i++) lanesOut.push(lane());
+  const res = await Promise.all(lanesOut);
+  if(res.some(x => x === 'no-worker')) return runSync();
+  if(failed){
+    if(typeof console !== 'undefined' && console.warn) console.warn('field worker fell back: ' + failed);
+    return runSync();
+  }
+  for(let k=0;k<K;k++) if(!out[k]) return null;
+  return out;
 }
 
 // ── SHOWDOWN FIELD SAMPLER (NFL Captain Mode) ────────────────────────────────
@@ -33559,12 +33790,20 @@ async function runNflGppEngine(ctx){
     }));
   }
   let _sharpPlaced = 0, _sharpOf = 0, _boards0 = null, _dup0 = null;
-  const sampleSet = (label, NF, pool) => {
+  // ck103: the K scenario draws go to workers (see sampleFieldSet). The seed is
+  // the run's, mixed with the CALL INDEX, so the same run seed redraws the same
+  // fields in the same order however many lanes the machine gives them.
+  let _fieldCall = 0;
+  const _fieldBase = ((_runSeed != null ? _runSeed : 0) ^ 0x5F1E1D) >>> 0;
+  const sampleSet = async (label, NF, pool) => {
     const sp = (pool !== undefined) ? pool : sharpPool;
     _sharpPlaced = 0; _sharpOf = K*NF;
     const lin = new Int32Array(K * NF * 9);
+    const drawn = await sampleFieldSet(fieldPool, NF, scen, fieldOpts,
+                                       fieldSeedMix(_fieldBase, _fieldCall++), 0);
+    if(!drawn) return null;
     for(let k = 0; k < K; k++){
-      const r = sampleUfcField(fieldPool, NF, scen[k], fieldOpts);
+      const r = drawn[k];
       const field = r && r.field;
       if(!field || !field.length) return null;
       // ck77: an EXACT floor(NF·share) distinct entries (see gppApplySharpSlice).
@@ -33586,6 +33825,11 @@ async function runNflGppEngine(ctx){
         const l = field[f % field.length];
         for(let j = 0; j < 9; j++) lin[base + f*9 + j] = l[j];
       }
+      // ck103: the sharp injection and the pack are main-thread work, ~250 ms a
+      // scenario at NF = 20,000. Five of them back to back is a quarter of a
+      // second short of a visible stall, so the loop yields between them. The
+      // RNG draws stay in the same order, so the field does not change.
+      await tick();
     }
     return lin;
   };
@@ -33598,13 +33842,13 @@ async function runNflGppEngine(ctx){
   const needSharpPass = !!(bud.sharpFromEngine && sharpShare > 0 && !ctx.noSharpPass);
   gppProgressPhase('sampling the opponent field');
   const _tSample = Date.now();
-  const fldLinG = sampleSet('generation', NFs);
+  const fldLinG = await sampleSet('generation', NFs);
   await tick(); if(window._genCancelled) return null;
   let fldLinS = null, fldLinR = null;
   if(!needSharpPass){
-    fldLinS = sampleSet('select', NFp);
+    fldLinS = await sampleSet('select', NFp);
     await tick(); if(window._genCancelled) return null;
-    fldLinR = sampleSet('report', NFp);
+    fldLinR = await sampleSet('report', NFp);
   } else {
     // Placeholders: the searchOnly pass never reads them, and they are replaced
     // wholesale below. Sharing one reference keeps the payload small.
@@ -33825,9 +34069,9 @@ async function runNflGppEngine(ctx){
       }
       const enginePool = poolOf(ent);
       const _t2 = Date.now();
-      const g2 = sampleSet('search', NFs, enginePool);
-      const s2 = sampleSet('select', NFp, enginePool);
-      const r2 = sampleSet('report', NFp, enginePool);
+      const g2 = await sampleSet('search', NFs, enginePool);
+      const s2 = await sampleSet('select', NFp, enginePool);
+      const r2 = await sampleSet('report', NFp, enginePool);
       if(g2 && s2 && r2){
         payload.fldLinG = g2; payload.fldLinS = s2; payload.fldLinR = r2;
         logFieldLine(enginePool.asIdx.length, Date.now()-_t2); logBoardLine();
@@ -33854,7 +34098,7 @@ async function runNflGppEngine(ctx){
     // supply a pool they still have to exist.
     if(badSharp){
       const _t3 = Date.now();
-      const s3 = sampleSet('select', NFp), r3 = sampleSet('report', NFp);
+      const s3 = await sampleSet('select', NFp), r3 = await sampleSet('report', NFp);
       if(!s3 || !r3){ log('⚠ Field sampler produced no lineups.'); return null; }
       payload.fldLinS = s3; payload.fldLinR = r3;
       logFieldLine(sharpPool ? sharpPool.asIdx.length : 0, Date.now()-_t3); logBoardLine();
@@ -33863,6 +34107,26 @@ async function runNflGppEngine(ctx){
   }
 
   let lastPhase = '';
+  // ── ck103: DRAW THE PRICING FIELD WHILE THE KERNEL SEARCHES ───────────────
+  // The board's headline numbers come from `priceBoardHeldOut`, whose field
+  // (ck95's ONE pricing surface) is an INDEPENDENT 5 × 20,000-entry draw that
+  // depends on the slate, the ownership column and the contest — none of which
+  // the kernel touches. Measured on the wk1 main slate it cost 72 s of a 412 s
+  // run, spent after the kernel came back, on a main thread that had been idle
+  // for the whole 237 s search. It is started here instead.
+  // The lanes are held back to leave the kernel a core, and the overlap is only
+  // taken on a machine that HAS a spare one: the search is wall-clock capped, so
+  // on a 2-core box stealing from it would cost seeds, i.e. menu, i.e. board.
+  window._hbPrewarmPromise = null;
+  try {
+    const _hw = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
+    if(_hw >= 4 && typeof hbFieldPrewarm === 'function'){
+      const _pctx = slateSimCtx(slate), _pcon = pricingContest(slate);
+      if(_pctx && _pcon)
+        window._hbPrewarmPromise = hbFieldPrewarm(slate, _pctx, _pcon,
+          {fold:'report', reuseGenField:false}, 2).catch(() => false);
+    }
+  } catch(e){ window._hbPrewarmPromise = null; }
   const t0 = Date.now();
   const out = await gppRunKernel(payload, m => {
     if(!m) return;
@@ -34034,6 +34298,19 @@ async function runNflGppBoard(ctx){
   // kernel's own numbers stay on `_gpp` / `_evPct` where a diagnostic can find
   // them.
   let _ho95 = null;
+  // ck103: the pricing field, drawn in workers — during the kernel's search
+  // when the machine had a core to spare (see runNflGppEngine), otherwise now.
+  // Either way it is off the main thread, which is what stopped the 72 s block.
+  try {
+    const _pw = window._hbPrewarmPromise;
+    window._hbPrewarmPromise = null;
+    if(_pw) await _pw;
+    else {
+      const _pctx = slateSimCtx(slate), _pcon = pricingContest(slate);
+      if(_pctx && _pcon) await hbFieldPrewarm(slate, _pctx, _pcon,
+        {fold:'report', reuseGenField:false}, 0);
+    }
+  } catch(e){}
   {
     const _t0 = Date.now();
     try {
@@ -34582,8 +34859,16 @@ async function runNflSimGenInner(){
   if(window._genCancelled){ log('Cancelled.'); done(); return; }
 
   // Decorate the pool: composite sim score + full DK-outcome distribution.
+  // ck103: 746 players x a 10,000-element copy-and-sort, and then the boom-rate
+  // pass below walks 10,000 worlds x five position groups with a sort inside.
+  // Together they were a 3 s synchronous block — the largest left in the run
+  // once the field draw moved to workers. Both now yield on the clock. Pure
+  // arithmetic, no RNG draws: the numbers are identical either way.
   const NBINS=32;
-  simPool.forEach((p,i)=>{
+  let _decTick=Date.now();
+  for(let i=0;i<simPool.length;i++){
+    const p=simPool[i];
+    if((i&31)===31 && Date.now()-_decTick>=50){ _decTick=Date.now(); await new Promise(r=>setTimeout(r,0)); }
     const raw=simScores[i].slice(0,simsDone);
     const arr=Array.from(raw).sort((a,b)=>a-b);
     const n=arr.length||1;
@@ -34603,7 +34888,7 @@ async function runNflSimGenInner(){
     const bar=Math.max(3, (p.salary||3000)/1000 * 1.5);
     let usable=0; for(let k=0;k<n;k++) if(arr[k]>=bar) usable++;
     p._simCut=Math.round(100*usable/n);
-  });
+  }
   // Boom rate — how often the player posts a TOP-N score at his position in
   // a simulated slate (N = roughly the slots that position fills in a winning
   // GPP lineup ×2: QB/TE/DST 2, RB 4, WR 6; showdown: top-3 overall in the
@@ -34621,7 +34906,9 @@ async function runNflSimGenInner(){
       const idx = groups[g]; const N = SDb ? 3 : (TOPN[g]||2);
       if(idx.length <= N){ idx.forEach(i=>{ hits[i]=simsDone; }); continue; }
       const col = new Float64Array(idx.length);
+      let _bTick=Date.now();
       for(let k=0;k<simsDone;k++){
+        if((k&255)===255 && Date.now()-_bTick>=50){ _bTick=Date.now(); await new Promise(r=>setTimeout(r,0)); }
         for(let j=0;j<idx.length;j++) col[j]=simScores[idx[j]][k];
         // N-th largest by partial selection (N is tiny).
         const sorted = Float64Array.from(col).sort();
@@ -34719,6 +35006,10 @@ async function runNflSimGenInner(){
   // lineup — the 1.5× makes that choice most of the lineup's edge.
   if(typeof gppProgressPhase==='function') gppProgressPhase('per-sim optimal lineups (seeds for the search)');
   log('Computing per-sim optimal lineups…');
+  // ck103: the per-QB market-rule readout above is ~100 log lines on a main
+  // slate; let the browser paint them before the optimals take the thread.
+  await new Promise(r=>setTimeout(r,0));
+  let _optTick = Date.now(), _optLogged = 0;
   // `id` rides along so nflOptimalForSim can look a QB up in the per-QB stack
   // overrides (and match an explicit partner list) without a pool round-trip.
   const cands=pool.map((p,i)=>({i, id:p.id, pos:nflPosOf(p), sal:p.salary||0, score:0,
@@ -34755,8 +35046,14 @@ async function runNflSimGenInner(){
     }
     if(!lu) ruleMisses++;
     addCand(lu, cptIdx);
-    if(s>0&&s%100===0){
-      if(s%500===0) log(`  optimals: ${s.toLocaleString()}/${simsDone.toLocaleString()}…`);
+    // ck103: YIELD ON THE CLOCK, NOT ON A COUNT. One optimal is 1-13 ms
+    // depending on the pool, so a fixed 100-sim stride was a 0.2 s pause on a
+    // small slate and a 2.5 s one on a 746-player main slate — the second
+    // largest synchronous block in the run after the field draw. 60 ms keeps
+    // the frame budget whatever the slate costs.
+    if(s>0 && (s%20===0) && (Date.now()-_optTick)>=60){
+      _optTick = Date.now();
+      if(s-_optLogged>=500){ _optLogged=s; log(`  optimals: ${s.toLocaleString()}/${simsDone.toLocaleString()}…`); }
       await new Promise(r=>setTimeout(r,0));
       if(window._genCancelled){ log('Cancelled.'); done(); return; }
     }
@@ -37351,6 +37648,21 @@ function hbField(slate, ctx, contest, opts){
     scenarios=reuse.scenarios; cptScen=reuse.cptScen; fields=reuse.fields;
     idx=reuse.simIdx;
   } else {
+    // ── ck103: THE PRICING FIELD IS SEEDED ON ITS OWN KEY ──────────────────
+    // The draw below was the largest synchronous block in the app after the
+    // generator's own (72 s of a 412 s NFL main-slate run, in ONE call), and it
+    // is now drawn in workers by `hbFieldPrewarm` while the GPP kernel searches.
+    // A prewarm can only hand back the right opponents if the SCENARIOS it drew
+    // them under are the ones this pass would have drawn, so the whole draw —
+    // ownership scenarios, the K fields, the sharp injection — runs on a stream
+    // seeded from `drawKey`, which is exactly the fingerprint of everything the
+    // field depends on. Pricing the same board twice now gives the same number
+    // instead of two Monte-Carlo draws, which is what the staleness stamp has
+    // claimed since ck95.
+    const _seed=_h32n(drawKey);
+    const _origRnd=Math.random;
+    try {
+    Math.random=mulberry32(_seed);
     // Same floor the generator's baseOwn uses. On showdown p.own IS flex own.
     // Same ownership temperature too — the stakes level is a property of the
     // contest, and runUFCContestEV applies it at the identical point.
@@ -37389,10 +37701,36 @@ function hbField(slate, ctx, contest, opts){
       sharp.push({idxs:ii, w:Math.max(1, c.w||1)});
     }
     const totW=sharp.reduce((s,x)=>s+x.w,0);
+    // ck103: the PROBE pass. `hbFieldPrewarm` calls this function with
+    // `_hbPreDrawRequest` set purely to reach this point — it wants the draw's
+    // inputs, computed by this one prologue rather than by a copy of it that
+    // could drift. It records them and stops; nothing is drawn and nothing is
+    // cached, so the real call a moment later runs the prologue again (a pool
+    // filter and a key string) and finds the prewarmed opponents below.
+    if(window._hbPreDrawRequest && !(window._hbPreDraw && window._hbPreDraw.key===drawKey)){
+      window._hbPreDrawRequest={key:drawKey, pool, N, KK, SD, seed:_seed,
+                                scenarios, cptScen, opts};
+      return null;
+    }
+    // The prewarmed draw, if it is for exactly this field.
+    let _raw=null;
+    { const _pre=window._hbPreDraw;
+      if(_pre && _pre.key===drawKey && _pre.raw && _pre.raw.length===KK) _raw=_pre.raw;
+      window._hbPreDraw=null; }
+    if(!_raw){
+      _raw=[];
+      for(let k=0;k<KK;k++){
+        Math.random=mulberry32(fieldSeedMix(_seed, k));
+        _raw.push(SD ? sampleShowdownField(pool, N, scenarios[k], cptScen[k], opts)
+                     : sampleUfcField(pool, N, scenarios[k], opts));
+      }
+    }
+    // The sharp injection draws too, and must not depend on how the fields got
+    // here — its own stream, off the same seed.
+    Math.random=mulberry32(fieldSeedMix(_seed, 0x5A12));
     fields=[];
     for(let k=0;k<KK;k++){
-      const drawn=SD ? sampleShowdownField(pool, N, scenarios[k], cptScen[k], opts)
-                     : sampleUfcField(pool, N, scenarios[k], opts);
+      const drawn=_raw[k];
       const f=(drawn||{}).field;
       if(!f || !f.length) return null;
       if(totW>0){
@@ -37405,6 +37743,7 @@ function hbField(slate, ctx, contest, opts){
       }
       fields.push(f);
     }
+    } finally { Math.random=_origRnd; }
     idx=_foldSimIdx(ctx.simsDone, _fold);
     if(idx.length>HB_MAX_SIMS){
       const st=idx.length/HB_MAX_SIMS, out=[];
@@ -37679,10 +38018,39 @@ function priceBoardHeldOut(entries, opts){
 // on the card is no longer about the lineup you are looking at. The stamp is
 // everything the price actually depends on, and a card whose stamp no longer
 // matches is dimmed and offers to re-price rather than quietly lying.
-function _h32(s){
+function _h32(s){ return _h32n(s).toString(36); }
+// ck103: the same FNV-1a, as a number — `hbField` seeds the pricing field's RNG
+// on it (see the draw block there).
+function _h32n(s){
   let h=2166136261>>>0;
   for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619)>>>0; }
-  return h.toString(36);
+  return h>>>0;
+}
+// ── ck103: DRAW THE PRICING FIELD OFF THE MAIN THREAD ───────────────────────
+// Runs `hbField`'s own prologue as a PROBE to learn what to draw (one source of
+// truth for the drawKey, the pool and the ownership scenarios), draws the K
+// fields in workers, and leaves them where the next real `hbField` call picks
+// them up. `reserve` holds worker lanes back for a kernel that is searching at
+// the same time. Resolves true when a field was prewarmed. Never throws and
+// never changes an answer: if anything goes wrong the synchronous draw runs.
+async function hbFieldPrewarm(slate, ctx, contest, opts, reserve){
+  if(!fieldWorkersUsable()) return false;
+  let req=null;
+  try {
+    window._hbPreDraw=null;
+    window._hbPreDrawRequest={probe:true};
+    try { hbField(slate, ctx, contest, opts); } finally {
+      req=window._hbPreDrawRequest; window._hbPreDrawRequest=null; }
+  } catch(e){ window._hbPreDrawRequest=null; return false; }
+  // No key ⇒ either the field was already cached or the slate cannot build one.
+  // Showdown draws through sampleShowdownField, which does not travel.
+  if(!req || !req.key || req.SD) return false;
+  try {
+    const drawn=await sampleFieldSet(req.pool, req.N, req.scenarios, req.opts, req.seed, reserve);
+    if(!drawn) return false;
+    window._hbPreDraw={key:req.key, raw:drawn};
+    return true;
+  } catch(e){ window._hbPreDraw=null; return false; }
 }
 // The ownership column, as one short token. Used BOTH by the price stamp and
 // by `hbField`'s cache key — they must agree or a "re-price" would hand back
