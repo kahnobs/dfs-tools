@@ -1604,6 +1604,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
       <!-- Showdown only: Players / Captain segmented control (filled by renderPool). -->
       <button class="show-hidden-btn" id="showHiddenBtn" onclick="toggleShowHidden()">👁 Hidden</button>
       <button class="show-hidden-btn" id="unhideAllBtn" onclick="unhideAll()" style="display:none;">✕ Unhide All</button>
+      <button class="show-hidden-btn" id="hideOutBtn" onclick="hideAllOut()" style="display:none;" title="Hide every player DraftKings lists as OUT / IR / suspended (⛔) from the pool — one click instead of one ✕ per row. OUT players never reach a generated lineup anyway; this just clears them off the list.">⛔ Hide OUT</button>
       <button class="show-hidden-btn" id="resetMaxExpBtn" onclick="resetMaxExposures()" style="display:none;" title="Clear all MAX% overrides back to default (100)">↺ Reset Max</button>
       <button class="show-hidden-btn" id="updatePoolBtn" onclick="openUpdatePoolModal()" title="Re-upload CSV to refresh projections, ownership, salary, tee times">↺ Update</button>
       <button class="show-hidden-btn" id="dkCsvBtn" onclick="document.getElementById('dkCsvFile').click()" title="Upload a DraftKings DKSalaries.csv or DKEntries.csv: attaches game times, home/away and positions to your players, and loads your contest entries for the DK Entries fill" style="display:none;border-color:rgba(83,180,255,.35);color:#53b4ff;">⬆ DK CSV</button>
@@ -6496,7 +6497,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck98/2026-09-13';
+const BUILD_ID = '2.0/ck100/2026-09-13';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -7354,6 +7355,43 @@ function refreshHiddenBadge(){
   } else { nb.classList.remove('on'); nb.textContent=''; }
   const uab=document.getElementById('unhideAllBtn');
   if(uab) uab.style.display=n>0?'':'none';
+  // ck100: "⛔ Hide OUT" shows only while an OUT-listed player is still visible
+  // in some pool; the count is how many one click would remove.
+  const hob=document.getElementById('hideOutBtn');
+  if(hob){
+    const k=hideAllOutCandidates(slate).length;
+    hob.style.display=k>0?'':'none';
+    hob.textContent=`⛔ Hide OUT (${k})`;
+  }
+}
+// The OUT-listed players (DK Status O / IR / SUS → slate._outIds) that are
+// still visible in at least one pool. On showdown a man is "still visible" if
+// either the captain or the flex list shows him.
+function hideAllOutCandidates(slate){
+  if(!slate || slate.sport!=='nfl' || typeof nflOutIds!=='function') return [];
+  const SD=typeof isShowdown==='function' && isShowdown(slate);
+  const hid=new Set(slate.hiddenIds||[]);
+  const cpt=SD?new Set(sdCptHiddenList(slate)):null;
+  const have=new Set((slate.players||[]).map(p=>p.id));
+  return nflOutIds(slate).filter(id=>have.has(id) && (!hid.has(id) || (SD && !cpt.has(id))));
+}
+function hideAllOut(){
+  const slate=activeSlate(); if(!slate) return;
+  const ids=hideAllOutCandidates(slate);
+  if(!ids.length){ showToast('No OUT players left to hide.','ok'); return; }
+  const SD=typeof isShowdown==='function' && isShowdown(slate);
+  slate.hiddenIds=slate.hiddenIds||[];
+  ids.forEach(id=>{
+    if(!slate.hiddenIds.includes(id)) slate.hiddenIds.push(id);
+    if(SD && !sdCptHiddenList(slate).includes(id)) sdToggleCptHidden(slate,id);
+  });
+  // An OUT man cannot be in the lineup you are building either.
+  slate.currentLineup=(slate.currentLineup||[]).filter(x=>!ids.includes(x));
+  if(SD && ids.includes(slate.sdCaptain)) slate.sdCaptain=null;
+  refreshHiddenBadge();
+  save(); renderAll();
+  if(typeof renderNflQbStacks === 'function' && document.getElementById('nflQbStackWrap')) renderNflQbStacks();
+  showToast(`⛔ Hid ${ids.length} OUT player${ids.length===1?'':'s'}${SD?' from both pools':''}.`,'ok');
 }
 
 function unhideAll(){
@@ -7473,6 +7511,12 @@ function setPosFilter(f){
   const slate=activeSlate(); if(!slate) return;
   slate._posFilter = (f && f!=='ALL') ? f : null;
   save(); renderPool();
+}
+// ck99: the Exposure tab's own position filter (independent of the pool's).
+function setExpPosFilter(f){
+  const slate=activeSlate(); if(!slate) return;
+  slate._expPosFilter = (f && f!=='ALL') ? f : null;
+  save(); renderExposure();
 }
 function renderPosFilterBar(slate){
   const el=document.getElementById('posFilterBar'); if(!el) return;
@@ -10505,12 +10549,33 @@ function renderExposure(){
   // All non-hidden players, sorted by exposure desc. ck84: on showdown a man
   // hidden from only ONE pool is still buildable, so only "hidden everywhere"
   // drops him off the exposure list.
-  const allPlayers=(slate.players||[])
+  // ck99: position filter (NFL). The chip row reuses the pool's `.pf-btn`
+  // chips and `nflPosMatch`, so FLEX = RB/WR/TE exactly as it does there. The
+  // counts on the chips are "players USED at that position" over the saved
+  // board, so the row reads as a summary even before you click. Exposure %
+  // stays lineups-based (count / saved lineups) whatever the filter — the
+  // filter changes which rows you see, never what a percentage means.
+  const isNflSlate=(slate.sport==='nfl');
+  const posF=isNflSlate ? (slate._expPosFilter||'ALL') : 'ALL';
+  const everyPlayer=(slate.players||[])
     .filter(p=>SDx ? !poolHiddenEverywhere(slate,p.id) : !hidden.has(p.id))
     .map(p=>({...p,count:ec[p.id]||0,cpt:cc[p.id]||0}))
     .sort((a,b)=>b.count-a.count);
+  const allPlayers=everyPlayer.filter(p=>!isNflSlate || nflPosMatch(posF,p));
 
   const maxC=allPlayers.find(p=>p.count>0)?.count||1;
+  let posBar='';
+  if(isNflSlate){
+    const hasK=everyPlayer.some(p=>nflPosOf(p)==='K');
+    const tabs=[['ALL','All'],['QB','QB'],['RB','RB'],['WR','WR'],['TE','TE'],['FLEX','FLEX'],['DST','DST']];
+    if(hasK||SDx) tabs.push(['K','K']);
+    posBar=`<div class="pos-filter-bar" style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:2px 0 8px;">`
+      +`<span class="pf-lbl">POS</span>`
+      +tabs.map(([k,l])=>{
+        const used=everyPlayer.filter(p=>p.count>0&&nflPosMatch(k,p)).length;
+        return `<button class="pf-btn${posF===k?' active':''}" onclick="setExpPosFilter('${k}')" title="${k==='FLEX'?'RB / WR / TE — everyone who can fill the FLEX slot':k==='ALL'?'Every position':'Only '+l+' exposure'}">${l}<span class="pf-n">${used}</span></button>`;
+      }).join('')+`</div>`;
+  }
 
   const dHTML=(SDx?`<div style="display:flex;justify-content:flex-end;gap:6px;padding:0 4px 4px;font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);"><span>Total</span><span style="width:40px;text-align:right;color:var(--accent);">CPT</span>${hasOwn?'<span style="width:38px;text-align:right;" title="Captain leverage: captain exposure% − captain own%">LevC</span><span style="width:38px;text-align:right;" title="Flex leverage: flex exposure% − flex own%">LevF</span>':''}</div>`:'')+allPlayers.map(p=>{
     const pct=total>0?p.count/total:0;
@@ -10580,9 +10645,9 @@ function renderExposure(){
 
   panel.innerHTML=`<div>
     <div class="exp-title" style="display:flex;align-items:center;justify-content:space-between;">
-      <span>Player Exposure <span class="exp-badge">${allPlayers.filter(p=>p.count>0).length}/${allPlayers.length} used</span></span>
+      <span>Player Exposure <span class="exp-badge">${allPlayers.filter(p=>p.count>0).length}/${allPlayers.length} used${posF!=='ALL'?' · '+posF:''}</span></span>
     </div>
-    ${legend}${dHTML}
+    ${posBar}${legend}${allPlayers.length?dHTML:'<div class="no-data">No players at this position in the pool.</div>'}
   </div>
   <div style="margin-top:16px;">
     <div class="exp-title">Repeated Combos <span class="exp-badge">2+ times</span></div>
