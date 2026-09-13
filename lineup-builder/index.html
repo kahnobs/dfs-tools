@@ -5605,6 +5605,22 @@ function applyNflStats(p, row, headers){
   setPct('base_rush',  /^base\s*rush\s*%?$/i);
   setPct('base_td',    /^base\s*td\s*%?$/i);
   setStr('base_src',   /^base\s*src$/i);
+  // ck101: a quarterback does not have a target share. Cooper Rush (ATL QB3)
+  // arrived with Tgt 15.1% / RecYd 16.9% — Cooper Kupp's Clay row, left on the
+  // sheet cell after the slate re-sorted and Rush's name landed on that row
+  // (the puller only wrote cells it had a value for; it now blanks the rest,
+  // but a sheet pulled before that fix can still carry the leftovers). A
+  // receiving share on a QB is a stale cell by definition, so drop it here
+  // rather than let the pie hand him a receiver's targets. Rushing and TD
+  // shares are legitimate for a QB and stay. DST/K rows carry no shares.
+  // The clamp is to a KNOWN ZERO, not to blank: blank would tell the remainder
+  // fill "no opinion" and let him absorb targets, which is the opposite of the
+  // point. A QB's genuine "0.0" from Clay is already a known zero and stays.
+  { const _pos = (typeof nflPosOf === 'function') ? nflPosOf(p) : null;
+    if(_pos === 'QB'){
+      if(p.base_tgt   != null && p.base_tgt   > 0){ p._baseStale = (p._baseStale||[]).concat('tgt');   p.base_tgt   = 0; }
+      if(p.base_recyd != null && p.base_recyd > 0){ p._baseStale = (p._baseStale||[]).concat('recyd'); p.base_recyd = 0; }
+    } }
   setNum('game_ou', /^o\/u$/i);
   setNum('spread',  /^spread$/i);
   setNum('tm_tot',  /^tm\s*tot(al)?$/i);
@@ -6497,7 +6513,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck100/2026-09-13';
+const BUILD_ID = '2.0/ck102/2026-09-13';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -10638,9 +10654,14 @@ function renderExposure(){
     return `<div class="combo-row"><div class="combo-top"><div class="combo-names">${names.join('<br>')}</div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px"><div class="combo-ct">×${count}</div><div class="combo-type">${type}</div></div></div><div class="combo-bar-track"><div class="combo-bar-fill" style="width:${bw}%"></div></div></div>`;
   }).join(''):'<div class="no-data">No repeated combos yet.</div>';
 
-  const legend=hasOwn?`<div style="display:flex;gap:12px;font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);margin-bottom:6px;">
-    ${SDx?`<span>Exp%</span><span style="color:var(--accent);">CPT%</span><span title="Captain exposure% − captain own%">LevC</span><span title="Flex exposure% − flex own%">LevF</span>`
-        :`<span>Exp%</span><span style="color:var(--muted);">Own%</span><span>Lev</span>`}
+  // ck102: the legend is a HEADER ROW — right-aligned, each label the same
+  // width as the cell it names in the rows below (exp-pct 28px, CPT 40px, own
+  // 32px, lev 38px, gap 6px, plus the row's 7px right padding), so the labels
+  // sit over their columns instead of drifting to the left edge.
+  const _h=(t,w,extra='')=>`<span style="display:inline-block;width:${w}px;text-align:right;${extra}">${t}</span>`;
+  const legend=hasOwn?`<div style="display:flex;justify-content:flex-end;gap:6px;padding-right:8px;font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);margin-bottom:4px;">
+    ${SDx?_h('Exp%',28)+_h('CPT%',40,'color:var(--accent);')+_h('<span title="Captain exposure% − captain own%">LevC</span>',38)+_h('<span title="Flex exposure% − flex own%">LevF</span>',38)
+        :_h('Exp%',28)+_h('Own%',32)+_h('Lev',38)}
   </div>`:'';
 
   panel.innerHTML=`<div>
