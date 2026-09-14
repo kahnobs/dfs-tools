@@ -616,7 +616,9 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .saved-lineup.dup{border-color:var(--red);background:rgba(239,68,68,.07);animation:pulse .5s ease;}
 @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.02)}}
 .saved-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;}
-.saved-num{font-family:'Bebas Neue',sans-serif;font-size:12px;color:var(--accent2);}
+.saved-num{font-family:'Bebas Neue',sans-serif;font-size:12px;color:var(--accent2);display:flex;align-items:center;gap:8px;}
+.saved-stack-badge .stack-tag{font-size:8px;padding:0 5px;line-height:14px;opacity:.85;}
+.saved-stack-badge .stack-tag .stack-warn,.saved-stack-badge .stack-tag span{font-size:8px;}
 .saved-sal{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);}
 /* Reserve 2 lines for names + 2 rows for stats so every saved card is the SAME
    height regardless of name length or whether it carries Sim/EV stats. Short
@@ -6513,7 +6515,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck103/2026-09-13';
+const BUILD_ID = '2.0/ck106/2026-09-14';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -7396,6 +7398,7 @@ function hideAllOut(){
   const ids=hideAllOutCandidates(slate);
   if(!ids.length){ showToast('No OUT players left to hide.','ok'); return; }
   const SD=typeof isShowdown==='function' && isShowdown(slate);
+  if(SD) sdMigrateHiddenPools(slate);
   slate.hiddenIds=slate.hiddenIds||[];
   ids.forEach(id=>{
     if(!slate.hiddenIds.includes(id)) slate.hiddenIds.push(id);
@@ -7437,6 +7440,9 @@ function toggleHide(id,e){
   if(typeof isShowdown==='function' && isShowdown(slate) && sdHiddenPoolOf(slate)==='cpt'){
     sdToggleCptHidden(slate,id);
   } else {
+    // ck104: materialise the captain set BEFORE touching hiddenIds, so the two
+    // pools can never alias (see createSlate / sdMigrateHiddenPools).
+    if(typeof isShowdown==='function' && isShowdown(slate)) sdMigrateHiddenPools(slate);
     slate.hiddenIds=slate.hiddenIds||[];
     if(slate.hiddenIds.includes(id)){slate.hiddenIds=slate.hiddenIds.filter(x=>x!==id);}
     else{
@@ -8994,11 +9000,17 @@ function renderSaved(){
     if(top10Eq!=null)  stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top10</span>${(top10Eq/100).toFixed(1)}</span>`);
     if(top20Eq!=null)  stats.push(`<span class="saved-stat"><span class="saved-stat-lbl">Top20</span>${(top20Eq/100).toFixed(1)}</span>`);
     if(own!=null)      stats.push(`<span class="saved-stat" style="color:var(--muted);"><span class="saved-stat-lbl" style="opacity:.7;">Own</span>${own.toFixed(1)}%</span>`);
+    // ck105: on SHOWDOWN the stack chip moves up beside the lineup number as a
+    // small badge — the label matters less there and was pushing the metrics
+    // onto a second line. Classic keeps it in the stats row where it reads
+    // with the numbers.
+    const _stackHtml = isNfl(slate) ? (nflStackLabelHtml(slate, Array.isArray(lineup)?lineup:players.map(p=>p.id), isShowdown(slate)?players[0]&&players[0].id:null) || '') : '';
+    const _sdBadge = (isShowdown(slate) && _stackHtml) ? `<span class="saved-stack-badge">${_stackHtml}</span>` : '';
     return `<div class="saved-lineup" id="saved-${i}">
-      <div class="saved-top"><div class="saved-num">Lineup #${i+1}</div>
+      <div class="saved-top"><div class="saved-num">Lineup #${i+1}${_sdBadge}</div>
       <div class="saved-actions"><div class="saved-sal">${fmt(sal)}</div><button class="lu-det-btn" onclick="toggleSavedDetails(${i},this)" title="Outcome distribution and per-player sim numbers (needs a sim run for this slate)">Details</button><button class="saved-load" onclick="loadLineup(${i})">↑ Edit</button><button class="saved-del" onclick="deleteLineup(${i})">✕</button></div></div>
       <div class="saved-names">${players.map((p,k)=>(isShowdown(slate)&&k===0)?`<span class="sd-cpt-tag">CPT</span> <b>${p.name}</b>`:p.name).join(' · ')}</div>
-      ${stats.length?`<div class="saved-stats">${(isNfl(slate)?[nflStackLabelHtml(slate, Array.isArray(lineup)?lineup:players.map(p=>p.id), isShowdown(slate)?players[0]&&players[0].id:null)].filter(Boolean):[]).concat(stats).join('<span class="saved-stat-sep">·</span>')}</div>`:''}
+      ${stats.length?`<div class="saved-stats">${((_stackHtml && !isShowdown(slate))?[_stackHtml]:[]).concat(stats).join('<span class="saved-stat-sep">·</span>')}</div>`:''}
       <div class="lu-det-wrap" id="svdet${i}" style="display:none"></div>
     </div>`;
   }).join('');
@@ -9083,6 +9095,40 @@ function dkFieldLabel(c){
   if(c.maxEntries===1) return 'single entry';
   if(c.maxEntries) return c.maxEntries+'-max';
   return 'multi-entry';
+}
+// ck106: the field size a DK contest NAME implies. "NFL $175K mini-MAX" at
+// $0.50 is a ~412,000-entry contest (prize pool ÷ (fee × (1 − rake)), DK GPP
+// rake ≈ 15%). Week 1 was priced at 25,000 entries and entered into that
+// 416,171-entry contest — a 17× steeper ladder than the board was built for —
+// and nothing on screen said so. Returns null when the name carries no pool.
+const DK_GPP_RAKE = 0.15;
+function dkImpliedField(c){
+  const nm = String(c && c.name || '');
+  // A qualifier's headline number is the TARGET contest's pool, not this one's.
+  if(/qualifier|satellite|ticket|step\s*\d/i.test(nm)) return null;
+  const m = /\$\s*([\d.,]+)\s*([KkMm])\b/.exec(nm);
+  const fee = parseFloat(String(c && c.fee || '').replace(/[^0-9.]/g, ''));
+  if(!m || !(fee > 0)) return null;
+  const pool = parseFloat(m[1].replace(/,/g, '')) * (/m/i.test(m[2]) ? 1e6 : 1e3);
+  if(!(pool > 0)) return null;
+  return Math.round(pool / (fee * (1 - DK_GPP_RAKE)));
+}
+function dkFieldMismatch(slate, st){
+  if(!slate || !st || !(slate._ufcEv && slate._ufcEv.on)) return null;
+  const cur = parseInt(slate._ufcEv.fieldSize) || 0; if(!(cur > 0)) return null;
+  // The contest you put the most entries into is the one the board is for.
+  const big = (st.contests||[]).slice().sort((a,b)=>b.count-a.count)[0]; if(!big) return null;
+  const imp = dkImpliedField(big); if(!imp) return null;
+  const ratio = Math.max(imp/cur, cur/imp);
+  return ratio >= 1.75 ? {contest:big, implied:imp, current:cur, ratio} : null;
+}
+function dkUseImpliedField(n){
+  const slate=activeSlate(); if(!slate) return;
+  slate._ufcEv = Object.assign({}, slate._ufcEv, {fieldSize: parseInt(n)||slate._ufcEv.fieldSize});
+  save(); renderDkEntriesModal();
+  if(typeof renderContestEvPanel==='function') try{ renderContestEvPanel(); }catch(e){}
+  if(typeof repriceAllSaved==='function') try{ repriceAllSaved(); }catch(e){}
+  showToast(`Contest EV field set to ${(parseInt(n)||0).toLocaleString()} entries — saved lineups re-priced.`,'ok');
 }
 // The slot header is the only reliable tell of which DK game a file belongs
 // to, and there are three shapes:
@@ -10147,7 +10193,7 @@ function renderDkEntriesModal(){
       const badf=c.format!==res.slateFmt;
       return `<tr data-cid="${c.contestId}" style="border-top:1px solid var(--border);">
         <td style="padding:6px 8px;font-size:11px;color:var(--text);">${esc(c.name)}
-          <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;">${esc(c.fee)} · ${c.count} entr${c.count===1?'y':'ies'} · ${c.fieldLabel}${badf?' · <span style="color:var(--red)">format mismatch</span>':''}</div></td>
+          <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;">${esc(c.fee)} · ${c.count} entr${c.count===1?'y':'ies'} · ${c.fieldLabel}${dkImpliedField(c)?' · ~'+dkImpliedField(c).toLocaleString()+' field':''}${badf?' · <span style="color:var(--red)">format mismatch</span>':''}</div></td>
         <td style="padding:6px 8px;white-space:nowrap;">${balSel(c.contestId,plan)} ${over}</td>
         <td class="dk-fill-n" style="padding:6px 8px;font-size:11px;font-family:'DM Mono',monospace;color:${n?'var(--accent)':'var(--muted)'};text-align:right;">${n}/${c.count}</td>
       </tr>`;
@@ -10158,7 +10204,7 @@ function renderDkEntriesModal(){
     const bad=c.format!==res.slateFmt;
     return `<tr data-cid="${c.contestId}" style="border-top:1px solid var(--border);">
       <td style="padding:6px 8px;font-size:11px;color:var(--text);">${esc(c.name)}
-        <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;">${esc(c.fee)} · ${c.count} entr${c.count===1?'y':'ies'} · ${c.fieldLabel}${bad?' · <span style="color:var(--red)">format mismatch</span>':''}</div></td>
+        <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;">${esc(c.fee)} · ${c.count} entr${c.count===1?'y':'ies'} · ${c.fieldLabel}${dkImpliedField(c)?' · ~'+dkImpliedField(c).toLocaleString()+' field':''}${bad?' · <span style="color:var(--red)">format mismatch</span>':''}</div></td>
       <td style="padding:6px 8px;white-space:nowrap;">${modeSel(c.contestId,plan)} ${extra}</td>
       <td class="dk-fill-n" style="padding:6px 8px;font-size:11px;font-family:'DM Mono',monospace;color:${n?'var(--accent)':'var(--muted)'};text-align:right;">${n}/${c.count}</td>
     </tr>`;
@@ -10263,7 +10309,11 @@ function renderDkEntriesModal(){
       <div id="dkBalanceBars">${bars||'<div style="font-size:10px;color:var(--muted);">nothing assigned</div>'}${more}</div>`;
   }
   const filterOn=!!(slate._savedFilter && slate._savedFilter.v!=='' && !isNaN(parseFloat(slate._savedFilter.v)));
-  host.innerHTML=`
+  const _mm = dkFieldMismatch(slate, st);
+  const _mmHtml = _mm ? `<div style="margin-bottom:9px;padding:7px 10px;border:1px solid rgba(255,107,107,.45);background:rgba(255,107,107,.08);border-radius:6px;font-size:11px;color:var(--text);">
+      ⚠ Contest EV is priced for <b>${_mm.current.toLocaleString()}</b> entries, but <b>${esc(_mm.contest.name)}</b> (${esc(_mm.contest.fee)}) implies a field of about <b>${_mm.implied.toLocaleString()}</b>. The payout ladder and the field model both depend on it.
+      <button onclick="dkUseImpliedField(${_mm.implied})" style="margin-left:8px;background:var(--accent);color:#000;border:none;padding:3px 9px;border-radius:4px;font-size:10.5px;font-weight:600;cursor:pointer;">Use ${_mm.implied.toLocaleString()}</button></div>` : '';
+  host.innerHTML=`${_mmHtml}
     <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;margin-bottom:8px;">
       ${esc(st.fileName)} · ${st.contests.length} contest${st.contests.length===1?'':'s'} · ${res.total} entries · ${st.slots.join('/')} (${res.fileFmt})
       <button onclick="dkClearEntries()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:2px 7px;border-radius:4px;font-size:10px;cursor:pointer;margin-left:6px;">load another</button>
@@ -15765,7 +15815,11 @@ function fieldWorkerGlue(){
     if(opts.__posOf) opts.posOf = function(p){ return p._pos; };
     const orig = Math.random;
     let r = null, err = null;
-    try { Math.random = mulberry32(d.seed >>> 0); r = sampleUfcField(d.pool, d.N, d.own, opts); }
+    try { Math.random = mulberry32(d.seed >>> 0);
+          // ck104: SHOWDOWN draws through its own sampler (1 CPT at 1.5x + 5
+          // FLEX, two published ownership vectors). Same worker, same contract.
+          r = d.sd ? sampleShowdownField(d.pool, d.N, d.own, d.cptOwn, opts)
+                   : sampleUfcField(d.pool, d.N, d.own, opts); }
     catch(x){ err = String((x && x.stack) || x); }
     finally { Math.random = orig; }
     if(err || !r || !r.field || !r.field.length){ self.postMessage({k:d.k, error: err || 'empty field'}); return; }
@@ -15784,17 +15838,23 @@ function fieldWorkerGlue(){
       meta:{maxDev:r.maxDev, maxName:r.maxName, boardSigma:r.boardSigma,
             boardTopExposure:r.boardTopExposure, optShare:r.optShare,
             optTheta:r.optTheta, optTemp:r.optTemp, optPoolN:r.optPoolN,
-            clusterShare:r.clusterShare, clusterK:r.clusterK, clusterZipf:r.clusterZipf}}, xfer);
+            clusterShare:r.clusterShare, clusterK:r.clusterK, clusterZipf:r.clusterZipf,
+            cptRate:(r.cptRate ? Array.prototype.slice.call(r.cptRate) : null)}}, xfer);
   };
 }
 function fieldWorkerSource(){
   return ['const FIELD_CLUSTER=' + JSON.stringify(FIELD_CLUSTER) + ';',
           'const FIELD_CLUSTER_BY_SPORT=' + JSON.stringify(FIELD_CLUSTER_BY_SPORT) + ';',
           'const FIELD_OPT_KAPPA=' + FIELD_OPT_KAPPA + ', FIELD_OPT_POOL_MAX=' + FIELD_OPT_POOL_MAX +
-            ', FIELD_OPT_POOL_TEMP=' + FIELD_OPT_POOL_TEMP + ', OPT_DISTINCT_TRIES=' + OPT_DISTINCT_TRIES + ';',
+            ', FIELD_OPT_POOL_TEMP=' + FIELD_OPT_POOL_TEMP + ', OPT_DISTINCT_TRIES=' + OPT_DISTINCT_TRIES +
+            ', FIELD_OPT_POOL_FRAC=' + FIELD_OPT_POOL_FRAC + ', SD_CPT_BUDGET=' + SD_CPT_BUDGET +
+            ', SALARY_CAP=' + SALARY_CAP + ';',
+          'const CPT_MULT=' + CPT_MULT + ';',
+          'const cptSalaryOf=' + cptSalaryOf.toString() + ';',
           mulberry32.toString(), sdFloorGate.toString(), ufcSameFight.toString(),
           fieldClusterFor.toString(), fieldConsensusTopK.toString(), fieldBoardTilts.toString(),
-          sampleUfcField.toString(),
+          fieldOptEnumerateSd.toString(),
+          sampleUfcField.toString(), sampleShowdownField.toString(),
           '(' + fieldWorkerGlue.toString() + ')();'].join('\n');
 }
 // The player rows the sampler actually reads, and nothing else — a slate player
@@ -15843,8 +15903,12 @@ function fieldWorkersUsable(){
 }
 // Draw one field per ownership scenario. Returns the same shape sampleUfcField
 // returns, one per scenario, or null if any scenario came back empty.
-async function sampleFieldSet(pool, N, scenarios, opts, seed, reserve){
+// ck104: `extra.sd` + `extra.cptScen` route the draw through
+// sampleShowdownField instead, one captain scenario per ownership scenario.
+async function sampleFieldSet(pool, N, scenarios, opts, seed, reserve, extra){
   const K = scenarios.length;
+  const SD = !!(extra && extra.sd), cptScen = (extra && extra.cptScen) || null;
+  if(SD && (!cptScen || cptScen.length !== K)) return null;
   const seeds = [];
   for(let k=0;k<K;k++) seeds.push(fieldSeedMix(seed, k));
   const runSync = () => {
@@ -15853,7 +15917,8 @@ async function sampleFieldSet(pool, N, scenarios, opts, seed, reserve){
     try {
       for(let k=0;k<K;k++){
         Math.random = mulberry32(seeds[k]);
-        const r = sampleUfcField(pool, N, scenarios[k], opts);
+        const r = SD ? sampleShowdownField(pool, N, scenarios[k], cptScen[k], opts)
+                     : sampleUfcField(pool, N, scenarios[k], opts);
         if(!r || !r.field || !r.field.length) return null;
         out.push(r);
       }
@@ -15873,7 +15938,9 @@ async function sampleFieldSet(pool, N, scenarios, opts, seed, reserve){
     const feed = () => {
       if(failed || next >= K){ try { w.terminate(); } catch(e){} resolve(null); return; }
       const k = next++;
-      w.postMessage({k, N, seed:seeds[k], own:scenarios[k], pool:marshalled, opts:wOpts});
+      w.postMessage({k, N, seed:seeds[k], own:scenarios[k],
+                     cptOwn: SD ? cptScen[k] : null, sd: SD,
+                     pool:marshalled, opts:wOpts});
     };
     w.onerror = e => { failed = failed || ('worker: ' + ((e && e.message) || 'failed'));
       try { w.terminate(); } catch(x){} resolve(null); };
@@ -15894,6 +15961,11 @@ async function sampleFieldSet(pool, N, scenarios, opts, seed, reserve){
   const res = await Promise.all(lanesOut);
   if(res.some(x => x === 'no-worker')) return runSync();
   if(failed){
+    // ck104: A FALLBACK IS A PERFORMANCE CLIFF, NOT A DETAIL. The worker missing
+    // one constant put the showdown draw back on the main thread — 57 s blocks —
+    // and nothing said so. The reason is recorded where a run log and a harness
+    // can both see it, and `test_ck104_fieldsports` fails if it is ever set.
+    if(typeof window !== 'undefined') window.__fieldWorkerFallback = String(failed);
     if(typeof console !== 'undefined' && console.warn) console.warn('field worker fell back: ' + failed);
     return runSync();
   }
@@ -17157,6 +17229,16 @@ const EVCAL_SEED = [
    ingestKey:'ingest-194798545',
    fieldSize:35525, n:40, predWinRate:0.00062765, predCashRate:0.2854, predTop1Rate:0.02445, predTop10Rate:0.1509,
    obsWins:0, obsTop1:0, obsTop10:3, obsCash:9, seeded:true},
+  // ck106 · NFL Week 1 main slate 2026-09-13, DK 193028212 ($175K mini-MAX,
+  // 416,171 entries, $0.50). The ck100 150-lineup board AS BUILT (Sim CSV
+  // export run 4), re-priced on the real field size (the run itself was priced
+  // at 25,000). Realized from the standings file: 52 cashed (paid through
+  // 91,558), 23 top-10%, 0 top-1%, 0 wins; best rank 7,812 (an entry Matt
+  // late-swapped finished 3,688th, but that roster is not the board's).
+  {sport:'nfl', key:'seed-wk1-main-2026-09-13', file:'NFL Wk1 main slate $175K mini-MAX (ck100 board)', at:1757808000000,
+   ingestKey:'ingest-193028212',
+   fieldSize:416171, n:150, predWinRate:0.0000102, predCashRate:0.331, predTop1Rate:0.0303, predTop10Rate:0.181,
+   obsWins:0, obsTop1:0, obsTop10:23, obsCash:52, seeded:true},
 ];
 function evCalLoad(){
   let v = null;
@@ -18098,14 +18180,32 @@ async function runUFCContestEV(ctx){
   // The dup key must separate two lineups that differ only in who wears the C:
   // they are different salaries, different scores and different DK entries.
   const _fkey = l => l.slice().sort((a,b)=>a-b).join('|') + (_SD ? '|C'+l[0] : '');
+  // ── ck104: EVERY SPORT'S FIELD BUILD RUNS IN WORKERS ──────────────────────
+  // ck92 raised this draw from NF = 2,000 to NF = 20,000 for every sport, which
+  // multiplied the cost of the one phase that was still on the main thread and
+  // made it the "page unresponsive" block on UFC, PGA, NASCAR and NFL showdown
+  // exactly as it had become on NFL classic. Same machinery as ck103's
+  // (`sampleFieldSet`): K scenarios in parallel worker lanes, each on its own
+  // deterministic stream, with an in-page fallback on the same seeds.
+  // The seed is the run's (`_runSeed`, installed by every sport's seeded entry
+  // point) mixed with a call counter, so a run replays its own fields.
+  // The base is ONE draw from whatever stream is installed. On a SEEDED run
+  // (NFL, and UFC with Contest EV on) that stream is the run's mulberry32, so
+  // the draw — and therefore every field — replays from the seed. NASCAR and
+  // PGA are not seeded, so it is a fresh random and their fields still vary run
+  // to run exactly as they did before.
+  let _evFieldCall = 0;
+  const _evFieldBase = ((Math.floor(Math.random()*4294967296) >>> 0) ^ 0x4E1D5A) >>> 0;
   const sampleFields = async (scen) => {
     const flds=[], keyCounts=[];
     let d0=0, d0Name='', cpt0=null, bd0=null;
+    const _drawn = await sampleFieldSet(fieldPool, _SD ? NF_SD : NF, scen, _fieldOpts,
+      fieldSeedMix(_evFieldBase, _evFieldCall++), 0,
+      _SD ? {sd:true, cptScen: scen.map(x => _cptScenOf(x))} : null);
+    if(!_drawn) { log('⚠ Field sampler produced no lineups — check the Own% column, that the field pool can fill a legal roster under the salary cap/floor' + (_fieldOpts?', and that it covers every position.':'.')); return null; }
     for(let k=0;k<K;k++){
       const {field, maxDev, maxName, cptRate, boards, boardTopExposure,
-             optShare, optTheta, optTemp, optPoolN} = _SD
-        ? sampleShowdownField(fieldPool, NF_SD, scen[k], _cptScenOf(scen[k]), _fieldOpts)
-        : sampleUfcField(fieldPool, NF, scen[k], _fieldOpts);
+             optShare, optTheta, optTemp, optPoolN} = _drawn[k];
       // The sampler's OWN realized captain marginals, captured before the sharp
       // slice overwrites entries below — that injection deliberately moves the
       // composed field away from the published column, so a calibration check
@@ -18142,6 +18242,13 @@ async function runUFCContestEV(ctx){
   const smp0 = await sampleFields(scenarios);
   if(smp0===null) return null;
   let fields=smp0.fields, fieldKeyCounts=smp0.fieldKeyCounts;
+  // ck104: a worker fallback is a performance cliff (57 s blocks on showdown
+  // when one constant was missing from the worker source) and it used to be
+  // silent. Say it in the run log, once.
+  if(typeof window !== 'undefined' && window.__fieldWorkerFallback)
+    log('\u26a0 The field sampler could not use its worker on this run and drew in-page instead ('
+      + String(window.__fieldWorkerFallback).split('\n')[0]
+      + ') \u2014 expect long pauses. This is a defect; please report the message.');
   log(`Field: ${K}×${(_SD?NF_SD:NF).toLocaleString()} lineups sampled (as-projected scenario worst marginal miss ${smp0.dev0.toFixed(1)}pts on ${smp0.dev0Name}).`
     + (_SD ? (NF_SD >= F
         ? ` The sample IS the contest (${F.toLocaleString()} entries), so beaters and duplicates are COUNTED, not extrapolated.`
@@ -18276,10 +18383,17 @@ async function runUFCContestEV(ctx){
   const scoreArr = fieldPool.map(p=>simScoresById[p.id]||[]);
   // Field scorer, reusable so auto-exposure can re-score the same sampled field
   // under a "model wrong about the pillar" world.
-  const buildFieldSorted = (arrs, flds) => {
+  // ck104: ASYNC, yielding on the clock. This is simIdx.length x NF lineup
+  // totals plus one sort of NF per priced world, and ck92 took NF from 2,000 to
+  // 20,000 — measured at a 3.4 s uninterruptible block on the UFC Paris slate,
+  // the largest left in a non-NFL run once the field draw moved to workers.
+  // Pure arithmetic, no RNG: the sorted field is identical either way.
+  const buildFieldSorted = async (arrs, flds) => {
     const useFlds = flds || fields;
     const out=[];
+    let _bfsTick = Date.now();
     for(let s=0; s<simIdx.length; s++){
+      if((s & 15) === 15 && Date.now() - _bfsTick >= 50){ _bfsTick = Date.now(); await tick(); }
       const si = simIdx[s];
       const field = useFlds[s%K];
       const arr = new Float64Array(field.length);
@@ -18294,7 +18408,7 @@ async function runUFCContestEV(ctx){
     }
     return out;
   };
-  let fieldSorted = buildFieldSorted(scoreArr);   // reassigned after dominance repair (M3)
+  let fieldSorted = await buildFieldSorted(scoreArr);   // reassigned after dominance repair (M3)
   await tick(); if(window._genCancelled) return null;
 
   // 3) EV per candidate (all unique ex-post optimals).
@@ -18438,7 +18552,7 @@ async function runUFCContestEV(ctx){
         const smpV = await sampleFields(scenarios);
         if(smpV===null) return null;
         fields = smpV.fields; fieldKeyCounts = smpV.fieldKeyCounts;
-        fieldSorted = buildFieldSorted(scoreArr);
+        fieldSorted = await buildFieldSorted(scoreArr);
         await tick(); if(window._genCancelled) return null;
       }
     }
@@ -18631,7 +18745,7 @@ async function runUFCContestEV(ctx){
       const smpR = await sampleFields(scenarios);
       if(smpR===null) return null;
       fields = smpR.fields; fieldKeyCounts = smpR.fieldKeyCounts;
-      fieldSorted = buildFieldSorted(scoreArr);
+      fieldSorted = await buildFieldSorted(scoreArr);
       await tick(); if(window._genCancelled) return null;
       log(`Field re-sampled against the repaired candidate pool (duplication is measured on the lineups actually being priced).`);
     }
@@ -19440,7 +19554,7 @@ async function runUFCContestEV(ctx){
     const smp = await sampleFields(scen);
     if(smp===null) return null;
     return { scenarios:scen, fields:smp.fields, fieldKeyCounts:smp.fieldKeyCounts,
-             fieldSorted: buildFieldSorted(scoreArr, smp.fields) };
+             fieldSorted: await buildFieldSorted(scoreArr, smp.fields) };
   };
   const activateCtx = (ctx) => { scenarios=ctx.scenarios; fields=ctx.fields;
     fieldKeyCounts=ctx.fieldKeyCounts; fieldSorted=ctx.fieldSorted; };
@@ -19574,7 +19688,7 @@ async function runUFCContestEV(ctx){
       const capMap=new Map(pillars.map(p=>[p.id, Math.max(5, Math.round(p._simCut))]));
       const needs=pillars.some(p=> (sel.expCount[p.id]||0) > Math.ceil(capMap.get(p.id)/100*target));
       if(needs){
-        const fieldSortedW = buildFieldSorted(scoreArrW);
+        const fieldSortedW = await buildFieldSorted(scoreArrW);
         await tick(); if(window._genCancelled) return null;
         const rU=evalPortfolio(sel,scoreArr,fieldSorted), wU=evalPortfolio(sel,scoreArrW,fieldSortedW);
         const un={sel, evR:rU.ev, evW:wU.ev, deadR:rU.dead, deadW:wU.dead};
@@ -19943,6 +20057,17 @@ async function runUFCContestEV(ctx){
   // uses — so the run log, the preview chip, the saved card and
   // `_boardPredicted` are four views of ONE number.
   let _cal88 = null;
+  // ck104: this report pass draws its OWN independent 5 x 20,000 field (ck95),
+  // and on every sport but NFL classic it was the last big synchronous block
+  // left in the run. Draw it in worker lanes first; the sync draw inside
+  // `hbField` then finds it through the ck103 prewarm cache. There is no search
+  // to overlap it with here (the non-NFL selector runs on the main thread), so
+  // the win is the lanes and the unblocked thread, not concurrency.
+  try {
+    const _pctx = slateSimCtx(slate), _pcon = pricingContest(slate);
+    if(_pctx && _pcon && typeof hbFieldPrewarm === 'function')
+      await hbFieldPrewarm(slate, _pctx, _pcon, {fold:'report', reuseGenField:false}, 0);
+  } catch(e){}
   const _hoT0 = Date.now();
   try {
     const _ent = finalLineups.map(l=>({players:[...l], cptId:(_SD && l._sdCaptain)?l._sdCaptain:null}));
@@ -31369,6 +31494,40 @@ const NFL_GPP_BUDGET = {
   budgetMs:    75000,
   budgetMsPerLineup: 1600,
   budgetMsMax: 480000,
+  // ── CONVERGENCE STOP (checkpoint 104) ─────────────────────────────────────
+  // The cap above BINDS — a 150-lineup run climbs ~700 of 3,000 planned seeds —
+  // so an early stop can only ship if it cannot cost quality. The statistic it
+  // watches is therefore the one the portfolio greedy actually consumes: the
+  // SELECT-FOLD value of the menu. `convWindows` cuts the budget into equal
+  // windows; at each boundary every local optimum found so far is priced on the
+  // select fold (CACHED — the pricing pass after the search reuses the identical
+  // rows, so the statistic costs no extra pricing, only the sort) and G = the sum
+  // of the top `menuTarget` select-fold EVs. The search stops only after
+  // `convStreak` CONSECUTIVE windows have each improved G by less than `convEps`
+  // relative, AND never before `convMinFrac` of the budget, AND never while the
+  // menu is still short of `menuTarget` — a short menu is measured to cost this
+  // engine its whole out-of-fold edge (see menuPerLineup), and a flat G while the
+  // menu is still filling means the pool saturated, not that the search is done.
+  // The greedy's own coverage-credited G cannot be the statistic: it needs the
+  // select-fold field AND a best-of-3 greedy per evaluation. The select-fold menu
+  // value is the ORDERING the greedy consumes, computed exactly, for free.
+  // SHIPPED OFF (convWindows: 0), and the measurement is the reason. On the wk1
+  // main slate at 150 lineups / 10k sims / MME 25,000, ck104's field workers took
+  // the search off a contended main thread, and it now climbs EVERY planned seed
+  // (2,100 of 2,100, in 207-224 s of its 240 s cap) at both seeds tried — the cap
+  // no longer binds, so there is nothing for an early stop to save. And it could
+  // not fire even if the cap were raised: G was still improving 20.7% and 23.5%
+  // in the LAST window before the seeds ran out, against the 0.2% bar, with the
+  // menu already past its 1,500 target since window 6. The search on this slate
+  // is nowhere near converged; more seeds would still buy menu quality. The
+  // machinery, the window trace and the log line stay in the build so the
+  // question can be re-asked on a slate where the cap does bind (set convWindows
+  // to 10) — see the ck104 notes for the full trace at both seeds.
+  // convWindows: 0 disables the stop and restores the pure wall-clock cap.
+  convWindows: 0,
+  convStreak:  3,
+  convEps:     0.002,
+  convMinFrac: 0.5,
   sharpFromEngine: true, // seed the field's sharp slice with the ENGINE's own optima
   // ck73: the sharp pass used to run 220 seeds and hand back 300 lineups, so at
   // a 22% sharp share a 2,000-entry sample held ~440 entries drawn from ~190
@@ -32894,8 +33053,64 @@ function gppKernelFactory(){
     const optima = new Map();
     let evalCount = 0, climbed = 0;
     let climbedSeeds = 0, capBound = false;
+    // ── ck104: THE CONVERGENCE STOP. See NFL_GPP_BUDGET.convWindows for why the
+    // statistic is the MENU's SELECT-FOLD value and not the greedy's G.
+    // `_selPriced` is the cache that makes it free: every row it builds is the
+    // row the select-fold pricing pass below would have built, so that pass
+    // reuses it instead of re-pricing. No RNG is consumed (grossEV is a
+    // deterministic pass over the fold's worlds), so a run with the stock stop
+    // and a run with `convWindows: 0` see the identical random stream.
+    const convOn = !!(bud.convWindows > 0 && bud.convStreak > 0 && bud.convEps > 0)
+                   && isFinite(bud.budgetMs);
+    const convStep = convOn ? bud.budgetMs / bud.convWindows : Infinity;
+    const convMinMs = convOn ? bud.budgetMs * (bud.convMinFrac || 0) : Infinity;
+    const convLog = [];
+    let convNext = convStep, convPrev = null, convFlat = 0, converged = false;
+    const _selPriced = new Map();
+    const _selTot = new Float64Array(selW.W);
+    const priceSel = function(key, o){
+      let r = _selPriced.get(key);
+      if(r) return r;
+      const d = dupsOf(dm, o.ids);
+      totalsInto(selW, o.ids, _selTot);
+      const st = {};
+      const g = grossEV(selW, _selTot, d, null, st);
+      let dsum = 0; for(let q = 0; q < selW.K; q++) dsum += d[q];
+      r = {ids:o.ids, searchGross:o.searchGross, selGross:g, selEV:g - P.fee,
+           heldEV:g - P.fee, win:st.win, cash:st.cash, se:st.se,
+           dups:dsum/selW.K, seedKind:o.seedKind};
+      _selPriced.set(key, r);
+      return r;
+    };
+    // G = the select-fold value of the menu the greedy would be handed right now.
+    const menuG = function(){
+      const a = [];
+      for(const [k, o] of optima){
+        if(stackOn && !stackOkIdx(o.ids)) continue;
+        a.push(priceSel(k, o).selEV);
+      }
+      a.sort(function(x, y){ return y - x; });
+      const n = Math.min(a.length, P.menuTarget || a.length);
+      let sum = 0; for(let i = 0; i < n; i++) sum += a[i];
+      return {G:sum, menu:a.length};
+    };
     for(let si = 0; si < seeds.length; si++){
-      if(Date.now() - t0 > bud.budgetMs){ capBound = true; break; }
+      const _el = Date.now() - t0;
+      if(_el > bud.budgetMs){ capBound = true; break; }
+      if(convOn && _el >= convNext){
+        while(convNext <= _el) convNext += convStep;
+        const m = menuG();
+        const rel = (convPrev == null || !(Math.abs(convPrev) > 1e-12))
+          ? null : (m.G - convPrev) / Math.abs(convPrev);
+        convLog.push({ms:_el, seeds:climbedSeeds, optima:optima.size, menu:m.menu,
+                      G:m.G, rel:rel});
+        if(rel != null && rel < bud.convEps) convFlat++; else convFlat = 0;
+        convPrev = m.G;
+        // THREE GATES, all of which must hold: the streak, half the budget spent,
+        // and a FULL MENU (see NFL_GPP_BUDGET.convWindows).
+        if(convFlat >= bud.convStreak && _el >= convMinMs
+           && m.menu >= (P.menuTarget || 0)){ converged = true; break; }
+      }
       if((si & 15) === 0 && cancelled()) return {cancelled:true};
       climbedSeeds++;
       let cur = seeds[si].ids.slice();
@@ -33132,19 +33347,15 @@ function gppKernelFactory(){
     if(stackOn){
       for(const [k, o] of optima){ if(!stackOkIdx(o.ids)){ optima.delete(k); stackMenuDrop++; } }
     }
-    const otot = new Float64Array(selW.W);
+    // ck104: `priceSel` is the same arithmetic this pass always did, and every
+    // optimum the convergence statistic already priced is returned from its cache
+    // — so the statistic adds no pricing work to the run, and a row priced during
+    // the search is bit-identical to one priced here.
     const priced = [];
     let _pn = 0;
-    for(const o of optima.values()){
+    for(const [k, o] of optima){
       if(((_pn++) & 63) === 0 && cancelled()) return {cancelled:true};
-      const d = dupsOf(dm, o.ids);
-      totalsInto(selW, o.ids, otot);
-      const st = {};
-      const g = grossEV(selW, otot, d, null, st);
-      let dsum = 0; for(let k = 0; k < selW.K; k++) dsum += d[k];
-      priced.push({ids:o.ids, searchGross:o.searchGross, selGross:g, selEV:g - P.fee,
-                   heldEV:g - P.fee, win:st.win, cash:st.cash, se:st.se,
-                   dups:dsum/selW.K, seedKind:o.seedKind});
+      priced.push(priceSel(k, o));
     }
     const nOptima = priced.length;
     priced.sort(function(a,b){ return b.selEV - a.selEV; });
@@ -33487,6 +33698,11 @@ function gppKernelFactory(){
       diag: {
         seeds: seeds.length, seedOpt: nOptSeeds, seedRand: nRandSeeds, seedStack: nStackSeeds,
         seedsPlanned: plan.total, seedsClimbed: climbedSeeds, capBound: capBound,
+        // ck104: how the search ENDED, and the window-by-window G trace behind it.
+        endedOn: converged ? 'converged' : (capBound ? 'cap' : 'seeds'),
+        converged: converged, convLog: convLog, convEps: bud.convEps,
+        convStreak: bud.convStreak, convWindows: bud.convWindows,
+        convMinFrac: bud.convMinFrac, budgetMs: bud.budgetMs,
         menuTarget: P.menuTarget, nakedPicks: nakedOut,
         optima: nOptima, survived: kept.length, dropped: nOptima - nFilter, floored: floored,
         medRatio: medRatio, overfitCut: cut,
@@ -33858,6 +34074,13 @@ async function runNflGppEngine(ctx){
     log('⚠ Field sampler produced no lineups — check the ownership column and that the pool can fill a legal roster under the cap/floor.');
     return null;
   }
+  // ck104: a worker fallback is a performance cliff (57 s blocks on showdown
+  // when one constant was missing from the worker source) and it used to be
+  // silent. Say it in the run log, once.
+  if(typeof window !== 'undefined' && window.__fieldWorkerFallback)
+    log('\u26a0 The field sampler could not use its worker on this run and drew in-page instead ('
+      + String(window.__fieldWorkerFallback).split('\n')[0]
+      + ') \u2014 expect long pauses. This is a defect; please report the message.');
   const logFieldLine = (poolN, ms) =>
     log(`Field: three INDEPENDENT samples — ${K}×${NFs.toLocaleString()} for the SEARCH fold (an ordering is all a hill climb needs) and ${K}×${NFp.toLocaleString()} for each PRICED fold`
       + `, so a rank at ${F.toLocaleString()} entries resolves to ${(F/NFp).toFixed(1)} places per sample slot instead of ${(F/NFs).toFixed(1)} (${(ms/1000).toFixed(1)}s).`
@@ -34006,7 +34229,11 @@ async function runNflGppEngine(ctx){
       seedPlan: gppSeedPlan(Object.assign({}, bud, {seedsPerLineup: 1, seedsMin: bud.sharpPassSeeds,
                                                     seedsMax: bud.sharpPassSeeds}), 1),
       menuTarget: _baseTarget,
-      budget: Object.assign({}, bud, {budgetMs: bud.sharpPassMs}),
+      // ck104: the convergence stop is OFF on the sharp pass. That pass is not
+      // producing a board, it is producing the FIELD's smart money, and cutting it
+      // short would change the field model rather than save time on the answer.
+      // Its own budget is already a fraction of the search's.
+      budget: Object.assign({}, bud, {budgetMs: bud.sharpPassMs, convWindows: 0}),
     });
     const preOut = await gppRunKernel(pre, m => {
       // Quiet by design: the sharp pass is a means, not a result, and letting it
@@ -34156,11 +34383,30 @@ async function runNflGppEngine(ctx){
   // Deduped 2026-09-09: the worlds line is printed once, up front, where the
   // folds are decided; the search summary is one line, not three overlapping
   // ones; and the sharp pass no longer emits its own per-seed progress block.
-  if(d.capBound)
-    log(`Search hit its ${Math.round(bud.budgetMs/1000)}s wall-clock cap: ${d.seedsClimbed} of ${d.seeds} seeds were climbed`
+  // ── ck104: HOW THE SEARCH ENDED ─────────────────────────────────────────────
+  // Three ways: every planned seed climbed, the wall clock, or the MENU's
+  // select-fold value G stopped improving (see NFL_GPP_BUDGET.convWindows). The
+  // last one is the only one that is a CHOICE, so it prints its evidence.
+  if(d.endedOn === 'converged'){
+    const _w = d.convLog || [];
+    const _tail = _w.slice(-(d.convStreak||3)).map(x => x.rel==null ? '—' : (100*x.rel).toFixed(3)+'%');
+    log(`Search ENDED ON CONVERGENCE at ${d.seedsClimbed} seeds / ${(d.ms/1000).toFixed(1)}s of its `
+      + `${Math.round(bud.budgetMs/1000)}s cap (${d.optima} distinct local optima, menu target ${d.menuTarget}). `
+      + `G — the select-fold EV of the top ${d.menuTarget} local optima, which is the menu the greedy is handed — `
+      + `improved ${_tail.join(', ')} over the last ${d.convStreak} windows of `
+      + `${Math.round(bud.budgetMs/1000/(d.convWindows||10))}s, every one under the ${(100*d.convEps).toFixed(1)}% bar, `
+      + `with the menu already full and past ${Math.round(100*(d.convMinFrac||0))}% of the budget. `
+      + `More seeds would have replaced menu entries the greedy was not going to take.`);
+  } else if(d.capBound)
+    log(`Search ENDED ON CAP — its ${Math.round(bud.budgetMs/1000)}s wall clock: ${d.seedsClimbed} of ${d.seeds} seeds were climbed`
       + (d.seedsClimbed > 0 && d.ms > 0
          ? ` (${(1000*d.seedsClimbed/d.ms).toFixed(1)} seeds/s, so all ${d.seeds} would need about ${Math.ceil(d.seeds*d.ms/1000/d.seedsClimbed)}s)` : '')
-      + `. The cap is on the Advanced panel.`);
+      + `. The cap is on the Advanced panel.`
+      + ((d.convLog||[]).length
+         ? ` G was still improving: last windows ${(d.convLog||[]).slice(-3).map(x=>x.rel==null?'—':(100*x.rel).toFixed(2)+'%').join(', ')} against a ${(100*d.convEps).toFixed(1)}% convergence bar, so the cap IS the price of the menu here.`
+         : ''));
+  else
+    log(`Search ENDED having climbed every planned seed (${d.seedsClimbed}) in ${(d.ms/1000).toFixed(1)}s of its ${Math.round(bud.budgetMs/1000)}s cap.`);
   log(`Search: ${d.seedsClimbed} of ${d.seeds} seeds → ${d.optima} distinct local optima → ${d.survived} on the menu (target ${d.menuTarget})`
     + `, ${d.evals.toLocaleString()} evaluations in ${(d.ms/1000).toFixed(1)}s`
     + (d.ms > 0 ? ` (${Math.round(d.evals/(d.ms/1000)/1000)}k/s on ${d.searchWorlds.toLocaleString()} worlds).` : '.'));
@@ -34478,8 +34724,10 @@ async function runNflGppBoard(ctx){
     const roiSEC = d.stake > 0 ? (d.seNet / d.stake) * 100 : 0;
     const badges = [];
     const capSec = Math.round(((r.payload.budget && r.payload.budget.budgetMs) || NFL_GPP_BUDGET.budgetMs)/1000);
-    if(d.capBound) badges.push({kind:'warn', text:`search capped ${capSec}s`,
-      tip:`${d.seedsClimbed} of ${d.seeds} seeds were climbed before the wall-clock cap. Raise it under Advanced.`});
+    if(d.endedOn === 'converged') badges.push({kind:'ok', text:`search converged ${(d.ms/1000).toFixed(0)}s`,
+      tip:`The menu stopped improving: ${d.convStreak} consecutive windows under ${(100*d.convEps).toFixed(1)}% relative gain in G, the select-fold EV of the top ${d.menuTarget} local optima, after ${d.seedsClimbed} of ${d.seeds} seeds. The ${capSec}s cap was not needed.`});
+    else if(d.capBound) badges.push({kind:'warn', text:`search capped ${capSec}s`,
+      tip:`${d.seedsClimbed} of ${d.seeds} seeds were climbed before the wall-clock cap, and G was still improving. Raise it under Advanced.`});
     if(d.survived < d.menuTarget) badges.push({kind:'warn', text:`menu ${d.survived} < ${d.menuTarget}`,
       tip:'A menu barely larger than the lineup count forces the greedy to take almost every candidate — measured to cost the engine its out-of-fold edge.'});
     else badges.push({kind:'ok', text:`menu ${d.survived}`, tip:`At or above the ${d.menuTarget} target (${NFL_GPP_BUDGET.menuPerLineup}× the lineups asked for).`});
@@ -38043,10 +38291,11 @@ async function hbFieldPrewarm(slate, ctx, contest, opts, reserve){
       req=window._hbPreDrawRequest; window._hbPreDrawRequest=null; }
   } catch(e){ window._hbPreDrawRequest=null; return false; }
   // No key ⇒ either the field was already cached or the slate cannot build one.
-  // Showdown draws through sampleShowdownField, which does not travel.
-  if(!req || !req.key || req.SD) return false;
+  // ck104: showdown travels too — sampleShowdownField is in the worker now.
+  if(!req || !req.key) return false;
   try {
-    const drawn=await sampleFieldSet(req.pool, req.N, req.scenarios, req.opts, req.seed, reserve);
+    const drawn=await sampleFieldSet(req.pool, req.N, req.scenarios, req.opts, req.seed, reserve,
+      req.SD ? {sd:true, cptScen:req.cptScen} : null);
     if(!drawn) return false;
     window._hbPreDraw={key:req.key, raw:drawn};
     return true;
@@ -39713,6 +39962,12 @@ function createSlate(){
   }
   imputeMissingRatings(slate);
   const _st = (slate.sport==='nfl') ? nflApplyStatus(slate) : null;
+  // ck104: a NEW showdown slate must own its captain-hidden set from the start.
+  // sdCptHiddenList reads an ABSENT array as a copy of hiddenIds (the ck84
+  // migration for slates saved before the pools were split) — which meant that
+  // on a freshly created slate, hiding a man from the FLEX list hid him from the
+  // captain list too until the first captain-side toggle materialised the array.
+  if(typeof isShowdown==='function' && isShowdown(slate) && !Array.isArray(slate.sdCptHidden)) slate.sdCptHidden=[];
   slates.push(slate);activeSlateId=slate.id;save();closeSlateModal();renderTopBar();renderSlate();
   if(_st && (_st.out || _st.q))
     showToast(`Status column: ${_st.out} marked OUT${_st.q ? `, ${_st.q} questionable` : ''} — see the Slate check.`, 'ok');
