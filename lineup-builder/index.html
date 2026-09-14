@@ -6553,7 +6553,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck109/2026-09-14';
+const BUILD_ID = '2.0/ck110/2026-09-14';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -8701,7 +8701,7 @@ const SAVED_METRICS=[
   {k:'proj',  label:'Proj',    get:e=>e.proj},
   {k:'rtg',   label:'Rating',  get:e=>e.rtg},
   {k:'sim',   label:'Sim',     get:e=>e.simScore},
-  {k:'ev',    label:'EV%',     get:e=>e.evPct},
+  {k:'ev',    label:'Edge',    get:e=>(e.edge!=null?e.edge:e.evPct)},
   {k:'win',   label:'Win%',    get:e=>(e.mlEq!=null?e.mlEq:e.winEq)},
   {k:'top5',  label:'Top5',    get:e=>e.top5Eq},
   {k:'top10', label:'Top10',   get:e=>e.top10Eq},
@@ -8959,14 +8959,11 @@ function renderSaved(){
     const top10Pct=_pr ? _pr.top10Pct : null;
     const cashPct=_pr ? _pr.cashPct : null;
     const evCal=true;
-    const evTip=evPct==null?null:(
-      `CALIBRATED EV, priced HELD OUT (ck95 — report fold, independent field draw, `
-      + `the same function and fold the hand-builder card uses). `
-      + `P(win) held to min(model, ${(_pr.evWinCap!=null?_pr.evWinCap:3).toFixed(1)}× fair)`
-      + (_pr.evTop1Cap!=null?`, P(top 1%) to min(model, ${_pr.evTop1Cap.toFixed(2)}× fair)`:'')
-      + (_pr.evPctModel!=null?`. Model EV ${_pr.evPctModel>=0?'+':''}${_pr.evPctModel.toFixed(0)}%`:'')
-      + (_pr.evRank1Share!=null?`, of which ${Math.round(100*_pr.evRank1Share)}% is the rank-1 band — the one band no real contest has validated.`:'.')
-      + (evStale?' ⚠ STALE — the sim, the ownership, the contest or the pool has changed since this was priced. Use "Re-price all".':'')
+    // ck110: the card shows EDGE (calibrated gross ÷ a random entry's gross);
+    // every EV figure — calibrated, model, dollars, caps, bands — is on hover.
+    const edge=_pr ? evEdgeOf(_pr, slate) : null;
+    const evTip=evPct==null?null:evEdgeTip(_pr, slate, edge,
+        (evStale?'⚠ STALE — the sim, the ownership, the contest or the pool has changed since this was priced. Use "Re-price all".':'')
       + (_priceLive?' (priced live — this row has no stored price.)':''));
     const winEq  =hasWin  ?players.reduce((s,p)=>s+(nascarMlToProb(p.win)||0),  0)*100:null;
     const top5Eq =hasTop5 ?players.reduce((s,p)=>s+(nascarMlToProb(p.top5)||0), 0)*100:null;
@@ -8987,7 +8984,7 @@ function renderSaved(){
     // ck95: the second EV chip is gone. There was a stored one and a live one,
     // priced by two surfaces against two folds, and a row could show both.
     const hbEv=null, hbEvModel=null, hbEvTip=null;
-    return {lineup,i,players,sal,proj,rtg,simScore,evPct,evCal,evTip,evStale,
+    return {lineup,i,players,sal,proj,rtg,simScore,evPct,edge,evCal,evTip,evStale,
             winPct,top10Pct,cashPct,hbEv,hbEvModel,hbEvTip,winEq,top5Eq,top10Eq,top20Eq,mlEq,own};
   });
   _savedEntriesCache=entries;   // for the filter panel (see savedFilterMatches)
@@ -8997,8 +8994,10 @@ function renderSaved(){
   else if(sortBy==='sal_asc')     entries.sort((a,b)=>a.sal-b.sal);
   else if(sortBy==='sim_desc')    entries.sort((a,b)=>(b.simScore||0)-(a.simScore||0));
   else if(sortBy==='sim_asc')     entries.sort((a,b)=>(a.simScore||0)-(b.simScore||0));
-  else if(sortBy==='ev_desc')     entries.sort((a,b)=>(b.evPct??-Infinity)-(a.evPct??-Infinity));
-  else if(sortBy==='ev_asc')      entries.sort((a,b)=>(a.evPct??Infinity)-(b.evPct??Infinity));
+  // ck110: the 'ev' key sorts by EDGE — the number on the card. (Same order as
+  // calibrated EV% within one contest; the key is kept so stored sorts survive.)
+  else if(sortBy==='ev_desc')     entries.sort((a,b)=>((b.edge??b.evPct)??-Infinity)-((a.edge??a.evPct)??-Infinity));
+  else if(sortBy==='ev_asc')      entries.sort((a,b)=>((a.edge??a.evPct)??Infinity)-((b.edge??b.evPct)??Infinity));
   else if(sortBy==='win_desc')    entries.sort((a,b)=>(b.winEq||0)-(a.winEq||0));
   else if(sortBy==='win_asc')     entries.sort((a,b)=>(a.winEq||0)-(b.winEq||0));
   else if(sortBy==='ml_desc')     entries.sort((a,b)=>(b.mlEq||0)-(a.mlEq||0));
@@ -9013,7 +9012,7 @@ function renderSaved(){
   else if(sortBy==='rtg_asc')     entries.sort((a,b)=>(a.rtg||0)-(b.rtg||0));
   else if(sortBy==='own_desc')    entries.sort((a,b)=>(b.own||0)-(a.own||0));
   else if(sortBy==='own_asc')     entries.sort((a,b)=>(a.own||0)-(b.own||0));
-  list.innerHTML=entries.map(({lineup,i,players,sal,proj,rtg,simScore,evPct,evCal,evTip,evStale,winPct,top10Pct,cashPct,hbEv,hbEvModel,hbEvTip,winEq,top5Eq,top10Eq,top20Eq,mlEq,own})=>{
+  list.innerHTML=entries.map(({lineup,i,players,sal,proj,rtg,simScore,evPct,edge,evCal,evTip,evStale,winPct,top10Pct,cashPct,hbEv,hbEvModel,hbEvTip,winEq,top5Eq,top10Eq,top20Eq,mlEq,own})=>{
     const stats=[];
     // ck95: a stale price is DIMMED and struck through in its label, not
     // silently presented as current.
@@ -9024,7 +9023,12 @@ function renderSaved(){
     if(simScore!=null) stats.push(`<span class="saved-stat" title="${esc(LINEUP_SIM_TIP)}"><span class="saved-stat-lbl">Sim</span>${simScore.toFixed(1)}</span>`);
     // ck95: ONE chip, and it keeps the `hb-ev-chip` class the live-priced chip
     // used to carry — the two chips became one, and that is the one.
-    if(evPct!=null)    stats.push(`<span class="saved-stat hb-ev-chip" style="color:${evPct>=0?'var(--green)':'var(--red)'};${_stCss}" title="${esc(evTip||'')}"><span class="saved-stat-lbl" style="color:${evPct>=0?'var(--green)':'var(--red)'};opacity:.7;">EV cal</span>${_stMark}${evPct>=0?'+':''}${evPct.toFixed(0)}%</span>`);
+    // ck110: the chip reads EDGE (≥ 1.00× beats a random entry, < 1.00× trails
+    // one). The EV figures moved into its hover — with rake, "−EV" is the
+    // headline for almost every GPP lineup and said nothing about which lineup
+    // was better. `data-ev` keeps the calibrated EV% on the element.
+    if(evPct!=null){ const _eg=(edge!=null)?edge:null; const _col=_eg==null?'var(--muted)':(_eg>=1?'var(--green)':'var(--red)');
+      stats.push(`<span class="saved-stat hb-ev-chip" data-ev="${evPct.toFixed(1)}" data-edge="${_eg!=null?_eg.toFixed(3):''}" style="color:${_col};${_stCss}" title="${esc(evTip||'')}"><span class="saved-stat-lbl" style="color:${_col};opacity:.7;">Edge</span>${_stMark}${_eg!=null?evEdgeFmt(_eg):(evPct>=0?'+':'')+evPct.toFixed(0)+'%'}</span>`); }
     // THE win rate: P(rank 1), held out, one decimal in the same units as the
     // hand-builder card. Nothing else on this card may wear this label.
     if(winPct!=null)   stats.push(`<span class="saved-stat saved-win-chip" style="${_stCss}" title="${esc(WINPCT_TIP)}"><span class="saved-stat-lbl">Win%</span>${_stMark}${hbPct(winPct)}%</span>`);
@@ -9945,9 +9949,13 @@ async function dkPriceAcrossContests(){
         mEV += r.meanPay - con.fee; cEV += r.calMeanPay - con.fee;
         cash += r.cashPct/100; t10 += r.top10Pct/100; t1 += r.top1Pct/100;
       }
+      const _rg = contestRandomGross(con);
       rows.push({name:c.name, contestId:c.contestId, count:c.count, entries:n, miss, all,
                  fieldSize:con.fieldSize, fee:con.fee, se:con.dkSe, paid:con.paid,
                  stake, modelEV:mEV, calEV:cEV, cash, top10:t10, top1:t1,
+                 // ck110: edge = calibrated gross ÷ what n random entries collect here
+                 randomBase: (_rg > 0) ? n*_rg : 0,
+                 edge: (_rg > 0 && n > 0) ? (stake + cEV)/(n*_rg) : null,
                  modelRoi: stake > 0 ? 100*mEV/stake : null,
                  calRoi:   stake > 0 ? 100*cEV/stake : null});
       prog(`Contest ${ci}/${st.contests.length} done — ${((Date.now()-t0)/1000).toFixed(1)}s elapsed.`);
@@ -9955,8 +9963,9 @@ async function dkPriceAcrossContests(){
     }
     const T = rows.filter(r => !r.skipped).reduce((a,r) => {
       a.entries += r.entries; a.stake += r.stake; a.modelEV += r.modelEV; a.calEV += r.calEV;
-      a.cash += r.cash; a.top10 += r.top10; a.top1 += r.top1; return a;
-    }, {entries:0, stake:0, modelEV:0, calEV:0, cash:0, top10:0, top1:0});
+      a.cash += r.cash; a.top10 += r.top10; a.top1 += r.top1; a.randomBase += (r.randomBase||0); return a;
+    }, {entries:0, stake:0, modelEV:0, calEV:0, cash:0, top10:0, top1:0, randomBase:0});
+    T.edge = T.randomBase > 0 ? (T.stake + T.calEV)/T.randomBase : null;
     T.modelRoi = T.stake > 0 ? 100*T.modelEV/T.stake : null;
     T.calRoi   = T.stake > 0 ? 100*T.calEV/T.stake   : null;
     _dkPriceAcross = {slateId: slate.id, ts: Date.now(), rows, total: T,
@@ -9980,7 +9989,7 @@ function dkPriceAcrossHtml(slate){
   const col = v => v == null ? 'var(--muted)' : (v >= 0 ? 'var(--green)' : 'var(--red)');
   const tr = (r, tot) => {
     if(r.skipped) return `<tr style="border-top:1px solid var(--border);"><td style="padding:5px 7px;font-size:10.5px;color:var(--muted);">${esc(r.name)}</td>
-      <td colspan="11" style="padding:5px 7px;font-size:10px;color:var(--muted);">skipped — ${esc(r.skipped)}</td></tr>`;
+      <td colspan="12" style="padding:5px 7px;font-size:10px;color:var(--muted);">skipped — ${esc(r.skipped)}</td></tr>`;
     const nm = tot ? '<b>TOTAL</b>' : esc(r.name) + (r.all ? ' <span style="color:var(--muted);">(all lineups)</span>' : '');
     return `<tr style="border-top:1px solid var(--border);${tot?'background:var(--surface2);':''}">
       <td style="padding:5px 7px;font-size:10.5px;color:var(--text);">${nm}</td>
@@ -9988,6 +9997,7 @@ function dkPriceAcrossHtml(slate){
       <td style="padding:5px 7px;text-align:right;">${tot?'—':r.fieldSize.toLocaleString()}</td>
       <td style="padding:5px 7px;text-align:right;">${tot?'—':contestFeeStr(r.fee)}</td>
       <td style="padding:5px 7px;text-align:right;">${m(r.stake)}</td>
+      <td style="padding:5px 7px;text-align:right;font-weight:600;color:${r.edge==null?'var(--muted)':(r.edge>=1?'var(--green)':'var(--red)')};" title="Edge — calibrated gross ÷ what these entries would collect as random entries in this contest">${r.edge==null?'—':evEdgeFmt(r.edge)}</td>
       <td style="padding:5px 7px;text-align:right;color:${col(r.modelEV)};">${m(r.modelEV)}</td>
       <td style="padding:5px 7px;text-align:right;color:${col(r.calEV)};">${m(r.calEV)}</td>
       <td style="padding:5px 7px;text-align:right;color:${col(r.modelRoi)};">${pc(r.modelRoi)}</td>
@@ -10002,6 +10012,7 @@ function dkPriceAcrossHtml(slate){
       <thead><tr style="font-size:9.5px;color:var(--muted);text-align:right;">
         <th style="padding:3px 7px;text-align:left;">CONTEST</th><th style="padding:3px 7px;">ENTRIES</th>
         <th style="padding:3px 7px;">FIELD</th><th style="padding:3px 7px;">FEE</th><th style="padding:3px 7px;">STAKE</th>
+        <th style="padding:3px 7px;">EDGE</th>
         <th style="padding:3px 7px;">MODEL EV$</th><th style="padding:3px 7px;">CAL EV$</th>
         <th style="padding:3px 7px;">MODEL ROI</th><th style="padding:3px 7px;">CAL ROI</th>
         <th style="padding:3px 7px;">CASHES</th><th style="padding:3px 7px;">TOP 10%</th><th style="padding:3px 7px;">TOP 1%</th>
@@ -10719,7 +10730,7 @@ function renderDkEntriesModal(){
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:11px;color:var(--muted);${LS?'margin-top:10px;':''}">
       <label>Rank by
         <select id="dkRankBy" onchange="dkSetGlobal('rankBy',this.value)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;cursor:pointer;outline:none;">
-          <option value="ev"${st.rankBy==='ev'?' selected':''}>EV%</option>
+          <option value="ev"${st.rankBy==='ev'?' selected':''}>Edge</option>
           <option value="sim"${st.rankBy==='sim'?' selected':''} title="Sim = median lineup total across the sim">Sim</option>
           <option value="proj"${st.rankBy==='proj'?' selected':''}>Proj</option>
         </select></label>
@@ -32643,6 +32654,11 @@ function renderGppCard(model){
   const ev = model.ev;
   const evBlock = ev ? `<div class="gpp-sec">EV — two figures, always together</div>
     <div class="gpp-ev">
+      ${ev.edge != null ? `<div class="gpp-ev-row" title="Board edge — the board's calibrated expected return divided by what the same number of random entries in this contest collect (prize pool ÷ field, per entry). Above 1.00× beats the field's average entry; rake makes the average entry lose, so this is the number to compare boards and contests on. Same definition as the Edge chip on every lineup card.">
+        <span class="gpp-ev-lbl">Board edge</span>
+        <span class="gpp-ev-val${ev.edge < 1 ? ' neg' : ''}">${evEdgeFmt(ev.edge)}</span>
+        <span class="gpp-ev-note">calibrated return vs a random entry's — the comparable number</span>
+      </div>` : ''}
       <div class="gpp-ev-row" title="${esc(ev.modelTip || '')}">
         <span class="gpp-ev-lbl">Model EV</span>
         <span class="gpp-ev-val${ev.modelNet < 0 ? ' neg' : ''}">${esc(ev.model)}</span>
@@ -35281,6 +35297,10 @@ async function runNflGppBoard(ctx){
          + `top 1% ${(100*expTop1B/Math.max(1,nL)).toFixed(2)}% (${expTop1B.toFixed(2)}) · `
          + `first ${expWinB.toExponential(1)} expected — the checkable claims, held out`,
       ev: {
+        // ck110: the board's EDGE — calibrated gross ÷ what nL random entries
+        // in this contest collect. Same definition as every lineup chip.
+        edge: (()=>{ try{ const c=pricingContest(slate); const rg=c?contestRandomGross(c):null;
+                          return (rg>0 && c.fee>0) ? (1+calRoiB/100)*c.fee/rg : null; }catch(e){ return null; } })(),
         model: `${roiB >= 0 ? '+' : ''}${roiB.toFixed(0)}%${_ho95?'':` ± ${roiSEC.toFixed(0)}%`} ROI · ${evMoney(modNetB, slate, true)} on ${evMoney(_hoS, slate)}`,
         modelNet: modNetB,
         modelTip: `The model's own number, computed under the SAME model these lineups were optimized against — so model error is exploited maximally and cannot be seen from inside. ${Math.round(100*bandsB.share[0])}% of the board's gross is the rank-1 band, whose win rate (${r.calPort.winMult.toFixed(0)}× fair) no contest has ever validated: 0 wins in ${r.cal.lineups} real lineups.`,
@@ -37889,7 +37909,8 @@ function lineupDetailHtml(players, cptId, opts){
     const bits=[];
     if(m.simWinAvg!=null&&m.simWinAvg!=='') bits.push(`<span title="${esc(LINEUP_SIM_TIP)}"><i>Sim</i>${parseFloat(m.simWinAvg).toFixed(1)}</span>`);
     if(m.simAvg!=null&&m.simAvg!=='')       bits.push(`<span><i>Avg</i>${parseFloat(m.simAvg).toFixed(1)}</span>`);
-    if(m.evPct!=null)                       bits.push(`<span><i>EV</i>${parseFloat(m.evPct).toFixed(0)}%</span>`);
+    if(m.evPct!=null){ const _eg=evEdgeOf(m, slate);
+      bits.push(`<span title="${esc(evEdgeTip(m, slate, _eg))}"><i>Edge</i>${_eg!=null?evEdgeFmt(_eg):parseFloat(m.evPct).toFixed(0)+'%'}</span>`); }
     return `<div class="lu-det">
       ${bits.length?`<div class="lu-det-pcts">${bits.join('')}</div>`:''}
       <div class="lu-det-note">${bits.length?'Stored from the run that built this lineup. ':''}No live simulation in memory for this slate — run the NFL sim generator to see this lineup's outcome distribution.</div>
@@ -38683,10 +38704,18 @@ function hbPriceLineup(players, cptId, opts){
   const bands=evBandsFrom(bandRaw, meanPay);
   const cl=evCalibrate(bands, win/nS, fieldSize, cal, top1/nS);
   void _rho;
+  // ck110: EDGE — the calibrated gross as a multiple of what a RANDOM entry in
+  // this contest collects (pool ÷ F). Rake makes the average entry −EV in every
+  // GPP, so "+EV / −EV" is the wrong headline for a card; edge > 1 says this
+  // roster beats the field's average, and by how much. See `contestRandomGross`.
+  const randomGross=contestRandomGross(contest);
   return {
     evPct: 100*(meanPay-contest.fee)/contest.fee,
     calEvPct: 100*(cl.calGross-contest.fee)/contest.fee,
     meanPay, calMeanPay: cl.calGross,
+    randomGross,
+    edge: (randomGross>0) ? cl.calGross/randomGross : null,
+    edgeModel: (randomGross>0) ? meanPay/randomGross : null,
     // ck96: `winPct` is P(band 0) = P(no beaters), now the EXACT negative-
     // binomial term at continuous resolution — `winPctExact` is the same number
     // by construction and is kept only as the assertion that it is.
@@ -38813,11 +38842,73 @@ function lineupPriceStamp(slate){
 // The ONLY shape a lineup price is ever stored in. `evPct` is the CALIBRATED
 // figure (ck88) because that is the one a bankroll may be sized against; the
 // model figure rides along under `evPctModel` and is named in every tooltip.
+// ── ck110: EDGE ─────────────────────────────────────────────────────────────
+// What a random entry in this contest collects per entry: the whole ladder
+// summed and divided by the field. Every branch of `hbContest` / `contestResolve`
+// exposes only `payout(r)` and `paid`, so the pool is summed off the ladder
+// itself — once per (contest, F, fee, paid), memoized; F·fee·(1−rake) would be
+// wrong for a custom table.
+const _contestPoolMemo=new Map();
+function contestRandomGross(contest){
+  if(!contest || typeof contest.payout!=='function' || !(contest.fieldSize>0)) return null;
+  const k=[contest.key, contest.fieldSize, contest.fee, contest.paid].join('|');
+  if(_contestPoolMemo.has(k)) return _contestPoolMemo.get(k);
+  const paid=Math.min(contest.paid||0, contest.fieldSize);
+  let pool=0;
+  for(let r=1;r<=paid;r++){ const v=contest.payout(r); if(v>0) pool+=v; }
+  const g=pool>0 ? pool/contest.fieldSize : null;
+  _contestPoolMemo.set(k,g);
+  return g;
+}
+// The edge a stored price implies. Rows priced by ck110+ carry it; an older row
+// is re-derived from its calibrated EV% against the CURRENT pricing contest
+// (that row is stale anyway if the contest changed — the stamp says so).
+function evEdgeOf(m, slate){
+  if(!m) return null;
+  if(m.edge!=null && isFinite(m.edge)) return m.edge;
+  if(m.evPct==null || isNaN(m.evPct)) return null;
+  const c=(slate && typeof pricingContest==='function') ? pricingContest(slate) : null;
+  const g=c ? contestRandomGross(c) : null;
+  if(!(g>0) || !(c.fee>0)) return null;
+  return (1+m.evPct/100)*c.fee/g;
+}
+function evEdgeFmt(edge){
+  if(edge==null || !isFinite(edge)) return '—';
+  return (edge>=10 ? edge.toFixed(1) : edge.toFixed(2))+'×';
+}
+// Everything the old "EV cal" chip and its tooltip said, and more, in ONE hover.
+function evEdgeTip(m, slate, edge, extra){
+  if(!m) return '';
+  const fee=(m.fee!=null) ? m.fee : (()=>{ const c=(slate&&typeof pricingContest==='function')?pricingContest(slate):null; return c?c.fee:null; })();
+  const $=v=>(v==null||!isFinite(v))?'—':('$'+(Math.abs(v)<10?v.toFixed(2):Math.round(v).toLocaleString()));
+  const pct=v=>(v==null||!isFinite(v))?'—':((v>=0?'+':'')+v.toFixed(0)+'%');
+  const rg=(m.randomGross!=null)?m.randomGross:((m.evPct!=null&&edge>0&&fee>0)?(1+m.evPct/100)*fee/edge:null);
+  const lines=[];
+  lines.push(`EDGE ${evEdgeFmt(edge)} — this roster's calibrated expected return vs a random entry in this contest (${$(m.calGross!=null?m.calGross:(fee!=null&&m.evPct!=null?(1+m.evPct/100)*fee:null))} vs ${$(rg)} per entry). Rake makes the average entry lose; edge > 1.00× beats the field's average, edge < 1.00× trails it.`);
+  lines.push(`Calibrated EV ${pct(m.evPct)}`+(m.evPctModel!=null?` · Model EV ${pct(m.evPctModel)}`:'')+(fee!=null?` · Entry ${$(fee)}`:'')+(m.modelGross!=null?` · Model gross ${$(m.modelGross)}`:'')+'.');
+  const caps=[];
+  if(m.evWinCap!=null) caps.push(`P(win) ≤ ${m.evWinCap.toFixed(1)}× fair`);
+  if(m.evTop1Cap!=null) caps.push(`P(top 1%) ≤ ${m.evTop1Cap.toFixed(2)}× fair`);
+  if(caps.length) lines.push(`Calibration caps: ${caps.join(', ')}`+(m.evRank1Share!=null?` · ${Math.round(100*m.evRank1Share)}% of the model EV is the rank-1 band, the one band no real contest has validated`:'')+'.');
+  const rates=[];
+  if(m.winPct!=null) rates.push(`Win ${hbPct(m.winPct)}%`);
+  if(m.top1Pct!=null) rates.push(`Top 1% ${hbPct(m.top1Pct)}%`);
+  if(m.top10Pct!=null) rates.push(`Top 10% ${hbPct(m.top10Pct)}%`);
+  if(m.cashPct!=null) rates.push(`Cash ${m.cashPct.toFixed(0)}%`);
+  if(m.dups!=null && m.dups>=0.5) rates.push(`~${m.dups.toFixed(0)} dupes`);
+  if(rates.length) lines.push(rates.join(' · ')+'.');
+  lines.push('Priced HELD OUT: report fold, independent field draw — the same function and fold the hand builder uses.');
+  if(extra) lines.push(extra);
+  return lines.join('\n');
+}
 function pricedMetaFrom(r, slate){
   if(!r) return null;
   const rd=(v,d)=>(v==null||!isFinite(v))?null:Math.round(v*Math.pow(10,d))/Math.pow(10,d);
   return {
     evPct: rd(r.calEvPct,1), evPctModel: rd(r.evPct,1), evCalibrated:true,
+    edge: rd(r.edge,3), edgeModel: rd(r.edgeModel,3),
+    fee: (r.contest&&r.contest.fee!=null)?r.contest.fee:null,
+    calGross: rd(r.calMeanPay,3), modelGross: rd(r.meanPay,3), randomGross: rd(r.randomGross,3),
     winPct: rd(r.winPct,4), cashPct: rd(r.cashPct,2),
     top10Pct: rd(r.top10Pct,3), top1Pct: rd(r.top1Pct,4),
     dups: rd(r.dups,2),
@@ -39071,16 +39162,16 @@ function renderHbEv(){
   // the contest is Off, so the roster test comes before the contest test.
   if(!ctx){
     cells.push(hbStatCell('Win%','—','dim'));
-    cells.push(`<div class="hbst" id="hbEvVal"><div class="hbst-l">EV</div><div class="hbst-v dim">—</div></div>`);
+    cells.push(`<div class="hbst" id="hbEvVal"><div class="hbst-l">Edge</div><div class="hbst-v dim">—</div></div>`);
   } else if(!done){
     cells.push(hbStatCell('Win%', pend, 'dim'));
-    cells.push(`<div class="hbst" id="hbEvVal"><div class="hbst-l">EV</div><div class="hbst-v dim">${pend}</div></div>`);
+    cells.push(`<div class="hbst" id="hbEvVal"><div class="hbst-l">Edge</div><div class="hbst-v dim">${pend}</div></div>`);
   } else if(cur==='off'){
     cells.push(hbStatCell('Win%','—','dim','Pick a contest to model the field'));
-    cells.push(`<div class="hbst" id="hbEvVal"><div class="hbst-l">EV</div><div class="hbst-v dim">—</div></div>`);
+    cells.push(`<div class="hbst" id="hbEvVal"><div class="hbst-l">Edge</div><div class="hbst-v dim">—</div></div>`);
   } else if(!priced){
     cells.push(hbStatCell('Win%','—','dim'));
-    cells.push(`<div class="hbst" id="hbEvVal"><div class="hbst-l">EV</div><div class="hbst-v dim">—</div></div>`);
+    cells.push(`<div class="hbst" id="hbEvVal"><div class="hbst-l">Edge</div><div class="hbst-v dim">—</div></div>`);
   } else {
     // ck88: the CHECKABLE tile headlines (top 10% — a rate two real contests
     // have already scored), and the EV tile shows the CALIBRATED figure with the
@@ -39091,8 +39182,14 @@ function renderHbEv(){
       `Chance this roster finishes in the top 10% of ${priced.contest.fieldSize.toLocaleString()} entries — a CHECKABLE claim: a standings file settles it directly. Top 1% ${hbPct(priced.top1Pct)}%, cash ${priced.cashPct.toFixed(0)}%.`));
     cells.push(hbStatCell('Win%', `${hbPct(priced.winPct)}<span class="u">%</span>`, 'lit',
       `${WINPCT_TIP} Chance this exact roster is the top score among ${priced.contest.fieldSize.toLocaleString()} entries — ${priced.calibration.winMult.toFixed(0)}× fair. UNVALIDATED: ${evCalCapLine(priced.cal)}.`));
-    cells.push(`<div class="hbst lit" id="hbEvVal" title="${esc('CALIBRATED EV — P(win) held to min(model, ' + priced.cal.cap.toFixed(1) + '× fair) and P(top 1%) to min(model, ' + (priced.cal.cap1!=null?priced.cal.cap1.toFixed(2):'—') + '× fair). Model EV is ' + (priced.evPct>=0?'+':'') + priced.evPct.toFixed(0) + '%, of which ' + Math.round(100*priced.bands.share[0]) + '% is the rank-1 band. ' + evCalCapLine(priced.cal) + '. ' + (priced.contest.desc||priced.contest.name||'') + ' · ' + priced.nSims + ' held-out sims vs ' + priced.fieldN.toLocaleString() + ' modeled entries')}">`
-      +`<div class="hbst-l">EV<span class="u"> cal</span></div><div class="hbst-v ${priced.calEvPct>=0?'pos':'neg'}">${sign}${priced.calEvPct.toFixed(0)}<span class="u">%</span></div></div>`);
+    // ck110: the tile reads EDGE — calibrated gross ÷ a random entry's gross —
+    // and the hover carries every EV figure. The split line under the grid
+    // still prints both EV% figures and both caps in full.
+    const _pm=pricedMetaFrom(priced, slate), _eg=evEdgeOf(_pm, slate);
+    const _egTip=evEdgeTip(_pm, slate, _eg, evCalCapLine(priced.cal) + '. ' + (priced.contest.desc||priced.contest.name||'') + ' · ' + priced.nSims + ' held-out sims vs ' + priced.fieldN.toLocaleString() + ' modeled entries');
+    cells.push(`<div class="hbst lit" id="hbEvVal" data-ev="${priced.calEvPct.toFixed(1)}" data-edge="${_eg!=null?_eg.toFixed(3):''}" title="${esc(_egTip)}">`
+      +`<div class="hbst-l">Edge</div><div class="hbst-v ${_eg==null?'dim':(_eg>=1?'pos':'neg')}">${_eg!=null?evEdgeFmt(_eg):(sign+priced.calEvPct.toFixed(0)+'%')}</div></div>`);
+    void sign;
   }
 
   let out=`<div class="hbst-grid">${cells.join('')}</div>`;
@@ -39103,7 +39200,7 @@ function renderHbEv(){
     out+='<div class="hb-ev-note" style="margin-top:5px">Run a sim (Auto-Gen) to price lineups'
       +'<button class="hb-ev-go" onclick="hbGotoAutogen()">Auto-Gen →</button></div>';
   } else if(cur==='off'){
-    out+='<div class="hb-ev-note" style="margin-top:5px">Pick a contest above for Win% and Contest EV.</div>';
+    out+='<div class="hb-ev-note" style="margin-top:5px">Pick a contest above for Win% and Edge.</div>';
   } else if(done && !priced && !blocked){
     out+='<div class="hb-ev-note" style="margin-top:5px">Can\'t price this lineup — someone in it wasn\'t in the last sim run.</div>';
   } else if(priced){
@@ -39196,12 +39293,10 @@ function renderPreviewLineupsList(){
     // no contest-EV pricing) shows NEITHER rather than a look-alike statistic.
     { const _p=lineup._priced, _v=_p?_p.evPct:null;
       if(_v!=null&&!isNaN(_v)){
-        const _tip=`CALIBRATED EV, priced HELD OUT (ck95: report fold, independent field draw — the same function and the same fold the hand builder uses). `
-          + `P(win) held to min(model, ${(_p.evWinCap!=null?_p.evWinCap:3).toFixed(1)}× fair)`
-          + (_p.evTop1Cap!=null?`, P(top 1%) to min(model, ${_p.evTop1Cap.toFixed(2)}× fair)`:'') + `. `
-          + (_p.evPctModel!=null?`Model EV ${_p.evPctModel>=0?'+':''}${_p.evPctModel.toFixed(0)}%`:'')
-          + (_p.evRank1Share!=null?`, of which ${Math.round(100*_p.evRank1Share)}% is the rank-1 band — the one band no real contest has validated.`:'.');
-        stats.push(`<span class="preview-stat" title="${esc(_tip)}" style="color:${_v>=0?'var(--green)':'var(--red)'};"><span class="preview-stat-lbl" style="color:${_v>=0?'var(--green)':'var(--red)'};opacity:.7;">EV cal</span>${_v>=0?'+':''}${_v.toFixed(0)}%</span>`);
+        // ck110: EDGE on the chip, every EV figure on hover (see renderSaved).
+        const _eg=evEdgeOf(_p, slate), _tip=evEdgeTip(_p, slate, _eg);
+        const _col=_eg==null?'var(--muted)':(_eg>=1?'var(--green)':'var(--red)');
+        stats.push(`<span class="preview-stat hb-ev-chip" data-ev="${_v.toFixed(1)}" data-edge="${_eg!=null?_eg.toFixed(3):''}" title="${esc(_tip)}" style="color:${_col};"><span class="preview-stat-lbl" style="color:${_col};opacity:.7;">Edge</span>${_eg!=null?evEdgeFmt(_eg):(_v>=0?'+':'')+_v.toFixed(0)+'%'}</span>`);
       }
       if(_p && _p.winPct!=null && !isNaN(_p.winPct))
         stats.push(`<span class="preview-stat" title="${esc(WINPCT_TIP)}"><span class="preview-stat-lbl" style="opacity:.7;">Win%</span>${hbPct(_p.winPct)}%</span>`);
