@@ -3605,17 +3605,52 @@ function nflStandingsBoardScore(slate, sortedPts, fptsById, SD, fieldSize){
     while(lo < hi){ const m = (lo + hi + 1) >> 1; if(pay.at(m) > 0) lo = m; else hi = m - 1; }
     paidThrough = pay.at(lo) > 0 ? lo : null; }
   const N = sortedPts.length;
+  const meta = slate._lineupMeta || {};
   const rows = lus.map(ids => {
     const cpt = SD ? sdLineupCaptain(slate, ids) : null;
     let pts = 0, have = 0;
     ids.forEach(id => { const v = fptsById[id];
       if(Number.isFinite(v)){ have++; pts += (SD && id === cpt ? CPT_MULT : 1) * v; } });
     const rank = rankOf(pts);
+    // ck111: the lineup's OWN stored prediction rides along so the ordering
+    // the engine claimed can be scored against the ordering that happened.
+    const m = meta[lineupKey(ids)] || {};
     return { ids: ids.slice(), cpt,
              names: ids.map(id => ((playerById(slate, id) || {}).name) || String(id)),
              points: Math.round(100 * pts) / 100, rank, pctile: rank / N,
-             won: pay ? pay.at(rank) : null, complete: have === ids.length };
+             won: pay ? pay.at(rank) : null, complete: have === ids.length,
+             predEdge: (m.edge != null) ? m.edge : null, predTop1: (m.top1Pct != null) ? m.top1Pct : null,
+             predTop10: (m.top10Pct != null) ? m.top10Pct : null, predEv: (m.evPct != null) ? m.evPct : null };
   }).sort((a, b) => a.rank - b.rank);
+  // ── ck111: DID THE ORDERING HOLD? ─────────────────────────────────────────
+  // Spearman rank correlation between each stored per-lineup claim and the
+  // realized finish (better finish = lower rank, so a claim that ORDERS the
+  // board correctly gives a POSITIVE ρ). This is the number the shrink cannot
+  // supply: whether the engine's ranking of first-place / top-1% chances means
+  // anything, as opposed to its level. Needs ≥ 8 lineups with a stored claim.
+  const ordering = (function(){
+    const spear = (key) => {
+      const pr = rows.filter(r => r[key] != null && Number.isFinite(r[key]));
+      if(pr.length < 8) return null;
+      const rk = arr => { const idx = arr.map((v, i) => [v, i]).sort((a, b) => a[0] - b[0]);
+        const out = new Array(arr.length); let i = 0;
+        while(i < idx.length){ let j = i; while(j + 1 < idx.length && idx[j + 1][0] === idx[i][0]) j++;
+          const avg = (i + j) / 2 + 1; for(let k = i; k <= j; k++) out[idx[k][1]] = avg; i = j + 1; }
+        return out; };
+      const a = rk(pr.map(r => -r[key])), b = rk(pr.map(r => r.rank));   // higher claim ↔ lower rank
+      const n = a.length, ma = (n + 1) / 2;
+      let num = 0, da = 0, db = 0;
+      for(let i = 0; i < n; i++){ num += (a[i] - ma) * (b[i] - ma); da += (a[i] - ma) ** 2; db += (b[i] - ma) ** 2; }
+      const rho = (da > 0 && db > 0) ? num / Math.sqrt(da * db) : 0;
+      // the board split at the claim's median: did the top half finish better?
+      const half = Math.floor(n / 2);
+      const byClaim = pr.slice().sort((x, y) => y[key] - x[key]);
+      const topMean = byClaim.slice(0, half).reduce((t, r) => t + r.rank, 0) / Math.max(1, half);
+      const botMean = byClaim.slice(half).reduce((t, r) => t + r.rank, 0) / Math.max(1, n - half);
+      return { n, rho: Math.round(rho * 1000) / 1000, topHalfMeanRank: Math.round(topMean), bottomHalfMeanRank: Math.round(botMean) };
+    };
+    return { edge: spear('predEdge'), top1: spear('predTop1'), top10: spear('predTop10'), ev: spear('predEv') };
+  })();
   const n = rows.length;
   const sum = f => rows.reduce((a, r) => a + f(r), 0);
   const med = a => { const b = a.slice().sort((x, y) => x - y); return b[Math.floor(b.length / 2)]; };
@@ -3637,6 +3672,7 @@ function nflStandingsBoardScore(slate, sortedPts, fptsById, SD, fieldSize){
     roiPct: gross == null ? null : Math.round(1000 * (gross - stake) / stake) / 10,
     payoutModelled: true, payoutDesc: pay ? pay.desc : null, paidThrough,
     predicted: pred && pred.n ? pred : null,
+    ordering,
     lineups: rows.slice(0, 200)
   };
 }
@@ -3656,9 +3692,16 @@ function evCalIngestBoard(slate, key, board, fieldSize, file){
     fieldSize: N, n: board.n,
     // PREDICTED: only what the build actually stored. A board built before the
     // hook existed carries nothing, and the row says so rather than imputing.
-    predWinRate:  (pred && pred.winRate  > 0) ? pred.winRate  : null,
+    // ck111: the CALIBRATED claim when the build stored one (normalized over
+    // the field, shrunk by the record at the time) — the raw model figure rides
+    // along as predWinRateRaw. Only normalized rows feed the "model claims M×
+    // fair" half of the next cap; every row feeds the observed half.
+    predWinRate:  (pred && pred.calWinRate > 0) ? pred.calWinRate : ((pred && pred.winRate  > 0) ? pred.winRate  : null),
+    predWinRateRaw: (pred && pred.winRate > 0) ? pred.winRate : null,
+    normalized: !!(pred && pred.normalized && pred.calWinRate != null),
     predCashRate: (pred && pred.cashRate > 0) ? pred.cashRate : null,
-    predTop1Rate: (pred && pred.top1Rate > 0) ? pred.top1Rate : null,
+    predTop1Rate: (pred && pred.calTop1Rate > 0) ? pred.calTop1Rate : ((pred && pred.top1Rate > 0) ? pred.top1Rate : null),
+    predTop1RateRaw: (pred && pred.top1Rate > 0) ? pred.top1Rate : null,
     predTop10Rate:(pred && pred.top10Rate> 0) ? pred.top10Rate: null,
     predRoiPct:   (pred && pred.roiPct != null) ? pred.roiPct : null,
     predCalRoiPct:(pred && pred.calRoiPct != null) ? pred.calRoiPct : null,
@@ -4563,7 +4606,17 @@ function nflBacktestLog(slate, key){
              + (P.fieldSize ? ` against a ${P.fieldSize.toLocaleString()}-entry field` : '')
              + (P.build ? ` (${P.build})` : '') + `; realized ${B.roiPct != null ? (B.roiPct >= 0 ? '+' : '') + B.roiPct.toFixed(1) + '%' : '—'} at ${B.fieldN.toLocaleString()} real entries. `
              + `n = 1 contest — this is a ROW, not a calibration.`);
-    } else {
+    }
+    // ck111: did the engine's ORDERING of the board hold? Level is what the
+    // calibration record scores; this is the other half.
+    if(B.ordering){
+      const O = B.ordering, f = (lbl, o) => o ? `${lbl} ρ=${(o.rho>=0?'+':'')}${o.rho.toFixed(2)} (top half by claim finished at mean rank ${o.topHalfMeanRank.toLocaleString()} vs ${o.bottomHalfMeanRank.toLocaleString()} for the bottom half, n=${o.n})` : null;
+      const parts = [f('Edge', O.edge), f('top-1% claim', O.top1), f('top-10% claim', O.top10)].filter(Boolean);
+      out.push(parts.length
+        ? `   ORDERING (ck111): Spearman between each lineup's stored claim and its realized finish — ${parts.join(' · ')}. Positive means the lineups the engine liked more finished better; ~0 means its ranking within this board carried no information this week. One contest is one draw of this number.`
+        : `   ORDERING (ck111): no per-lineup claims were stored for this board (lineups saved before ck110, or fewer than 8 priced), so the engine's ranking cannot be scored here.`);
+    }
+    if(!B.predicted){
       out.push(`   PREDICTED vs REALIZED: no build-time prediction is stored for this board (Contest EV has not run on this slate since ck85 added the hook), so only the realized half of the row exists.`);
     }
   }
@@ -4582,7 +4635,7 @@ function nflBacktestLog(slate, key){
     // contributes a realized half only, and is excluded from the pairing.
     const vs = (o, p, n) => n > 0 ? `${o} realized vs ${p.toFixed(1)} predicted over ${n} lineups` : `no board on record carries a stored claim`;
     out.push(`      Checkable components (predicted vs realized on the boards that carry both halves): top 1% ${vs(cal.matchTop1, cal.predTop1, cal.nTop1)} · top 10% ${vs(cal.matchTop10, cal.predTop10, cal.nTop10)} · cash ${vs(cal.matchCash, cal.predCash, cal.nCash)}. Realized totals over the whole ${cal.lineups.toLocaleString()}-lineup record: ${cal.obsTop1} · ${cal.obsTop10} · ${cal.obsCash}.`);
-    if(cal.toClaim != null) out.push(`      About ${cal.toClaim.toLocaleString()} more contests like these before the evidence alone could carry the cap to the model's ${cal.modelMult.toFixed(0)}× claim.`);
+    if(cal.toClaim != null) out.push(`      About ${cal.toClaim.toLocaleString()} more contests like these before the evidence alone could carry the cap to the model's ${((cal.modelMult != null) ? cal.modelMult : cal.modelMultRaw).toFixed(0)}× claim${cal.modelMult == null ? ' (raw-scale)' : ''}.`);
   }
   // ck86: the per-player calibration.
   for(const line of nflPitLines(rec.pit, rp.pitPooled)) out.push(line);
@@ -6553,7 +6606,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck110/2026-09-14';
+const BUILD_ID = '2.0/ck113/2026-09-14';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -9941,21 +9994,20 @@ async function dkPriceAcrossContests(){
       const mine = useAssign ? res.assign.filter(a => a.contestId === c.contestId) : [];
       if(mine.length) keys = mine.map(a => a.lineup.key);
       else { keys = list.map(l => l.key); all = true; }
-      let n = 0, miss = 0, stake = 0, mEV = 0, cEV = 0, cash = 0, t10 = 0, t1 = 0;
+      let n = 0, miss = 0, stake = 0, mEV = 0, cEV = 0, cash = 0, t10 = 0, t1 = 0, favS = 0;
       for(const k of keys){
         const i = idxOf.get(k); const r = (i != null) ? priced[i] : null;
         if(!r){ miss++; continue; }
-        n++; stake += con.fee;
+        n++; stake += con.fee; favS += (r.fieldAvgGross > 0 ? r.fieldAvgGross : 0);
         mEV += r.meanPay - con.fee; cEV += r.calMeanPay - con.fee;
         cash += r.cashPct/100; t10 += r.top10Pct/100; t1 += r.top1Pct/100;
       }
-      const _rg = contestRandomGross(con);
       rows.push({name:c.name, contestId:c.contestId, count:c.count, entries:n, miss, all,
                  fieldSize:con.fieldSize, fee:con.fee, se:con.dkSe, paid:con.paid,
                  stake, modelEV:mEV, calEV:cEV, cash, top10:t10, top1:t1,
-                 // ck110: edge = calibrated gross ÷ what n random entries collect here
-                 randomBase: (_rg > 0) ? n*_rg : 0,
-                 edge: (_rg > 0 && n > 0) ? (stake + cEV)/(n*_rg) : null,
+                 // ck110: edge = calibrated gross ÷ what n AVERAGE field entries collect here
+                 randomBase: favS,
+                 edge: (favS > 0 && n > 0) ? (stake + cEV)/favS : null,
                  modelRoi: stake > 0 ? 100*mEV/stake : null,
                  calRoi:   stake > 0 ? 100*cEV/stake : null});
       prog(`Contest ${ci}/${st.contests.length} done — ${((Date.now()-t0)/1000).toFixed(1)}s elapsed.`);
@@ -9997,7 +10049,7 @@ function dkPriceAcrossHtml(slate){
       <td style="padding:5px 7px;text-align:right;">${tot?'—':r.fieldSize.toLocaleString()}</td>
       <td style="padding:5px 7px;text-align:right;">${tot?'—':contestFeeStr(r.fee)}</td>
       <td style="padding:5px 7px;text-align:right;">${m(r.stake)}</td>
-      <td style="padding:5px 7px;text-align:right;font-weight:600;color:${r.edge==null?'var(--muted)':(r.edge>=1?'var(--green)':'var(--red)')};" title="Edge — calibrated gross ÷ what these entries would collect as random entries in this contest">${r.edge==null?'—':evEdgeFmt(r.edge)}</td>
+      <td style="padding:5px 7px;text-align:right;font-weight:600;color:${r.edge==null?'var(--muted)':(r.edge>=1?'var(--green)':'var(--red)')};" title="Edge — calibrated gross ÷ what the same number of average field entries collect in this contest, priced the same way">${r.edge==null?'—':evEdgeFmt(r.edge)}</td>
       <td style="padding:5px 7px;text-align:right;color:${col(r.modelEV)};">${m(r.modelEV)}</td>
       <td style="padding:5px 7px;text-align:right;color:${col(r.calEV)};">${m(r.calEV)}</td>
       <td style="padding:5px 7px;text-align:right;color:${col(r.modelRoi)};">${pc(r.modelRoi)}</td>
@@ -15611,7 +15663,15 @@ function sampleUfcField(pool, N, ownArr, opts){
     return a;
   };
 
-  let w = target.slice();
+  // ck112: WARM START. The calibrated weight vector from an earlier draw of the
+  // SAME scenario (same pool, same target column, same options) is handed in as
+  // `opts.wInit`; the calibration then needs one pass instead of three, and the
+  // final draw is the same draw it always was (the weights are the state; the
+  // RNG stream is the caller's). The generator's select/report folds and the
+  // pricing field each drew the same five scenarios from scratch — 3 calibration
+  // passes of ~8,000 entries per scenario, per draw, is most of a field's cost.
+  const _warm = !!(opts && opts.wInit && opts.wInit.length === pool.length);
+  let w = _warm ? Array.from(opts.wInit) : target.slice();
   let field = [];
   // ── ONE DRAW (checkpoint 82) ───────────────────────────────────────────────
   // The body of the sampling loop, extracted VERBATIM so the board sampler can
@@ -15763,7 +15823,8 @@ function sampleUfcField(pool, N, ownArr, opts){
   // `w` is for the ownership draws.
   const OPT = PF ? ((opts && opts.fieldOpt) || null) : null;
   const projArr = OPT ? pool.map(p => Math.max(0, parseFloat(p.proj) || 0)) : null;
-  let anch = OPT ? new Float64Array(pool.length).fill(1) : null;
+  let anch = OPT ? ((_warm && opts.anchInit && opts.anchInit.length === pool.length) ? Float64Array.from(opts.anchInit) : new Float64Array(pool.length).fill(1)) : null;
+  if(_warm && opts.hedgeInit > 0 && hedgeLever > 0) hedgeLever = opts.hedgeInit;
   let optTheta = OPT ? Math.max(0.02, OPT.theta || 0.35) : 0;
   let optTemp  = OPT ? Math.max(1e-4, OPT.temp || 0.02) : 0;
   let optBuilds = null, optLogA = null, optScoreBase = null, optSd = 1;
@@ -16071,7 +16132,8 @@ function sampleUfcField(pool, N, ownArr, opts){
   // the pool-mode anchor. Gated on `!slots && OPT`, so this is a statement about
   // the ROSTER SHAPE (a small pool with no slot structure to spread the anchor
   // over), not about the sport: NFL classic and showdown are untouched.
-  const PASSES = (PF && OPT && !slots) ? 6 : (PF ? 4 : 3);
+  const PASSES0 = (PF && OPT && !slots) ? 6 : (PF ? 4 : 3);
+  const PASSES = _warm ? Math.max(2, Math.ceil(PASSES0/2)) : PASSES0;   // ck112: warm ⇒ half the passes (min one calibration + the draw)
   for(let iter=0; iter<PASSES; iter++){
     const Ni = (iter < PASSES-1) ? CALIB : N;
     // The weights change between passes, so the gamma table is rebuilt with them.
@@ -16179,6 +16241,7 @@ function sampleUfcField(pool, N, ownArr, opts){
   // the two observables the tests band: within-board top exposure and distinct
   // fraction. Null when the sampler drew the ck81 independent field.
   return {field, maxDev, maxName, boards: boardsMeta,
+          calW: w, calAnch: anch, calHedge: hedgeLever, warm: _warm, passes: PASSES,
           boardSigma: PF ? tiltSigma : null,
           boardTopExposure: PF ? lastTopExp : null,
           optShare: OPT ? lastOptShare : null,
@@ -16239,6 +16302,7 @@ function fieldWorkerGlue(){
               distinct:b.distinct, topExposure:b.topExposure};
     }) : null;
     self.postMessage({k:d.k, n:n, SZ:SZ, flat:flat, boards:boards,
+      calW: r.calW ? Float64Array.from(r.calW) : null, calWC: r.calWC ? Float64Array.from(r.calWC) : null, calAnch: r.calAnch ? Float64Array.from(r.calAnch) : null, calHedge: r.calHedge, warm: !!r.warm, passes: r.passes,
       meta:{maxDev:r.maxDev, maxName:r.maxName, boardSigma:r.boardSigma,
             boardTopExposure:r.boardTopExposure, optShare:r.optShare,
             optTheta:r.optTheta, optTemp:r.optTemp, optPoolN:r.optPoolN,
@@ -16321,15 +16385,43 @@ async function sampleFieldSet(pool, N, scenarios, opts, seed, reserve, extra){
     try {
       for(let k=0;k<K;k++){
         Math.random = mulberry32(seeds[k]);
-        const r = SD ? sampleShowdownField(pool, N, scenarios[k], cptScen[k], opts)
-                     : sampleUfcField(pool, N, scenarios[k], opts);
+        const _wi = (typeof _warmIn !== 'undefined') ? _warmIn[k] : null;
+        const r = SD ? sampleShowdownField(pool, N, scenarios[k], cptScen[k], _wi ? Object.assign({}, opts, _wi) : opts)
+                     : sampleUfcField(pool, N, scenarios[k], _wi ? Object.assign({}, opts, _wi) : opts);
         if(!r || !r.field || !r.field.length) return null;
         out.push(r);
       }
     } finally { Math.random = orig; }
     return out;
   };
-  if(!fieldWorkersUsable()) return runSync();
+  // ck112: the calibrated weights of every scenario ever drawn on this page,
+  // keyed by (pool, target column, options) — the next draw of the same
+  // scenario starts from them. Bounded; a slate change simply misses.
+  const _wc = (typeof window !== 'undefined') ? (window._fieldWCache = window._fieldWCache || new Map()) : null;
+  const _optsSig = (function(){ try { return _h32(JSON.stringify(fieldWorkerOpts(opts))); } catch(e){ return 'x'; } })();
+  const _poolSig = _h32(pool.map(p => p.id).join(','));
+  const _wkey = k => [_poolSig, _optsSig, SD ? 'sd' : 'c',
+    _h32(Array.from(scenarios[k]).map(v => Math.round(v*100)).join(',')),
+    SD ? _h32(Array.from(cptScen[k]).map(v => Math.round(v*100)).join(',')) : ''].join('|');
+  // Exact scenario first; otherwise the as-projected column's weights (scenario
+  // 0 of any earlier draw on this pool) — a perturbed scenario is a small move
+  // from it, and one calibration pass from there beats three from the target.
+  const _warmFor = k => { if(!_wc) return null;
+    const c = _wc.get(_wkey(k)) || (k > 0 ? _wc.get(_wkey(0)) : null);
+    if(!c) return null;
+    return SD ? (c.wC ? {wInit:c.w, wInitC:c.wC} : null) : {wInit:c.w, anchInit:c.anch, hedgeInit:c.hedge}; };
+  const _remember = (k, r) => { if(!_wc || !r || !r.calW) return;
+    if(_wc.size > 400) _wc.clear();
+    _wc.set(_wkey(k), {w: r.calW, wC: r.calWC || null, anch: r.calAnch, hedge: r.calHedge}); };
+  // Decided ONCE, before any lane starts: a scenario must not warm-start from
+  // a sibling that happened to finish first, or the draw would depend on lane
+  // timing. What this call learns is for the NEXT call.
+  const _warmIn = scenarios.map((_, k) => _warmFor(k));
+  if(!fieldWorkersUsable()){
+    const out = runSync();
+    if(out) out.forEach((r, k) => _remember(k, r));
+    return out;
+  }
   const marshalled = fieldWorkerPool(pool, opts && opts.posOf);
   const wOpts = fieldWorkerOpts(opts);
   const lanes = fieldWorkerLanes(K, reserve);
@@ -16342,9 +16434,10 @@ async function sampleFieldSet(pool, N, scenarios, opts, seed, reserve, extra){
     const feed = () => {
       if(failed || next >= K){ try { w.terminate(); } catch(e){} resolve(null); return; }
       const k = next++;
+      const _wi = _warmIn[k];
       w.postMessage({k, N, seed:seeds[k], own:scenarios[k],
                      cptOwn: SD ? cptScen[k] : null, sd: SD,
-                     pool:marshalled, opts:wOpts});
+                     pool:marshalled, opts:_wi ? Object.assign({}, wOpts, _wi) : wOpts});
     };
     w.onerror = e => { failed = failed || ('worker: ' + ((e && e.message) || 'failed'));
       try { w.terminate(); } catch(x){} resolve(null); };
@@ -16355,7 +16448,8 @@ async function sampleFieldSet(pool, N, scenarios, opts, seed, reserve, extra){
       for(let i=0;i<d.n;i++){ const l = new Array(SZ), off = i*SZ;
         for(let j=0;j<SZ;j++) l[j] = flat[off+j];
         field[i] = l; }
-      out[d.k] = Object.assign({field, boards:d.boards}, d.meta);
+      out[d.k] = Object.assign({field, boards:d.boards, warm:!!d.warm, passes:d.passes}, d.meta);
+      _remember(d.k, d);
       feed();
     };
     feed();
@@ -16520,7 +16614,9 @@ function sampleShowdownField(pool, N, flexTarget, cptTarget, opts){
   })();
   const pre = k => cheapPre[Math.max(0, Math.min(cheapPre.length-1, k))];
   const need = (k, missT) => (missT && k>0) ? (cheapTeam[missT]||0) + pre(k-1) : pre(k);
-  let wF = tgtF.slice(), wC = tgtC.slice();
+  // ck112: warm start (see sampleUfcField) — both weight vectors.
+  const _warmSD = !!(opts && opts.wInit && opts.wInit.length === pool.length && opts.wInitC && opts.wInitC.length === pool.length);
+  let wF = _warmSD ? Array.from(opts.wInit) : tgtF.slice(), wC = _warmSD ? Array.from(opts.wInitC) : tgtC.slice();
   let field=[], cptCnt=new Array(nP).fill(0), flexCnt=new Array(nP).fill(0);
   // ck82: one draw, extracted verbatim so the board sampler can call it with a
   // tilted pair of vectors and the board's own chalk temperature. With no extra
@@ -16769,7 +16865,8 @@ function sampleShowdownField(pool, N, flexTarget, cptTarget, opts){
   };
   // ck82/83: a board mixture needs one more calibration pass than an
   // independent draw — see the classic sampler's note.
-  const PASSES_SD = PF ? 4 : 3;
+  const PASSES_SD0 = PF ? 4 : 3;
+  const PASSES_SD = _warmSD ? Math.max(2, Math.ceil(PASSES_SD0/2)) : PASSES_SD0;
   for(let iter=0; iter<PASSES_SD; iter++){
     field=[]; cptCnt=new Array(nP).fill(0); flexCnt=new Array(nP).fill(0);
     let guard=0;
@@ -16814,6 +16911,7 @@ function sampleShowdownField(pool, N, flexTarget, cptTarget, opts){
     if(d>maxDev){ maxDev=d; maxName=pool[i].name; }
   }
   return {field, maxDev, maxName, cptRate, flexRate, boards: boardsMeta,
+          calW: wF, calWC: wC, warm: _warmSD, passes: PASSES_SD,
           boardSigma: PF ? tiltSigma : null,
           boardTopExposure: PF ? lastTopExp : null,
           optShare: OPT ? lastOptShare : null,
@@ -17724,9 +17822,16 @@ function evCalCapFrom(rows){
   // `obsTop1Ev` is the observed count on exactly the rows that recorded one
   // (a row with obsTop1 === null contributes to NEITHER — "not recorded").
   let fairTop1 = 0, obsTop1Ev = 0, nTop1Ev = 0, rowsTop1Ev = 0, fairTop1M = 0;
+  // ck111: the model's CLAIM is measured only on rows whose prediction was
+  // stored on the calibrated scale (normalized over the field). Older rows
+  // still count wins, top-1% finishes and fair rates — the observed half.
+  let fairWinsM = 0, rowsNorm = 0, predWinsN = 0, predTop1N = 0, fairTop1N = 0;
   for(const r of R){
     n += r.n;
     fairWins += r.n / r.fieldSize;
+    if(r.normalized){ rowsNorm++;
+      if(r.predWinRate > 0){ predWinsN += r.n * r.predWinRate; fairWinsM += r.n / r.fieldSize; }
+      if(r.predTop1Rate > 0 && r.obsTop1 != null){ predTop1N += r.n * r.predTop1Rate; fairTop1N += r.n * evCalFairTop1(r.fieldSize); } }
     if(r.obsTop1 != null){
       fairTop1 += r.n * evCalFairTop1(r.fieldSize);
       obsTop1Ev += r.obsTop1; nTop1Ev += r.n; rowsTop1Ev++;
@@ -17752,10 +17857,16 @@ function evCalCapFrom(rows){
   const cap1 = (EVCAL_T1_A + obsTop1Ev) / (EVCAL_T1_B + fairTop1);
   // What the MODEL claims for the band over the rows that carry both halves,
   // as a multiple of fair — the number cap1 is being held below.
-  const modelMult1 = fairTop1M > 0 ? predTop1 / fairTop1M : null;
+  // ck111: `modelMult1` / `modelMult` — the claims the SHRINK reads — come from
+  // normalized rows only; `modelMult1Raw` / `modelMultRaw` are the same ratios
+  // over every row with a prediction, on whatever scale it was stored (the
+  // pre-ck111 rows' raw model figures), kept for the record's own sentence.
+  const modelMult1Raw = fairTop1M > 0 ? predTop1 / fairTop1M : null;
+  const modelMult1 = fairTop1N > 0 ? predTop1N / fairTop1N : null;
   // What the MODEL claims, as a multiple of fair, over the same record — this
   // is the number the cap is being held below.
-  const modelMult = fairWins > 0 ? predWins / fairWins : null;
+  const modelMultRaw = fairWins > 0 && predWins > 0 ? predWins / fairWins : null;
+  const modelMult = fairWinsM > 0 ? predWinsN / fairWinsM : null;
   // Ranks 2–10 are capped too only when the record says the model over-claims
   // the band we CAN check: a top-1% hit rate materially below prediction. Two
   // contests say the opposite (SF@LAR hit 2 where the model was conservative),
@@ -17770,12 +17881,13 @@ function evCalCapFrom(rows){
   // evidence could carry the cap to 90% of the model's own claim, assuming the
   // model is right and wins arrive at its rate. Solve (a0+kP)/(b0+kΦ) = 0.9M.
   let toClaim = null;
-  if(modelMult != null && R.length && modelMult > EVCAL_PRIOR_A){
-    const per = fairWins / R.length, target = 0.9*modelMult;
-    const denom = (modelMult - target) * per;
+  const _mmClaim = (modelMult != null) ? modelMult : modelMultRaw;
+  if(_mmClaim != null && R.length && _mmClaim > EVCAL_PRIOR_A){
+    const per = fairWins / R.length, target = 0.9*_mmClaim;
+    const denom = (_mmClaim - target) * per;
     if(denom > 0) toClaim = Math.ceil((target*EVCAL_PRIOR_B - EVCAL_PRIOR_A) / denom);
   }
-  return {cap, cap1, prior1: rowsTop1Ev === 0, fairTop1, obsTop1Ev, nTop1Ev,
+  return {cap, cap1, prior1: rowsTop1Ev === 0, fairTop1, obsTop1Ev, nTop1Ev, rowsNorm, modelMultRaw, modelMult1Raw,
           rowsTop1Ev, fairTop1Matched: fairTop1M, modelMult1,
           t1PriorA: EVCAL_T1_A, t1PriorB: EVCAL_T1_B,
           capTop10, top1Z, prior: R.length === 0 || obsWins === 0,
@@ -17797,7 +17909,7 @@ function evCalCapLine(cal){
   return `win-rate cap ${c.cap.toFixed(1)}× fair — ${c.prior ? 'prior' : 'updated'}; `
        + `${c.contests} contest${c.contests === 1 ? '' : 's'}, ${c.lineups.toLocaleString()} lineups, `
        + `${c.obsWins} win${c.obsWins === 1 ? '' : 's'} observed vs ${w(c.predWins)} predicted at model rate`
-       + (c.modelMult != null ? ` (the model claims ${c.modelMult.toFixed(0)}× fair)` : '')
+       + (c.modelMult != null ? ` (the model claims ${c.modelMult.toFixed(0)}× fair)` : (c.modelMultRaw != null ? ` (the model claimed ${c.modelMultRaw.toFixed(0)}× fair on the raw, pre-normalization scale)` : ''))
        + (c.cap1 != null ? ' · ' + evCalCap1Line(c) : '');
 }
 // ck108: the same sentence for the top-1% band cap. Separate function because
@@ -17809,7 +17921,7 @@ function evCalCap1Line(cal){
   return `top-1% cap ${c.cap1.toFixed(2)}× fair — ${c.prior1 ? 'prior' : 'updated'}; `
        + `${c.obsTop1Ev} top-1% finish${c.obsTop1Ev === 1 ? '' : 'es'} observed vs `
        + `${c.fairTop1.toFixed(2)} fair over ${c.nTop1Ev.toLocaleString()} recorded lineups`
-       + (c.modelMult1 != null ? ` (the model claims ${c.modelMult1.toFixed(1)}× fair)` : '');
+       + (c.modelMult1 != null ? ` (the model claims ${c.modelMult1.toFixed(1)}× fair)` : (c.modelMult1Raw != null ? ` (raw-scale claim ${c.modelMult1Raw.toFixed(1)}× fair)` : ''));
 }
 // Apply the cap to a band decomposition. P(win) = min(model, cap × fair).
 // Everything below rank 1 (and below rank 10, when the record says so) is left
@@ -17819,17 +17931,192 @@ function evCalCap1Line(cal){
 // in the top 1% (hbPriceLineup's `top1`, the same posterior the card prints). It
 // is optional: a caller that does not pass one gets exactly ck88's behaviour,
 // which is why every pre-ck108 assertion still holds byte for byte.
-function evCalibrate(bands, winRate, F, cal, top1Rate){
+// ── ck111: SHRINK, NOT CLIP ─────────────────────────────────────────────────
+// The record says two things about a band: what the MODEL claimed for the
+// lineups actually played (`modelMult`, a multiple of fair) and what the
+// evidence supports (`cap`, the Gamma–Poisson posterior). ck88/ck108 applied
+// the cap PER LINEUP as a ceiling — P(win) = min(model, cap × fair) — which
+// gives every lineup above the ceiling the same number: the one thing a
+// top-heavy GPP build is for (a real chance at first, low duplication) became
+// invisible to the calibrated figure, the ordering fell through to cash and
+// top-10%, and the engine (which maximizes the model figure) and the card
+// (which shows the calibrated one) disagreed about which lineups were good.
+// The posterior on a claim of M× fair that the evidence caps at c× fair is
+// "believe c/M of it" — for every lineup, by the same factor. Relative order
+// survives; duplication still divides (it is inside the rank offset). With no
+// record for the sport (modelMult unknown) the per-lineup clip remains.
+function evCalShrink(cal){
+  const c = cal || {};
+  const s1 = (c.modelMult > 0 && isFinite(c.modelMult)) ? Math.min(1, c.cap / c.modelMult) : null;
+  const s23 = (c.modelMult1 > 0 && isFinite(c.modelMult1) && c.cap1 != null) ? Math.min(1, c.cap1 / c.modelMult1) : null;
+  return {s1, s23, on: s1 != null};
+}
+// A payout ladder with the shrink folded in: pay(r) × band factor. Feeding this
+// to an expected-payout integral is identical to shrinking the bands after —
+// which is how the engine's search can maximize the calibrated gross without
+// touching a single one of its inner loops.
+// ── ck111: THE EDGE SCREEN ──────────────────────────────────────────────────
+// The board is built ~40% long, every lineup is priced held out, and a lineup
+// is kept only if (a) its edge is at least EDGE_SCREEN.floor — never play a
+// lineup the model thinks is worse than an average entry — and (b) its edge
+// WITH THE RANK-1 BAND REMOVED is at least EDGE_SCREEN.ex1Floor: a lineup
+// whose entire case is first place is a lineup whose tails we do not yet trust
+// (no results file has scored the ORDERING of first-place claims). The first
+// N survivors in selection order are kept; a board that cannot fill comes back
+// short and the log says so, rather than padded with lineups that failed.
+// Over-generation factors. Exposure caps are scaled by wanted/long, so a cap
+// of X% of the WANTED board is the same number of slots on the long one — and
+// the kept board is a subsequence of the long one, so the caps hold on it
+// exactly. The legacy selector's greedy is cheap, so it builds 2.5× long
+// (MEASURED, UFC Paris: 16 of 28 failed at 1.4×, 30 of 50 at 2.5× — 17 shipped of 20); the GPP kernel's
+// portfolio greedy is not, so 1.4×.
+const EDGE_SCREEN = {on:true, floor:1.0, ex1Floor:0.85, overgen:1.4, overgenLegacy:3.0, overgenMin:3};
+function evEdgeScreenCfg(slate){
+  const o=(slate && slate._edgeScreen) || {};
+  return {on: o.on!=null ? !!o.on : EDGE_SCREEN.on,
+          floor: (o.floor>0) ? +o.floor : EDGE_SCREEN.floor,
+          ex1Floor: (o.ex1Floor>0) ? +o.ex1Floor : EDGE_SCREEN.ex1Floor};
+}
+function evOvergen(slate, target, kind){
+  if(!evEdgeScreenCfg(slate).on) return target;
+  const f = kind === 'legacy' ? EDGE_SCREEN.overgenLegacy : EDGE_SCREEN.overgen;
+  return Math.max(target + EDGE_SCREEN.overgenMin, Math.ceil(target * f));
+}
+// `rows` = [{r}] index-aligned with the board, r = hbPriceLineup's return (or
+// null). Returns the indices to keep, in board order, plus what was dropped.
+// ck113: `opts.floors = {ids(i), min(id)}` — the user's Min% pins, as slot
+// counts on the KEPT board. After the pass, a floored player short of his
+// count gets survivors that hold him swapped in for the last-kept lineups that
+// hold no floored player still short, caps respected; what cannot be met is
+// logged, never silently dropped.
+function evScreenBoard(slate, rows, target, log, opts){
+  const cfg=evEdgeScreenCfg(slate);
+  const keep=[], dropped=[];
+  // ck112: optional exposure caps enforced ON THE KEPT BOARD — `caps.ids(i)`
+  // lists a lineup's player ids, `caps.cap(id)` the slot cap; a lineup that
+  // would push any player over its cap is skipped (why:'cap') and the next
+  // survivor in order takes the slot.
+  const caps=(opts && opts.caps) || null; const cnt=new Map();
+  const capOk=i=>{ if(!caps) return true; for(const id of caps.ids(i)) if((cnt.get(id)||0)+1 > caps.cap(id)) return false; return true; };
+  const take=i=>{ keep.push(i); if(caps) for(const id of caps.ids(i)) cnt.set(id, (cnt.get(id)||0)+1); };
+  if(!cfg.on){ for(let i=0;i<rows.length && keep.length<target;i++){ if(capOk(i)) take(i); else dropped.push({i, edge:null, edgeEx1:null, why:'cap'}); }
+    return {keep, dropped, cfg, short:Math.max(0,target-keep.length), screened:false}; }
+  for(let i=0;i<rows.length;i++){
+    const r=rows[i];
+    if(!r || r.edge==null){ if(keep.length<target){ if(capOk(i)) take(i); else dropped.push({i, edge:null, edgeEx1:null, why:'cap'}); } continue; }   // unpriced: cannot be judged
+    const e=r.edge, e1=(r.edgeEx1!=null)?r.edgeEx1:e;
+    if(e < cfg.floor){ dropped.push({i, edge:e, edgeEx1:e1, why:'edge'}); continue; }
+    if(e1 < cfg.ex1Floor){ dropped.push({i, edge:e, edgeEx1:e1, why:'ex1'}); continue; }
+    if(keep.length>=target){ dropped.push({i, edge:e, edgeEx1:e1, why:'surplus'}); continue; }
+    if(!capOk(i)){ dropped.push({i, edge:e, edgeEx1:e1, why:'cap'}); continue; }
+    take(i);
+  }
+  // ── ck113: exposure floors on the kept board ──────────────────────────────
+  const floors=(opts && opts.floors) || null; const floorRep=[];
+  if(floors && keep.length){
+    const need=new Map(); for(const id of (floors.list||[])){ const m=floors.min(id); if(m>0) need.set(id, m); }
+    const have=id=>{ let c=0; for(const i of keep) if(floors.ids(i).includes(id)) c++; return c; };
+    const passed=i=>{ const r=rows[i]; if(!r || r.edge==null) return true; const e1=(r.edgeEx1!=null)?r.edgeEx1:r.edge; return r.edge>=cfg.floor && e1>=cfg.ex1Floor; };
+    const kept=new Set(keep);
+    for(const [id, m] of need){
+      let deficit=m-have(id);
+      if(deficit<=0) continue;
+      const cands=[]; for(let i=0;i<rows.length;i++) if(!kept.has(i) && passed(i) && floors.ids(i).includes(id)) cands.push(i);
+      let swapped=0;
+      for(const ci of cands){
+        if(deficit<=0) break;
+        // the last kept lineup holding NO floored player who is still short
+        let vi=-1;
+        for(let k=keep.length-1;k>=0;k--){ const ids=floors.ids(keep[k]);
+          let protectedRow=false; for(const [pid, pm] of need){ if(ids.includes(pid) && have(pid)<=pm) { protectedRow=true; break; } }
+          if(!protectedRow){ vi=k; break; } }
+        if(vi<0) break;
+        // caps: the incoming lineup, with the victim removed
+        if(caps){ let ok=true; const out=floors.ids(keep[vi]); const outSet=new Set(out);
+          for(const pid of floors.ids(ci)){ const c=(cnt.get(pid)||0)-(outSet.has(pid)?1:0)+1; if(c>caps.cap(pid)){ ok=false; break; } }
+          if(!ok) continue; }
+        const victim=keep[vi];
+        if(caps) for(const pid of floors.ids(victim)) cnt.set(pid, (cnt.get(pid)||0)-1);
+        keep.splice(vi,1); kept.delete(victim);
+        keep.push(ci); kept.add(ci); if(caps) for(const pid of floors.ids(ci)) cnt.set(pid,(cnt.get(pid)||0)+1);
+        dropped.push({i:victim, edge:rows[victim]?rows[victim].edge:null, edgeEx1:rows[victim]?rows[victim].edgeEx1:null, why:'floor-swap'});
+        deficit--; swapped++;
+      }
+      floorRep.push({id, want:m, have:have(id), swapped});
+    }
+  }
+  const short=Math.max(0, target-keep.length);
+  if(log && floorRep.length){
+    const nm=id=>{ const p=(slate&&typeof playerById==='function')?playerById(slate,id):null; return p?p.name:String(id); };
+    const unmet=floorRep.filter(f=>f.have<f.want);
+    log(`Exposure floors on the kept board (ck113): ${floorRep.map(f=>`${nm(f.id)} ${f.have}/${f.want}${f.swapped?` (+${f.swapped} swapped in)`:''}`).join(', ')}.`
+      + (unmet.length?` ⚠ ${unmet.length} floor${unmet.length===1?'':'s'} could not be met from lineups that pass the screen — a floored player whose lineups price under 1.00× is not forced onto the board.`:''));
+  }
+  if(log){
+    const nE=dropped.filter(d=>d.why==='edge').length, n1=dropped.filter(d=>d.why==='ex1').length, nS=dropped.filter(d=>d.why==='surplus').length, nC=dropped.filter(d=>d.why==='cap').length;
+    const fmt=v=>(v==null?'—':v.toFixed(2)+'×');
+    log(`Edge screen (ck111): ${rows.length} built for ${target} wanted — kept ${keep.length}; dropped ${nE} under ${cfg.floor.toFixed(2)}× edge, ${n1} under ${cfg.ex1Floor.toFixed(2)}× with the rank-1 band removed${nC?`, ${nC} that would have broken an exposure cap on the kept board`:''}, ${nS} surplus beyond the target.`
+      + (short ? ` ⚠ BOARD IS ${short} SHORT — the search did not produce ${target} lineups that clear the screen; it ships ${keep.length}, not ${short} padded with lineups that failed.` : '')
+      + (dropped.some(d=>d.edge!=null && d.why!=='surplus' && d.why!=='cap' && d.why!=='floor-swap') ? ` Weakest dropped: ${dropped.filter(d=>d.edge!=null && d.why!=='surplus' && d.why!=='cap' && d.why!=='floor-swap').sort((a,b)=>a.edge-b.edge).slice(0,3).map(d=>`#${d.i+1} ${fmt(d.edge)} (${fmt(d.edgeEx1)} ex-first)`).join(', ')}.` : ''));
+  }
+  return {keep, dropped, cfg, short, screened:true};
+}
+// The three band factors — normalization × record shrink — as one object.
+function evCalFactors(cal, norm){
+  const sh = evCalShrink(cal), c = cal || {};
+  const n1 = (norm && norm.n1 != null) ? norm.n1 : 1, n23 = (norm && norm.n23 != null) ? norm.n23 : 1;
+  const s1 = n1 * (sh.on ? sh.s1 : 1), s23 = n23 * ((sh.on && sh.s23 != null) ? sh.s23 : 1);
+  const s2 = c.capTop10 ? Math.min(s1, s23) : s23;
+  return {s1, s2, s3: s23, s23, on: (s1 < 1) || (s23 < 1), norm: !!(norm && norm.n1 != null), shrink: sh.on};
+}
+function evCalObjectiveLine(fx, norm){
+  if(!fx || !fx.on) return 'Objective: the search scores on the raw ladder — no field normalization was available and the results record holds no calibrated claim yet.';
+  const parts = [];
+  if(norm && norm.n1 != null) parts.push(`the field's mean P(first) was ${norm.winMult.toFixed(1)}× fair and P(top 1%) ${norm.top1Mult.toFixed(2)}× fair, so the bands are normalized to conserve probability (×${norm.n1.toFixed(3)} / ×${norm.n23.toFixed(3)})`);
+  if(fx.shrink) parts.push('the results record shrinks them further (validated cap ÷ the calibrated claim)');
+  return `Objective (ck111): candidates are scored on the CALIBRATED ladder — rank-1 band × ${fx.s1.toFixed(4)}, top-1% bands × ${fx.s23.toFixed(3)}: ${parts.join('; ')}. One factor for every lineup, so a real chance at first still ranks above a smaller one and duplication still divides it.`;
+}
+function evCalPayoutFn(payAt, F, cal, norm){
+  const fx = evCalFactors(cal, norm);
+  if(!fx.on) return payAt;
+  const s1 = fx.s1, s2 = fx.s2, s23 = fx.s23;
+  const onePct = Math.max(10.5, Math.ceil(0.01 * Math.max(1, F)) + 0.5);
+  return function(r){
+    const v = payAt(r);
+    if(!(v > 0)) return v;
+    if(!(r >= 1.5)) return v * s1;
+    if(r < 10.5) return v * s2;
+    return r < onePct ? v * s23 : v;
+  };
+}
+// ck111: the rates a record row stores are the CALIBRATED claims — normalized
+// over the field and shrunk by the record — so "the model claims M× fair" in
+// the next cap is measured on the same scale the cap is applied to.
+function evCalRates(slate, winRate, top1Rate){
+  const cal=evCalCap((slate&&slate.sport)||'nfl'), shr=evCalShrink(cal), nm=(slate&&slate._calNorm)||null;
+  const f1=(nm&&nm.n1!=null?nm.n1:1)*(shr.on?shr.s1:1);
+  const f23=(nm&&nm.n23!=null?nm.n23:1)*((shr.on&&shr.s23!=null)?shr.s23:1);
+  return {calWinRate:(winRate>0)?winRate*f1:winRate, calTop1Rate:(top1Rate>0)?top1Rate*f23:top1Rate,
+          normalized: !!(nm&&nm.n1!=null), f1, f23};
+}
+function evCalibrate(bands, winRate, F, cal, top1Rate, norm){
   const c = cal || {cap: EVCAL_PRIOR_A/EVCAL_PRIOR_B, capTop10: false};
   const fair = 1/Math.max(1, F);
-  const s1 = (winRate > 0) ? Math.min(1, (c.cap*fair)/winRate) : 1;
+  const shr = evCalShrink(c);
+  // ck111: normalization (conservation over the field) × the record's shrink.
+  // With neither — no field sample and no record — ck108's per-lineup clip is
+  // the fallback, so a lineup priced with no field context is never uncapped.
+  const nz = norm && (norm.n1 != null);
+  const s1 = nz ? norm.n1 * (shr.on ? shr.s1 : 1)
+           : (shr.on ? shr.s1 : ((winRate > 0) ? Math.min(1, (c.cap*fair)/winRate) : 1));
   // The top-1% scale, in the band's own units of fair. Applies to the two bands
   // INSIDE the top 1% that rank 1 does not already cover — ranks 2–10 and the
   // rest of the top 1%. Rank 1 keeps the stricter win cap; everything below the
   // top 1% is untouched, which is the whole point of the decomposition.
   const fair1 = evCalFairTop1(F);
-  const st1 = (top1Rate > 0 && c.cap1 != null && isFinite(c.cap1))
-    ? Math.min(1, (c.cap1*fair1)/top1Rate) : 1;
+  const st1 = nz ? (norm.n23 != null ? norm.n23 : 1) * ((shr.on && shr.s23 != null) ? shr.s23 : 1)
+    : ((shr.on && shr.s23 != null) ? shr.s23
+    : ((top1Rate > 0 && c.cap1 != null && isFinite(c.cap1)) ? Math.min(1, (c.cap1*fair1)/top1Rate) : 1));
   // ck88's capTop10 flag survives as a FLOOR: when the record says the top-1%
   // claim over-shoots badly enough to fail the z-test, ranks 2–10 take the
   // rank-1 factor if that is the harsher of the two.
@@ -17837,13 +18124,15 @@ function evCalibrate(bands, winRate, F, cal, top1Rate){
   const s3 = st1;
   const amt = bands.amt;
   const calGross = amt[0]*s1 + amt[1]*s2 + amt[2]*s3 + amt[3];
-  return {s1, s2, s3, st1, calGross, modelGross: bands.gross,
+  return {s1, s2, s3, st1, calGross, modelGross: bands.gross, mode: nz ? (shr.on ? 'norm+shrink' : 'norm') : (shr.on ? 'shrink' : 'clip'),
+          norm: nz ? norm : null,
+          calGrossEx1: calGross - amt[0]*s1,
           rank1Share: bands.share[0], band2Share: bands.share[1],
           fair, winMult: winRate > 0 ? winRate/fair : 0,
           fair1, top1Mult: top1Rate > 0 ? top1Rate/fair1 : 0,
           calTop1Rate: top1Rate > 0 ? Math.min(top1Rate, (c.cap1 != null ? c.cap1 : Infinity)*fair1) : null,
           cap1: (c.cap1 != null ? c.cap1 : null),
-          calWinRate: Math.min(winRate, c.cap*fair), cap: c.cap, capTop10: !!c.capTop10};
+          calWinRate: (nz || shr.on) ? winRate*s1 : Math.min(winRate, c.cap*fair), cap: c.cap, capTop10: !!c.capTop10};
 }
 // THE line — the one the log and the card must both carry, so the split is
 // impossible to miss. `stake` turns the two grosses into ROI.
@@ -18283,7 +18572,15 @@ function evFieldOptsFor(slate, SD, cap){
          slate.sport==='nascar' ? { floor: 49200 } : null));
 }
 async function runUFCContestEV(ctx){
-  const {slate, pool, ranked, simScoresById, totalSims, target, maxExpPct, overrides} = ctx;
+  const {slate, pool, ranked, simScoresById, totalSims} = ctx;
+  // ck111: build long, screen after the held-out pass (see evScreenBoard).
+  // Caps are scaled so X% of the WANTED board is the same number of slots.
+  const targetWant = ctx.target, target = evOvergen(slate, ctx.target, 'legacy');
+  // ck112: the greedy keeps its caps as a % of the LONG board (scaling them
+  // down starved the fill — MEASURED SF@LAR: three "RELAXING caps" passes, 125 s
+  // of greedy); the cut to the wanted count enforces the user's caps EXACTLY
+  // on the kept board (see evScreenBoard's `caps`).
+  const maxExpPct = ctx.maxExpPct, overrides = ctx.overrides || {};
   // Field frame = full slate when the caller provides it (see the note at the
   // ownership-scenario block): the modeled field ignores the user's curation.
   const fieldPool = (ctx.fieldPool && ctx.fieldPool.length >= pool.length) ? ctx.fieldPool : pool;
@@ -18306,7 +18603,15 @@ async function runUFCContestEV(ctx){
   const _rc  = contestResolve(slate, target);
   const F    = _rc.fieldSize;
   const fee  = _rc.fee;
-  const payout = contestPayoutFn(slate, F, fee);
+  // ck111: the selector scores every candidate on the CALIBRATED ladder — the
+  // real payout with the record's shrink on the rank-1 / top-1% bands
+  // (evCalPayoutFn) — so it builds toward the number the card grades it on.
+  // `payoutRaw` keeps the true ladder for the pool/overlay sanity check and the
+  // descriptive log lines; everything that prices a candidate reads `payout`.
+  const payoutRaw = contestPayoutFn(slate, F, fee);
+  const _runNorm = await evRunNorm(slate, _rc);
+  const _calShr = evCalFactors(evCalCap(slate.sport || 'nfl'), _runNorm);
+  const payout = Object.assign(Object.create(payoutRaw), {at: evCalPayoutFn(payoutRaw.at, F, evCalCap(slate.sport || 'nfl'), _runNorm)});
   const tick = ()=>new Promise(r=>setTimeout(r,0));
   // ── LEVERAGE-YIELD WORLD WEIGHTING (UFC, 2026-08-04) ──────────────────────
   // Where to take leverage stances is not a taste dial — it is a computable
@@ -18435,13 +18740,14 @@ async function runUFCContestEV(ctx){
       ? `Contest EV: ${payout.desc}. Leverage stances: AUTO — worlds weighted by orphaned equity (dead ownership × beneficiary rosterability); strength β solved per slate via the restart sweep below.`
       : `Contest EV: ${payout.desc}. Leverage stances: MANUAL β=${_levStr.toFixed(2)} (slider pin) on orphaned-equity world weighting.`)
     : `Contest EV: ${payout.desc}.`);
+  log(evCalObjectiveLine(_calShr, _runNorm));
   if(_SD) log('Showdown Contest EV: the modeled field is 1 CPT + 5 FLEX, captains drawn from CPT ownership and flex from FLEX ownership; candidates are priced at 1.5× captain against it.');
   // Same overlay guard as the contest summary line: pool > entries×fee means
   // the field size is almost certainly the places-paid count, not total
   // entries — every EV% that follows would be inflated by the phantom overlay.
   {
     let _pool=0,_lp=0;
-    for(let r=1;r<=F;r++){ const a=payout.at(r); if(a>0){_pool+=a;_lp=r;} else if(_lp>0&&r-_lp>5000) break; }
+    for(let r=1;r<=F;r++){ const a=payoutRaw.at(r); if(a>0){_pool+=a;_lp=r;} else if(_lp>0&&r-_lp>5000) break; }
     const _handle=F*fee;
     if(_pool > _handle*1.02){
       log(`⚠ CONTEST CONFIG: payout pool $${Math.round(_pool).toLocaleString()} exceeds entry fees $${Math.round(_handle).toLocaleString()} (${(_pool/_handle).toFixed(1)}×). Field size looks like PLACES PAID, not total entries — EV% below is inflated by that phantom overlay. Fix field size and re-run.`);
@@ -20051,8 +20357,12 @@ async function runUFCContestEV(ctx){
     fieldKeyCounts=ctx.fieldKeyCounts; fieldSorted=ctx.fieldSorted; };
   let sel = null;
   {
-    const evalCtx = await makeCtx();
-    if(evalCtx===null) return null;
+    // ck112: the eval field and the next restart's field are sampled in worker
+    // lanes WHILE the current restart's greedy runs on the main thread, instead
+    // of each being awaited before the work that needs it.
+    const evalCtxP = makeCtx();
+    let nextCtxP = (!_levAuto && RESTARTS > 1) ? makeCtx() : null;
+    let evalCtx = null;
     let curCtx = { scenarios, fields, fieldKeyCounts, fieldSorted }; // restart 1 = the already-built-and-priced context
     // β SWEEP (UFC auto-leverage): the restarts double as the leverage solve —
     // each runs at a different orphaned-equity weighting strength on its own
@@ -20088,9 +20398,10 @@ async function runUFCContestEV(ctx){
       // common, independent eval field. Manual/non-UFC keeps the original
       // one-sample-per-restart stability semantics.
       if(r>0 && !_levAuto){
-        const c = await makeCtx();
+        const c = await nextCtxP;
         if(c===null) return null;
         activateCtx(c); curCtx = c;
+        nextCtxP = (r+1 < RESTARTS) ? makeCtx() : null;
       }
       setLevBeta(BETAS[r]);
       if(r>0 || (BETAS[r]>0)){          // restart 1 was pre-priced at β=BETAS[0] only if that was 0
@@ -20101,6 +20412,7 @@ async function runUFCContestEV(ctx){
       const s = await runGreedy(null);
       if(s===null) return null;
       if(window._genCancelled) return null;
+      if(!evalCtx){ evalCtx = await evalCtxP; if(evalCtx===null) return null; }
       const q = evalPortfolio(s, scoreArr, evalCtx.fieldSorted,
         e => entryDups(e, evalCtx.scenarios, evalCtx.fieldKeyCounts, evalCtx.fields));
       results.push({r, beta:BETAS[r], s, q, ctx:curCtx});
@@ -20515,7 +20827,7 @@ async function runUFCContestEV(ctx){
   // Portfolio report straight from the per-sim portfolio distribution — the
   // exact object the utility optimized. Mean net is the linear-EV view;
   // the loss probabilities are what the log-utility actually managed.
-  const spent  = fee*finalLineups.length;
+  let spent  = fee*finalLineups.length;
   const meanNet = portNet.reduce((a,b)=>a+b,0)/Math.max(1,simN2);
   let bustAll=0, bustHalf=0;
   for(let s=0;s<simN2;s++){
@@ -20562,14 +20874,26 @@ async function runUFCContestEV(ctx){
   const _hoT0 = Date.now();
   try {
     const _ent = finalLineups.map(l=>({players:[...l], cptId:(_SD && l._sdCaptain)?l._sdCaptain:null}));
-    const _pr = priceBoardHeldOut(_ent, {slate});
-    let nOk=0, gross=0, calGross=0, winS=0, cashS=0, top1S=0, top10S=0;
+    const _pr0 = priceBoardHeldOut(_ent, {slate});
+    // ck111: the screen, then the aggregate over what survived.
+    const _capSlots = id => { const pct = overrides[id]!=null ? overrides[id] : maxExpPct;
+                              return Math.max(1, Math.ceil(Math.max(0, Math.min(100, pct))/100*targetWant)); };
+    const _minIds = Object.keys(minOverrides||{}).filter(id => (minOverrides[id]||0) > 0);
+    const _scr = evScreenBoard(slate, _pr0, targetWant, log,
+      {caps:{ids: i => finalLineups[i].map(p => p.id), cap: _capSlots},
+       floors: _minIds.length ? {list:_minIds, ids: i => finalLineups[i].map(p => p.id),
+                                 min: id => Math.ceil(Math.max(0, Math.min(100, minOverrides[id]||0))/100*targetWant)} : null});
+    const _pr = _scr.keep.map(i => _pr0[i]);
+    finalLineups = _scr.keep.map(i => finalLineups[i]);
+    spent = fee*finalLineups.length;
+    let nOk=0, gross=0, calGross=0, winS=0, cashS=0, top1S=0, top10S=0, favS=0, favN=0;
     const bandSum=[0,0,0,0];
     finalLineups.forEach((l,i)=>{
       const r=_pr[i]; if(!r) return;
       nOk++;
       gross    += r.meanPay;
       calGross += r.calMeanPay;
+      if(r.fieldAvgGross>0){ favS += r.fieldAvgGross; favN++; }
       winS  += r.winPct/100;  cashS  += r.cashPct/100;
       top1S += r.top1Pct/100; top10S += r.top10Pct/100;
       if(r.bands && r.bands.amt) for(let b=0;b<4;b++) bandSum[b]+=r.bands.amt[b];
@@ -20588,6 +20912,7 @@ async function runUFCContestEV(ctx){
       const netHO = gross - stakeHO, calNet = calGross - stakeHO;
       _cal88 = {cal, bands, calNet, netHO, winRate, cashRate:cashS/nOk,
                 top1:top1S/nOk, top10:top10S/nOk, n:nOk, stake:stakeHO,
+                edge: (favN>0 && favS>0) ? (calGross/nOk)/(favS/favN) : null,
                 rank1Share:bands.share[0], ms:Date.now()-_hoT0};
       log(`Held-out report (ck95): ${nOk} lineups re-priced on the REPORT fold against an independent ${Math.max(200, Math.min(NFL_GPP_NF_PRICE, F)).toLocaleString()}-entry field draw in ${((Date.now()-_hoT0)/1000).toFixed(1)}s. Every number below, on every card and in the CSV, comes from this pass — not from the fold the greedy selected on.`);
       log(`Board, expected: cash ${(100*cashS/nOk).toFixed(1)}% (${(cashS).toFixed(1)} of ${nOk} lineups) · top 10% ${(100*top10S/nOk).toFixed(2)}% (${(top10S).toFixed(1)}) · top 1% ${(100*top1S/nOk).toFixed(3)}% (${(top1S).toFixed(2)}) · ${(winS).toExponential(2)} first-place finishes. These four are the CHECKABLE claims — a standings file scores them directly.`);
@@ -20629,6 +20954,10 @@ async function runUFCContestEV(ctx){
       calRoiPct: (_cal88 && spent > 0) ? 100*_cal88.calNet/spent : null,
       bandShare: _cal88 ? _cal88.bands.share : null,
       winCap: _cal88 ? _cal88.cal.cap : null,
+      // ck111: the calibrated claims, on the scale the record's cap is applied to.
+      calWinRate: _cal88 ? evCalRates(slate, _cal88.winRate, _cal88.top1).calWinRate : null,
+      calTop1Rate: _cal88 ? evCalRates(slate, _cal88.winRate, _cal88.top1).calTop1Rate : null,
+      normalized: !!(_cal88 && slate._calNorm),
       at: Date.now() };
     if(typeof save === 'function') save();
   } catch(e){}
@@ -21726,6 +22055,7 @@ async function runPgaSimScoreSelect(ctx){
 }
 
 async function runPgaSimGen(){
+  window._fieldWCache = new Map();   // ck112: warm starts are per run
   const slate=activeSlate(); if(!slate) return;
   const target=parseInt(document.getElementById('genCount').value)||20;
   const maxExpPct=parseInt(document.getElementById('genMaxExp').value)||100;
@@ -21835,6 +22165,11 @@ async function runPgaSimGen(){
   // publishes; runUFCContestEV hangs `evField` and `sharpCands` off it.
   window._lastSimCtx = {simScoresById, simsDone, sport:'pga', sd:false, slateId:slate.id, ts:Date.now()};
   if(typeof renderHbEv==='function') renderHbEv();   // the builder's stats card can now score/price
+  // ck112: the pricing field (the ONE pricing surface's independent draw) is
+  // needed by evRunNorm before the search and by the report pass after it —
+  // start drawing it in worker lanes NOW, while the main thread does the
+  // per-sim optimals and the search. evRunNorm awaits this promise.
+  evPrewarmKick(slate);
 
   // Candidates: unique ex-post optimal lineups, one per simulated tournament
   log('Computing per-sim optimal lineups…');
@@ -22125,6 +22460,7 @@ async function runPgaSimGen(){
 async function runUFCSimGen(){
   const _s  = activeSlate();
   const _ev = !!(_s && _s._ufcEv && _s._ufcEv.on);
+  window._fieldWCache = new Map();   // ck112: warm starts are per run, so a seed still reproduces
   if(!_ev){ _runSeed = null; return await runUFCSimGenInner(); }
   _runSeed = (typeof window !== 'undefined' && window.__runSeed != null)
     ? (window.__runSeed >>> 0)
@@ -22209,6 +22545,7 @@ async function runUFCSimGenInner(){
   // roster with the same numbers the generator used. Same shape runNflSimGen
   // publishes; runUFCContestEV hangs `evField` and `sharpCands` off it.
   if(simScoresById) window._lastSimCtx = {simScoresById, simsDone:totalSims, sport:'ufc', sd:false, slateId:slate.id, ts:Date.now()};
+  if(simScoresById) evPrewarmKick(slate);   // ck112: draw the pricing field in worker lanes now
   if(typeof renderHbEv==='function') renderHbEv();   // the builder's stats card can now score/price
 
   // Min% overrides are enforced by enforceMinExposure, which only runs on the
@@ -23901,6 +24238,7 @@ function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target, leverage
 }
 
 async function runNascarSimGen(){
+  window._fieldWCache = new Map();   // ck112: warm starts are per run
   const slate     = activeSlate(); if(!slate) return;
   const target    = parseInt(document.getElementById('genCount').value)||20;
   const maxExpPct = parseInt(document.getElementById('genMaxExp').value)||100;
@@ -24009,6 +24347,7 @@ async function runNascarSimGen(){
     const _ssb={};
     fullField.forEach((p,i)=>{ if(simScoreArrays[i]) _ssb[p.id]=simScoreArrays[i]; });
     window._lastSimCtx = {simScoresById:_ssb, simsDone:simTopScorer.length, sport:'nascar', sd:false, slateId:slate.id, ts:Date.now()};
+    evPrewarmKick(slate);   // ck112: draw the pricing field in worker lanes now
   if(typeof renderHbEv==='function') renderHbEv();   // the builder's stats card can now score/price
   }
   // Full sim outcomes are now attached — enable the ⬇ Sim CSV export.
@@ -31986,6 +32325,8 @@ const NFL_GPP_BUDGET = {
   budgetMs:    75000,
   budgetMsPerLineup: 1600,
   budgetMsMax: 480000,
+  // ck112: the search runs on up to this many workers at once (see the
+  // parallel block in runNflGppEngine); each gets budgetMs / K of wall clock.
   // ── CONVERGENCE STOP (checkpoint 104) ─────────────────────────────────────
   // The cap above BINDS — a 150-lineup run climbs ~700 of 3,000 planned seeds —
   // so an early stop can only ship if it cannot cost quality. The statistic it
@@ -32470,6 +32811,7 @@ function nflEngineDecide(slate, evOn){
 // 16-game slate than on a 2-game one.
 // ck74: the DEFAULT is no longer a constant — it scales with the lineup count,
 // because the seed plan and the menu target both do. See NFL_GPP_BUDGET.
+const NFL_GPP_PAR_MAX = 6;
 function nflGppDefaultSearchMs(n){
   const N = Math.max(1, parseInt(n, 10) || 0);
   return Math.min(NFL_GPP_BUDGET.budgetMsMax,
@@ -32654,10 +32996,10 @@ function renderGppCard(model){
   const ev = model.ev;
   const evBlock = ev ? `<div class="gpp-sec">EV — two figures, always together</div>
     <div class="gpp-ev">
-      ${ev.edge != null ? `<div class="gpp-ev-row" title="Board edge — the board's calibrated expected return divided by what the same number of random entries in this contest collect (prize pool ÷ field, per entry). Above 1.00× beats the field's average entry; rake makes the average entry lose, so this is the number to compare boards and contests on. Same definition as the Edge chip on every lineup card.">
+      ${ev.edge != null ? `<div class="gpp-ev-row" title="Board edge — the board's average calibrated expected return divided by the average entry of the modeled field, priced the same way. Above 1.00× beats the field's average entry; rake makes the average entry lose, so this is the number to compare boards and contests on. Same definition as the Edge chip on every lineup card.">
         <span class="gpp-ev-lbl">Board edge</span>
         <span class="gpp-ev-val${ev.edge < 1 ? ' neg' : ''}">${evEdgeFmt(ev.edge)}</span>
-        <span class="gpp-ev-note">calibrated return vs a random entry's — the comparable number</span>
+        <span class="gpp-ev-note">calibrated return vs the modeled field's average entry — the comparable number</span>
       </div>` : ''}
       <div class="gpp-ev-row" title="${esc(ev.modelTip || '')}">
         <span class="gpp-ev-lbl">Model EV</span>
@@ -33181,6 +33523,25 @@ function gppKernelFactory(){
     const nP = P.nP, pos = P.pos, sal = P.sal, sel = P.sel, team = P.team, opp = P.opp;
     const cap = P.maxSal, floor = P.minSal;
     const payFn = payFnOf(P.payTable);
+    // ck111: the SEARCH and SELECTION folds score on the CALIBRATED ladder —
+    // the raw payout with the record's shrink folded into the rank-1 and
+    // top-1% bands (`P.calShrink`, see evCalPayoutFn on the page). The REPORT
+    // fold keeps the raw ladder so heldGross / bands are the model figures and
+    // the page's evCalibrate produces the calibrated ones once, not twice.
+    const payFnCal = (function(){
+      const cs = P.calShrink;
+      if(!cs || !(cs.s1 < 1) && !(cs.s23 < 1)) return payFn;
+      const s1 = cs.s1 != null ? cs.s1 : 1, s23 = cs.s23 != null ? cs.s23 : 1;
+      const s2 = cs.capTop10 ? Math.min(s1, s23) : s23;
+      const onePct = Math.max(10.5, Math.ceil(0.01 * Math.max(1, P.F)) + 0.5);
+      return function(r){
+        const v = payFn(r);
+        if(!(v > 0)) return v;
+        if(!(r >= 1.5)) return v * s1;
+        if(r < 10.5) return v * s2;
+        return r < onePct ? v * s23 : v;
+      };
+    })();
     // ── THREE FOLDS, NOT TWO (2026-09-09) ─────────────────────────────────
     // The greedy used to SELECT on the held-out worlds and the card then
     // REPORTED the portfolio's value on those same worlds — a winner's curse
@@ -33197,14 +33558,14 @@ function gppKernelFactory(){
     // sample cannot resolve the top ten ranks of a 150,000-entry contest and
     // that is where 93% of the EV lives.
     const NFg = P.NFg, NFp = P.NFp;
-    const gen = worldSet(P.sg, P.Wg, NFg, P.K, P.fldLinG, P.F, payFn, P.paidRank);
+    const gen = worldSet(P.sg, P.Wg, NFg, P.K, P.fldLinG, P.F, payFnCal, P.paidRank);
     say({phase:'field', which:'search', ms:Date.now()-t0});
     // The sharp pass is a throwaway that only has to produce a POOL of decent
     // lineups for the field to be seeded with; it prices on the search fold
     // rather than paying for a second NFL_GPP_NF_PRICE world set it will
     // discard. Its overfit ratio is then 1 by construction, which is why it
     // keeps everything and simply ranks by EV — the right behaviour for a pool.
-    const selW = P.searchOnly ? gen : worldSet(P.ss, P.Ws, NFp, P.K, P.fldLinS, P.F, payFn, P.paidRank);
+    const selW = P.searchOnly ? gen : worldSet(P.ss, P.Ws, NFp, P.K, P.fldLinS, P.F, payFnCal, P.paidRank);
     if(!P.searchOnly) say({phase:'field', which:'select', ms:Date.now()-t0});
     // The report fold is only built when there is something to report: the sharp
     // pass runs this same kernel with searchOnly and would otherwise pay for a
@@ -33591,7 +33952,15 @@ function gppKernelFactory(){
       let sum = 0; for(let i = 0; i < n; i++) sum += a[i];
       return {G:sum, menu:a.length};
     };
+    // ck112: PARALLEL SEARCH. With `P.shard = {k, of}` this worker climbs only
+    // every of-th seed starting at k — the page runs `of` workers at once on
+    // disjoint shards of the SAME seed list and the same world set, so the
+    // union of their optima is what one worker would have found in `of` times
+    // the wall time. `P.optimaIn` (below) is how the assembling run receives
+    // them.
+    const _shard = P.shard || null;
     for(let si = 0; si < seeds.length; si++){
+      if(_shard && (si % _shard.of) !== _shard.k) continue;
       const _el = Date.now() - t0;
       if(_el > bud.budgetMs){ capBound = true; break; }
       if(convOn && _el >= convNext){
@@ -33819,7 +34188,24 @@ function gppKernelFactory(){
       }
       if((si & 15) === 0) say({phase:'search', seed:si, of:seeds.length, optima:optima.size, ms:Date.now()-t0});
     }
-    say({phase:'search', seed:seeds.length, of:seeds.length, optima:optima.size, ms:Date.now()-t0, done:true});
+    // ck112: optima found by the parallel search workers, priced on THIS
+    // worker's search worlds so `searchGross` is one arithmetic for every row.
+    let optimaInN = 0;
+    if(P.optimaIn && P.optimaIn.length >= RSIZE){
+      const src = P.optimaIn, kinds = P.optimaInKind || null;
+      for(let s0 = 0, oi = 0; s0 + RSIZE <= src.length; s0 += RSIZE, oi++){
+        const l = []; for(let j = 0; j < RSIZE; j++) l.push(src[s0 + j]);
+        const k = keyOf(l);
+        if(optima.has(k)) continue;
+        totalsInto(gen, l, tot);
+        const d = dupsOf(dm, l);
+        optima.set(k, {ids:l, searchGross:grossEV(gen, tot, d, null, null),
+                       seedKind:(kinds && kinds[oi]) || 'parallel'});
+        optimaInN++;
+      }
+    }
+    say({phase:'search', seed:seeds.length, of:seeds.length, optima:optima.size, ms:Date.now()-t0, done:true,
+         merged:optimaInN, shard:_shard ? _shard.of : 1});
 
     // Every SEED, priced on the held-out worlds. Not used by the engine — it is
     // what §8's dominance check compares the search's answer against ("the
@@ -33897,6 +34283,8 @@ function gppKernelFactory(){
     if(P.searchOnly){
       return {lineups: [], searchOnly: true,
               sharp: kept.slice(0, P.sharpWanted || 3000).map(function(x){ return x.ids; }),
+              sharpKind: kept.slice(0, P.sharpWanted || 3000).map(function(x){ return x.seedKind || ''; }),
+              capBound: capBound,
               diag: {seeds: seeds.length, seedsClimbed: climbedSeeds, optima: nOptima,
                      survived: kept.length, ms: Date.now() - t0}};
     }
@@ -33958,8 +34346,8 @@ function gppKernelFactory(){
             if(sc0 < t0q){ memStep[q*memN+k] = 0; continue; }
             const dq = mDup[m*W+q];
             const sh = mShape[m*W+q], sc = mScale[m*W+q], dv = 1 + dupDiv*dq, dof = dupOff*dq;
-            const now = payAt(sh, sc, 1+k+dof, payFn) / dv;
-            memStep[q*memN+k] = payAt(sh, sc, 2+k+dof, payFn) / dv - now;
+            const now = payAt(sh, sc, 1+k+dof, ws.payFn) / dv;
+            memStep[q*memN+k] = payAt(sh, sc, 2+k+dof, ws.payFn) / dv - now;
             s2 += now;
           }
           memSuf[q*(memN+1)+memN] = 0;
@@ -34005,7 +34393,7 @@ function gppKernelFactory(){
         let lo = 0, h = memN;
         while(lo < h){ const mid = (lo + h) >> 1; if(memScore[q*memN+mid] > t) lo = mid + 1; else h = mid; }
         const dq = mDup[m*W+q];
-        return payAt(mShape[m*W+q], mScale[m*W+q], 1+lo+dupOff*dq, payFn) / (1 + dupDiv*dq)
+        return payAt(mShape[m*W+q], mScale[m*W+q], 1+lo+dupOff*dq, ws.payFn) / (1 + dupDiv*dq)
              + memSuf[q*(memN+1)+lo];
       };
       const growthNow = function(n){
@@ -34601,6 +34989,11 @@ async function runNflGppEngine(ctx){
   await tick(); if(window._genCancelled) return null;
 
   const payTable = gppPayTable(payout, F);
+  // ck111: ONE normalization for the run, from the pricing field (built here,
+  // cached for the report pass), and the search maximizes the calibrated gross.
+  const _runNorm = await evRunNorm(slate, pricingContest(slate));
+  const _calFx = evCalFactors(evCalCap(slate.sport || 'nfl'), _runNorm);
+  log(evCalObjectiveLine(_calFx, _runNorm));
 
   // ── Player frame ──────────────────────────────────────────────────────────
   const POSC = {QB:0, RB:1, WR:2, TE:3, DST:4};
@@ -34677,6 +35070,9 @@ async function runNflGppEngine(ctx){
     ownO: Float32Array.from(scen.flatMap(v => Array.from(v))),
     theta: NFL_GPP_DUP_THETA, maxDupFrac: NFL_GPP_DUP_MAXFRAC,
     fldLinG, fldLinS, fldLinR, payTable, paidRank: gppPaidRank(payout, F),
+    // ck111: the record's shrink on the rank-1 / top-1% bands — the search and
+    // selection folds maximize the CALIBRATED gross (see payFnCal in the kernel).
+    calShrink: {s1: _calFx.s1, s23: _calFx.s23, capTop10: !!evCalCap(slate.sport || 'nfl').capTop10, on: _calFx.on},
     maxSal, minSal, N: target, B, capSlots,
     // ck74: the partner definition the LABEL uses, so the kernel's naked-pick
     // explanation and `nflStackShape` cannot disagree about what "naked" means.
@@ -34732,15 +35128,31 @@ async function runNflGppEngine(ctx){
       // Its own budget is already a fraction of the search's.
       budget: Object.assign({}, bud, {budgetMs: bud.sharpPassMs, convWindows: 0}),
     });
-    const preOut = await gppRunKernel(pre, m => {
-      // Quiet by design: the sharp pass is a means, not a result, and letting it
-      // print the same search block as the real run made the log read as if the
-      // engine had searched twice.
-      if(m && m.phase === 'search' && !m.done) gppProgressPhase(`sharp pass — ${m.seed}/${m.of} seeds`);
-      if(m && m.phase === 'search' && m.done) log(`Sharp pass: ${m.optima} of the engine's own local optima in ${(m.ms/1000).toFixed(1)}s — the field's smart money is now as good as ours.`);
-    });
-    if(preOut && preOut.cancelled) return null;
-    const sharpIdx = (preOut && preOut.result && preOut.result.sharp) || [];
+    // ck112: the sharp pass is sharded across the same spare cores as the
+    // search (see the parallel block below) — K workers, each with 1/K of the
+    // pass's budget on a disjoint seed shard, their optima merged by key.
+    const _hwS = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
+    const KS = (ctx.budget && ctx.budget.parallel > 0) ? Math.max(1, Math.min(NFL_GPP_PAR_MAX, ctx.budget.parallel|0))
+             : Math.max(1, Math.min(NFL_GPP_PAR_MAX, _hwS - 1));
+    const _tSharp = Date.now();
+    const preJobs = [];
+    for(let k = 0; k < KS; k++){
+      const preK = (KS === 1) ? pre : Object.assign({}, pre, {
+        shard: {k, of: KS}, seed: (pre.seed ^ Math.imul(k + 1, 0x85ebca6b)) >>> 0,
+        budget: Object.assign({}, pre.budget, {budgetMs: Math.max(1500, Math.ceil(bud.sharpPassMs / KS))}),
+      });
+      preJobs.push(gppRunKernel(preK, m => {
+        // Quiet by design: the sharp pass is a means, not a result.
+        if(m && m.phase === 'search' && !m.done && k === 0) gppProgressPhase(`sharp pass — ${KS > 1 ? KS + ' workers, shard 0 at ' : ''}${m.seed}/${m.of} seeds`);
+      }));
+    }
+    const preOuts = await Promise.all(preJobs);
+    if(preOuts.some(o => o && o.cancelled)) return null;
+    const _seenSharp = new Set(); const sharpIdx = [];
+    preOuts.forEach(o => { const r = o && o.result; if(!r || !r.sharp) return;
+      for(const l of r.sharp){ const k = Array.prototype.slice.call(l).sort((a,b)=>a-b).join('|'); if(_seenSharp.has(k)) continue; _seenSharp.add(k); sharpIdx.push(l); } });
+    if(sharpIdx.length > _baseTarget) sharpIdx.length = _baseTarget;   // the base the neighbourhood grows from, same size as before
+    log(`Sharp pass: ${sharpIdx.length} of the engine's own local optima in ${((Date.now()-_tSharp)/1000).toFixed(1)}s${KS > 1 ? ` across ${KS} workers` : ''} — the field's smart money is now as good as ours.`);
     if(sharpIdx.length >= 20){
       // ── WHAT THE SHARP SLICE IS MADE OF (checkpoint 77) ─────────────────
       // ck73's mix was `optima at weight 1` + `the per-sim optimal pool at half
@@ -34841,17 +35253,58 @@ async function runNflGppEngine(ctx){
   // The lanes are held back to leave the kernel a core, and the overlap is only
   // taken on a machine that HAS a spare one: the search is wall-clock capped, so
   // on a 2-core box stealing from it would cost seeds, i.e. menu, i.e. board.
-  window._hbPrewarmPromise = null;
-  try {
-    const _hw = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
-    if(_hw >= 4 && typeof hbFieldPrewarm === 'function'){
-      const _pctx = slateSimCtx(slate), _pcon = pricingContest(slate);
-      if(_pctx && _pcon)
-        window._hbPrewarmPromise = hbFieldPrewarm(slate, _pctx, _pcon,
-          {fold:'report', reuseGenField:false}, 2).catch(() => false);
-    }
-  } catch(e){ window._hbPrewarmPromise = null; }
+  // ck112: the kick-off moved to the moment the sim context exists (see
+  // evPrewarmKick); by now the draw is usually done and cached.
+  try { evPrewarmKick(slate); } catch(e){}
   const t0 = Date.now();
+  // ── ck112: THE SEARCH RUNS ON EVERY SPARE CORE ────────────────────────────
+  // The hill climb from independent seeds is the run's one long block and it
+  // is embarrassingly parallel: `K` workers take disjoint shards of the SAME
+  // seed list against the SAME world set (the field draws travel in the
+  // payload, so every worker's search worlds are identical), each with 1/K of
+  // the wall-clock cap, and the assembling run below receives the union of
+  // their optima through `optimaIn` with its own search budget set to nothing.
+  // Same seeds climbed, same menu, in 1/K the time. K leaves a core for the UI
+  // and the pricing-field lanes; a machine with no spare core runs as before.
+  let _par = null;
+  {
+    const _hw = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
+    const K = (ctx.budget && ctx.budget.parallel > 0) ? Math.max(1, Math.min(NFL_GPP_PAR_MAX, ctx.budget.parallel|0))
+            : Math.max(1, Math.min(NFL_GPP_PAR_MAX, _hw - 1));
+    if(K > 1 && !payload.searchOnly){
+      const _tp = Date.now();
+      const perMs = Math.max(2000, Math.ceil(bud.budgetMs / K));
+      gppProgressPhase(`search — ${K} workers in parallel`);
+      const jobs = [];
+      for(let k = 0; k < K; k++){
+        jobs.push(gppRunKernel(Object.assign({}, payload, {
+          searchOnly: true, sharpWanted: 1e9, shard: {k, of: K},
+          seed: (payload.seed ^ Math.imul(k + 1, 0x9e3779b9)) >>> 0,
+          budget: Object.assign({}, bud, {budgetMs: perMs, convWindows: 0}),
+        }), m => {
+          if(m && m.phase === 'search' && !m.done && k === 0)
+            gppProgressPhase(`search — ${K} workers: shard 0 at ${m.seed.toLocaleString()} of ${m.of.toLocaleString()} seeds, ${m.optima.toLocaleString()} optima`);
+        }));
+      }
+      const outs = await Promise.all(jobs);
+      if(outs.some(o => o && o.cancelled)) return null;
+      const ids = [], kinds = []; let seedsClimbed = 0, seedsOf = 0, optima = 0, capped = 0;
+      outs.forEach(o => {
+        const r = o && o.result; if(!r || !r.sharp) return;
+        r.sharp.forEach((l, i) => { for(let j = 0; j < l.length; j++) ids.push(l[j]); kinds.push((r.sharpKind || [])[i] || 'parallel'); });
+        optima += r.sharp.length; if(r.capBound) capped++;
+        if(r.diag){ seedsClimbed += r.diag.seedsClimbed || 0; seedsOf = Math.max(seedsOf, r.diag.seeds || 0); }
+      });
+      if(ids.length >= 9){
+        payload.optimaIn = Int32Array.from(ids); payload.optimaInKind = kinds;
+        payload.budget = Object.assign({}, bud, {budgetMs: 0, convWindows: 0});
+        _par = {K, perMs, ms: Date.now() - _tp, seedsClimbed, seedsOf, optima, capped};
+        log(`Parallel search (ck112): ${K} workers × ${Math.round(perMs/1000)}s on disjoint seed shards — ${seedsClimbed.toLocaleString()} of ${seedsOf.toLocaleString()} seeds climbed, ${optima.toLocaleString()} local optima (with duplicates across shards) in ${((Date.now()-_tp)/1000).toFixed(1)}s wall; ${capped} of ${K} shards hit their cap. The assembling run below prices and builds the portfolio from that union.`);
+      } else {
+        log('  (parallel search produced nothing — falling back to the single-worker search)');
+      }
+    }
+  }
   const out = await gppRunKernel(payload, m => {
     if(!m) return;
     // Phase + counter for the progress line. The search is the long one, so it
@@ -34894,7 +35347,11 @@ async function runNflGppEngine(ctx){
       + `${Math.round(bud.budgetMs/1000/(d.convWindows||10))}s, every one under the ${(100*d.convEps).toFixed(1)}% bar, `
       + `with the menu already full and past ${Math.round(100*(d.convMinFrac||0))}% of the budget. `
       + `More seeds would have replaced menu entries the greedy was not going to take.`);
-  } else if(d.capBound)
+  } else if(_par)
+    log(`Search ENDED ON CAP across ${_par.K} parallel shards (${Math.round(_par.perMs/1000)}s each, ${(_par.ms/1000).toFixed(1)}s wall): ${_par.seedsClimbed} of ${_par.seedsOf} seeds were climbed`
+      + (_par.seedsClimbed > 0 && _par.ms > 0 ? ` (${(1000*_par.seedsClimbed/_par.ms).toFixed(1)} seeds/s across the workers)` : '')
+      + `; ${d.optima} distinct local optima after merging. The cap is on the Advanced panel; the per-worker share is the cap ÷ ${_par.K}.`);
+  else if(d.capBound)
     log(`Search ENDED ON CAP — its ${Math.round(bud.budgetMs/1000)}s wall clock: ${d.seedsClimbed} of ${d.seeds} seeds were climbed`
       + (d.seedsClimbed > 0 && d.ms > 0
          ? ` (${(1000*d.seedsClimbed/d.ms).toFixed(1)} seeds/s, so all ${d.seeds} would need about ${Math.ceil(d.seeds*d.ms/1000/d.seedsClimbed)}s)` : '')
@@ -34943,7 +35400,7 @@ async function runNflGppEngine(ctx){
   const cal88 = evCalCap(slate.sport || 'nfl');
   const bands88 = evBandsFrom(d.bands || [0,0,0,0], d.meanNet + d.stake);
   const calP = evCalibrate(bands88, (d.expWin || 0) / Math.max(1, L.length), F, cal88,
-                           (d.expTop1 || 0) / Math.max(1, L.length));
+                           (d.expTop1 || 0) / Math.max(1, L.length), slate._calNorm || null);
   const calNet = calP.calGross - d.stake;
   const calRoi = d.stake > 0 ? 100*calNet/d.stake : 0;
   log(`Board, expected (report fold): ${d.expCash.toFixed(1)} of ${L.length} lineups in the money `
@@ -34989,7 +35446,15 @@ async function runNflGppEngine(ctx){
 // The board, end to end: run the engine, decorate the chosen lineups the way
 // every other selector does, print §7's log and hand them to the preview modal.
 async function runNflGppBoard(ctx){
-  const r = await runNflGppEngine(ctx);
+  // ck111: build long, screen after the held-out pass. Exposure caps are scaled
+  // so a cap of X% of the WANTED board is exactly the same number of slots on
+  // the longer one; the search budget is the one the wanted count earns.
+  const _want = ctx.target, _long = evOvergen(ctx.slate, _want, 'gpp');
+  const _ovr = {}; Object.keys(ctx.overrides||{}).forEach(id => { const v = ctx.overrides[id]; if(v != null) _ovr[id] = v * _want/_long; });
+  const r = await runNflGppEngine(_long === _want ? ctx : Object.assign({}, ctx, {
+    target: _long, maxExpPct: ctx.maxExpPct * _want/_long, overrides: _ovr,
+    budget: Object.assign({budgetMs: nflGppSearchMs(ctx.slate, _want)}, ctx.budget || {}),
+  }));
   if(!r) return null;
   const {slate, pool, simScoresById, simsDone, target} = ctx;
   const log = ctx.log || function(){};
@@ -35006,14 +35471,15 @@ async function runNflGppBoard(ctx){
     if(!(want > 0) || want >= rep.length) oosIdx.push.apply(oosIdx, rep);
     else { const st = rep.length/want; for(let k = 0; k < want; k++) oosIdx.push(rep[Math.floor(k*st)]); } }
 
-  const out = r.res.lineups.map(x => {
+  let out = r.res.lineups.map(x => {
     const l = x.ids.map(i => fieldPool[i]);
+    l._kx = x;                 // ck111: the kernel's own row, for the CSV/harness after the screen
     l._ev = x.heldEV;
     l._evPct = (x.heldEV / Math.max(0.01, fee)) * 100;
     // ck88: the same lineup, priced with its rank-1 band held to the capped win
     // multiple. Selection already happened — this is reporting only.
     const _b88 = evBandsFrom(x.bands || [0,0,0,0], x.heldGross);
-    const _c88 = evCalibrate(_b88, x.win, r.F, r.cal, x.top1);
+    const _c88 = evCalibrate(_b88, x.win, r.F, r.cal, x.top1, slate._calNorm || null);
     l._evBands = _b88;
     l._evCal = {ev: _c88.calGross - fee, gross: _c88.calGross, s1: _c88.s1, s2: _c88.s2,
                 rank1Share: _b88.share[0], winMult: _c88.winMult, cap: _c88.cap};
@@ -35058,12 +35524,17 @@ async function runNflGppBoard(ctx){
   {
     const _t0 = Date.now();
     try {
-      const _pr = priceBoardHeldOut(out.map(l => ({players:[...l], cptId:null})), {slate});
-      let nOk=0, gross=0, calGross=0, winS=0, cashS=0, top1S=0, top10S=0;
+      const _pr0 = priceBoardHeldOut(out.map(l => ({players:[...l], cptId:null})), {slate});
+      // ck111: the screen, then the aggregate over what survived.
+      const _scr = evScreenBoard(slate, _pr0, target, log);
+      const _pr = _scr.keep.map(i => _pr0[i]);
+      out = _scr.keep.map(i => out[i]);
+      let nOk=0, gross=0, calGross=0, winS=0, cashS=0, top1S=0, top10S=0, favS=0, favN=0;
       const bandSum=[0,0,0,0];
       out.forEach((l,i) => {
         const rr=_pr[i]; if(!rr) return;
         nOk++; gross+=rr.meanPay; calGross+=rr.calMeanPay;
+        if(rr.fieldAvgGross>0){ favS+=rr.fieldAvgGross; favN++; }
         winS+=rr.winPct/100; cashS+=rr.cashPct/100; top1S+=rr.top1Pct/100; top10S+=rr.top10Pct/100;
         if(rr.bands && rr.bands.amt) for(let b=0;b<4;b++) bandSum[b]+=rr.bands.amt[b];
         l._pricedHO = rr;
@@ -35074,6 +35545,7 @@ async function runNflGppBoard(ctx){
         const bands = evBandsFrom(bandSum, gross);
         _ho95 = {n:nOk, stake:stakeHO, netHO:gross-stakeHO, calNet:calGross-stakeHO,
                  bands, winRate:winS/nOk, cashRate:cashS/nOk, top1:top1S/nOk, top10:top10S/nOk,
+                 edge:(favN>0 && favS>0) ? (calGross/nOk)/(favS/favN) : null,
                  ms:Date.now()-_t0};
         log(`Held-out report (ck95): ${nOk} lineups re-priced by the ONE pricing surface (report fold, independent ${Math.max(200, Math.min(NFL_GPP_NF_PRICE, r.F)).toLocaleString()}-entry field draw) in ${((Date.now()-_t0)/1000).toFixed(1)}s. `
           + `Board net ${evMoney(_ho95.netHO, slate, true)} model / ${evMoney(_ho95.calNet, slate, true)} calibrated on ${evMoney(stakeHO, slate)} staked, against the kernel's own ${evMoney(d.meanNet, slate, true)}. `
@@ -35299,8 +35771,7 @@ async function runNflGppBoard(ctx){
       ev: {
         // ck110: the board's EDGE — calibrated gross ÷ what nL random entries
         // in this contest collect. Same definition as every lineup chip.
-        edge: (()=>{ try{ const c=pricingContest(slate); const rg=c?contestRandomGross(c):null;
-                          return (rg>0 && c.fee>0) ? (1+calRoiB/100)*c.fee/rg : null; }catch(e){ return null; } })(),
+        edge: (_ho95 && _ho95.edge!=null) ? _ho95.edge : null,
         model: `${roiB >= 0 ? '+' : ''}${roiB.toFixed(0)}%${_ho95?'':` ± ${roiSEC.toFixed(0)}%`} ROI · ${evMoney(modNetB, slate, true)} on ${evMoney(_hoS, slate)}`,
         modelNet: modNetB,
         modelTip: `The model's own number, computed under the SAME model these lineups were optimized against — so model error is exploited maximally and cannot be seen from inside. ${Math.round(100*bandsB.share[0])}% of the board's gross is the rank-1 band, whose win rate (${r.calPort.winMult.toFixed(0)}× fair) no contest has ever validated: 0 wins in ${r.cal.lineups} real lineups.`,
@@ -35333,7 +35804,7 @@ async function runNflGppBoard(ctx){
     expCash: d.expCash, expTop1: d.expTop1, expTop10: d.expTop10, expWin: d.expWin,
     // ck95: the CSV's columns are the ONE pricing surface's numbers (`hoXXX`),
     // with the kernel's own selection figures kept beside them under `sel*`.
-    lineups: r.res.lineups.map((x,i) => { const h = out[i]._pricedHO || null; return {
+    lineups: out.map((l,i) => { const x = l._kx, h = l._pricedHO || null; return {
       ids:out[i].map(p=>p.id),
       heldEV: h ? (h.meanPay - fee) : x.heldEV,
       win:  h ? h.winPct/100  : x.win,
@@ -35376,6 +35847,9 @@ async function runNflGppBoard(ctx){
       calNet: _ho95 ? _ho95.calNet : r.calNet,
       calRoiPct: _ho95 ? (_ho95.stake>0 ? 100*_ho95.calNet/_ho95.stake : null) : r.calRoi,
       bandShare: _ho95 ? _ho95.bands.share : r.bands.share, winCap: r.cal.cap,
+      calWinRate: _ho95 ? evCalRates(slate, _ho95.winRate, _ho95.top1).calWinRate : null,
+      calTop1Rate: _ho95 ? evCalRates(slate, _ho95.winRate, _ho95.top1).calTop1Rate : null,
+      normalized: !!(_ho95 && slate._calNorm),
       at: Date.now() };
     if(typeof save === 'function') save();
   } catch(e){}
@@ -35399,6 +35873,7 @@ async function runNflGppBoard(ctx){
 // yield (a UI render minting an id) is part of the stream, so interacting with
 // the page mid-run can break exact reproduction.
 async function runNflSimGen(){
+  window._fieldWCache = new Map();   // ck112: warm starts are per run, so a seed still reproduces
   _runSeed = (typeof window !== 'undefined' && window.__runSeed != null)
     ? (window.__runSeed >>> 0)
     : (Math.floor(Math.random() * 4294967296) >>> 0);
@@ -35702,6 +36177,11 @@ async function runNflSimGenInner(){
   // nothing beyond holding them; the next run clears it above.
   window._lastSimCtx = {simScoresById, simsDone, sport:'nfl', sd:SD, slateId:slate.id, ts:Date.now()};
   if(typeof renderHbEv==='function') renderHbEv();   // the builder's stats card can now score/price
+  // ck112: the pricing field (the ONE pricing surface's independent draw) is
+  // needed by evRunNorm before the search and by the report pass after it —
+  // start drawing it in worker lanes NOW, while the main thread does the
+  // per-sim optimals and the search. evRunNorm awaits this promise.
+  evPrewarmKick(slate);
 
   // ── Stacking rules ────────────────────────────────────────────────────────
   // Global numbers + the resolved per-QB map (Showdown has no QB slot to
@@ -38293,6 +38773,7 @@ const EV_SHARP_SHARE = 0.15;
 // it. The build is now scenario-for-scenario what the generator does; sim s is
 // evaluated against scenario (s mod K)'s field, exactly as buildFieldSorted does.
 function hbField(slate, ctx, contest, opts){
+  const _tp0=performance.now(); let _usedPre=false;
   // ck109: `opts.fieldContest` — draw the FIELD for one contest (the build
   // target) and price against another's size and ladder. Who the opponents are
   // is one field of people; what changes per contest is F (the estimator's
@@ -38474,7 +38955,7 @@ function hbField(slate, ctx, contest, opts){
     // The prewarmed draw, if it is for exactly this field.
     let _raw=null;
     { const _pre=window._hbPreDraw;
-      if(_pre && _pre.key===drawKey && _pre.raw && _pre.raw.length===KK) _raw=_pre.raw;
+      if(_pre && _pre.key===drawKey && _pre.raw && _pre.raw.length===KK){ _raw=_pre.raw; _usedPre=true; }
       window._hbPreDraw=null; }
     if(!_raw){
       _raw=[];
@@ -38514,6 +38995,8 @@ function hbField(slate, ctx, contest, opts){
     window._hbFieldDraw={key:drawKey, pool:pool.map(p=>p.id), scenarios, cptScen, fields};
   }
   const arrs=pool.map(p=>ctx.simScoresById[p.id]);
+  // ck112: phase timings, kept on window._hbFieldProf for the speed log.
+  const _tp1=performance.now();
   // Sorted per-sim field totals — the same structure runUFCContestEV builds,
   // for the same reason: ranking one lineup is then a binary search.
   const sorted=[];
@@ -38555,9 +39038,12 @@ function hbField(slate, ctx, contest, opts){
   // of the lineup being priced, so it is computed once per world here instead
   // of once per (lineup × world) inside beatersEstimate. On a 150-lineup board
   // that is 150× fewer fits — see the timing table in AGENT_NOTES ck95 §6.
+  const _tp2=performance.now();
   const tailFits=sorted.map(a=>{
     try { return (a.length>200) ? gppTailFit(a, a.length) : null; } catch(e){ return null; }
   });
+  const _tp3=performance.now();
+  window._hbFieldProf={drawMs:Math.round(_tp1-_tp0), scoreMs:Math.round(_tp2-_tp1), tailMs:Math.round(_tp3-_tp2), sims:idx.length, n:f0.length, K:KK, prewarmed:!!_usedPre};
   window._hbField={key, field:f0, fields, fieldTotals:sorted, idx, pool, K:KK, fold:_fold, tailFits,
     idxById, n:f0.length, counts, scenarios, cptScen, fromGen:!!reuse,
     ownAvg:ownSum/f0.length, ownMap:_hbOwnMap,
@@ -38702,20 +39188,40 @@ function hbPriceLineup(players, cptId, opts){
   // as SHARES of the reported gross — four amounts that sum to it exactly.
   const cal=evCalCap((slate&&slate.sport)||'nfl');
   const bands=evBandsFrom(bandRaw, meanPay);
-  const cl=evCalibrate(bands, win/nS, fieldSize, cal, top1/nS);
+  // ck111: the field's own average (and the normalization it carries) comes
+  // FIRST — the calibrated figure below scales the top bands by it.
+  const randomGross=contestRandomGross(contest);
+  const fav=(opts && opts._noFieldAvg) ? null : hbFieldAvgGross(F, slate, contest, opts);
+  const _norm=fav ? fav.norm : ((opts && opts._norm!==undefined) ? opts._norm : ((slate&&slate._calNorm)||null));
+  const cl=evCalibrate(bands, win/nS, fieldSize, cal, top1/nS, _norm);
   void _rho;
   // ck110: EDGE — the calibrated gross as a multiple of what a RANDOM entry in
   // this contest collects (pool ÷ F). Rake makes the average entry −EV in every
   // GPP, so "+EV / −EV" is the wrong headline for a card; edge > 1 says this
   // roster beats the field's average, and by how much. See `contestRandomGross`.
-  const randomGross=contestRandomGross(contest);
+  // ck110b: the denominator is the AVERAGE ENTRY OF THE MODELED FIELD, priced
+  // through this same function (`hbFieldAvgGross`) — NOT pool ÷ F. MEASURED on
+  // the SF@LAR showdown fixture: 150 entries drawn from the field and priced
+  // here average 0.59× of pool ÷ F (0.74× before the calibration caps) — the
+  // conservative rank posterior (Lomax tail at the upper quantile, robust
+  // worst-scenario blend, the caps) does not conserve the prize pool, so
+  // against pool ÷ F an average field entry read as 0.6× and a board that
+  // beats the field by 80% read as 1.06×. Against the field's own priced
+  // average, the average entry is 1.00× by construction and edge means what it
+  // says. `poolPerEntry` and `poolGap` keep the conservation gap visible.
   return {
     evPct: 100*(meanPay-contest.fee)/contest.fee,
     calEvPct: 100*(cl.calGross-contest.fee)/contest.fee,
     meanPay, calMeanPay: cl.calGross,
     randomGross,
-    edge: (randomGross>0) ? cl.calGross/randomGross : null,
-    edgeModel: (randomGross>0) ? meanPay/randomGross : null,
+    fieldAvgGross: fav ? fav.cal : null, fieldAvgGrossModel: fav ? fav.model : null,
+    fieldAvgGrossEx1: fav ? fav.calEx1 : null,
+    calMeanPayEx1: cl.calGrossEx1,
+    edgeEx1: (fav && fav.calEx1>0) ? cl.calGrossEx1/fav.calEx1 : null,
+    norm: _norm,
+    poolGap: (fav && randomGross>0) ? fav.cal/randomGross : null,
+    edge: (fav && fav.cal>0) ? cl.calGross/fav.cal : null,
+    edgeModel: (fav && fav.model>0) ? meanPay/fav.model : null,
     // ck96: `winPct` is P(band 0) = P(no beaters), now the EXACT negative-
     // binomial term at continuous resolution — `winPctExact` is the same number
     // by construction and is kept only as the assertion that it is.
@@ -38860,17 +39366,111 @@ function contestRandomGross(contest){
   _contestPoolMemo.set(k,g);
   return g;
 }
+// What the AVERAGE entry of the modeled field earns, priced by the same
+// function that prices the user's lineups: up to 300 entries spread evenly
+// through the drawn field (scenario 0), each run through hbPriceLineup, mean
+// calibrated and model gross. Memoized on the field object per contest ladder.
+// ck113: 600 entries (was 300), STRATIFIED by the entry's total ownership —
+// the field is sorted by Σ own and every k-th entry of that order is taken, so
+// the sample holds the chalk / mid / contrarian strata in their true
+// proportions instead of at the luck of a random draw. MEASURED (DEN@KC, 235k
+// entries, average entry duplicated ~190×): 150 random entries priced at
+// 0.84× of the 300-entry random mean; the strata are what the mean is made of.
+const HB_FIELD_AVG_N=600;
+function hbFieldAvgGross(F, slate, contest, opts){
+  if(!F || !F.field || !F.field.length || !contest) return null;
+  const k=[contest.key, contest.fieldSize, contest.fee, contest.paid, F.fold||''].join('|');
+  F._avgGross=F._avgGross||new Map();
+  if(F._avgGross.has(k)) return F._avgGross.get(k);
+  const SD=isShowdown(slate);
+  const n=F.field.length, take=Math.min(HB_FIELD_AVG_N, n), step=Math.max(1, Math.floor(n/take));
+  const o=Object.assign({}, opts||{}, {slate, contest, _noFieldAvg:true, _norm:null});
+  // ck113: systematic sample over the field ORDERED BY OWNERSHIP SUM.
+  const _ownOf=(SD ? (q,k)=>sdOwnOf(q, k===0) : (q)=>(parseFloat(q.own)||0));
+  const _order=(function(){ const a=new Array(n); const os=new Float64Array(n);
+    for(let i=0;i<n;i++){ const l=F.field[i]; let t=0; for(let k=0;k<l.length;k++){ const q=F.pool[l[k]]; if(q) t+=_ownOf(q,k); } os[i]=t; a[i]=i; }
+    a.sort((x,y)=>os[x]-os[y]); return a; })();
+  // ── ck111: CONSERVATION ───────────────────────────────────────────────────
+  // Summed over the F entries of a contest, P(first) is 1 and P(top 1%) is
+  // 0.01·F — for ANY model that is consistent with itself. MEASURED on the
+  // pricing surface (DEN@KC showdown, 235k entries): the field's mean P(first)
+  // was 37× fair. The rank posterior hands every entry a floor at the top of
+  // the ladder, and the sum of those floors is 37 first places, not one. The
+  // rank-1 band is therefore scaled by n1 = fair ÷ mean P(first) over the
+  // field sample, and the two top-1% bands by n23 = 0.01 ÷ mean P(top 1%) —
+  // the SAME factor for every lineup, so a lineup the model likes 5× more for
+  // first still carries 5× the first-place value. Never scaled UP (capped at
+  // 1): a model that under-claims is left alone. The record's shrink
+  // (evCalShrink) then applies on top, once rows priced this way exist.
+  const raw=[]; let model=0;
+  for(let oi=Math.floor(step/2); oi<n && raw.length<take; oi+=step){
+    const l=F.field[_order[oi]]; const players=l.map(j=>F.pool[j]);
+    if(!players.every(Boolean)) continue;
+    let r=null; try { r=hbPriceLineup(players, SD?players[0].id:null, o); } catch(e){ r=null; }
+    if(!r || !r.bands) continue;
+    raw.push({amt:r.bands.amt.slice(), win:r.winPct/100, top1:r.top1Pct/100, gross:r.meanPay});
+    model+=r.meanPay;
+  }
+  const m=raw.length;
+  if(!m){ F._avgGross.set(k, null); return null; }
+  const Fs=Math.max(1, contest.fieldSize), fair=1/Fs, fair1=Math.max(1, Math.ceil(0.01*Fs))/Fs;
+  const meanWin=raw.reduce((t,x)=>t+x.win,0)/m, meanTop1=raw.reduce((t,x)=>t+x.top1,0)/m;
+  const n1=(meanWin>0) ? Math.min(1, fair/meanWin) : 1;
+  const n23=(meanTop1>0) ? Math.min(1, fair1/meanTop1) : 1;
+  const norm={n1, n23, winMult:meanWin/fair, top1Mult:meanTop1/fair1, sample:m};
+  const cal=evCalCap((slate&&slate.sport)||'nfl');
+  let calS=0, calEx1=0;
+  for(const x of raw){
+    const b=evBandsFrom(x.amt, x.gross);
+    const c=evCalibrate(b, x.win, Fs, cal, x.top1, norm);
+    calS+=c.calGross; calEx1+=c.calGrossEx1;
+  }
+  const out={cal:calS/m, calEx1:calEx1/m, model:model/m, n:m, n1, n23, norm};
+  F._avgGross.set(k, out);
+  // The run-level normalization the engine's objective and every board-level
+  // calibration read (see evRunNorm).
+  if(slate){ slate._calNorm={key:k, n1, n23, winMult:norm.winMult, top1Mult:norm.top1Mult, ts:Date.now()}; }
+  return out;
+}
+// The normalization for THIS slate's pricing field and contest — built (or
+// read from the cache) before a search starts, so the search, the board card
+// and every lineup card scale the top bands by one number.
+// ck112: start the pricing-field draw in worker lanes as soon as a run has a
+// sim context. Idempotent per (slate, ctx.ts): a second kick while the first is
+// in flight is a no-op, and `evRunNorm` / the report pass await the promise.
+function evPrewarmKick(slate){
+  try {
+    if(typeof hbFieldPrewarm!=='function') return null;
+    const ctx=slateSimCtx(slate); const c=pricingContest(slate);
+    if(!ctx || !c) return null;
+    const key=[slate.id, ctx.ts, c.key].join('|');
+    if(window._hbPrewarmKey===key && window._hbPrewarmPromise) return window._hbPrewarmPromise;
+    const _hw=(typeof navigator!=='undefined' && navigator.hardwareConcurrency)||4;
+    window._hbPrewarmKey=key;
+    window._hbPrewarmPromise=hbFieldPrewarm(slate, ctx, c, {fold:'report', reuseGenField:false}, _hw>=4?2:0).catch(()=>false);
+    return window._hbPrewarmPromise;
+  } catch(e){ return null; }
+}
+async function evRunNorm(slate, contest){
+  try {
+    const ctx=slateSimCtx(slate); const c=contest||pricingContest(slate);
+    if(!ctx || !c) return null;
+    const o={fold:'report', reuseGenField:false};
+    const kicked=evPrewarmKick(slate);
+    if(kicked) await kicked;
+    else if(typeof hbFieldPrewarm==='function') await hbFieldPrewarm(slate, ctx, c, o, 0);
+    const F=hbField(slate, ctx, c, o); if(!F) return null;
+    const fav=hbFieldAvgGross(F, slate, c, o);
+    return fav ? fav.norm : null;
+  } catch(e){ return null; }
+}
 // The edge a stored price implies. Rows priced by ck110+ carry it; an older row
-// is re-derived from its calibrated EV% against the CURRENT pricing contest
-// (that row is stale anyway if the contest changed — the stamp says so).
+// (or one whose field average could not be priced) has none — the chip falls
+// back to the calibrated EV% and "Re-price all" fills it in.
 function evEdgeOf(m, slate){
   if(!m) return null;
   if(m.edge!=null && isFinite(m.edge)) return m.edge;
-  if(m.evPct==null || isNaN(m.evPct)) return null;
-  const c=(slate && typeof pricingContest==='function') ? pricingContest(slate) : null;
-  const g=c ? contestRandomGross(c) : null;
-  if(!(g>0) || !(c.fee>0)) return null;
-  return (1+m.evPct/100)*c.fee/g;
+  return null;
 }
 function evEdgeFmt(edge){
   if(edge==null || !isFinite(edge)) return '—';
@@ -38882,14 +39482,18 @@ function evEdgeTip(m, slate, edge, extra){
   const fee=(m.fee!=null) ? m.fee : (()=>{ const c=(slate&&typeof pricingContest==='function')?pricingContest(slate):null; return c?c.fee:null; })();
   const $=v=>(v==null||!isFinite(v))?'—':('$'+(Math.abs(v)<10?v.toFixed(2):Math.round(v).toLocaleString()));
   const pct=v=>(v==null||!isFinite(v))?'—':((v>=0?'+':'')+v.toFixed(0)+'%');
-  const rg=(m.randomGross!=null)?m.randomGross:((m.evPct!=null&&edge>0&&fee>0)?(1+m.evPct/100)*fee/edge:null);
+  const fa=(m.fieldAvgGross!=null)?m.fieldAvgGross:null;
   const lines=[];
-  lines.push(`EDGE ${evEdgeFmt(edge)} — this roster's calibrated expected return vs a random entry in this contest (${$(m.calGross!=null?m.calGross:(fee!=null&&m.evPct!=null?(1+m.evPct/100)*fee:null))} vs ${$(rg)} per entry). Rake makes the average entry lose; edge > 1.00× beats the field's average, edge < 1.00× trails it.`);
+  lines.push(`EDGE ${evEdgeFmt(edge)} — this roster's calibrated expected return vs the AVERAGE entry in the modeled field, priced the same way (${$(m.calGross!=null?m.calGross:(fee!=null&&m.evPct!=null?(1+m.evPct/100)*fee:null))} vs ${$(fa)} per entry). Rake makes the average entry lose money; edge > 1.00× beats the field's average, edge < 1.00× trails it.`);
+  if(m.randomGross!=null && fa!=null) lines.push(`Pool share: ${$(m.randomGross)} per entry (prize pool ÷ field). The pricing model is conservative at the top of the ladder, so its average field entry collects ${(100*fa/m.randomGross).toFixed(0)}% of that — which is why every EV% below reads lower than the edge suggests.`);
   lines.push(`Calibrated EV ${pct(m.evPct)}`+(m.evPctModel!=null?` · Model EV ${pct(m.evPctModel)}`:'')+(fee!=null?` · Entry ${$(fee)}`:'')+(m.modelGross!=null?` · Model gross ${$(m.modelGross)}`:'')+'.');
-  const caps=[];
-  if(m.evWinCap!=null) caps.push(`P(win) ≤ ${m.evWinCap.toFixed(1)}× fair`);
-  if(m.evTop1Cap!=null) caps.push(`P(top 1%) ≤ ${m.evTop1Cap.toFixed(2)}× fair`);
-  if(caps.length) lines.push(`Calibration caps: ${caps.join(', ')}`+(m.evRank1Share!=null?` · ${Math.round(100*m.evRank1Share)}% of the model EV is the rank-1 band, the one band no real contest has validated`:'')+'.');
+  if(m.edgeEx1!=null) lines.push(`Edge with the rank-1 band removed: ${evEdgeFmt(m.edgeEx1)} — how good the lineup is before any credit for first place (the screen requires ≥ ${EDGE_SCREEN.ex1Floor.toFixed(2)}×).`);
+  if(m.normN1!=null) lines.push(`Calibration: the rank-1 band is scaled ×${m.normN1.toFixed(4)} and the top-1% bands ×${(m.normN23!=null?m.normN23:1).toFixed(3)} so that P(first) and P(top 1%) sum correctly over the whole field — one factor for every lineup, ordering preserved`+(m.calMode&&/shrink/.test(m.calMode)?', then shrunk by the results record':'')+'.');
+  else { const caps=[];
+    if(m.evWinCap!=null) caps.push(`P(win) ≤ ${m.evWinCap.toFixed(1)}× fair`);
+    if(m.evTop1Cap!=null) caps.push(`P(top 1%) ≤ ${m.evTop1Cap.toFixed(2)}× fair`);
+    if(caps.length) lines.push(`Calibration caps (no field context — per-lineup clip): ${caps.join(', ')}.`); }
+  if(m.evRank1Share!=null) lines.push(`${Math.round(100*m.evRank1Share)}% of the model EV is the rank-1 band.`);
   const rates=[];
   if(m.winPct!=null) rates.push(`Win ${hbPct(m.winPct)}%`);
   if(m.top1Pct!=null) rates.push(`Top 1% ${hbPct(m.top1Pct)}%`);
@@ -38909,6 +39513,9 @@ function pricedMetaFrom(r, slate){
     edge: rd(r.edge,3), edgeModel: rd(r.edgeModel,3),
     fee: (r.contest&&r.contest.fee!=null)?r.contest.fee:null,
     calGross: rd(r.calMeanPay,3), modelGross: rd(r.meanPay,3), randomGross: rd(r.randomGross,3),
+    fieldAvgGross: rd(r.fieldAvgGross,3), poolGap: rd(r.poolGap,3),
+    edgeEx1: rd(r.edgeEx1,3), calGrossEx1: rd(r.calMeanPayEx1,3),
+    calMode: (r.cal && r.cal.mode) || null, normN1: (r.norm && r.norm.n1!=null) ? rd(r.norm.n1,4) : null, normN23: (r.norm && r.norm.n23!=null) ? rd(r.norm.n23,4) : null,
     winPct: rd(r.winPct,4), cashPct: rd(r.cashPct,2),
     top10Pct: rd(r.top10Pct,3), top1Pct: rd(r.top1Pct,4),
     dups: rd(r.dups,2),
