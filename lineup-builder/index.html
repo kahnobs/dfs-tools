@@ -3600,6 +3600,26 @@ function nflStandingsBoardScore(slate, sortedPts, fptsById, SD, fieldSize){
   const rankOf = v => { const w = v + 1e-4; let lo = 0, hi = sortedPts.length;
     while(lo < hi){ const m = (lo + hi) >> 1; if(sortedPts[m] > w) lo = m + 1; else hi = m; }
     return lo + 1; };
+  // ck115: TIES SPLIT THE PRIZES. DK pays entries tied on a score the average
+  // of the prizes for the places they jointly occupy — the 206 entries tied at
+  // rank 1 on DEN@KC 9/14 each took 1/206 of the top prize, not the whole
+  // thing, and settling `pay.at(rank)` per entry had this board at +102,738%.
+  // `tiesAt(rank)` counts the entries at exactly this score (the file's own
+  // precision), and `wonAt` averages the ladder over that block of places.
+  const tiesAt = v => { const lo = v - 1e-4, hi = v + 1e-4; let a = 0, b = sortedPts.length;
+    while(a < b){ const m = (a + b) >> 1; if(sortedPts[m] > hi) a = m + 1; else b = m; }
+    let c = 0, d = sortedPts.length;
+    while(c < d){ const m = (c + d) >> 1; if(sortedPts[m] >= lo) c = m + 1; else d = m; }
+    return Math.max(1, c - a); };
+  const wonAt = (rank, ties) => {
+    if(!pay) return null;
+    if(ties <= 1) return pay.at(rank);
+    const last = rank + ties - 1;
+    if(ties <= 4000){ let t = 0; for(let r = rank; r <= last; r++) t += pay.at(r); return t / ties; }
+    // a very deep tie block on a slowly-varying tail: trapezoid over 64 knots
+    let t = 0; const KN = 64;
+    for(let k = 0; k <= KN; k++) t += pay.at(Math.round(rank + (last - rank) * k / KN)) * (k === 0 || k === KN ? 0.5 : 1);
+    return t / KN; };
   let paidThrough = null;
   if(pay){ let lo = 1, hi = Math.max(1, fieldSize);
     while(lo < hi){ const m = (lo + hi + 1) >> 1; if(pay.at(m) > 0) lo = m; else hi = m - 1; }
@@ -3612,13 +3632,14 @@ function nflStandingsBoardScore(slate, sortedPts, fptsById, SD, fieldSize){
     ids.forEach(id => { const v = fptsById[id];
       if(Number.isFinite(v)){ have++; pts += (SD && id === cpt ? CPT_MULT : 1) * v; } });
     const rank = rankOf(pts);
+    const ties = tiesAt(pts);
     // ck111: the lineup's OWN stored prediction rides along so the ordering
     // the engine claimed can be scored against the ordering that happened.
     const m = meta[lineupKey(ids)] || {};
     return { ids: ids.slice(), cpt,
              names: ids.map(id => ((playerById(slate, id) || {}).name) || String(id)),
-             points: Math.round(100 * pts) / 100, rank, pctile: rank / N,
-             won: pay ? pay.at(rank) : null, complete: have === ids.length,
+             points: Math.round(100 * pts) / 100, rank, ties, pctile: rank / N,
+             won: wonAt(rank, ties), complete: have === ids.length,
              predEdge: (m.edge != null) ? m.edge : null, predTop1: (m.top1Pct != null) ? m.top1Pct : null,
              predTop10: (m.top10Pct != null) ? m.top10Pct : null, predEv: (m.evPct != null) ? m.evPct : null };
   }).sort((a, b) => a.rank - b.rank);
@@ -4598,6 +4619,7 @@ function nflBacktestLog(slate, key){
            + (B.cashed != null ? `, ${B.cashed}/${B.n} cashed` : '')
            + (B.roiPct != null ? ` — realized ${B.roiPct >= 0 ? '+' : ''}${B.roiPct.toFixed(1)}% ROI (${m(B.gross)} back on ${m(B.stake)} at ${B.feeAssumed ? '$1/entry assumed — DK does not export the fee, so the % is fee-invariant and the dollars notional' : '$' + B.fee + '/entry'}).` : '.')
            + ` The settlement is the MODELLED payout table at this field size (${B.payoutDesc || 'n/a'}) — DK's standings export carries no payout table.`
+           + ((B.lineups && B.lineups[0] && B.lineups[0].ties > 1) ? ` Your best lineup is TIED with ${(B.lineups[0].ties - 1).toLocaleString()} other entr${B.lineups[0].ties === 2 ? 'y' : 'ies'} at that score — the prizes for those places are split ${B.lineups[0].ties.toLocaleString()} ways (ck115), so it settles at ${m(B.lineups[0].won)}.` : '')
            + (B.incomplete ? ` ${B.incomplete} lineup(s) hold a player with no realized FPTS row and are scored on the rest.` : '')
            + (_alsoIn ? _alsoIn.text + '. This ROI is ONE LEG, not the week.' : ''));
     if(B.predicted){
@@ -6606,7 +6628,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck113/2026-09-14';
+const BUILD_ID = '2.0/ck115/2026-09-15';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -15823,7 +15845,13 @@ function sampleUfcField(pool, N, ownArr, opts){
   // `w` is for the ownership draws.
   const OPT = PF ? ((opts && opts.fieldOpt) || null) : null;
   const projArr = OPT ? pool.map(p => Math.max(0, parseFloat(p.proj) || 0)) : null;
-  let anch = OPT ? ((_warm && opts.anchInit && opts.anchInit.length === pool.length) ? Float64Array.from(opts.anchInit) : new Float64Array(pool.length).fill(1)) : null;
+  // The optimizer-board ANCHOR is NOT warm-started: it is a slow control
+  // (0.35 exponent) that enters as an RSIZE-fold product, and carrying it on
+  // from a finished draw kept shrinking it — MEASURED on the ck104 fixture, a
+  // warm draw yielded 475 of 2,000 entries (cold: 1,986) with the anchor's
+  // median at 0.05. The per-slot weights and the hedge lever carry over; the
+  // anchor starts at 1 every draw.
+  let anch = OPT ? new Float64Array(pool.length).fill(1) : null;
   if(_warm && opts.hedgeInit > 0 && hedgeLever > 0) hedgeLever = opts.hedgeInit;
   let optTheta = OPT ? Math.max(0.02, OPT.theta || 0.35) : 0;
   let optTemp  = OPT ? Math.max(1e-4, OPT.temp || 0.02) : 0;
@@ -16426,15 +16454,20 @@ async function sampleFieldSet(pool, N, scenarios, opts, seed, reserve, extra){
   const wOpts = fieldWorkerOpts(opts);
   const lanes = fieldWorkerLanes(K, reserve);
   const out = new Array(K);
+  // ck114: the scenarios still to draw, in order; a warm draw that yields under
+  // half its target is redrawn COLD (a warm-started weight vector can be more
+  // extreme than a cold one on a tiny pool, and the draw loop gives up).
+  let queue = []; for(let k=0;k<K;k++) queue.push(k);
+  let coldOnly = new Set();
   let next = 0, failed = null;
   let url; try { url = fieldWorkerUrl(); } catch(e){ return runSync(); }
   const lane = () => new Promise(resolve => {
     let w = null;
     try { w = new Worker(url); } catch(e){ resolve('no-worker'); return; }
     const feed = () => {
-      if(failed || next >= K){ try { w.terminate(); } catch(e){} resolve(null); return; }
-      const k = next++;
-      const _wi = _warmIn[k];
+      if(failed || next >= queue.length){ try { w.terminate(); } catch(e){} resolve(null); return; }
+      const k = queue[next++];
+      const _wi = coldOnly.has(k) ? null : _warmIn[k];
       w.postMessage({k, N, seed:seeds[k], own:scenarios[k],
                      cptOwn: SD ? cptScen[k] : null, sd: SD,
                      pool:marshalled, opts:_wi ? Object.assign({}, wOpts, _wi) : wOpts});
@@ -16456,7 +16489,16 @@ async function sampleFieldSet(pool, N, scenarios, opts, seed, reserve, extra){
   });
   const lanesOut = [];
   for(let i=0;i<lanes;i++) lanesOut.push(lane());
-  const res = await Promise.all(lanesOut);
+  let res = await Promise.all(lanesOut);
+  if(!failed && !res.some(x => x === 'no-worker')){
+    const redo = [];
+    for(let k=0;k<K;k++) if(out[k] && out[k].warm && out[k].field.length < 0.5*N) redo.push(k);
+    if(redo.length){
+      queue = redo; next = 0; redo.forEach(k => coldOnly.add(k));
+      const again = []; for(let i=0;i<Math.min(lanes, redo.length);i++) again.push(lane());
+      res = res.concat(await Promise.all(again));
+    }
+  }
   if(res.some(x => x === 'no-worker')) return runSync();
   if(failed){
     // ck104: A FALLBACK IS A PERFORMANCE CLIFF, NOT A DETAIL. The worker missing
@@ -22391,7 +22433,7 @@ async function runPgaSimGen(){
       if(_tot > 0) for(const e of ranked){ if(e._pivot) continue;
         for(const p of e.lineup) _appGen[p.id] = (_appGen[p.id]||0) + (e.count||1)/_tot; }
     }
-    out=await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, appearRate:_appGen, oosParity:1, sharpShare:contestSharpShare(slate), ownTemp:contestOwnTemp(slate), se:_se, dominanceRepair:true, maxSal,
+    out=await runContestEvBoard({slate, pool, ranked, simScoresById, totalSims:simsDone, genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, appearRate:_appGen, oosParity:1, sharpShare:contestSharpShare(slate), ownTemp:contestOwnTemp(slate), se:_se, dominanceRepair:true, maxSal,
       // Field frame = full slate (same doctrine as UFC/NASCAR): the modeled
       // opponents roster hidden golfers too — simScoresById is already keyed
       // for the whole simPool, so the field sampler always has real scores.
@@ -22635,7 +22677,7 @@ async function runUFCSimGenInner(){
     // hands the greedy a chalk-tilted menu before pricing begins. The EV
     // engine judges unrepaired per-sim optimals on equal footing already;
     // UFC needs the coverage, not the polish. PGA/NFL/NASCAR keep repair.
-    const out = await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims,
+    const out = await runContestEvBoard({slate, pool, ranked, simScoresById, totalSims,
       genSims: genSims || totalSims, target, maxExpPct, overrides, appearRate,
       // Field frame: the modeled 47.5k opponents play the FULL slate — hidden
       // fighters carry sims + Own%, and stance baselines use full-slate rates.
@@ -24729,7 +24771,7 @@ async function runNascarSimGen(){
     evPool.forEach((p,i)=>{ if(!simScoresByIdNas[p.id]) simScoresByIdNas[p.id]=evScores[i]; });
     // Full EV-engine parity with the UFC/PGA paths: out-of-sample pricing,
     // sharp field share, dominance repair, real salary cap.
-    const out = await runUFCContestEV({slate, pool: evPool, ranked: rankedNas, simScoresById: simScoresByIdNas,
+    const out = await runContestEvBoard({slate, pool: evPool, ranked: rankedNas, simScoresById: simScoresByIdNas,
       totalSims: simsDone2, genSims: Math.ceil(simsDone2/2), target, maxExpPct, overrides,
       fieldPool: fullField,
       oosParity:1, sharpShare:contestSharpShare(slate), ownTemp:contestOwnTemp(slate), se:!!(slate._ufcEv && slate._ufcEv.se), dominanceRepair:true, maxSal, minSal});
@@ -32776,8 +32818,13 @@ function nflEngineMode(slate){
   return (v === 'legacy' || v === 'gpp') ? v : 'auto';
 }
 // → {engine:'gpp'|'legacy', why:string}
+// ck114: the GPP engine is the engine for EVERY sport (UFC / PGA / NASCAR and
+// NFL showdown run through the same kernel with a roster SHAPE). The sports
+// switched on here; the engine selector's 'legacy' pin still wins per slate.
+const GPP_ENGINE_SPORTS = {nfl:true, ufc:true, pga:true, nascar:true};
 function nflEngineDecide(slate, evOn){
-  if(!isNflClassic(slate)) return {engine:'legacy', why:'not an NFL classic slate'};
+  const sport = (slate && slate.sport) || 'nfl';
+  if(!GPP_ENGINE_SPORTS[sport]) return {engine:'legacy', why:`the GPP engine is not enabled for ${sport}`};
   const mode = nflEngineMode(slate);
   if(mode === 'legacy') return {engine:'legacy', why:'the engine selector is set to the legacy pipeline'};
   if(!evOn) return {engine:'legacy', why:'Contest EV Mode is off — the GPP engine IS a Contest-EV objective, so there is nothing for it to maximize'};
@@ -32785,6 +32832,17 @@ function nflEngineDecide(slate, evOn){
   const ev = slate._ufcEv || {};
   const haveContest = !!cs || (parseInt(ev.fieldSize) > 0 && parseFloat(ev.fee) > 0);
   if(!haveContest) return {engine:'legacy', why:'no contest is set (pick a Format × Stakes, or type a field size and entry fee)'};
+  if(sport !== 'nfl'){
+    const anyOwn = (slate.players || []).some(p => parseFloat(p.own) > 0);
+    if(!anyOwn) return {engine:'legacy', why:'no ownership input is available (map SS Own)'};
+    return {engine:'gpp', why:mode === 'gpp' ? 'pinned by the engine selector' : 'contest and ownership are both available (ck114: one engine for every sport)'};
+  }
+  if(isShowdown(slate)){
+    const anyOwn = (slate.players || []).some(p => parseFloat(p.own) > 0) || ((typeof nflOwnAnySource === 'function') && nflOwnAnySource(slate, true));
+    if(!anyOwn) return {engine:'legacy', why:'no ownership input is available (map SS Own)'};
+    return {engine:'gpp', why:mode === 'gpp' ? 'pinned by the engine selector' : 'contest and ownership are both available (ck114: showdown runs the kernel captain-first)'};
+  }
+  if(!isNflClassic(slate)) return {engine:'legacy', why:'not an NFL classic slate'};
   const own = (typeof nflOwnAnySource === 'function') ? nflOwnAnySource(slate, true) : false;
   if(!own) return {engine:'legacy', why:'no ownership input is available (map SS Own, or run a sim so the Own Model can be built)'};
   // STACK CONSTRAINTS. §7 keeps the stacking controls available as user
@@ -33035,7 +33093,13 @@ function renderGppCard(model){
 // arrives in `P`. Position codes: 0 QB, 1 RB, 2 WR, 3 TE, 4 DST, 5 other.
 function gppKernelFactory(){
   const WH_Z = [-1.2816, -0.5244, 0, 0.5244, 1.2816];
-  const RSIZE = 9;
+  // ck114: ONE KERNEL, EVERY SPORT. `RSIZE` is the roster size and `SHAPE` the
+  // roster's shape — 'nfl' (9 positional slots, stack rules), 'flat' (RSIZE
+  // interchangeable slots: UFC, PGA, NASCAR), 'sd' (showdown: slot 0 is the
+  // captain at CMUL = 1.5× score and salary, slots 1..5 flex). Set per run from
+  // the payload; everything below reads them.
+  let RSIZE = 9, SHAPE = 'nfl', CMUL = 1;
+  const slotMul = function(j){ return (j === 0 && SHAPE === 'sd') ? CMUL : 1; };
   // How duplication is charged — see NFL_GPP_DUP_MODE on the page. 'rank' puts
   // the lineup's duplicates around it in the standings (offset dups/2, which is
   // what a DK tie pays); 'divide' splits one rank's prize among them, §2's
@@ -33186,12 +33250,14 @@ function gppKernelFactory(){
   }
 
   function posOk(c){
+    if(SHAPE !== 'nfl') return c[5] === 0;
     return c[5] === 0 && c[0] === 1 && c[4] === 1 && c[1] >= 2 && c[2] >= 3 && c[3] >= 1 &&
            (c[1] + c[2] + c[3]) === 7;
   }
+  // The captain is part of a showdown lineup's identity.
   function keyOf(idxs){
     const a = idxs.slice().sort(function(x,y){ return x - y; });
-    return a.join('|');
+    return SHAPE === 'sd' ? a.join('|') + '|C' + idxs[0] : a.join('|');
   }
 
   // ── One world-set, packaged ────────────────────────────────────────────────
@@ -33232,11 +33298,22 @@ function gppKernelFactory(){
     for(let w = 0; w < W; w++){
       for(let i = 0; i < nPc; i++) col[i] = S[i*W + w];
       const base = (w % K) * NF * RSIZE;
-      for(let f = 0; f < NF; f++){
-        const lo = base + f*RSIZE;
-        scratch[f] = col[fieldLin[lo]] + col[fieldLin[lo+1]] + col[fieldLin[lo+2]]
-                   + col[fieldLin[lo+3]] + col[fieldLin[lo+4]] + col[fieldLin[lo+5]]
-                   + col[fieldLin[lo+6]] + col[fieldLin[lo+7]] + col[fieldLin[lo+8]];
+      if(RSIZE === 9 && SHAPE === 'nfl'){
+        for(let f = 0; f < NF; f++){
+          const lo = base + f*RSIZE;
+          scratch[f] = col[fieldLin[lo]] + col[fieldLin[lo+1]] + col[fieldLin[lo+2]]
+                     + col[fieldLin[lo+3]] + col[fieldLin[lo+4]] + col[fieldLin[lo+5]]
+                     + col[fieldLin[lo+6]] + col[fieldLin[lo+7]] + col[fieldLin[lo+8]];
+        }
+      } else {
+        // ck114: generic roster; a showdown field entry is captain-first.
+        const m0 = slotMul(0);
+        for(let f = 0; f < NF; f++){
+          const lo = base + f*RSIZE;
+          let t = col[fieldLin[lo]] * m0;
+          for(let j = 1; j < RSIZE; j++) t += col[fieldLin[lo + j]];
+          scratch[f] = t;
+        }
       }
       scratch.sort();
       const o = w * NV;
@@ -33425,8 +33502,9 @@ function gppKernelFactory(){
     const W = ws.W, S = ws.S;
     tot.fill(0);
     for(let j = 0; j < RSIZE; j++){
-      const off = idxs[j] * W;
-      for(let w = 0; w < W; w++) tot[w] += S[off + w];
+      const off = idxs[j] * W, m = slotMul(j);
+      if(m === 1){ for(let w = 0; w < W; w++) tot[w] += S[off + w]; }
+      else { for(let w = 0; w < W; w++) tot[w] += S[off + w] * m; }
     }
   }
   // Mean payout per world (GROSS — the fee is subtracted by the caller so the
@@ -33482,13 +33560,13 @@ function gppKernelFactory(){
   }
   // Same, but for a candidate SWAP: total = tot − S[a] + S[b]. Never
   // materializes the swapped totals; this is the hill-climb's inner loop.
-  function grossEVSwap(ws, tot, offA, offB, dups, wIdx){
+  function grossEVSwap(ws, tot, offA, offB, dups, wIdx, mul){
     const K = ws.K, F = ws.F, payFn = ws.payFn, NF = ws.NF, views = ws.views, S = ws.S, thr = ws.cashThr;
-    const n = wIdx.length;
+    const n = wIdx.length, m = (mul > 0) ? mul : 1;
     let sum = 0;
     for(let q = 0; q < n; q++){
       const w = wIdx[q];
-      const t = tot[w] - S[offA + w] + S[offB + w];
+      const t = tot[w] - (S[offA + w] - S[offB + w]) * m;
       if(t < thr[w]) continue;
       rankPostFast(t, views[w], NF, F, w, ws);
       const d = dups[w % K];
@@ -33520,7 +33598,48 @@ function gppKernelFactory(){
     // interrupted from outside.
     const cancelled = isCancelled || function(){ return false; };
     setDupMode(P.dupMode);
+    RSIZE = (P.R > 0) ? (P.R | 0) : 9; SHAPE = P.shape || 'nfl'; CMUL = (P.capMul > 0) ? P.capMul : 1.5;
     const nP = P.nP, pos = P.pos, sal = P.sal, sel = P.sel, team = P.team, opp = P.opp;
+    // ck114: pairs that may not share a lineup (UFC: the two sides of a fight,
+    // when the user's no-oppose rule is on). exclOf[i] = the one index i may
+    // not sit with, or -1.
+    const exclOf = new Int32Array(nP).fill(-1);
+    if(P.excl && P.excl.length){ for(let e = 0; e + 1 < P.excl.length; e += 2){ exclOf[P.excl[e]] = P.excl[e+1]; exclOf[P.excl[e+1]] = P.excl[e]; } }
+    const exclOn = P.excl && P.excl.length > 0;
+    // ck114: group count rules. `groupsOk(ids)` is the kernel's copy of the
+    // page's checkGroupRules (min / max over a mask, hard conditionals).
+    const groups = P.groups || [];
+    const groupsOn = groups.length > 0;
+    const groupsOk = function(ids){
+      for(let g = 0; g < groups.length; g++){
+        const G = groups[g]; let c = 0;
+        for(let j = 0; j < ids.length; j++) c += G.mask[ids[j]];
+        if(G.min > 0 && c < G.min) return false;
+        if(G.max > 0 && c > G.max) return false;
+        const cs = G.conds || [];
+        for(let q = 0; q < cs.length; q++){
+          const C = cs[q]; if(c < C.ifMin) continue;
+          let t = 0; for(let j = 0; j < ids.length; j++) t += C.mask[ids[j]];
+          if(C.thenMin > 0 && t < C.thenMin) return false;
+          if(C.thenMax > 0 && t > C.thenMax) return false;
+        }
+      }
+      return true;
+    };
+    const tmpIds = new Int32Array(RSIZE);
+    // ck114: DK's showdown rule — a lineup must roster players from BOTH teams —
+    // and the user's two pools: `P.cptOk` / `P.flexOk` say who may sit in slot
+    // 0 and who in slots 1..5 (a man hidden as a captain is still a flex, and
+    // vice versa). `teamsOk` covers all of it for a whole lineup.
+    const cptOk = P.cptOk || null, flexOk = P.flexOk || null;
+    const teamsOk = function(ids){
+      if(SHAPE !== 'sd') return true;
+      if(cptOk && !cptOk[ids[0]]) return false;
+      if(flexOk){ for(let j = 1; j < ids.length; j++) if(!flexOk[ids[j]]) return false; }
+      const t0 = team[ids[0]];
+      for(let j = 1; j < ids.length; j++) if(team[ids[j]] !== t0) return true;
+      return false;
+    };
     const cap = P.maxSal, floor = P.minSal;
     const payFn = payFnOf(P.payTable);
     // ck111: the SEARCH and SELECTION folds score on the CALIBRATED ladder —
@@ -33728,9 +33847,12 @@ function gppKernelFactory(){
       if(!l || l.length !== RSIZE) return false;
       const c = [0,0,0,0,0,0];
       let s = 0;
-      for(const i of l){ if(!sel[i]) return false; c[pos[i]]++; s += sal[i]; }
+      for(let j = 0; j < l.length; j++){ const i = l[j]; if(!sel[i]) return false; c[pos[i]]++; s += sal[i] * slotMul(j); }
       if(!posOk(c) || s > cap || s < floor) return false;
       if(new Set(l).size !== RSIZE) return false;
+      if(exclOn){ for(const i of l){ const x = exclOf[i]; if(x >= 0 && l.indexOf(x) >= 0) return false; } }
+      if(groupsOn && !groupsOk(l)) return false;
+      if(!teamsOk(l)) return false;
       // ck75: a seed must satisfy its QB's rule. Repair it if a legal partner
       // fits; drop it if none does. Seeds are supply, so a rejected one costs
       // nothing but a draw — what would cost is starting a climb from a lineup
@@ -33761,7 +33883,34 @@ function gppKernelFactory(){
     // a cheapest-completion lookahead so the cap cannot corner the draw.
     const SLOTS = [0,1,1,2,2,2,3,-1,4];
     const own0 = P.ownG;   // scenario 0 is the as-projected column
+    // ck114: the positionless draw — RSIZE distinct players, ownership-weighted,
+    // with a cheapest-completion lookahead; slot 0 at the captain multiplier.
+    const flatElig = []; for(let i = 0; i < nP; i++) if(sel[i]) flatElig.push(i);
+    const flatCheapest = flatElig.reduce(function(m, i){ return sal[i] < m ? sal[i] : m; }, Infinity);
+    const randomSeedFlat = function(){
+      const usedFlags = new Uint8Array(nP);
+      const outIds = []; let spent = 0;
+      for(let sIdx = 0; sIdx < RSIZE; sIdx++){
+        const m = slotMul(sIdx);
+        const restMin = (RSIZE - sIdx - 1) * flatCheapest;
+        const pick = [], wts = []; let tot = 0;
+        for(let z = 0; z < flatElig.length; z++){
+          const i = flatElig[z];
+          if(usedFlags[i]) continue;
+          if(exclOn){ const x = exclOf[i]; if(x >= 0 && usedFlags[x]) continue; }
+          if(spent + sal[i] * m + restMin > cap) continue;
+          const w = Math.max(0.05, own0[i]);
+          pick.push(i); wts.push(w); tot += w;
+        }
+        if(!pick.length) return null;
+        let r = rand() * tot, ch = pick[pick.length-1];
+        for(let k = 0; k < pick.length; k++){ r -= wts[k]; if(r <= 0){ ch = pick[k]; break; } }
+        usedFlags[ch] = 1; outIds.push(ch); spent += sal[ch] * m;
+      }
+      return outIds;
+    };
     const randomSeed = function(){
+      if(SHAPE !== 'nfl') return randomSeedFlat();
       const usedFlags = new Uint8Array(nP);
       const outIds = []; let spent = 0;
       for(let sIdx = 0; sIdx < RSIZE; sIdx++){
@@ -33980,7 +34129,7 @@ function gppKernelFactory(){
       if((si & 15) === 0 && cancelled()) return {cancelled:true};
       climbedSeeds++;
       let cur = seeds[si].ids.slice();
-      let spent = 0; for(const i of cur) spent += sal[i];
+      let spent = 0; for(let j = 0; j < cur.length; j++) spent += sal[cur[j]] * slotMul(j);
       let dups = dupsOf(dm, cur);
       totalsInto(gen, cur, tot);
       let curEV = grossEV(gen, tot, dups, searchW, null);
@@ -34003,7 +34152,8 @@ function gppKernelFactory(){
         // ── single swaps ──
         for(let sIdx = 0; sIdx < RSIZE; sIdx++){
           const a = cur[sIdx], pa = pos[a];
-          const room = cap - spent + sal[a], low = floor - spent + sal[a];
+          const sm = slotMul(sIdx);   // ck114: the captain slot costs and scores at CMUL
+          const room = cap - spent + sal[a] * sm, low = floor - spent + sal[a] * sm;
           for(let pc = 0; pc < 5; pc++){
             if(pc !== pa){
               counts[pa]--; counts[pc]++;
@@ -34015,7 +34165,10 @@ function gppKernelFactory(){
             for(let k = 0; k < list.length; k++){
               const b = list[k];
               if(inSet.has(b)) continue;
-              if(sal[b] > room || sal[b] < low) continue;
+              if(sal[b] * sm > room || sal[b] * sm < low) continue;
+              if(exclOn){ const x = exclOf[b]; if(x >= 0 && x !== a && inSet.has(x)) continue; }
+              if(groupsOn || SHAPE === 'sd'){ for(let z = 0; z < RSIZE; z++) tmpIds[z] = (z === sIdx) ? b : cur[z];
+                if(groupsOn && !groupsOk(tmpIds)) continue; if(!teamsOk(tmpIds)) continue; }
               // Duplication moves with the swap: his ownership ratio AND the
               // ratio of his measured pair lifts against the eight players that
               // stay (dupSwapRatio), so a swap that walks the lineup toward the
@@ -34043,7 +34196,7 @@ function gppKernelFactory(){
                 }
               }
               evalCount++;
-              const e = grossEVSwap(gen, tot, a*gen.W, b*gen.W, nd1, searchW);
+              const e = grossEVSwap(gen, tot, a*gen.W, b*gen.W, nd1, searchW, sm);
               if(!feas){
                 stackRejects++;
                 if(e > bestEV + 1e-12 && (!bestBad || e > bestBad.ev)) bestBad = {ev:e, sIdx:sIdx, a:a, b:b};
@@ -34051,6 +34204,23 @@ function gppKernelFactory(){
               }
               if(e > bestEV + 1e-12){ bestEV = e; bestMove = {kind:1, sIdx:sIdx, b:b}; }
             }
+          }
+        }
+        // ── ck114: the CAPTAIN move (showdown) ──
+        // Hand the captaincy to another member: score and salary move by
+        // (CMUL − 1) × (his − the captain's); the roster is unchanged, so
+        // duplication is re-read from the model with the new key at the end.
+        if(SHAPE === 'sd'){
+          const c0 = cur[0], d = CMUL - 1;
+          for(let k = 1; k < RSIZE; k++){
+            const b = cur[k];
+            if(cptOk && !cptOk[b]) continue;
+            if(flexOk && !flexOk[c0]) continue;
+            const ns = spent + (sal[b] - sal[c0]) * d;
+            if(ns > cap || ns < floor) continue;
+            evalCount++;
+            const e = grossEVSwap(gen, tot, c0*gen.W, b*gen.W, dups, searchW, d);
+            if(e > bestEV + 1e-12){ bestEV = e; bestMove = {kind:3, k:k}; }
           }
         }
         // ── ck75: the stack REPAIR move ──
@@ -34167,8 +34337,12 @@ function gppKernelFactory(){
         }
         if(!bestMove) break;
         if(bestMove.kind === 1){
-          spent += sal[bestMove.b] - sal[cur[bestMove.sIdx]];
+          spent += (sal[bestMove.b] - sal[cur[bestMove.sIdx]]) * slotMul(bestMove.sIdx);
           cur[bestMove.sIdx] = bestMove.b;
+        } else if(bestMove.kind === 3){
+          const k = bestMove.k, c0 = cur[0], b = cur[k];
+          spent += (sal[b] - sal[c0]) * (CMUL - 1);
+          cur[0] = b; cur[k] = c0;
         } else {
           spent += sal[bestMove.qb2] - sal[cur[bestMove.qbSlot]] + sal[bestMove.b] - sal[cur[bestMove.sIdx]];
           cur[bestMove.qbSlot] = bestMove.qb2;
@@ -34207,6 +34381,90 @@ function gppKernelFactory(){
     say({phase:'search', seed:seeds.length, of:seeds.length, optima:optima.size, ms:Date.now()-t0, done:true,
          merged:optimaInN, shard:_shard ? _shard.of : 1});
 
+    // ── ck114: A MENU FROM A SMALL POOL ──────────────────────────────────────
+    // On a 28-fighter / 40-driver / 6-man slate the hill climb from hundreds of
+    // seeds lands on a handful of distinct local optima — MEASURED, UFC Paris:
+    // 392 seeds → 3 optima — and a menu of 3 leaves the portfolio greedy no
+    // choice at all. The menu is then grown from the optima's own swap
+    // neighbourhood: every feasible single swap (and captain hand-off) of every
+    // optimum, priced on the search fold, best first, until the menu target is
+    // met; a second ring (swaps of the best neighbours) if one ring is not
+    // enough. These are candidates the greedy weighs like any other — the
+    // out-of-fold pricing, the overfit rule and the caps all still apply.
+    let neighbourAdded = 0, neighbourEvals = 0;
+    if(!P.searchOnly && optima.size < (P.menuTarget || 0)){
+      const wantMenu = P.menuTarget;
+      const feasibleOf = function(ids){
+        const c = [0,0,0,0,0,0]; let sp = 0;
+        for(let j = 0; j < RSIZE; j++){ const i = ids[j]; if(!sel[i]) return false; c[pos[i]]++; sp += sal[i] * slotMul(j); }
+        if(!posOk(c) || sp > cap || sp < floor) return false;
+        if(new Set(ids).size !== RSIZE) return false;
+        if(exclOn){ for(const i of ids){ const x = exclOf[i]; if(x >= 0 && ids.indexOf(x) >= 0) return false; } }
+        if(groupsOn && !groupsOk(ids)) return false;
+        if(stackOn && !stackOkIdx(ids)) return false;
+        if(!teamsOk(ids)) return false;
+        return true;
+      };
+      const ring = function(baseIds, into){
+        for(let sIdx = 0; sIdx < RSIZE; sIdx++){
+          const a = baseIds[sIdx];
+          for(let pc = 0; pc < 5; pc++){
+            const list = short[pc];
+            for(let k = 0; k < list.length; k++){
+              const b = list[k];
+              if(baseIds.indexOf(b) >= 0) continue;
+              const nb = baseIds.slice(); nb[sIdx] = b;
+              const key = keyOf(nb);
+              if(optima.has(key) || into.has(key)) continue;
+              if(!feasibleOf(nb)) continue;
+              into.set(key, nb);
+            }
+          }
+        }
+        if(SHAPE === 'sd'){
+          for(let k = 1; k < RSIZE; k++){
+            const nb = baseIds.slice(); nb[0] = baseIds[k]; nb[k] = baseIds[0];
+            const key = keyOf(nb);
+            if(optima.has(key) || into.has(key)) continue;
+            if(!feasibleOf(nb)) continue;
+            into.set(key, nb);
+          }
+        }
+      };
+      const scoreAll = function(cands){
+        const out = [];
+        for(const [key, ids] of cands){
+          if(((neighbourEvals++) & 255) === 0 && cancelled()) return null;
+          totalsInto(gen, ids, tot);
+          const d = dupsOf(dm, ids);
+          out.push({key, ids, searchGross: grossEV(gen, tot, d, null, null)});
+        }
+        out.sort(function(x, y){ return y.searchGross - x.searchGross; });
+        return out;
+      };
+      const bases = Array.from(optima.values()).sort(function(x, y){ return y.searchGross - x.searchGross; }).map(function(o){ return o.ids; });
+      let ringCands = new Map();
+      for(const b of bases) ring(b, ringCands);
+      let scored = scoreAll(ringCands);
+      if(scored === null) return {cancelled:true};
+      // A second ring off the best of the first, only if the first fell short.
+      if(optima.size + scored.length < wantMenu && scored.length){
+        const ring2 = new Map();
+        for(let q = 0; q < Math.min(scored.length, 40); q++) ring(scored[q].ids, ring2);
+        for(const [k] of ringCands) ring2.delete(k);
+        const s2 = scoreAll(ring2);
+        if(s2 === null) return {cancelled:true};
+        scored = scored.concat(s2).sort(function(x, y){ return y.searchGross - x.searchGross; });
+      }
+      const take = Math.max(0, Math.min(scored.length, wantMenu * 2 - optima.size));
+      for(let q = 0; q < take; q++){
+        const c = scored[q];
+        optima.set(c.key, {ids:c.ids, searchGross:c.searchGross, seedKind:'neighbour'});
+        neighbourAdded++;
+      }
+      say({phase:'menu', added:neighbourAdded, evals:neighbourEvals, optima:optima.size, ms:Date.now()-t0});
+    }
+
     // Every SEED, priced on the held-out worlds. Not used by the engine — it is
     // what §8's dominance check compares the search's answer against ("the
     // search's best held-out EV ≥ the best per-world-optimal candidate's, on
@@ -34229,6 +34487,13 @@ function gppKernelFactory(){
     // count is logged so "0 dropped" is a measured claim rather than a hope.
     if(stackOn){
       for(const [k, o] of optima){ if(!stackOkIdx(o.ids)){ optima.delete(k); stackMenuDrop++; } }
+    }
+    if(groupsOn || exclOn || SHAPE === 'sd'){
+      for(const [k, o] of optima){
+        let bad = (groupsOn && !groupsOk(o.ids)) || !teamsOk(o.ids);
+        if(!bad && exclOn){ for(const i of o.ids){ const x = exclOf[i]; if(x >= 0 && o.ids.indexOf(x) >= 0){ bad = true; break; } } }
+        if(bad){ optima.delete(k); stackMenuDrop++; }
+      }
     }
     // ck104: `priceSel` is the same arithmetic this pass always did, and every
     // optimum the convergence statistic already priced is returned from its cache
@@ -34582,6 +34847,7 @@ function gppKernelFactory(){
       }),
       diag: {
         seeds: seeds.length, seedOpt: nOptSeeds, seedRand: nRandSeeds, seedStack: nStackSeeds,
+        neighbourAdded: neighbourAdded, neighbourEvals: neighbourEvals,
         seedsPlanned: plan.total, seedsClimbed: climbedSeeds, capBound: capBound,
         // ck104: how the search ENDED, and the window-by-window G trace behind it.
         endedOn: converged ? 'converged' : (capBound ? 'cap' : 'seeds'),
@@ -34713,16 +34979,53 @@ function gppRunKernel(payload, onProgress){
   });
 }
 
+// ── ck114: ONE FRONT DOOR for a Contest-EV board on the non-NFL-classic paths ──
+// UFC / PGA / NASCAR hand their candidate context here; the engine decision
+// (GPP kernel vs the legacy selector) is `nflEngineDecide`, the same one NFL
+// uses, and the log says which ran and why.
+async function runContestEvBoard(ctx){
+  const slate = ctx.slate;
+  const _log = ctx.log || (typeof log === 'function' ? log : function(){});
+  const eng = nflEngineDecide(slate, true);
+  // The sharp candidate slice (per-sim optimals, ids only) is published for the
+  // hand builder's field on every path, as the NFL runner does before its fork.
+  try {
+    if(window._lastSimCtx && window._lastSimCtx.slateId === slate.id && ctx.ranked && ctx.ranked.length)
+      window._lastSimCtx.sharpCands = ctx.ranked.slice(0, 300).map(e => ({
+        ids: e.lineup.map(p => p.id), cpt: e.lineup._sdCaptain != null ? e.lineup._sdCaptain : null, w: Math.max(1, e.count || 1) }));
+  } catch(e){}
+  if(eng.engine === 'gpp'){
+    _log(`Engine: GPP (spec §5–6) — ${eng.why}.`);
+    return await runNflGppBoard(Object.assign({}, ctx, {
+      log: _log,
+      simsDone: (ctx.totalSims != null) ? ctx.totalSims : ctx.simsDone,
+      seed: (ctx.seed != null) ? ctx.seed : (slate._gppSeed != null ? slate._gppSeed : ((typeof _runSeed !== 'undefined' && _runSeed != null) ? _runSeed : 0x5eed1)),
+    }));
+  }
+  _log(`Engine: legacy selector — ${eng.why}.`);
+  return await runUFCContestEV(ctx);
+}
 // ── Page-side driver ────────────────────────────────────────────────────────
 // Builds the kernel's payload out of the run's sims + the existing field
 // sampler, runs it, and turns the answer back into decorated lineups. Every
 // number the log prints comes from the kernel's own diagnostics, so the log and
 // the board can never disagree.
 async function runNflGppEngine(ctx){
-  const {slate, pool, simScoresById, simsDone, target, maxExpPct, overrides,
+  const {slate, pool, simScoresById, target, maxExpPct, overrides,
          maxSal, minSal} = ctx;
+  const simsDone = (ctx.simsDone != null) ? ctx.simsDone : ctx.totalSims;
   const log = ctx.log || function(){};
   const fieldPool = ctx.fieldPool && ctx.fieldPool.length ? ctx.fieldPool : pool;
+  // ── ck114: ONE ENGINE, EVERY SPORT ────────────────────────────────────────
+  // The kernel takes a roster SHAPE: 'nfl' (9 positional slots, stack rules),
+  // 'sd' (showdown: captain-first, slot 0 at 1.5× score and salary), 'flat'
+  // (UFC / PGA / NASCAR: R interchangeable slots, optional no-oppose pairs,
+  // group count rules). The page-side driver below is the same code for all
+  // three; the NFL-only blocks (stack rules, the sharp-pass neighbourhood) are
+  // gated on `SHAPE === 'nfl'`.
+  const SD = isShowdown(slate);
+  const SHAPE = (slate.sport === 'nfl') ? (SD ? 'sd' : 'nfl') : 'flat';
+  const R = (SHAPE === 'nfl') ? 9 : (SD ? 6 : rosterSize(slate));
   const bud = Object.assign({}, NFL_GPP_BUDGET, {budgetMs: nflGppSearchMs(slate, target)}, ctx.budget || {});
   const cfg = slate._ufcEv || {};
   // ck96: ONE resolver — see contestResolve. The kernel and the pricing surface
@@ -34842,23 +35145,37 @@ async function runNflGppEngine(ctx){
   await tick(); if(window._genCancelled) return null;
 
   // ── Ownership + field ─────────────────────────────────────────────────────
-  const ownSrc = (typeof nflOwnInput === 'function') ? nflOwnInput(slate) : null;
+  let ownSrc = (slate.sport === 'nfl' && typeof nflOwnInput === 'function') ? nflOwnInput(slate) : null;
   if(!ownSrc || !ownSrc.ok){
-    log('⚠ GPP engine refuses to run without an ownership projection (spec §3). Map SS Own or build the Own Model.');
-    return null;
+    // Every other sport (and NFL when the Own Model is unavailable) reads the
+    // mapped Own% column, exactly as the legacy selector did.
+    const own = {}; let any = 0;
+    fieldPool.forEach(p => { const v = parseFloat(p.own); own[p.id] = (v > 0) ? v : 0; if(v > 0) any++; });
+    if(!any){ log('⚠ GPP engine refuses to run without an ownership projection (spec §3). Map SS Own' + (slate.sport === 'nfl' ? ' or build the Own Model.' : '.')); return null; }
+    ownSrc = {ok:true, own, source:'ss', label:'SS Own (mapped column)'};
   }
   log(`Ownership: ${ownSrc.label}`);
   const ownTemp = (ctx.ownTemp > 0) ? ctx.ownTemp : 1;
   const rawOwn = fieldPool.map(p => Math.max(0.2, ownSrc.own[p.id] || 0));
-  const baseOwn = evOwnTemper(rawOwn, ownTemp);
+  let _sdFlexRaw = null;
+  const baseOwn = (function(){ const v = evOwnTemper(rawOwn, ownTemp);
+    if(!SD) return v; const Rf = sdFlexTargets(v); _sdFlexRaw = Rf.rawSum; return Rf.flex; })();
+  // ck114: showdown captain targets — the same construction the legacy path
+  // used (sdCptTargets → temper → renormalise → per-scenario evCptScenario).
+  let _sdCptBase = null, _sdCptInfo = null;
+  if(SD){ _sdCptInfo = sdCptTargets(fieldPool); _sdCptBase = sdRenormalize(evOwnTemper(_sdCptInfo.cpt, ownTemp), SD_CPT_BUDGET, 0.02).vec; }
+  const _cptScenCache = new WeakMap();
+  const _cptScenOf = ownVec => { if(!SD) return null; let v = _cptScenCache.get(ownVec); if(v) return v;
+    v = evCptScenario(_sdCptBase, ownVec, baseOwn); _cptScenCache.set(ownVec, v); return v; };
   const scen = evOwnScenarios(baseOwn, K, EV_SCEN_SIGMA);
-  const fieldOpts = evFieldOptsFor(slate, false, maxSal);
+  const fieldOpts = evFieldOptsFor(slate, SD, maxSal);
   if(ownSrc.source !== 'ss') fieldOpts.ownRef = rawOwn;
   // Calibrate the sampler's marginals on a pilot; only the last of its three
   // passes draws the full sample. This is what makes a 20,000-entry priced
   // field affordable — see NFL_GPP_CALIB_N.
-  fieldOpts.calibN = NFL_GPP_CALIB_N;
-  fieldOpts.gammaBuckets = NFL_GPP_GAMMA_BUCKETS;
+  if(!(fieldOpts.calibN > 0)) fieldOpts.calibN = NFL_GPP_CALIB_N;
+  if(fieldOpts.gammaBuckets == null) fieldOpts.gammaBuckets = NFL_GPP_GAMMA_BUCKETS;
+  if(SD && _sdFlexRaw != null) log(`Showdown ownership budgets: flex column summed to ${_sdFlexRaw.toFixed(1)}% — renormalised to 500%; captain targets ${_sdCptInfo && _sdCptInfo.prior ? 'from the concentration prior' : 'from the published CPT column'}, renormalised to 100%.`);
   log(`Ownership uncertainty: ${K} scenarios at ±${Math.round(EV_SCEN_SIGMA*100)}% (budget-preserving); worlds split across them.`);
   log(`Duplication: charged as ${(ctx.dupMode||NFL_GPP_DUP_MODE)==='divide' ? 'a prize divisor, 1/(1+dups) — spec §2 verbatim' : 'a rank offset of dups/2 (a DK tie splits the prizes for the ranks the tied entries occupy, so duplicates cost you the AVERAGE of that block, not one prize divided among them)'}.`);
 
@@ -34883,14 +35200,23 @@ async function runNflGppEngine(ctx){
     for(let i = 0; i < asIdx.length; i++){ s += asIdx[i].w; cum[i] = s; }
     return {asIdx, totW: s, cum};
   };
+  // ck114: a candidate's kernel ids — captain FIRST on showdown, the way the
+  // sampler lays a field entry out; a showdown candidate without a captain is
+  // not admitted.
+  const kernelIdsOf = e => {
+    let ids = e.lineup.map(p => idxOfId.get(p.id)).filter(x => x != null);
+    if(SD){ const cid = e.lineup._sdCaptain; const ci = (cid != null) ? idxOfId.get(cid) : null;
+      if(ci == null) return null; ids = [ci].concat(ids.filter(x => x !== ci)); }
+    return ids.length === R ? ids : null;
+  };
   let sharpPool = null;
   if(sharpShare > 0 && ctx.ranked && ctx.ranked.length){
     sharpPool = poolOf(ctx.ranked.slice(0, bud.sharpPool).map(e => {
-      const ids = e.lineup.map(p => idxOfId.get(p.id)).filter(x => x != null);
-      return ids.length === 9 ? {idxs:ids, w:Math.max(1, e.count||1)} : null;
+      const ids = kernelIdsOf(e);
+      return ids ? {idxs:ids, w:Math.max(1, e.count||1)} : null;
     }));
   }
-  let _sharpPlaced = 0, _sharpOf = 0, _boards0 = null, _dup0 = null;
+  let _sharpPlaced = 0, _sharpOf = 0, _boards0 = null, _dup0 = null, _sdFieldLogged = false;
   // ck103: the K scenario draws go to workers (see sampleFieldSet). The seed is
   // the run's, mixed with the CALL INDEX, so the same run seed redraws the same
   // fields in the same order however many lanes the machine gives them.
@@ -34899,9 +35225,10 @@ async function runNflGppEngine(ctx){
   const sampleSet = async (label, NF, pool) => {
     const sp = (pool !== undefined) ? pool : sharpPool;
     _sharpPlaced = 0; _sharpOf = K*NF;
-    const lin = new Int32Array(K * NF * 9);
+    const lin = new Int32Array(K * NF * R);
     const drawn = await sampleFieldSet(fieldPool, NF, scen, fieldOpts,
-                                       fieldSeedMix(_fieldBase, _fieldCall++), 0);
+                                       fieldSeedMix(_fieldBase, _fieldCall++), 0,
+                                       SD ? {sd:true, cptScen: scen.map(v => _cptScenOf(v))} : null);
     if(!drawn) return null;
     for(let k = 0; k < K; k++){
       const r = drawn[k];
@@ -34914,6 +35241,26 @@ async function runNflGppEngine(ctx){
                               && fieldOpts.portfolio.sharpBoards)
         ? gppApplySharpBoards(field, {boards: r.boards}, sp, sharpShare)
         : gppApplySharpSlice(field, sp, sharpShare);
+      // ck114: the showdown field's captain rates, on the same hook the legacy
+      // path published (`window.__sdFieldDebug`) — the pool tests read it.
+      if(k === 0 && SD && label !== 'generation'){
+        const cnt = new Map(); for(const l of field) cnt.set(l[0], (cnt.get(l[0])||0) + 1);
+        const flexCnt = new Float64Array(nP); for(const l of field) for(let j = 1; j < l.length; j++) flexCnt[l[j]]++;
+        window.__sdFieldDebug = { n: field.length, prior: !!(_sdCptInfo && _sdCptInfo.prior), sampleSize: NF, fieldSize: F,
+          counted: NF >= F, cptRawSum: _sdCptInfo ? _sdCptInfo.rawSum : null, flexRawSum: _sdFlexRaw,
+          cptSource: _sdCptInfo ? _sdCptInfo.source : null, engine: 'gpp',
+          cptPublished: _sdCptInfo ? _sdCptInfo.published : 0, cptDerived: _sdCptInfo ? _sdCptInfo.derived : 0,
+          cptRate: Object.fromEntries([...cnt].map(([i, c]) => [fieldPool[i].id, 100*c/field.length])),
+          // the sampler's own realized captain marginals, pre-sharp-slice (r.cptRate)
+          cptRateSampler: r.cptRate ? Object.fromEntries(fieldPool.map((p, i) => [p.id, r.cptRate[i]])) : null,
+          cptTarget: Object.fromEntries(fieldPool.map((p, i) => [p.id, _sdCptBase[i]])),
+          flexRate: Object.fromEntries(fieldPool.map((p, i) => [p.id, 100*flexCnt[i]/field.length])),
+          names: Object.fromEntries(fieldPool.map(p => [p.id, p.name])) };
+        if(!_sdFieldLogged){ _sdFieldLogged = true;
+          const rows = [...cnt].map(([i, c]) => ({i, pct: 100*c/field.length})).sort((a, b) => b.pct - a.pct);
+          log(`Showdown field: ${field.length.toLocaleString()} lineups, captain distribution: ${rows.slice(0,8).map(r => `${fieldPool[r.i].name} ${r.pct.toFixed(0)}%`).join(', ')}`);
+          if(_sdCptInfo && _sdCptInfo.prior) log('⚠ No CPT Own% published on this slate — the captain distribution above is a PRIOR anchored on one measured contest, not this slate\'s data. Map a CPT Own% column for a measured field.'); }
+      }
       if(k === 0 && r.boards && r.boards.length){
         _boards0 = {boards: r.boards, topExposure: r.boardTopExposure,
           opt: (r.optShare!=null ? {share:r.optShare, theta:r.optTheta, poolN:r.optPoolN,
@@ -34921,10 +35268,10 @@ async function runNflGppEngine(ctx){
                 solved:!!(fieldOpts.fieldOpt||{}).solveTemp} : null)};
         _dup0 = fieldDupProfile(field, l => { const a=l.slice(); a.sort((x,y)=>x-y); return a.join(','); });
       }
-      const base = k * NF * 9;
+      const base = k * NF * R;
       for(let f = 0; f < NF; f++){
         const l = field[f % field.length];
-        for(let j = 0; j < 9; j++) lin[base + f*9 + j] = l[j];
+        for(let j = 0; j < R; j++) lin[base + f*R + j] = l[j];
       }
       // ck103: the sharp injection and the pack are main-thread work, ~250 ms a
       // scenario at NF = 20,000. Five of them back to back is a quarter of a
@@ -34940,7 +35287,7 @@ async function runNflGppEngine(ctx){
   // sampling pass — 46 s of a 236 s run, measured. The sharp pass itself only
   // ever reads the search fold (it prices on it and builds its duplication
   // model from it), so only that one is drawn up front.
-  const needSharpPass = !!(bud.sharpFromEngine && sharpShare > 0 && !ctx.noSharpPass);
+  const needSharpPass = !!(bud.sharpFromEngine && sharpShare > 0 && !ctx.noSharpPass && SHAPE === 'nfl');
   gppProgressPhase('sampling the opponent field');
   const _tSample = Date.now();
   const fldLinG = await sampleSet('generation', NFs);
@@ -35004,12 +35351,47 @@ async function runNflGppEngine(ctx){
   const team = new Int16Array(nP), opp = new Int16Array(nP);
   const poolIds = new Set(pool.map(p => p.id));
   fieldPool.forEach((p, i) => {
-    const pc = nflPosOf(p);
-    pos[i] = (pc != null && POSC[pc] != null) ? POSC[pc] : 5;
+    if(SHAPE === 'nfl'){ const pc = nflPosOf(p); pos[i] = (pc != null && POSC[pc] != null) ? POSC[pc] : 5; }
+    else pos[i] = 1;                       // ck114: one interchangeable slot type
     sal[i] = p.salary || 0;
     team[i] = codeOf(p.team); opp[i] = codeOf(p.opp);
     sel[i] = (poolIds.has(p.id) && pos[i] < 5 && sal[i] > 0) ? 1 : 0;
+    // UFC: a fighter in an excluded fight is not ours to roster.
+    if(slate.sport === 'ufc' && p.fightNum > 0 && typeof ufcExcludedFights !== 'undefined' && ufcExcludedFights.has(p.fightNum)) sel[i] = 0;
   });
+  // ck114: showdown's two pools — who may captain, who may flex — as masks.
+  let cptOkMask = null, flexOkMask = null;
+  if(SD){
+    cptOkMask = new Uint8Array(nP); flexOkMask = new Uint8Array(nP);
+    fieldPool.forEach((p, i) => { if(!sel[i]) return;
+      cptOkMask[i] = sdCptEligible(slate, p.id) ? 1 : 0; flexOkMask[i] = sdFlexEligible(slate, p.id) ? 1 : 0; });
+  }
+  // ck114: NO-OPPOSE pairs (UFC): the two sides of a fight may not share one of
+  // OUR lineups when the global rule or a group's rule says so. Flat pairs.
+  const exclPairs = [];
+  if(slate.sport === 'ufc' && typeof ufcSameFight === 'function'){
+    const groupsNO = (slate.groups || []).filter(g => g.ufcNoOppose).map(g => new Set(g.playerIds || []));
+    const wantPair = (p, q) => (typeof ufcNoOpposeGlobal !== 'undefined' && ufcNoOpposeGlobal)
+      || groupsNO.some(gs => gs.has(p.id) && gs.has(q.id));
+    for(let i = 0; i < nP; i++) for(let j = i + 1; j < nP; j++)
+      if(sel[i] && sel[j] && ufcSameFight(fieldPool[i], fieldPool[j]) && wantPair(fieldPool[i], fieldPool[j])) exclPairs.push(i, j);
+  }
+  // ck114: GROUP COUNT RULES (min / max over a player group, plus hard
+  // conditional rules) — the legacy selector filtered candidates through
+  // checkGroupRules; the kernel enforces the same counts in its own search.
+  const groupRules = [];
+  for(const g of (slate.groups || [])){
+    const ids = new Set(g.playerIds || []);
+    const mask = new Uint8Array(nP); let any = 0;
+    fieldPool.forEach((p, i) => { if(ids.has(p.id)){ mask[i] = 1; any++; } });
+    const min = g.ruleMin|0, max = g.ruleMax|0;
+    const conds = (g.condGroups || []).filter(c => c.type === 'hard' && (c.playerIds || []).length).map(c => {
+      const cm = new Uint8Array(nP); const cs = new Set(c.playerIds || []);
+      fieldPool.forEach((p, i) => { if(cs.has(p.id)) cm[i] = 1; });
+      return {ifMin: c.ifMin|0, thenMin: c.thenMin|0, thenMax: c.thenMax|0, mask: cm};
+    });
+    if(any && (min > 0 || max > 0 || conds.length)) groupRules.push({mask, min, max, conds});
+  }
   // ── STACK CONSTRAINTS, IN KERNEL INDEX SPACE (checkpoint 75) ─────────────
   // The engine enforces per-QB (and global) partner MINIMUMS in its own search
   // instead of declining the run. Two flat arrays are all it needs:
@@ -35018,12 +35400,12 @@ async function runNflGppEngine(ctx){
   //                partner of that QB? Rows are addressed by qbRow[i].
   // `nflStackReqFor` is the same function `nflStackOk` consults, so a lineup the
   // kernel calls legal is a lineup the post-run rule check calls legal.
-  const _rules = ctx.stackRules || nflResolvedStackRules(slate);
+  const _rules = (SHAPE === 'nfl') ? (ctx.stackRules || nflResolvedStackRules(slate)) : null;
   const qbMinN = new Int8Array(nP), qbRow = new Int32Array(nP).fill(-1);
   const _rowMasks = [];
   let nQbRow = 0, nQbConstrained = 0;
   fieldPool.forEach((p, i) => {
-    if(pos[i] !== 0 || !sel[i]) return;
+    if(SHAPE !== 'nfl' || pos[i] !== 0 || !sel[i]) return;
     const req = nflStackReqFor(_rules, p.id);
     const need = req.n|0;
     if(need <= 0) return;
@@ -35057,15 +35439,20 @@ async function runNflGppEngine(ctx){
   // Seeds from the per-sim optimals — starting points only, never candidates.
   const seedOptArr = [];
   for(const e of (ctx.ranked || [])){
-    if(seedOptArr.length >= bud.seedOptimals*9) break;
-    const ids = e.lineup.map(p => idxOfId.get(p.id)).filter(x => x != null);
-    if(ids.length === 9) for(const x of ids) seedOptArr.push(x);
+    if(seedOptArr.length >= bud.seedOptimals*R) break;
+    const ids = kernelIdsOf(e);
+    if(ids) for(const x of ids) seedOptArr.push(x);
   }
 
   const payload = {
     nP, pos, sal, sel, team, opp,
     Wg: genIdx.length, Ws: selIdx.length, Wr: repIdx.length, sg, ss, sr,
-    NFg: NFs, NFp: NFp, K, F, fee, dupK: evDupK('nfl'),
+    NFg: NFs, NFp: NFp, K, F, fee, dupK: SD ? SD_DUP_K : evDupK(slate.sport || 'nfl'),
+    // ck114: roster shape.
+    R, shape: SHAPE, capMul: (typeof CPT_MULT === 'number') ? CPT_MULT : 1.5,
+    cptOk: cptOkMask, flexOk: flexOkMask,
+    excl: Int32Array.from(exclPairs),
+    groups: groupRules.map(g => ({mask:g.mask, min:g.min, max:g.max, conds:g.conds})),
     ownG: Float32Array.from(scen.flatMap(v => Array.from(v))),
     ownO: Float32Array.from(scen.flatMap(v => Array.from(v))),
     theta: NFL_GPP_DUP_THETA, maxDupFrac: NFL_GPP_DUP_MAXFRAC,
@@ -35314,6 +35701,8 @@ async function runNflGppEngine(ctx){
     else if(m.phase === 'search') gppProgressPhase(m.done
       ? `search done — ${m.optima.toLocaleString()} local optima`
       : `search — ${m.seed.toLocaleString()} of ${m.of.toLocaleString()} seeds, ${m.optima.toLocaleString()} local optima`);
+    else if(m.phase === 'menu'){ gppProgressPhase(`menu — ${m.optima.toLocaleString()} candidates after the swap neighbourhood`);
+      log(`  menu (ck114): the search's local optima were fewer than the menu target on this pool, so their swap neighbourhood was priced on the search fold — ${m.added.toLocaleString()} neighbours added from ${m.evals.toLocaleString()} evaluated, ${m.optima.toLocaleString()} candidates for the greedy (${(m.ms/1000).toFixed(1)}s).`); }
     else if(m.phase === 'priced') gppProgressPhase(`select-fold pricing — ${m.optima.toLocaleString()} local optima`);
     else if(m.phase === 'portfolio') gppProgressPhase(`portfolio — greedy expected log growth (${m.n||0}/${m.of||0})`);
     else if(m.phase === 'report') gppProgressPhase('re-pricing on the report fold');
@@ -35456,10 +35845,15 @@ async function runNflGppBoard(ctx){
     budget: Object.assign({budgetMs: nflGppSearchMs(ctx.slate, _want)}, ctx.budget || {}),
   }));
   if(!r) return null;
-  const {slate, pool, simScoresById, simsDone, target} = ctx;
+  const {slate, pool, simScoresById, target} = ctx;
+  const simsDone = (ctx.simsDone != null) ? ctx.simsDone : ctx.totalSims;
   const log = ctx.log || function(){};
   const fieldPool = ctx.fieldPool && ctx.fieldPool.length ? ctx.fieldPool : pool;
   const fee = r.fee, d = r.res.diag;
+  // ck114: shape-aware labels — stack shapes are an NFL notion.
+  const SDb = isShowdown(slate);
+  const shapeOf = l => (slate.sport === 'nfl' && !SDb) ? nflStackShape(slate, l.map(p => p.id)) : null;
+  const shapeLabel = l => { const sh = shapeOf(l); return sh ? sh.label : (SDb ? ('CPT ' + surnameOf((l[0]||{}).name || '')) : 'lineup'); };
   // Held-out world indices, re-derived exactly as the engine derived them, so
   // the Sim column on a card is a mean over the same worlds its EV was priced on.
   // The REPORT fold, re-derived exactly as the engine derived it, so the Sim
@@ -35473,6 +35867,7 @@ async function runNflGppBoard(ctx){
 
   let out = r.res.lineups.map(x => {
     const l = x.ids.map(i => fieldPool[i]);
+    if(SDb) l._sdCaptain = l[0].id;   // ck114: the kernel keeps the captain in slot 0
     l._kx = x;                 // ck111: the kernel's own row, for the CSV/harness after the screen
     l._ev = x.heldEV;
     l._evPct = (x.heldEV / Math.max(0.01, fee)) * 100;
@@ -35524,9 +35919,14 @@ async function runNflGppBoard(ctx){
   {
     const _t0 = Date.now();
     try {
-      const _pr0 = priceBoardHeldOut(out.map(l => ({players:[...l], cptId:null})), {slate});
+      const _pr0 = priceBoardHeldOut(out.map(l => ({players:[...l], cptId: SDb ? l._sdCaptain : null})), {slate});
       // ck111: the screen, then the aggregate over what survived.
-      const _scr = evScreenBoard(slate, _pr0, target, log);
+      // ck114: Min% pins on the kept board, same as the legacy path (ck113).
+      const _mo = slate.playerMinOverrides || {};
+      const _minIds = Object.keys(_mo).filter(id => (_mo[id]||0) > 0);
+      const _scr = evScreenBoard(slate, _pr0, target, log,
+        {floors: _minIds.length ? {list:_minIds, ids: i => out[i].map(p => p.id),
+                                   min: id => Math.ceil(Math.max(0, Math.min(100, _mo[id]||0))/100*target)} : null});
       const _pr = _scr.keep.map(i => _pr0[i]);
       out = _scr.keep.map(i => out[i]);
       let nOk=0, gross=0, calGross=0, winS=0, cashS=0, top1S=0, top10S=0, favS=0, favN=0;
@@ -35559,8 +35959,7 @@ async function runNflGppBoard(ctx){
   // stack rule touched the objective at any stage.
   const byShape = new Map();
   out.forEach(l => {
-    const sh = nflStackShape(slate, l.map(p => p.id));
-    const key = sh ? sh.label : 'no QB';
+    const key = shapeLabel(l);
     const e = byShape.get(key) || {n:0, ev:0};
     e.n++; e.ev += l._gpp.heldEV;
     byShape.set(key, e);
@@ -35570,7 +35969,7 @@ async function runNflGppBoard(ctx){
   // ck75: the board against the rule that was in force, per lineup. A run that
   // enforced a minimum and shipped a lineup below it is a bug, and this is the
   // line that would say so.
-  {
+  if(slate.sport === 'nfl' && !SDb){
     const _r = ctx.stackRules || nflResolvedStackRules(slate);
     if(nflAnyStackRule(_r)){
       const bad = out.filter(l => !nflStackOk(l, _r));
@@ -35591,9 +35990,9 @@ async function runNflGppBoard(ctx){
   // Naked QBs are never suppressed. When one is chosen, say what it earned
   // against the best stacked lineup on the board rather than hiding it.
   {
-    const naked = out.filter(l => { const s = nflStackShape(slate, l.map(p=>p.id)); return s && s.n === 0; });
+    const naked = out.filter(l => { const s = shapeOf(l); return s && s.n === 0; });
     if(naked.length){
-      const stacked = out.filter(l => { const s = nflStackShape(slate, l.map(p=>p.id)); return s && s.n > 0; });
+      const stacked = out.filter(l => { const s = shapeOf(l); return s && s.n > 0; });
       const bestStack = stacked.length ? Math.max(...stacked.map(l => l._gpp.heldEV)) : null;
       const bestNaked = Math.max(...naked.map(l => l._gpp.heldEV));
       log(`  ${naked.length} naked-QB lineup${naked.length>1?'s were':' was'} chosen: best held-out EV $${bestNaked.toFixed(2)}`
@@ -35666,8 +36065,7 @@ async function runNflGppBoard(ctx){
     if(byDup.length && byDup[0].d > 0.01){
       log('Most-duplicated lineups on the board (expected duplicates in the modeled field): '
         + byDup.map(x => {
-            const sh = nflStackShape(slate, x.l.map(p=>p.id));
-            return `#${x.i+1} ${x.d.toFixed(1)}× (${sh?sh.label:'—'}, EV $${x.l._gpp.heldEV.toFixed(2)})`;
+            return `#${x.i+1} ${x.d.toFixed(1)}× (${shapeLabel(x.l)}, EV $${x.l._gpp.heldEV.toFixed(2)})`;
           }).join(' · ') + '.');
     } else {
       log(`Most-duplicated lineup on the board is under 0.01 expected duplicates — the board is entirely off-consensus for this field model.`);
@@ -35790,8 +36188,8 @@ async function runNflGppBoard(ctx){
         name: surnameOf((fieldPool.find(p => p.id === id)||{}).name || id),
         pct: Math.round(100*c/out.length) })),
       dups: dupRows.map(x => {
-        const sh = nflStackShape(slate, x.l.map(p => p.id));
-        return {rank:x.i+1, label: sh ? sh.label : '—', naked: !!(sh && sh.n === 0), dups: x.dv.toFixed(1)};
+        const sh = shapeOf(x.l);
+        return {rank:x.i+1, label: shapeLabel(x.l), naked: !!(sh && sh.n === 0), dups: x.dv.toFixed(1)};
       }),
     });
   }
@@ -35817,7 +36215,7 @@ async function runNflGppBoard(ctx){
       rank1Share: h ? (h.bands ? h.bands.share[0] : null) : (out[i]._evBands ? out[i]._evBands.share[0] : null),
       pricedFold: h ? (h.fold||null) : null,
       selHeldEV: x.heldEV, selWin: x.win, selCash: x.cash,
-      shape:(nflStackShape(slate, out[i].map(p=>p.id))||{}).label || ''}; }),
+      shape: shapeLabel(out[i])}; }),
     allPriced: d.allPriced.map(x => ({ids:x.ids.map(i=>fieldPool[i].id), heldEV:x.heldEV,
       heldGross:x.heldGross, searchGross:x.searchGross, win:x.win, seedKind:x.seedKind})),
     seedPriced: (d.seedPriced||[]).map(x => ({ids:x.ids.map(i=>fieldPool[i].id), kind:x.kind, heldGross:x.heldGross})),
@@ -36373,7 +36771,7 @@ async function runNflSimGenInner(){
   // fork chooses legacy — reaches runUFCContestEV / runPgaSimScoreSelect on the
   // code path it always did, byte for byte.
   const _eng = nflEngineDecide(slate, _evOn);
-  if(!SD && _eng.engine === 'gpp'){
+  if(_eng.engine === 'gpp'){
     log(`Engine: GPP (spec §5–6) — ${_eng.why}.`);
     out = await runNflGppBoard({slate, pool, ranked, simScoresById, simsDone,
       target, maxExpPct, overrides, maxSal, minSal, log, stackRules,
@@ -36381,12 +36779,14 @@ async function runNflSimGenInner(){
       sharpShare:contestSharpShare(slate), ownTemp:contestOwnTemp(slate),
       seed: (slate._gppSeed!=null ? slate._gppSeed : 0x5eed1)});
     if(out===null){ if(window._genCancelled) log('Cancelled.'); done(); return; }
-    done(`done — ${out.length} lineups`);
-    return out;
+    if(!SD){ done(`done — ${out.length} lineups`); return out; }
+    // showdown falls through to the captain readout + preview below
   }
-  if(!SD && isNflClassic(slate) && nflEngineMode(slate) !== 'legacy')
+  if(_eng.engine !== 'gpp' && isNfl(slate) && nflEngineMode(slate) !== 'legacy')
     log(`Engine: legacy pipeline — ${_eng.why}.`);
-  if(_evOn){
+  if(_eng.engine === 'gpp'){
+    // the showdown board was built above
+  } else if(_evOn){
     const _se = !!(slate._ufcEv && slate._ufcEv.se);
     out = await runUFCContestEV({slate, pool, ranked, simScoresById, totalSims:simsDone,
       genSims:Math.ceil(simsDone/2), target, maxExpPct, overrides, oosParity:1,
