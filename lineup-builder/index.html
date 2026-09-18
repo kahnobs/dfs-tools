@@ -6373,6 +6373,32 @@ const PGA_STAT_ALIASES = {
   bogey_avoid:['bogey_avoid','bogey avoidance'],
   sg_par_5:['sg_par_5','sg par 5','sg: par 5'],
 };
+// NASCAR sheet extras (ck116: one reader for create / refresh / late-add).
+//   practice     — console's "Practice Score" composite (residual tilt input)
+//   ratingN      — "Rating N": fastlap races behind the rating (shrinkage)
+//   trackRatings — which per-track rating columns this driver actually has
+//                  ("Short Track Rating", "Bristol Rating", …; never the
+//                  Average/New/N columns). A driver rated on one of two
+//                  tracks the slate carries is a thinner sample than his
+//                  "Average Rating" cell admits — the sim halves his N.
+// reset=true (refresh) clears fields the sheet no longer has; false keeps
+// whatever the row had (create / late-add semantics, unchanged).
+function applyNascarStats(p, row, headers, reset){
+  const hs=(headers||[]).map(h=>(h||'').trim());
+  const pi=hs.findIndex(h=>/^practice([\s_]?score)?$/i.test(h));
+  if(pi>=0){ const v=parseFloat(row[pi]); if(!isNaN(v)) p.practice=v; else if(reset) p.practice=null; }
+  const ni=hs.findIndex(h=>/^rating\s*(n|races|count)$/i.test(h));
+  if(ni>=0){ const v=parseInt(row[ni]); if(!isNaN(v)) p.ratingN=v; else if(reset) p.ratingN=null; }
+  const tr={}; let any=false;
+  hs.forEach((h,i)=>{
+    if(!/rating$/i.test(h)) return;
+    if(/^(averaged?|avg|mean|combined|composite|overall|blended|total|new)[\s_]/i.test(h)) return;
+    if(/^rating$/i.test(h)) return;
+    any=true;
+    const v=parseFloat(row[i]); tr[h]=(!isNaN(v)&&v>0)?v:null;
+  });
+  if(any) p.trackRatings=tr; else if(reset) delete p.trackRatings;
+}
 function applyPgaStats(p, row, headers){
   const hdrs=(headers||[]).map(h=>(h||'').trim().toLowerCase());
   const idx=names=>{for(const n of names){const i=hdrs.indexOf(n);if(i>=0)return i;}return -1;};
@@ -6628,7 +6654,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck115/2026-09-15';
+const BUILD_ID = '2.0/ck116/2026-09-18';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -23465,7 +23491,7 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
     // salary→rating regression over the real-rated field.
     const realArr=pool.filter(p=>p.rating!=null&&!p._ratingImputed&&parseFloat(p.rating)>0);
     const K=6;
-    let shrunk=0;
+    let shrunk=0, thinned=0;
     if(realArr.length>=8){
       // salary→rating linear fit (regression fallback for thin salary bands)
       let sx=0,sy=0,sxx=0,sxy=0; const nR=realArr.length;
@@ -23476,10 +23502,25 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
         if(peers.length>=3) return peers.reduce((s,q)=>s+parseFloat(q.rating),0)/peers.length;
         return alpha+beta*(p.salary||0);
       };
+      // ck116: partial track coverage thins the sample. The slate's rating
+      // columns that at least a third of the field populates are "live" for
+      // this track type (Bristol carries Short Track + Bristol; the Super
+      // Speedway / Daytona columns ride along empty). A driver holding only
+      // one of two live columns has his "Average Rating" built from half the
+      // evidence — his N is scaled by have/total (floor ½).
+      const liveCols=(()=>{
+        const cnt={}; let withTR=0;
+        pool.forEach(p=>{ if(!p.trackRatings) return; withTR++; Object.keys(p.trackRatings).forEach(k=>{ if(p.trackRatings[k]!=null) cnt[k]=(cnt[k]||0)+1; }); });
+        return Object.keys(cnt).filter(k=>cnt[k]>=Math.max(2,withTR/3));
+      })();
       pool.forEach(p=>{
         p._effRating=parseFloat(p.rating)||0;
         if(p.ratingN!=null&&p.rating!=null&&!p._ratingImputed){
-          const n=Math.max(0,p.ratingN);
+          let n=Math.max(0,p.ratingN);
+          if(liveCols.length>=2&&p.trackRatings){
+            const have=liveCols.filter(k=>p.trackRatings[k]!=null).length;
+            if(have>0&&have<liveCols.length){ n*=Math.max(0.5,have/liveCols.length); p._nRatingPartial=`${have}/${liveCols.length}`; thinned++; }
+          }
           const prior=priorFor(p);
           const eff=prior+(parseFloat(p.rating)-prior)*(n/(n+K));
           if(Math.abs(eff-p._effRating)>0.05) shrunk++;
@@ -23489,7 +23530,29 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
     } else {
       pool.forEach(p=>{ p._effRating=parseFloat(p.rating)||0; });
     }
-    if(shrunk&&typeof log==='function') log(`Rating shrinkage: ${shrunk} thin-sample rating${shrunk!==1?'s':''} pulled toward their salary-tier prior (n/(n+${K}) credibility on "Rating N").`);
+    if(shrunk&&typeof log==='function') log(`Rating shrinkage: ${shrunk} thin-sample rating${shrunk!==1?'s':''} pulled toward their salary-tier prior (n/(n+${K}) credibility on "Rating N")${thinned?`; ${thinned} rated on a subset of this track type's columns (N scaled, ck116)`:''}.`);
+  }
+
+  // ── Punt tier (ck116) ────────────────────────────────────────────────────
+  // Books floor the win line for cars they don't expect to matter: the bottom
+  // of a 38-car Xfinity board is a dozen identical +218153s. Inside that tie
+  // the odds carry zero ordering, so the rating — a 3–15% tiebreaker
+  // everywhere else — silently became 100% of it, and the sim spread the
+  // punts out as if a 50 vs a 30 fastlap rating separated cars the market
+  // says are equivalent. Rating separates good cars at the top; among the
+  // floored cars it is a weak "which one stinks least" hint. Flag the tier
+  // (≥3 real-priced cars sharing the field's longest win price) so the skill
+  // score can damp the rating there and the residual tilt can't argue with
+  // the market for cars it explicitly priced at the floor.
+  const puntTier=new Set();
+  {
+    const real=pool.filter(p=>p._nPWin!=null&&nascarMlToProb(p.win));
+    if(real.length>=6){
+      const minW=Math.min(...real.map(p=>p._nPWin));
+      const tied=real.filter(p=>Math.abs(p._nPWin-minW)<=minW*0.02+1e-9);
+      if(tied.length>=3) tied.forEach(p=>{ puntTier.add(p.id); p._nPuntTier=true; });
+    }
+    if(puntTier.size&&typeof log==='function') log(`Punt tier (ck116): ${puntTier.size} cars share the floored win line — rating damped to ½ and its residual tilt off inside the tier.`);
   }
 
   // ── Skill score: 65% odds-based (weighted by available tiers), 35% rating ─
@@ -23497,6 +23560,11 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
   const maxRating  = Math.max(...ratings);
   const minRating  = Math.min(...ratings.filter(r=>r>0));
   const ratingRange= maxRating - minRating || 1;
+  // ck116: punt-tier rating centre — the tier's own mean normalized rating.
+  const puntNormMean=(()=>{
+    const v=pool.filter(p=>puntTier.has(p.id)&&(p._effRating||0)>0).map(p=>((p._effRating||0)-minRating)/ratingRange);
+    return v.length?v.reduce((a,b)=>a+b,0)/v.length:0;
+  })();
   pool.forEach(p=>{
     // Weight odds tiers by market informativeness. Win is most signal-dense.
     // If a tier was estimated (not real), use it but at half weight.
@@ -23515,7 +23583,11 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
     // Drivers with no rating get 0 (worst), not 0.5 (middle).
     // Defaulting to 0.5 was incorrectly ranking no-rating backmarkers above
     // drivers with legitimately bad odds.
-    const normRating = rtg > 0 ? (rtg - minRating) / ratingRange : 0;
+    let normRating = rtg > 0 ? (rtg - minRating) / ratingRange : 0;
+    // ck116: inside the floored tier the rating is a hint, not an ordering —
+    // pull it halfway to the tier mean so a 50 vs 30 fastlap number moves a
+    // punt a couple of anchor spots, not a dozen.
+    if(puntTier.has(p.id) && rtg > 0) normRating = puntNormMean + (normRating - puntNormMean) * 0.5;
     // Ratings get more weight when fewer real odds tiers are available
     const realTiers = [p._nPWin, !p._nTop3Est && p._nPTop3, !p._nTop5Est && p._nPTop5, !p._nTop10Est && p._nPTop10].filter(Boolean).length;
     // Rating is a tiebreaker, not a primary signal.
@@ -23558,7 +23630,15 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
     const pctRank=vals=>{
       const ok=vals.filter(x=>x.v!=null&&!isNaN(x.v)).sort((a,b)=>a.v-b.v);
       const m=new Map();
-      ok.forEach((x,r)=>m.set(x.i, ok.length>1?r/(ok.length-1):0.5));
+      // ck116: ties share the mean rank. A dozen floored +218153s used to get
+      // percentiles 0…11/37 in sheet order, so the practice residual of a
+      // punt depended on which row he sat in.
+      for(let a=0;a<ok.length;){
+        let b=a; while(b+1<ok.length&&ok[b+1].v===ok[a].v) b++;
+        const r=(a+b)/2;
+        for(let k=a;k<=b;k++) m.set(ok[k].i, ok.length>1?r/(ok.length-1):0.5);
+        a=b+1;
+      }
       return m;
     };
     const oddsPct=pctRank(pool.map((p,i)=>({i, v:(p._nSkillScore>0&&p._nOddsScore>0)?p._nOddsScore:null})));
@@ -23566,15 +23646,34 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
     const pracVals=pool.map((p,i)=>{const v=parseFloat(p.practice); return {i, v:!isNaN(v)?v:null};});
     const pracN=pracVals.filter(x=>x.v!=null).length;
     const pracPct=pracN>=6?pctRank(pracVals):new Map(); // needs real coverage to rank against
+    // ck116: "didn't run" must not beat "ran slow". A driver with no practice
+    // row used to get residual 0 — i.e. AVERAGE practice — while every peer
+    // who actually turned laps in the same tier ate the full negative tilt
+    // (Starr at Bristol: no practice, simmed above six punts with real 8–29
+    // practice scores). Impute the missing percentile from ±$750 salary peers
+    // who did run (≥2 of them); no peers → leave the residual at zero.
+    let pracImputed=0;
+    if(pracN>=6){
+      pool.forEach((p,i)=>{
+        if(pracPct.has(i)) return;
+        const peers=pool.map((q,j)=>({q,j})).filter(x=>x.j!==i&&pracPct.has(x.j)&&Math.abs((x.q.salary||0)-(p.salary||0))<=750);
+        if(peers.length>=2){ pracPct.set(i, peers.reduce((s,x)=>s+pracPct.get(x.j),0)/peers.length); p._nPracImputed=true; pracImputed++; }
+      });
+    }
     pool.forEach((p,i)=>{
       const o=oddsPct.get(i);
       p._nResidR=(o!=null&&ratePct.has(i))?(ratePct.get(i)-o):0;
       p._nResidP=(o!=null&&pracPct.has(i))?(pracPct.get(i)-o):0;
+      // ck116: the market priced the punt tier at the floor on purpose — a
+      // fastlap rating doesn't get to overrule that. Practice still tilts
+      // (both ways): it is un-priced information for everyone.
+      if(puntTier.has(p.id)) p._nResidR=0;
       if(p._nSkillScore>0){
         const tilt=Math.max(-0.08,Math.min(0.08, 0.05*p._nResidR + 0.08*p._nResidP));
         p._nSkillScore*=(1+tilt);
       }
     });
+    if(pracImputed&&typeof log==='function') log(`Practice (ck116): ${pracImputed} driver${pracImputed!==1?'s':''} with no practice row imputed from salary peers' percentile (no free pass for not running).`);
   })();
 
   // Primary sort by skill score
@@ -40993,12 +41092,7 @@ async function refreshFromSheet(){
       // refresh path previously never re-read Practice Score, so a console
       // re-run (e.g. the pit-lap fix correcting a corrupted 10-lap value)
       // silently never reached the builder without recreating the slate.
-      if(slate.sport==='nascar'){
-        const pi=headers.findIndex(h=>/^practice([\s_]?score)?$/i.test((h||'').trim()));
-        if(pi>=0){ const v=parseFloat(row[pi]); p.practice=!isNaN(v)?v:null; }
-        const ni=headers.findIndex(h=>/^rating\s*(n|races|count)$/i.test((h||'').trim()));
-        if(ni>=0){ const v=parseInt(row[ni]); p.ratingN=!isNaN(v)?v:null; }
-      }
+      if(slate.sport==='nascar') applyNascarStats(p, row, headers, true);
       if(slate.sport==='pga') applyPgaStats(p, row, headers);
       if(slate.sport==='nfl') applyNflStats(p, row, headers);
     });
@@ -41036,12 +41130,7 @@ async function refreshFromSheet(){
         p.ss_ou=get2('SS O/U')||null; p.td_ou=get2('TD O/U')||null;
         p.fightNum = parseInt(p.start)||null;
       }
-      if(slate.sport==='nascar'){
-        const pi=headers.findIndex(h=>/^practice([\s_]?score)?$/i.test((h||'').trim()));
-        if(pi>=0){ const v=parseFloat(row[pi]); if(!isNaN(v)) p.practice=v; }
-        const ni=headers.findIndex(h=>/^rating\s*(n|races|count)$/i.test((h||'').trim()));
-        if(ni>=0){ const v=parseInt(row[ni]); if(!isNaN(v)) p.ratingN=v; }
-      }
+      if(slate.sport==='nascar') applyNascarStats(p, row, headers, false);
       if(slate.sport==='pga') applyPgaStats(p, row, headers);
       if(slate.sport==='nfl') applyNflStats(p, row, headers);
       slate.players.push(p);
@@ -41488,14 +41577,7 @@ function createSlate(){
     // NASCAR: practice composite (console's "Practice Score" column) — read
     // straight off the header like the UFC sim columns; feeds the sim's
     // residual tilts (un-priced dominator signal).
-    if(sport==='nascar'){
-      const pi2=parsedCSV.headers.findIndex(h=>/^practice([\s_]?score)?$/i.test((h||'').trim()));
-      if(pi2>=0){ const v=parseFloat(row[pi2]); if(!isNaN(v)) p.practice=v; }
-      // Rating sample size (console's "Rating N" column) — how many fastlap
-      // races back this driver's rating. Feeds the sim's thin-sample shrink.
-      const ni2=parsedCSV.headers.findIndex(h=>/^rating\s*(n|races|count)$/i.test((h||'').trim()));
-      if(ni2>=0){ const v=parseInt(row[ni2]); if(!isNaN(v)) p.ratingN=v; }
-    }
+    if(sport==='nascar') applyNascarStats(p, row, parsedCSV.headers, false);
 
     players.push(p);
   });
