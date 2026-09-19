@@ -2837,10 +2837,14 @@ function nflOwnZ(vals){
 // is good, and a guessed ownership column is worse than none.
 function nflOwnRows(slate){
   if(!slate || !isNflClassic(slate)) return null;
-  const hid = new Set(slate.hiddenIds || []);
+  // ck121: HIDDEN players stay in the model. Hiding is the USER's pool
+  // curation; the field never saw it, so a hide must not hand the hidden
+  // man's share of the position budget to everyone else (Matt hid 300 bodies
+  // on Week 2 and Bijan Robinson's OwnM read 92.8%). Only the OUT list —
+  // players who truly are not playing — leaves the softmax.
   const out = (typeof nflOutSet === 'function') ? nflOutSet(slate) : new Set();
   const live = (slate.players||[]).filter(p =>
-    p && (p.salary||0) > 0 && !hid.has(p.id) && !out.has(p.id) && nflPosOf(p));
+    p && (p.salary||0) > 0 && !out.has(p.id) && nflPosOf(p));
   if(live.length < 9) return null;
   // Sim mean is the spec's feature; Proj is the pre-sim estimate that lets the
   // column exist before anybody presses Generate.
@@ -3031,7 +3035,7 @@ function nflOwnFp(slate){
   }
   const fit = nflOwnBetaStore();
   return [ps.length, Math.round(sal), Math.round(prj*100), nSim, Math.round(sim*100),
-           (slate.hiddenIds||[]).length, (slate._outIds||[]).length,
+           (slate._outIds||[]).length,
            (fit && fit.ts) || 0].join('/');
 }
 function nflOwnEnsure(slate, force){
@@ -5322,7 +5326,10 @@ function nflAssignSlots(slate, ids){
     // down instead of reporting an unslottable player.
     if(pos && groups[pos]) groups[pos].push(id); else (groups._bad=groups._bad||[]).push(id);
   }
-  const bySal = a => a.sort((x,y)=>(playerById(slate,y)?.salary||0)-(playerById(slate,x)?.salary||0));
+  // ck122: a FLEX-only hidden player takes a base slot first, so the extra man
+  // at his position (the FLEX) is one who is allowed to flex.
+  const nfh = (typeof nflFlexHidden === 'function') ? (id => nflFlexHidden(slate, id) ? 1 : 0) : (() => 0);
+  const bySal = a => a.sort((x,y)=>(nfh(y)-nfh(x)) || ((playerById(slate,y)?.salary||0)-(playerById(slate,x)?.salary||0)));
   Object.values(groups).forEach(g=>Array.isArray(g)&&bySal(g));
   const out = {QB:groups.QB[0]||null, RB:groups.RB[0]||null, RB2:groups.RB[1]||null,
     WR:groups.WR[0]||null, WR2:groups.WR[1]||null, WR3:groups.WR[2]||null,
@@ -6672,7 +6679,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck121/2026-09-19';
+const BUILD_ID = '2.0/ck122/2026-09-19';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -7521,9 +7528,10 @@ function refreshHiddenBadge(){
   const SD=!!(slate && typeof isShowdown==='function' && isShowdown(slate));
   const nf=((slate&&slate.hiddenIds)||[]).length;
   const nc=SD?sdCptHiddenList(slate).length:0;
-  const n=SD?(nf+nc):nf;
+  const nx=(!SD && slate && slate.sport==='nfl') ? nflFlexHiddenList(slate).length : 0;   // ck122
+  const n=SD?(nf+nc):(nf+nx);
   if(n>0){
-    nb.textContent=SD?`${nc} CPT · ${nf} FLEX hidden`:`${nf} hidden`;
+    nb.textContent=SD?`${nc} CPT · ${nf} FLEX hidden`:(nx?`${nf} hidden · ${nx} FLEX-only`:`${nf} hidden`);
     if(SD) nb.title='Hidden from the captain pool / hidden from the flex pool — the two are separate';
     else nb.removeAttribute('title');
     nb.classList.add('on');
@@ -7631,6 +7639,7 @@ function unhideAll(){
         ? `Unhide all ${nc} captain-hidden and ${nf} flex-hidden players?`
         : `Unhide all ${nf} hidden players?`))return;
   slate.hiddenIds=[];
+  slate.flexHiddenIds=[];
   if(SD) slate.sdCptHidden=[];
   showHidden=false;
   document.getElementById('showHiddenBtn').classList.remove('active');
@@ -7647,6 +7656,16 @@ function toggleHide(id,e){
   // SHOWDOWN: the ✕ acts on the pool you are looking at and ONLY that pool —
   // hiding a man as a captain leaves him a flex option, and vice versa. Every
   // other sport keeps one set, which is what hiddenIds has always been.
+  // ck122: on the FLEX tab of an NFL classic slate the ✕ removes him from FLEX
+  // consideration only — he stays a candidate for his own position.
+  if(slate.sport==='nfl' && !(typeof isShowdown==='function' && isShowdown(slate)) && slate._posFilter==='FLEX'){
+    const was = nflFlexHidden(slate, id);
+    nflToggleFlexHidden(slate, id);
+    save(); renderAll(); refreshHiddenBadge();
+    const nm = (playerById(slate,id)||{}).name || 'player';
+    showToast(was ? `${nm} is back in FLEX consideration.` : `${nm} hidden from FLEX only — still eligible at ${nflPosOf(playerById(slate,id))||'his position'}.`, 'ok');
+    return;
+  }
   if(typeof isShowdown==='function' && isShowdown(slate) && sdHiddenPoolOf(slate)==='cpt'){
     sdToggleCptHidden(slate,id);
   } else {
@@ -7733,6 +7752,19 @@ function resetAllProj(){
 // ── Position filter (NFL) ────────────────────────────────────────────────────
 // FLEX = everyone but QB (and K/DST), i.e. the RB/WR/TE pool that can fill the
 // flex slot. K only exists on showdown slates (Classic has no kicker slot).
+// ck122: FLEX-ONLY HIDES (NFL classic). `slate.flexHiddenIds` lists players
+// who may still fill their own position slot but never the FLEX — a $3,000 TE
+// projected for 6 is a fine TE but a wasted FLEX. The ✕ on the FLEX tab adds
+// here instead of to hiddenIds; both engines enforce it (kernel `noFlexOk`,
+// legacy `fill` / `swapWithin`), the Sim CSV / DKEntries slotter reads it, and
+// Unhide All clears it.
+function nflFlexHiddenList(slate){ return (slate && Array.isArray(slate.flexHiddenIds)) ? slate.flexHiddenIds : []; }
+function nflFlexHidden(slate, id){ return nflFlexHiddenList(slate).includes(id); }
+function nflToggleFlexHidden(slate, id){
+  slate.flexHiddenIds = nflFlexHiddenList(slate).slice();
+  const k = slate.flexHiddenIds.indexOf(id);
+  if(k >= 0) slate.flexHiddenIds.splice(k, 1); else slate.flexHiddenIds.push(id);
+}
 function nflPosMatch(f, p){
   if(!f || f==='ALL') return true;
   const pos=nflPosOf(p);
@@ -7781,6 +7813,8 @@ function getSortedPlayers(){
     .filter(p=>p.name.toLowerCase().includes(q))
     .filter(p=>!gf || gf.has(nflTeamOf(p)))
     .filter(p=>slate.sport!=='nfl' || nflPosMatch(slate._posFilter, p))
+    // ck122: on the FLEX tab a FLEX-only hide behaves like a hide (Show Hidden reveals him).
+    .filter(p=>!(slate.sport==='nfl' && slate._posFilter==='FLEX' && !showHidden && nflFlexHidden(slate, p.id)))
     .sort((a,b)=>{
       const dir=(typeof sortDir!=="undefined"?sortDir:1);
       if(sortKey==='exp')return dir*((ec[b.id]||0)-(ec[a.id]||0));
@@ -8281,8 +8315,12 @@ function renderPool(){
     // ck84: "hidden" is per pool on showdown, so the row's own hidden state is
     // the state of the list it is currently in. The OTHER pool's state is shown
     // as a badge next to the name instead of silently removing the row.
+    // ck122: on NFL classic's FLEX tab a FLEX-only hide reads as hidden; on the
+    // other tabs it is a badge next to the name (he is still a base-slot option).
+    const _flexTab = !SDm && slate.sport==='nfl' && slate._posFilter==='FLEX';
+    const _flexHid = !SDm && slate.sport==='nfl' && !hidden.includes(p.id) && nflFlexHidden(slate, p.id);
     const isHidden=SDm ? (mode==='cpt' ? cptHidden.includes(p.id) : hidden.includes(p.id))
-                       : hidden.includes(p.id);
+                       : (hidden.includes(p.id) || (_flexTab && _flexHid));
     const _sdHidState=SDm ? sdHiddenState(slate,p.id) : null;
     const isOut=_outSet.has(p.id);
     const isLocked=_lockOn && !isOut && playerLocked(slate,p,_lockNow);
@@ -8498,8 +8536,9 @@ function renderPool(){
         : _sdHidState==='cpt' ? 'Hidden as CPT only — still available for the five FLEX slots'
         : 'Hidden as FLEX only — still available as your captain'}">${
         _sdHidState==='both' ? 'HIDDEN BOTH' : _sdHidState==='cpt' ? 'HIDDEN CPT ONLY' : 'HIDDEN FLEX ONLY'}</span>`;
+    const flexHidBadge = (_flexHid && !_flexTab) ? ` <span class="sd-hid-badge flex" title="Hidden from FLEX only — still eligible at ${nflPosOf(p)||'his position'}. Unhide from the FLEX tab (Show Hidden).">NO FLEX</span>` : '';
     const nameHtml = (isOut ? `<span class="out-name">${nameHtml0}</span> <span class="out-badge" title="Marked OUT — scores 0 and his market share was handed to his teammates">OUT</span>` : nameHtml0 + qBadge)
-      + sdHidBadge
+      + sdHidBadge + flexHidBadge
       + (isLocked ? ` <span class="lock-badge" title="Locked — ${esc(nflKickText(p)||'his game has started')}">🔒</span>` : '');
 
     return `<div class="${rowClass}" style="grid-template-columns:${gt}${isHidden&&!showHidden?';display:none':''}${isGroupEdit?';cursor:pointer':''}" data-pid="${p.id}" onclick="${rowClick}">
@@ -8550,7 +8589,8 @@ function renderPool(){
         // ck84: on showdown the ✕ is scoped to THIS pool. Hiding a man in the
         // Captain list leaves him a flex option and vice versa.
         const _hideTip = isHidden
-          ? (SDm ? `Unhide — put him back in the ${mode==='cpt'?'captain':'flex'} pool` : 'Unhide')
+          ? (SDm ? `Unhide — put him back in the ${mode==='cpt'?'captain':'flex'} pool` : (_flexTab && _flexHid ? 'Put him back in FLEX consideration' : 'Unhide'))
+          : _flexTab ? `Hide from FLEX only — he stays eligible at ${nflPosOf(p)||'his position'}`
           : SDm
             ? (mode==='cpt'
                ? 'Hide as CPT — he stays available for the five FLEX slots'
@@ -10334,7 +10374,8 @@ function nflLateSwapPlan(slate){
     (SD ? (sdCptEligible(slate,p.id) || sdFlexEligible(slate,p.id)) : !hiddenS.has(p.id)));
   const cands = pool.map((p,i) => ({i, id:p.id, pos:nflPosOf(p), sal:p.salary||0, score:0,
     team:String(p.team||'').toUpperCase(), opp:String(p.opp||'').toUpperCase(),
-    cptSal:cptSalaryOf(p), cptOk:SD?sdCptEligible(slate,p.id):true, flexOk:SD?sdFlexEligible(slate,p.id):true}));
+    cptSal:cptSalaryOf(p), cptOk:SD?sdCptEligible(slate,p.id):true, flexOk:SD?sdFlexEligible(slate,p.id):true,
+    noFlex:(!SD && nflFlexHidden(slate, p.id))}));   // ck122
   // STACK RULES ON A SWAP. Late swap used to pass `rules = null`, so a plan
   // could quietly hand back a naked QB on a slate the user had set to QB+2 —
   // the rule bound at generation and then evaporated at 1pm. Resolve the same
@@ -32217,6 +32258,11 @@ function nflOptimalForSim(cands, salaryCap, minSal, rules, fixed){
 
   // Fill one (seed, distribution) pair from `lists` (pre-sorted by the
   // criterion you want). Returns {pick, used, sal} or null.
+  // ck122: FLEX-only hides. A candidate with `c.noFlex` may fill a base slot at
+  // his position but never the FLEX, so per position at most NOFLEX_BASE such
+  // players may be rostered (the FLEX is then always someone allowed to flex).
+  const NOFLEX_BASE = { RB:2, WR:3, TE:1 };
+  const noFlexCount = (pick, pos, skip) => { let n = 0; for(const x of pick){ if(x !== skip && x.noFlex && x.pos === pos) n++; } return n; };
   const fill = (seed, dist, lists, ban) => {
     const need = { QB:1, RB:dist.RB, WR:dist.WR, TE:dist.TE, DST:1 };
     const pick = [], used = new Set();
@@ -32224,16 +32270,19 @@ function nflOptimalForSim(cands, salaryCap, minSal, rules, fixed){
     for(const c of seed){
       if(used.has(c.i)) return null;
       if(!(need[c.pos] > 0)) return null;   // seed doesn't fit this distribution
+      if(c.noFlex && noFlexCount(pick, c.pos, null) >= (NOFLEX_BASE[c.pos] || 0)) return null;
       need[c.pos]--; pick.push(c); used.add(c.i); sal += c.sal;
     }
     // DST last so the no-RB-vs-own-DST rule can see the rostered RBs.
     for(const pos of ['QB','RB','WR','TE','DST']){
       let n = need[pos];
       if(n<=0) continue;
+      let nf = noFlexCount(pick, pos, null);
       for(const c of lists[pos]){
         if(n<=0) break;
         if(used.has(c.i)) continue;
         if(ban && ban.has(c.i)) continue;   // a constrained QB is off-limits here
+        if(c.noFlex){ if(nf >= (NOFLEX_BASE[pos] || 0)) continue; nf++; }
         if(pos==='DST' && R.noRbVsDst){
           const dOpp = OP(c);
           if(dOpp && pick.some(x=>x.pos==='RB' && TM(x)===dOpp)) continue;
@@ -32266,6 +32315,7 @@ function nflOptimalForSim(cands, salaryCap, minSal, rules, fixed){
         for(const c of byScore[out.pos]){
           if(st.used.has(c.i)) continue;
           if(st.ban && st.ban.has(c.i)) continue;   // never upgrade INTO a constrained QB
+          if(c.noFlex && !out.noFlex && noFlexCount(st.pick, out.pos, out) >= (NOFLEX_BASE[out.pos] || 0)) continue;   // ck122
           if(R.noRbVsDst){
             // Guard BOTH directions: swapping a DST in must not collide with a
             // rostered RB, and swapping an RB in must not collide with the
@@ -33907,7 +33957,21 @@ function gppKernelFactory(){
     // 0 and who in slots 1..5 (a man hidden as a captain is still a flex, and
     // vice versa). `teamsOk` covers all of it for a whole lineup.
     const cptOk = P.cptOk || null, flexOk = P.flexOk || null;
+    // ck122: FLEX-only hides (NFL classic). `P.noFlex[i]` = 1 when the user
+    // hid player i from the FLEX tab only: he may fill a base RB/WR/TE slot but
+    // never the FLEX. A lineup is legal when, per position, the number of such
+    // players does not exceed the base slots (RB 2 / WR 3 / TE 1) — i.e. the
+    // FLEX is always taken by someone who is allowed to take it.
+    const noFlex = (SHAPE === 'nfl' && P.noFlex && P.noFlex.length === nP) ? P.noFlex : null;
+    const noFlexOn = !!noFlex && (function(){ for(let i = 0; i < nP; i++) if(noFlex[i]) return true; return false; })();
+    const NOFLEX_BASE = [0, 2, 3, 1, 0, 0];
+    const noFlexOk = function(ids){
+      let r = 0, w = 0, t = 0;
+      for(let j = 0; j < ids.length; j++){ const i = ids[j]; if(!noFlex[i]) continue; const pc = pos[i]; if(pc === 1) r++; else if(pc === 2) w++; else if(pc === 3) t++; }
+      return r <= NOFLEX_BASE[1] && w <= NOFLEX_BASE[2] && t <= NOFLEX_BASE[3];
+    };
     const teamsOk = function(ids){
+      if(noFlexOn && !noFlexOk(ids)) return false;
       if(SHAPE !== 'sd') return true;
       if(cptOk && !cptOk[ids[0]]) return false;
       if(flexOk){ for(let j = 1; j < ids.length; j++) if(!flexOk[ids[j]]) return false; }
@@ -34465,7 +34529,7 @@ function gppKernelFactory(){
               if(inSet.has(b)) continue;
               if(sal[b] * sm > room || sal[b] * sm < low) continue;
               if(exclOn){ const x = exclOf[b]; if(x >= 0 && x !== a && inSet.has(x)) continue; }
-              if(groupsOn || SHAPE === 'sd'){ for(let z = 0; z < RSIZE; z++) tmpIds[z] = (z === sIdx) ? b : cur[z];
+              if(groupsOn || noFlexOn || SHAPE === 'sd'){ for(let z = 0; z < RSIZE; z++) tmpIds[z] = (z === sIdx) ? b : cur[z];
                 if(groupsOn && !groupsOk(tmpIds)) continue; if(!teamsOk(tmpIds)) continue; }
               // Duplication moves with the swap: his ownership ratio AND the
               // ratio of his measured pair lifts against the eight players that
@@ -34810,7 +34874,7 @@ function gppKernelFactory(){
     if(stackOn){
       for(const [k, o] of optima){ if(!stackOkIdx(o.ids)){ optima.delete(k); stackMenuDrop++; } }
     }
-    if(groupsOn || exclOn || SHAPE === 'sd'){
+    if(groupsOn || exclOn || noFlexOn || SHAPE === 'sd'){
       for(const [k, o] of optima){
         let bad = (groupsOn && !groupsOk(o.ids)) || !teamsOk(o.ids);
         if(!bad && exclOn){ for(const i of o.ids){ const x = exclOf[i]; if(x >= 0 && o.ids.indexOf(x) >= 0){ bad = true; break; } } }
@@ -35760,6 +35824,13 @@ async function runNflGppEngine(ctx){
     fieldPool.forEach((p, i) => { if(!sel[i]) return;
       cptOkMask[i] = sdCptEligible(slate, p.id) ? 1 : 0; flexOkMask[i] = sdFlexEligible(slate, p.id) ? 1 : 0; });
   }
+  // ck122: FLEX-only hides (NFL classic) as a mask the kernel's teamsOk reads.
+  let noFlexMask = null;
+  if(!SD && slate.sport === 'nfl' && typeof nflFlexHiddenList === 'function' && nflFlexHiddenList(slate).length){
+    const fh = new Set(nflFlexHiddenList(slate));
+    noFlexMask = new Uint8Array(nP);
+    fieldPool.forEach((p, i) => { if(sel[i] && fh.has(p.id) && pos[i] >= 1 && pos[i] <= 3) noFlexMask[i] = 1; });
+  }
   // ck114: NO-OPPOSE pairs (UFC): the two sides of a fight may not share one of
   // OUR lineups when the global rule or a group's rule says so. Flat pairs.
   const exclPairs = [];
@@ -35871,7 +35942,7 @@ async function runNflGppEngine(ctx){
     NFg: NFs, NFp: NFp, K, F, fee, dupK: SD ? SD_DUP_K : evDupK(slate.sport || 'nfl'),
     // ck114: roster shape.
     R, shape: SHAPE, capMul: (typeof CPT_MULT === 'number') ? CPT_MULT : 1.5,
-    cptOk: cptOkMask, flexOk: flexOkMask,
+    cptOk: cptOkMask, flexOk: flexOkMask, noFlex: noFlexMask,
     excl: Int32Array.from(exclPairs),
     groups: groupRules.map(g => ({mask:g.mask, min:g.min, max:g.max, conds:g.conds})),
     ownG: Float32Array.from(scen.flatMap(v => Array.from(v))),
@@ -37138,7 +37209,7 @@ async function runNflSimGenInner(){
   // `id` rides along so nflOptimalForSim can look a QB up in the per-QB stack
   // overrides (and match an explicit partner list) without a pool round-trip.
   const cands=pool.map((p,i)=>({i, id:p.id, pos:nflPosOf(p), sal:p.salary||0, score:0,
-    team:p.team||'', opp:p.opp||''}));
+    team:p.team||'', opp:p.opp||'', noFlex:(!SD && nflFlexHidden(slate, p.id))}));   // ck122
   const rankedMap=new Map();
   // Showdown: the same six with a different captain is a DIFFERENT lineup
   // (different salary, different score) — key on the captain too, and stamp
