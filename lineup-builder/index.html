@@ -6654,7 +6654,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck116/2026-09-18';
+const BUILD_ID = '2.0/ck118/2026-09-19';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -11059,18 +11059,19 @@ function exportSimCSV(){
         + '; calibrated EV is the bankroll-planning figure, model EV is unvalidated at rank 1');
       lines.push(['Lineup','Build','HeldOutEV$','EV%ofFee','CalibratedEV$','CalEV%ofFee','Rank1Share',
                   'Win%','Top1%','Top10%','Cash%','ExpDupes','Salary',
-                  ...SPORT_CFG.nfl.slots].join(','));
+                  ...((slate.sport === 'nfl' && !isShowdown(slate)) ? SPORT_CFG.nfl.slots
+                      : Array.from({length: rosterSize(slate)}, (_, k) => (isShowdown(slate) && k === 0) ? 'CPT' : ('P' + (k + 1))))].join(','));
       const feeG = parseFloat((slate._ufcEv||{}).fee)||1;   // ck71: fee is optional; 1 means "one entry"
       g.lineups.forEach((L,i)=>{
         const ps = L.ids.map(id=>playerById(slate,id)).filter(Boolean);
-        const slotted = (typeof nflAssignSlots==='function') ? nflAssignSlots(slate, L.ids) : null;
+        const slotted = (slate.sport === 'nfl' && !isShowdown(slate) && typeof nflAssignSlots==='function') ? nflAssignSlots(slate, L.ids) : null;
         const names = slotted ? slotted.map(x=>(playerById(slate,x)||{}).name||'') : ps.map(p=>p.name);
         const salT = ps.reduce((t,p)=>t+(p.salary||0),0);
         const cEV = (L.calEV != null) ? L.calEV : L.heldEV;
         lines.push([i+1, L.shape||'', L.heldEV.toFixed(2), (100*L.heldEV/Math.max(0.01,feeG)).toFixed(1),
                     cEV.toFixed(2), (100*cEV/Math.max(0.01,feeG)).toFixed(1),
                     L.rank1Share != null ? (100*L.rank1Share).toFixed(1) : '',
-                    (100*L.win).toFixed(4), L.top1 != null ? (100*L.top1).toFixed(3) : '',
+                    (100*L.win) >= 0.001 ? (100*L.win).toFixed(4) : (100*L.win).toPrecision(2), L.top1 != null ? (100*L.top1).toFixed(3) : '',
                     L.top10 != null ? (100*L.top10).toFixed(2) : '',
                     (100*L.cash).toFixed(2), L.dups.toFixed(1), salT,
                     ...names].map(esc).join(','));
@@ -17271,6 +17272,22 @@ function gppTailSurv(xM, alpha, k, t, aExp, M){
 // `arr`/`sampleN` pair. The fit reads only the sorted sample, never the lineup,
 // so a caller pricing many lineups against one field computes it once per world
 // and hands it in. Omitted, the behaviour is bit-for-bit what it always was.
+// ── THE HEAD IS INVISIBLE TO THE OBJECTIVE (checkpoint 118, recorded, NOT fixed)
+// obs entries seen above us are counted exactly (ck78) and P(first) = 0 the
+// moment obs ≥ 1. Measured on UFC 331 (F = 58,824, N = 20,000, 750 worlds):
+// every one of the 1,400 menu candidates priced P(first) = 0 and the rank-1
+// and 2–10 bands were $0 for all of them — 37% of the pool invisible to the
+// objective, which then maximizes the cash bands, where consistency beats
+// leverage. Two repairs were tried and measured against the REAL fields
+// (test_ck92_head): (a) pricing all F entries from the fitted tail (obs = 0,
+// mean F·S(t)) made the head visible (a 100-copy pivot priced 24× fair at
+// first) but over-counted beaters 2.6× at the true rank-10 score on SF@LAR
+// and broke the NF = F literal-payout identity; (b) keeping the mean and
+// adding the sampled count's Poisson variance (finite-population corrected)
+// left the head at zero and over-paid rank 10 by 1.86×. The estimator is
+// therefore left as ck92 validated it. What the objective needs is a head
+// estimator validated on those real fields — the harness exists; see
+// AGENT_NOTES ck118.
 function beatersEstimate(beating, tied, sampleN, arr, t, F, refine, ftPre){
   const obs = beating + tied/2;
   let pHat = -1, nEff = 0;
@@ -17633,6 +17650,30 @@ function evNormInv(p){
 // an average over a block whose width is itself a posterior, and the change moves
 // EV UP on exactly the boards where the record already has the model at
 // 0.95–1.28x of realized gross. Recorded in AGENT_NOTES ck97 §3, not fixed here.
+// ── TIE-BLOCK SETTLEMENT (checkpoint 118) ───────────────────────────────────
+// DK pays a block of d+1 identical entries the AVERAGE of the prizes for the
+// places the block occupies (ck115 settles the results record this way). The
+// ladder read at the block's MIDPOINT (1 + d/2, the ck88–ck117 convention) is
+// that average only where the ladder is linear — at the head it is convex, and
+// ck97 measured the gap at 1.83× on a block of three. On UFC 331 every board
+// lineup carried 100–330 expected duplicates and the rank-1 band read $0 for
+// all of them: a unique-ish build (18 copies) at first place was paid the
+// rank-10 prize ($25) where its block averages ~$300, chalk (330 copies) the
+// rank-166 prize ($6.5) where its block averages ~$25. Both under-paid, the
+// unique build 12× and chalk 4× — so the head stopped distinguishing them, the
+// objective collapsed onto the cash bands, and chalk won every comparison.
+// `evTiePayoutOf(pay)` returns tie(r, d) = mean of pay over ranks r..r+d, from
+// a cumulative ladder built once per payout function (cached on it).
+function evTiePayoutOf(payFn){
+  if(payFn.__tie) return payFn.__tie;
+  let R = 0; while(R < 400000 && payFn(R + 1) > 0) R++;
+  const C = new Float64Array(R + 2);
+  for(let k = 1; k <= R; k++) C[k] = C[k-1] + payFn(k);
+  const cum = function(x){ if(!(x > 0)) return 0; if(x >= R) return C[R]; const i = Math.floor(x); return C[i] + (x - i) * payFn(i + 1); };
+  const tie = function(r, d){ if(!(d > 0.5)) return payFn(r); return (cum(r + d) - cum(r - 1)) / (d + 1); };
+  payFn.__tie = tie;
+  return tie;
+}
 const EV_HEAD_K = 10;          // places 1..10 are priced exactly
 function evHeadBands(shape, scale, dOff, payFn, F, bands, probs, obs){
   const add = (b, amt, pr) => { if(bands) bands[b] += amt; if(probs) probs[b] += pr; };
@@ -18124,7 +18165,7 @@ function evScreenBoard(slate, rows, target, log, opts){
     const nE=dropped.filter(d=>d.why==='edge').length, n1=dropped.filter(d=>d.why==='ex1').length, nS=dropped.filter(d=>d.why==='surplus').length, nC=dropped.filter(d=>d.why==='cap').length;
     const fmt=v=>(v==null?'—':v.toFixed(2)+'×');
     log(`Edge screen (ck111): ${rows.length} built for ${target} wanted — kept ${keep.length}; dropped ${nE} under ${cfg.floor.toFixed(2)}× edge, ${n1} under ${cfg.ex1Floor.toFixed(2)}× with the rank-1 band removed${nC?`, ${nC} that would have broken an exposure cap on the kept board`:''}, ${nS} surplus beyond the target.`
-      + (short ? ` ⚠ BOARD IS ${short} SHORT — the search did not produce ${target} lineups that clear the screen; it ships ${keep.length}, not ${short} padded with lineups that failed.` : '')
+      + (short ? ` ⚠ BOARD IS ${short} SHORT — the search did not produce ${target} lineups that clear the screen; it ships ${keep.length}, not ${short} padded with lineups that failed.${(caps && dropped.some(d=>d.why==='cap')) ? ` Caps are slots of the ${target} wanted, so on the shorter board a capped player's share reads above the cap.` : ''}` : '')
       + (dropped.some(d=>d.edge!=null && d.why!=='surplus' && d.why!=='cap' && d.why!=='floor-swap') ? ` Weakest dropped: ${dropped.filter(d=>d.edge!=null && d.why!=='surplus' && d.why!=='cap' && d.why!=='floor-swap').sort((a,b)=>a.edge-b.edge).slice(0,3).map(d=>`#${d.i+1} ${fmt(d.edge)} (${fmt(d.edgeEx1)} ex-first)`).join(', ')}.` : ''));
   }
   return {keep, dropped, cfg, short, screened:true};
@@ -32853,6 +32894,11 @@ const NFL_GPP_DUP_MAXFRAC = 0.005;
 // comfortably; a flat $1,000 against a 150 x $25 board would pin the objective
 // against its own floor. The placeholder now shows that number.
 const NFL_GPP_B_STAKE_MULT = 20;
+// ck117: on a head-to-head sport a fighter's exposure is held to this multiple
+// of his de-vigged win probability (never below UFC_EXPO_FLOOR %). See
+// runNflGppBoard.
+const UFC_EXPO_WIN_MULT = 1.5;
+const UFC_EXPO_FLOOR = 10;
 function nflGppFallbackB(slate){
   const ev = (slate && slate._ufcEv) || {};
   const fee = Math.max(0.01, parseFloat(ev.fee) || 1);
@@ -33203,8 +33249,11 @@ function gppKernelFactory(){
   // the lineup's duplicates around it in the standings (offset dups/2, which is
   // what a DK tie pays); 'divide' splits one rank's prize among them, §2's
   // literal wording. Set once per run from the payload.
-  let dupOff = 0.5, dupDiv = 0;
-  function setDupMode(m){ if(m === 'divide'){ dupOff = 0; dupDiv = 1; } else { dupOff = 0.5; dupDiv = 0; } }
+  // ck118: 'rank' now settles the tie BLOCK (evTiePayoutOf): the ladder is
+  // averaged over the d+1 places the copies occupy, so `dupOff` is 0 and the
+  // block width travels in BLK_D, read by the payout wrappers built in run().
+  let dupOff = 0, dupDiv = 0, BLK_D = 0;
+  function setDupMode(m){ if(m === 'divide'){ dupOff = 0; dupDiv = 1; } else { dupOff = 0; dupDiv = 0; } }
 
   // mulberry32 — the engine's only randomness, so a seeded run reproduces.
   function rngOf(seed){
@@ -33625,6 +33674,7 @@ function gppKernelFactory(){
       rankPostFast(tot[w], views[w], NF, F, w, ws);
       const d = dups[w % K];
       const off = 1 + dupOff*d, dv = 1 + dupDiv*d;
+      BLK_D = dupDiv ? 0 : d;
       const p = payAt(RP_shape, RP_scale, off, payFn, RP_obs) / dv;
       sum += p;
       if(stats){
@@ -33669,6 +33719,7 @@ function gppKernelFactory(){
       if(t < thr[w]) continue;
       rankPostFast(t, views[w], NF, F, w, ws);
       const d = dups[w % K];
+      BLK_D = dupDiv ? 0 : d;
       sum += payAt(RP_shape, RP_scale, 1 + dupOff*d, payFn, RP_obs) / (1 + dupDiv*d);
     }
     return sum / n;
@@ -33683,6 +33734,7 @@ function gppKernelFactory(){
       if(t < thr[w]) continue;
       rankPostFast(t, views[w], NF, F, w, ws);
       const d = dups[w % K];
+      BLK_D = dupDiv ? 0 : d;
       sum += payAt(RP_shape, RP_scale, 1 + dupOff*d, payFn, RP_obs) / (1 + dupDiv*d);
     }
     return sum / n;
@@ -33740,7 +33792,12 @@ function gppKernelFactory(){
       return false;
     };
     const cap = P.maxSal, floor = P.minSal;
-    const payFn = payFnOf(P.payTable);
+    const payRaw = payFnOf(P.payTable);
+    // ck118: the tie-block wrapper — pay(r) becomes the mean of the ladder over
+    // ranks r..r+BLK_D. Every scoring site sets BLK_D to the lineup's expected
+    // duplicates in that world before it prices; 'divide' mode leaves BLK_D 0.
+    const _tieRaw = evTiePayoutOf(payRaw);
+    const payFn = function(r){ return _tieRaw(r, BLK_D); };
     // ck111: the SEARCH and SELECTION folds score on the CALIBRATED ladder —
     // the raw payout with the record's shrink folded into the rank-1 and
     // top-1% bands (`P.calShrink`, see evCalPayoutFn on the page). The REPORT
@@ -33752,13 +33809,17 @@ function gppKernelFactory(){
       const s1 = cs.s1 != null ? cs.s1 : 1, s23 = cs.s23 != null ? cs.s23 : 1;
       const s2 = cs.capTop10 ? Math.min(s1, s23) : s23;
       const onePct = Math.max(10.5, Math.ceil(0.01 * Math.max(1, P.F)) + 0.5);
-      return function(r){
-        const v = payFn(r);
+      // The calibrated RAW ladder, then its own tie-block average (ck118): the
+      // block spans bands, so the average is taken over calibrated prizes.
+      const calRaw = function(r){
+        const v = payRaw(r);
         if(!(v > 0)) return v;
         if(!(r >= 1.5)) return v * s1;
         if(r < 10.5) return v * s2;
         return r < onePct ? v * s23 : v;
       };
+      const _tieCal = evTiePayoutOf(calRaw);
+      return function(r){ return _tieCal(r, BLK_D); };
     })();
     // ── THREE FOLDS, NOT TWO (2026-09-09) ─────────────────────────────────
     // The greedy used to SELECT on the held-out worlds and the card then
@@ -33813,6 +33874,12 @@ function gppKernelFactory(){
       const st = gen.W / n;
       for(let k = 0; k < n; k++) sw.push(Math.floor(k * st)); }
     const searchW = Int32Array.from(sw);
+    // ck118: a with-replacement resample of a world index list (seeded).
+    const bootstrapW = function(src){
+      const n = src.length, out = new Int32Array(n);
+      for(let k = 0; k < n; k++) out[k] = src[Math.floor(rand() * n)];
+      return out;
+    };
 
     // Per-player generation mean — used ONLY to build seeds and to shortlist
     // swap candidates. It never enters the objective.
@@ -34227,11 +34294,19 @@ function gppKernelFactory(){
       }
       if((si & 15) === 0 && cancelled()) return {cancelled:true};
       climbedSeeds++;
+      // ck118: each seed climbs on a BOOTSTRAP resample of the search worlds
+      // (with replacement, same length). Two pivots whose EV differs by less
+      // than the worlds' sampling error used to resolve the same way on every
+      // seed — the point estimate — so only one of them ever reached the
+      // menu. Under resampling each seed sees a plausible alternative world
+      // weighting and near-ties split their optima between the pivots. The
+      // optimum is still scored on every search world (`searchGross` below).
+      const seedW = P.robust === false ? searchW : bootstrapW(searchW);
       let cur = seeds[si].ids.slice();
       let spent = 0; for(let j = 0; j < cur.length; j++) spent += sal[cur[j]] * slotMul(j);
       let dups = dupsOf(dm, cur);
       totalsInto(gen, cur, tot);
-      let curEV = grossEV(gen, tot, dups, searchW, null);
+      let curEV = grossEV(gen, tot, dups, seedW, null);
       for(let iter = 0; iter < bud.maxIters; iter++){
         let bestEV = curEV, bestMove = null;
         const inSet = new Set(cur);
@@ -34295,7 +34370,7 @@ function gppKernelFactory(){
                 }
               }
               evalCount++;
-              const e = grossEVSwap(gen, tot, a*gen.W, b*gen.W, nd1, searchW, sm);
+              const e = grossEVSwap(gen, tot, a*gen.W, b*gen.W, nd1, seedW, sm);
               if(!feas){
                 stackRejects++;
                 if(e > bestEV + 1e-12 && (!bestBad || e > bestBad.ev)) bestBad = {ev:e, sIdx:sIdx, a:a, b:b};
@@ -34318,7 +34393,7 @@ function gppKernelFactory(){
             const ns = spent + (sal[b] - sal[c0]) * d;
             if(ns > cap || ns < floor) continue;
             evalCount++;
-            const e = grossEVSwap(gen, tot, c0*gen.W, b*gen.W, dups, searchW, d);
+            const e = grossEVSwap(gen, tot, c0*gen.W, b*gen.W, dups, seedW, d);
             if(e > bestEV + 1e-12){ bestEV = e; bestMove = {kind:3, k:k}; }
           }
         }
@@ -34367,7 +34442,7 @@ function gppKernelFactory(){
                   nd1[kk] = dups[kk] * dupSwapRatio(dm, kk, cur, a, b)
                                      * dupSwapRatio(dm, kk, mid, c1, p2);
                 evalCount++;
-                const e2 = grossEVSwap2(gen, tot, a*gen.W, c1*gen.W, b*gen.W, p2*gen.W, nd1, searchW);
+                const e2 = grossEVSwap2(gen, tot, a*gen.W, c1*gen.W, b*gen.W, p2*gen.W, nd1, seedW);
                 if(e2 > bestEV + 1e-12){
                   bestEV = e2;
                   bestMove = {kind:2, sIdx:cSlot, qbSlot:aSlot, qb2:b, b:p2, repaired:true};
@@ -34427,7 +34502,7 @@ function gppKernelFactory(){
                                        * dupSwapRatio(dm, kk, mid, a2, i);
                   }
                   evalCount++;
-                  const e = grossEVSwap2(gen, tot, qa*gen.W, a2*gen.W, qb2*gen.W, i*gen.W, nd1, searchW);
+                  const e = grossEVSwap2(gen, tot, qa*gen.W, a2*gen.W, qb2*gen.W, i*gen.W, nd1, seedW);
                   if(e > bestEV + 1e-12){ bestEV = e; bestMove = {kind:2, sIdx:sIdx, qbSlot:qbSlot, qb2:qb2, b:i}; }
                 }
               }
@@ -34449,7 +34524,7 @@ function gppKernelFactory(){
         }
         dups = dupsOf(dm, cur);
         totalsInto(gen, cur, tot);
-        curEV = grossEV(gen, tot, dups, searchW, null);
+        curEV = grossEV(gen, tot, dups, seedW, null);
         climbed++;
       }
       const k = keyOf(cur);
@@ -34710,6 +34785,7 @@ function gppKernelFactory(){
             if(sc0 < t0q){ memStep[q*memN+k] = 0; continue; }
             const dq = mDup[m*W+q];
             const sh = mShape[m*W+q], sc = mScale[m*W+q], dv = 1 + dupDiv*dq, dof = dupOff*dq;
+            BLK_D = dupDiv ? 0 : dq;
             const now = payAt(sh, sc, 1+k+dof, ws.payFn) / dv;
             memStep[q*memN+k] = payAt(sh, sc, 2+k+dof, ws.payFn) / dv - now;
             s2 += now;
@@ -34723,22 +34799,39 @@ function gppKernelFactory(){
       // log(B + cur − stake) per world, cached once per greedy step.
       const logCur = new Float64Array(W);
       let baseSum = 0, curSum = 0;
+      // ck118: per-step world WEIGHTS (Bayesian bootstrap: Exp(1) draws,
+      // normalized to mean 1). The greedy maximized growth on the point
+      // estimate, so two candidates whose EV differed by less than the
+      // worlds' sampling error resolved the same way at every step and the
+      // board filled with one of them. Each step now maximizes under a
+      // plausible re-weighting of the worlds — a candidate's share of the
+      // board tracks how often it is actually best (Thompson sampling), and
+      // near-ties split. Weights of exactly 1 reproduce the old greedy.
+      const wgt = new Float64Array(W).fill(1);
+      const reweight = function(){
+        if(!robust){ wgt.fill(1); return; }
+        let s = 0;
+        for(let q = 0; q < W; q++){ const u = Math.max(1e-12, rand()); wgt[q] = -Math.log(u); s += wgt[q]; }
+        const k = W / Math.max(1e-12, s);
+        for(let q = 0; q < W; q++) wgt[q] *= k;
+      };
       const prepare = function(n){
         const stake = n * fee;
+        reweight();
         baseSum = 0; curSum = 0;
         for(let q = 0; q < W; q++){
           const v = B + cur[q] - stake;
           logCur[q] = Math.log(v > 1e-9 ? v : 1e-9);
-          baseSum += logCur[q]; curSum += cur[q];
+          baseSum += wgt[q] * logCur[q]; curSum += wgt[q] * cur[q];
         }
         return stake;
       };
-      // G if candidate m were added as the n-th lineup.
+      // G if candidate m were added as the n-th lineup (under this step's weights).
       const growthWith = function(m, n, stake){
         const lv = live[m];
         if(linear){
           let add = 0;
-          for(let z = 0; z < lv.length; z++) add += deltaAt(m, lv[z]);
+          for(let z = 0; z < lv.length; z++){ const q = lv[z]; add += wgt[q] * deltaAt(m, q); }
           return (curSum + add)/W - stake;
         }
         let g = baseSum;
@@ -34746,7 +34839,7 @@ function gppKernelFactory(){
           const q = lv[z], dlt = deltaAt(m, q);
           if(dlt === 0) continue;
           const v = B + cur[q] + dlt - stake;
-          g += Math.log(v > 1e-9 ? v : 1e-9) - logCur[q];
+          g += wgt[q] * (Math.log(v > 1e-9 ? v : 1e-9) - logCur[q]);
         }
         return g / W;
       };
@@ -34757,14 +34850,15 @@ function gppKernelFactory(){
         let lo = 0, h = memN;
         while(lo < h){ const mid = (lo + h) >> 1; if(memScore[q*memN+mid] > t) lo = mid + 1; else h = mid; }
         const dq = mDup[m*W+q];
+        BLK_D = dupDiv ? 0 : dq;
         return payAt(mShape[m*W+q], mScale[m*W+q], 1+lo+dupOff*dq, ws.payFn) / (1 + dupDiv*dq)
              + memSuf[q*(memN+1)+lo];
       };
       const growthNow = function(n){
         const stake = n * fee;
-        if(linear){ let s2 = 0; for(let q = 0; q < W; q++) s2 += cur[q]; return s2/W - stake; }
+        if(linear){ let s2 = 0; for(let q = 0; q < W; q++) s2 += wgt[q] * cur[q]; return s2/W - stake; }
         let g = 0;
-        for(let q = 0; q < W; q++){ const v = B + cur[q] - stake; g += Math.log(v > 1e-9 ? v : 1e-9); }
+        for(let q = 0; q < W; q++){ const v = B + cur[q] - stake; g += wgt[q] * Math.log(v > 1e-9 ? v : 1e-9); }
         return g/W;
       };
       const add = function(m){ chosen.push(m); rebuild(); };
@@ -34791,6 +34885,7 @@ function gppKernelFactory(){
             if(sc0 < thr[q]) continue;              // dead world: 0 at every offset
             const dq = mDup[m*W+q], dv = 1 + dupDiv*dq;
             const sh = mShape[m*W+q], sc = mScale[m*W+q], off = 1 + k + dupOff*dq;
+            BLK_D = dupDiv ? 0 : dq;
             b4[0] = b4[1] = b4[2] = b4[3] = 0;
             const tot0 = evBandSplit(sh, sc, off, payFn, F, b4);
             bands[0] += b4[0]/dv; bands[1] += b4[1]/dv; bands[2] += b4[2]/dv; bands[3] += b4[3]/dv;
@@ -34829,6 +34924,7 @@ function gppKernelFactory(){
     const M = menu.length;
     const N = Math.min(P.N, M);
     const B = P.B, fee = P.fee, linear = !!P.linear;
+    const robust = P.robust !== false;   // ck118: bootstrap-weighted greedy steps
     const menuStackN = new Int8Array(M);
     for(let m = 0; m < M; m++) menuStackN[m] = stackNOf(menu[m].ids);
     say({phase:'portfolio', n:0, of:N});
@@ -35025,7 +35121,7 @@ function gppWorkerSource(){
           // toString() exactly as the tail estimator is.
           'const EV_WH_P=' + JSON.stringify(EV_WH_P) + ', EV_HEAD_K=' + EV_HEAD_K + ';',
           evNormInv.toString(), 'const EV_ZERO_PAY=' + EV_ZERO_PAY.toString() + ';',
-          evBandOf.toString(), evHeadBands.toString(), evBandSplit.toString(),
+          evTiePayoutOf.toString(), evBandOf.toString(), evHeadBands.toString(), evBandSplit.toString(),
           evNormCdf.toString(), evRankAtMost.toString(),
           gppKernelFactory.toString(), '(' + gppWorkerGlue.toString() + ')();'].join('\n');
 }
@@ -35559,6 +35655,8 @@ async function runNflGppEngine(ctx){
     // ck111: the record's shrink on the rank-1 / top-1% bands — the search and
     // selection folds maximize the CALIBRATED gross (see payFnCal in the kernel).
     calShrink: {s1: _calFx.s1, s23: _calFx.s23, capTop10: !!evCalCap(slate.sport || 'nfl').capTop10, on: _calFx.on},
+    // ck118: bootstrap-resampled search seeds + Bayesian-bootstrap greedy steps (slate._gppRobust === false turns both off).
+    robust: slate._gppRobust !== false,
     maxSal, minSal, N: target, B, capSlots,
     // ck74: the partner definition the LABEL uses, so the kernel's naked-pick
     // explanation and `nflStackShape` cannot disagree about what "naked" means.
@@ -35938,15 +36036,46 @@ async function runNflGppBoard(ctx){
   // so a cap of X% of the WANTED board is exactly the same number of slots on
   // the longer one; the search budget is the one the wanted count earns.
   const _want = ctx.target, _long = evOvergen(ctx.slate, _want, 'gpp');
-  const _ovr = {}; Object.keys(ctx.overrides||{}).forEach(id => { const v = ctx.overrides[id]; if(v != null) _ovr[id] = v * _want/_long; });
-  const r = await runNflGppEngine(_long === _want ? ctx : Object.assign({}, ctx, {
-    target: _long, maxExpPct: ctx.maxExpPct * _want/_long, overrides: _ovr,
+  const log = ctx.log || function(){};
+  // ck117: the exposure ceiling the SHIPPED board is held to. Max Exp is the
+  // user's number and applies to everyone. On a head-to-head sport (UFC) each
+  // fighter ALSO carries a market-tied ceiling: exposure may not exceed
+  // UFC_EXPO_WIN_MULT × his de-vigged win probability. A −1227 favourite can
+  // fill the board; a +179 dog (36%) stops at 54%. The kernel's per-lineup EV
+  // is nearly flat across the cheap fillers on a 24-fighter card, so with no
+  // such rule the greedy stacked the one it liked best into 94% of the board
+  // (UFC 331: Aswell) — a bet on a 36% outcome with 47 of 50 entries. The
+  // rule is a rule, not the model: it is logged, and Max Exp below it wins.
+  const _userCap = Math.max(1, Math.min(100, parseInt(ctx.maxExpPct) || 100));
+  const _capPct = _userCap;
+  const _mktCap = {};
+  if(ctx.slate.sport === 'ufc'){
+    const pl = ctx.slate.players || [];
+    const named = [];
+    for(const p of pl){
+      const q = pl.find(x => x !== p && typeof ufcSameFight === 'function' && ufcSameFight(p, x));
+      const w = vigRemovedWinProb(parseFloat(p.ml), q ? parseFloat(q.ml) : null);
+      if(w == null) continue;
+      const c = Math.max(UFC_EXPO_FLOOR, Math.min(100, Math.round(100 * w * ((typeof window !== 'undefined' && window.__ufcExpoMult > 0) ? window.__ufcExpoMult : UFC_EXPO_WIN_MULT))));
+      if(c < _capPct){ _mktCap[p.id] = c; named.push(`${surnameOf(p.name)} ${c}% (${Math.round(100*w)}% to win)`); }
+    }
+    if(named.length) log(`Exposure ceilings (ck117, UFC): a fighter's share of the board is held to ${UFC_EXPO_WIN_MULT}× his market win probability — ${named.slice(0, 8).join(', ')}${named.length > 8 ? `, +${named.length - 8} more` : ''}. Favourites above ${Math.round(100/UFC_EXPO_WIN_MULT)}% to win are uncapped; a lower Max Exp or a per-fighter Max% still wins.`);
+  }
+  const _ovrIn = ctx.overrides || {};
+  const _effOverrides = Object.assign({}, _ovrIn);
+  Object.keys(_mktCap).forEach(id => { const u = _ovrIn[id]; _effOverrides[id] = (u != null) ? Math.min(u, _mktCap[id]) : _mktCap[id]; });
+  // ck117: the long build carries the SAME percentage on its own length (more
+  // slots, so the greedy can reach the long count); the exact wanted-board
+  // caps are enforced by the screen on what ships. ck111 scaled the caps down
+  // to wanted-board slots on the long build instead, and the screen then
+  // dropped lineups without re-checking — a 40% cap shipped Pantoja at 83%.
+  const r = await runNflGppEngine(Object.assign({}, ctx, {
+    target: _long, maxExpPct: _capPct, overrides: _effOverrides,
     budget: Object.assign({budgetMs: nflGppSearchMs(ctx.slate, _want)}, ctx.budget || {}),
   }));
   if(!r) return null;
   const {slate, pool, simScoresById, target} = ctx;
   const simsDone = (ctx.simsDone != null) ? ctx.simsDone : ctx.totalSims;
-  const log = ctx.log || function(){};
   const fieldPool = ctx.fieldPool && ctx.fieldPool.length ? ctx.fieldPool : pool;
   const fee = r.fee, d = r.res.diag;
   // ck114: shape-aware labels — stack shapes are an NFL notion.
@@ -36023,8 +36152,12 @@ async function runNflGppBoard(ctx){
       // ck114: Min% pins on the kept board, same as the legacy path (ck113).
       const _mo = slate.playerMinOverrides || {};
       const _minIds = Object.keys(_mo).filter(id => (_mo[id]||0) > 0);
+      // ck117: exposure caps hold on the KEPT board — override or the ceiling, in wanted-board slots.
+      const _ovrC = _effOverrides;
+      const _capSlots = id => { const pct = (_ovrC[id] != null) ? _ovrC[id] : _capPct; return Math.max(0, Math.ceil(Math.max(0, Math.min(100, pct))/100*target)); };
       const _scr = evScreenBoard(slate, _pr0, target, log,
-        {floors: _minIds.length ? {list:_minIds, ids: i => out[i].map(p => p.id),
+        {caps: {ids: i => out[i].map(p => p.id), cap: _capSlots},
+         floors: _minIds.length ? {list:_minIds, ids: i => out[i].map(p => p.id),
                                    min: id => Math.ceil(Math.max(0, Math.min(100, _mo[id]||0))/100*target)} : null});
       const _pr = _scr.keep.map(i => _pr0[i]);
       out = _scr.keep.map(i => out[i]);
@@ -36294,6 +36427,16 @@ async function runNflGppBoard(ctx){
   }
 
   // Keep the run reachable for the Sim CSV export and for the §8 harness.
+  // ck117: the run stamp said engine=legacy on every non-NFL kernel run (the
+  // UFC/PGA/NASCAR runners stamp before the engine decision). Correct it here,
+  // where the kernel's board is final, so the log line and the Sim CSV header
+  // name the engine that built it.
+  try {
+    if(typeof _lastRunStamp === 'string' && /\| engine=legacy \| gppB= \| gppSeed=$/.test(_lastRunStamp)){
+      _lastRunStamp = _lastRunStamp.replace(/\| engine=legacy \| gppB= \| gppSeed=$/,
+        `| engine=gpp | gppB=${Math.round(r.B)} | gppSeed=m32:${(((slate._gppSeed!=null)?slate._gppSeed:((typeof _runSeed!=='undefined'&&_runSeed!=null)?_runSeed:0x5eed1)) >>> 0)}`);
+    }
+  } catch(e){}
   window._lastGppRun = {slateId:slate.id, ts:Date.now(), diag:d,
     // ck88: the calibration objects ride along so the Sim CSV can export the
     // calibrated per-lineup EV beside the model one.
@@ -39617,6 +39760,9 @@ function hbPriceLineup(players, cptId, opts){
   let top1=0, top10=0;
   const K1=Math.max(1, Math.ceil(0.01*fieldSize)), K10=Math.max(1, Math.ceil(0.10*fieldSize));
   const pctl=new Float64Array(nS);
+  // ck118: one tie-block payout per ownership scenario (dups vary by scenario).
+  const _tieOf=evTiePayoutOf(contest.payout);
+  const _tieByK=Array.from({length:K}, (_, kk) => { const d=dupsK[kk]; return function(r){ return _tieOf(r, d); }; });
   for(let s=0;s<nS;s++){
     const arr=F.fieldTotals[s], t=tot[s], k=s%K, dups=dupsK[k];
     let lo=0, hi=arr.length;
@@ -39631,11 +39777,15 @@ function hbPriceLineup(players, cptId, opts){
     // Expected beaters over all F entries. ck73: the estimator reports it
     // directly (`beat`) because the +0.5 prior no longer lives in `shape`.
     const lam=(est.beat != null) ? est.beat : (est.shape-0.5)*est.scale;
-    paySum[k]+=hbExpPayout(est.shape, est.scale, 1+dups/2, contest.payout, est.obs);
+    // ck118: the tie block — the ladder averaged over the d+1 places the
+    // copies occupy, priced at the block's TOP rank (which is the rank DK shows
+    // every tied entry). Was the midpoint rank 1 + dups/2 on the raw ladder.
+    const _tieK=_tieByK[k];
+    paySum[k]+=hbExpPayout(est.shape, est.scale, 1, _tieK, est.obs);
     payCnt[k]++;
-    evBandSplit(est.shape, est.scale, 1+dups/2, contest.payout, fieldSize, bandRaw, est.obs);
-    top1 +=evRankAtMost(est.shape, est.scale, 1+dups/2, K1);
-    top10+=evRankAtMost(est.shape, est.scale, 1+dups/2, K10);
+    evBandSplit(est.shape, est.scale, 1, _tieK, fieldSize, bandRaw, est.obs);
+    top1 +=evRankAtMost(est.shape, est.scale, 1, K1);
+    top10+=evRankAtMost(est.shape, est.scale, 1, K10);
     // ── WIN% IS THE PROBABILITY OF THE MONEY THE RANK-1 BAND CHARGES (ck95) ──
     // The posterior predictive of a Poisson count under a Gamma(shape, scale)
     // is (1+scale)^-shape — "nobody among the contest's F entries OUTSCORES
@@ -39663,10 +39813,10 @@ function hbPriceLineup(players, cptId, opts){
     // discrete figure is kept as `winPctExact`, unrendered, for diagnostics.
     // ck78: an entry we SAW above us is a fact, not a probability — the Gamma
     // term prices only the F − N entries the sample did not draw.
-    evBandProb(est.shape, est.scale, 1+dups/2, fieldSize, bandProb, est.obs);
+    evBandProb(est.shape, est.scale, 1, fieldSize, bandProb, est.obs);
     winExact+=(est.obs != null && est.obs >= 1) ? 0
          : (est.scale > 0 ? Math.pow(1+est.scale, -est.shape) : 1);
-    const rank=1+lam+dups/2;
+    const rank=1+lam;
     if(rank<=contest.paid) cash++;
     pctl[s]=Math.min(1, rank/fieldSize);
   }
