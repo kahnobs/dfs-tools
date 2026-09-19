@@ -1607,6 +1607,14 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
       <button class="show-hidden-btn" id="showHiddenBtn" onclick="toggleShowHidden()">👁 Hidden</button>
       <button class="show-hidden-btn" id="unhideAllBtn" onclick="unhideAll()" style="display:none;">✕ Unhide All</button>
       <button class="show-hidden-btn" id="hideOutBtn" onclick="hideAllOut()" style="display:none;" title="Hide every player DraftKings lists as OUT / IR / suspended (⛔) from the pool — one click instead of one ✕ per row. OUT players never reach a generated lineup anyway; this just clears them off the list.">⛔ Hide OUT</button>
+      <!-- ck121: bulk-hide by a projection / sim floor. -->
+      <span id="hideBelowWrap" style="display:inline-flex;align-items:center;gap:4px;">
+        <select id="hideBelowMetric" class="show-hidden-btn" style="padding:3px 4px;" title="Which number the floor applies to" onchange="refreshHiddenBadge()">
+          <option value="proj">Proj</option><option value="sim">Sim</option>
+        </select>
+        <input type="number" id="hideBelowVal" class="show-hidden-btn" value="5" min="0" step="0.5" style="width:56px;padding:3px 6px;" title="Hide every visible player whose value is below this" oninput="refreshHiddenBadge()">
+        <button class="show-hidden-btn" id="hideBelowBtn" onclick="hideBelow()" title="Hide every visible player whose projection (or sim score) is below the number — one click instead of hundreds of ✕. Anyone already in a saved or current lineup is left alone.">⌄ Hide below</button>
+      </span>
       <button class="show-hidden-btn" id="resetMaxExpBtn" onclick="resetMaxExposures()" style="display:none;" title="Clear all MAX% overrides back to default (100)">↺ Reset Max</button>
       <button class="show-hidden-btn" id="updatePoolBtn" onclick="openUpdatePoolModal()" title="Re-upload CSV to refresh projections, ownership, salary, tee times">↺ Update</button>
       <button class="show-hidden-btn" id="dkCsvBtn" onclick="document.getElementById('dkCsvFile').click()" title="Upload a DraftKings DKSalaries.csv or DKEntries.csv: attaches game times, home/away and positions to your players, and loads your contest entries for the DK Entries fill" style="display:none;border-color:rgba(83,180,255,.35);color:#53b4ff;">⬆ DK CSV</button>
@@ -6654,7 +6662,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck120/2026-09-19';
+const BUILD_ID = '2.0/ck121/2026-09-19';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -7520,6 +7528,13 @@ function refreshHiddenBadge(){
     hob.style.display=k>0?'':'none';
     hob.textContent=`⛔ Hide OUT (${k})`;
   }
+  // ck121: "⌄ Hide below" carries the count one click would remove.
+  const hbb=document.getElementById('hideBelowBtn');
+  if(hbb){
+    const k=slate?hideBelowCandidates(slate).length:0;
+    hbb.textContent=`⌄ Hide below (${k})`;
+    const wrap=document.getElementById('hideBelowWrap'); if(wrap) wrap.style.display=slate?'':'none';
+  }
 }
 // The OUT-listed players (DK Status O / IR / SUS → slate._outIds) that are
 // still visible in at least one pool. On showdown a man is "still visible" if
@@ -7550,6 +7565,51 @@ function hideAllOut(){
   save(); renderAll();
   if(typeof renderNflQbStacks === 'function' && document.getElementById('nflQbStackWrap')) renderNflQbStacks();
   showToast(`⛔ Hid ${ids.length} OUT player${ids.length===1?'':'s'}${SD?' from both pools':''}.`,'ok');
+}
+
+// ck121: HIDE BELOW A FLOOR. NFL main slates carry hundreds of $3,000 bodies
+// projected at 0.00 that never earn a role; one ✕ each was the slow part of
+// setting up a slate. Hides every visible player whose projection (or sim
+// score, once a sim has run) is below the box's number. Players sitting in the
+// current lineup or any saved lineup are left visible, and on showdown the
+// hide applies to both pools (a man who doesn't project for flex doesn't
+// project for captain either).
+function hideBelowCandidates(slate){
+  if(!slate) return [];
+  const metric=(document.getElementById('hideBelowMetric')||{}).value||'proj';
+  const x=parseFloat((document.getElementById('hideBelowVal')||{}).value);
+  if(!Number.isFinite(x)) return [];
+  const SD=typeof isShowdown==='function' && isShowdown(slate);
+  const hid=new Set(slate.hiddenIds||[]);
+  const cpt=SD?new Set(sdCptHiddenList(slate)):null;
+  const keep=new Set(slate.currentLineup||[]);
+  (slate.savedLineups||[]).forEach(l=>(l||[]).forEach(id=>keep.add(id)));
+  return (slate.players||[]).filter(p=>{
+    if(!p || !(p.salary>0) || keep.has(p.id)) return false;
+    const visible = !hid.has(p.id) || (SD && !cpt.has(p.id));
+    if(!visible) return false;
+    const v = metric==='sim' ? parseFloat(p._simP50) : parseFloat(p.proj);
+    if(metric==='sim' && !Number.isFinite(v)) return false;   // no sim yet: nothing to judge
+    return !(v >= x);   // 0, blank and NaN projections all count as "below"
+  }).map(p=>p.id);
+}
+function hideBelow(){
+  const slate=activeSlate(); if(!slate) return;
+  const ids=hideBelowCandidates(slate);
+  const metric=(document.getElementById('hideBelowMetric')||{}).value||'proj';
+  const x=parseFloat((document.getElementById('hideBelowVal')||{}).value);
+  if(!ids.length){ showToast(`Nobody visible has ${metric==='sim'?'a sim score':'a projection'} below ${x}.`,'ok'); return; }
+  const SD=typeof isShowdown==='function' && isShowdown(slate);
+  if(SD) sdMigrateHiddenPools(slate);
+  slate.hiddenIds=slate.hiddenIds||[];
+  ids.forEach(id=>{
+    if(!slate.hiddenIds.includes(id)) slate.hiddenIds.push(id);
+    if(SD && !sdCptHiddenList(slate).includes(id)) sdToggleCptHidden(slate,id);
+  });
+  refreshHiddenBadge();
+  save(); renderAll();
+  if(typeof renderNflQbStacks === 'function' && document.getElementById('nflQbStackWrap')) renderNflQbStacks();
+  showToast(`⌄ Hid ${ids.length} player${ids.length===1?'':'s'} with ${metric==='sim'?'sim score':'projection'} below ${x}${SD?' from both pools':''}. Unhide All brings them back.`,'ok');
 }
 
 function unhideAll(){
@@ -17298,7 +17358,8 @@ function beatersEstimate(beating, tied, sampleN, arr, t, F, refine, ftPre){
   // ck120: the smooth first-place term — P(no entry among all F beats t) from
   // the fitted tail. null (the sample's own 0/1) below the threshold or when
   // the sample is the contest.
-  const p0 = (pHat >= 0 && F > sampleN) ? Math.exp(-F * pHat) : null;
+  let p0 = (pHat >= 0 && F > sampleN) ? Math.exp(-F * pHat) : null;
+  if(p0 != null && p0 < 1e-9) p0 = 0;   // below one in a billion is zero, not a chip that reads '~0'
   if(pHat < 0){ pHat = (obs + 0.5)/sampleN; nEff = obs + 0.5; }
   const lam = Math.max(0, F - sampleN) * pHat;
   const m = obs + lam;
@@ -18204,6 +18265,9 @@ function evScreenBoard(slate, rows, target, log, opts){
 }
 // The three band factors — normalization × record shrink — as one object.
 function evCalFactors(cal, norm){
+  // ck121 harness switch: `window.__evCalOff` prices the raw ladder (no
+  // normalization, no record shrink) — A/B only, never set by the app.
+  if(typeof window !== 'undefined' && window.__evCalOff) return {s1: 1, s2: 1, s3: 1, s23: 1, on: false, norm: false, shrink: false};
   const sh = evCalShrink(cal), c = cal || {};
   const n1 = (norm && norm.n1 != null) ? norm.n1 : 1, n23 = (norm && norm.n23 != null) ? norm.n23 : 1;
   const s1 = n1 * (sh.on ? sh.s1 : 1), s23 = n23 * ((sh.on && sh.s23 != null) ? sh.s23 : 1);
@@ -33423,6 +33487,7 @@ function gppKernelFactory(){
                                       ws.tailAE[w], ws.tailM);
       nEff = ws.tailM;
       RP_p0 = (F > NF) ? Math.exp(-F * pHat) : null;
+      if(RP_p0 != null && RP_p0 < 1e-9) RP_p0 = 0;
     } else {
       pHat = (obs + 0.5)/NF; nEff = obs + 0.5;
       RP_p0 = null;
@@ -34684,6 +34749,30 @@ function gppKernelFactory(){
         optima.set(c.key, {ids:c.ids, searchGross:c.searchGross, seedKind:'neighbour'});
         neighbourAdded++;
       }
+      // ck121: CAP-AWARE MENU. The best neighbours all hold the same stars, so
+      // once a capped player (Max%, a market ceiling) or a ratio-bound fight
+      // side fills its slots, every remaining candidate is blocked and the
+      // greedy stalls short of the board (UFC 331: 39 of 50). For each capped
+      // player, the best neighbours WITHOUT him are added; for each fight side
+      // held to a ratio, the best neighbours holding the OTHER side.
+      {
+        const capsArr = P.capSlots || null, Nw = P.N || 0;
+        const addWhere = function(pred, want){
+          let added = 0;
+          for(let q = 0; q < scored.length && added < want; q++){
+            const c = scored[q];
+            if(optima.has(c.key) || !pred(c.ids)) continue;
+            optima.set(c.key, {ids:c.ids, searchGross:c.searchGross, seedKind:'neighbour-cap'});
+            neighbourAdded++; added++;
+          }
+        };
+        if(capsArr) for(let i = 0; i < nP; i++) if(capsArr[i] < Nw) addWhere(function(ids){ return ids.indexOf(i) < 0; }, 60);
+        const fp = P.fightPairs || [];
+        for(const pr of fp){
+          if(Math.min(1, pr.pa + (P.fightSlack != null ? P.fightSlack : 0.1)) < 1) addWhere(function(ids){ return ids.indexOf(pr.b) >= 0; }, 40);
+          if(Math.min(1, pr.pb + (P.fightSlack != null ? P.fightSlack : 0.1)) < 1) addWhere(function(ids){ return ids.indexOf(pr.a) >= 0; }, 40);
+        }
+      }
       say({phase:'menu', added:neighbourAdded, evals:neighbourEvals, optima:optima.size, ms:Date.now()-t0});
     }
 
@@ -34971,6 +35060,9 @@ function gppKernelFactory(){
 
     // ── Portfolio: greedy expected log bankroll growth (§6), on SELECT ─────
     const menu = kept.slice(0, P.menuTarget);
+    // ck121: the cap-aware neighbours ride along even when they price below the
+    // menu cut — they exist so the greedy has somewhere to go once a cap binds.
+    { const inM = new Set(menu); for(const x of kept) if(!inM.has(x) && x.seedKind === 'neighbour-cap') menu.push(x); }
     const M = menu.length;
     const N = Math.min(P.N, M);
     const B = P.B, fee = P.fee, linear = !!P.linear;
@@ -39964,8 +40056,8 @@ function hbPriceLineup(players, cptId, opts){
     // ck78: an entry we SAW above us is a fact, not a probability — the Gamma
     // term prices only the F − N entries the sample did not draw.
     evBandProb(est.shape, est.scale, 1, fieldSize, bandProb, est.obs, est.p0);
-    winExact+=(est.obs != null && est.obs >= 1) ? 0
-         : (est.scale > 0 ? Math.pow(1+est.scale, -est.shape) : 1);
+    winExact+=(est.p0 != null) ? est.p0 : ((est.obs != null && est.obs >= 1) ? 0
+         : (est.scale > 0 ? Math.pow(1+est.scale, -est.shape) : 1));
     const rank=1+lam;
     if(rank<=contest.paid) cash++;
     pctl[s]=Math.min(1, rank/fieldSize);
