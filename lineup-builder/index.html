@@ -6654,7 +6654,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck118/2026-09-19';
+const BUILD_ID = '2.0/ck119/2026-09-19';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -18106,7 +18106,11 @@ function evScreenBoard(slate, rows, target, log, opts){
   // would push any player over its cap is skipped (why:'cap') and the next
   // survivor in order takes the slot.
   const caps=(opts && opts.caps) || null; const cnt=new Map();
-  const capOk=i=>{ if(!caps) return true; for(const id of caps.ids(i)) if((cnt.get(id)||0)+1 > caps.cap(id)) return false; return true; };
+  // ck119b: an optional extra admission rule on the kept board (the UFC fight
+  // ratio) — `extraOk(ids, countOf)` sees the lineup's ids and the kept counts.
+  const extraOk=(opts && opts.extraOk) || null;
+  const capOk=i=>{ if(caps){ for(const id of caps.ids(i)) if((cnt.get(id)||0)+1 > caps.cap(id)) return false; }
+    if(extraOk && caps && !extraOk(caps.ids(i), id=>cnt.get(id)||0)) return false; return true; };
   const take=i=>{ keep.push(i); if(caps) for(const id of caps.ids(i)) cnt.set(id, (cnt.get(id)||0)+1); };
   if(!cfg.on){ for(let i=0;i<rows.length && keep.length<target;i++){ if(capOk(i)) take(i); else dropped.push({i, edge:null, edgeEx1:null, why:'cap'}); }
     return {keep, dropped, cfg, short:Math.max(0,target-keep.length), screened:false}; }
@@ -22702,13 +22706,21 @@ async function runUFCSimGenInner(){
     if(flagged.length) log(`⚠ ITD check — sim finish rate vs market: ${flagged.join(', ')} (check finish ladders)`);
   })();
 
-  // SIM column shows composite score (0.6xP80 + 0.4xavg) — ceiling-weighted, no floor double-count.
+  // (ck119: the SIM column is the sim mean now — see below.)
   // Written to the FULL pool: hidden fighters are simmed with everyone else
   // (removed from lineup selection only), so their board stats stay current —
   // and the deadweight reference reads them when the pool is curated.
+  // ck119: the SIM column shows the sim's own MEAN — the number the GPP engine
+  // prices — not the legacy selector's composite (ceiling × reliability ×
+  // finish tilt), which printed Steveson at 151 against a simmed mean of 101
+  // and a P90 of 127 and read as "the sim thinks he scores 150". The
+  // composite still drives the legacy selector and is kept on `_simLegacy`.
   fullPool.forEach(p=>{
-    p._simP50 = compositeScoreById[p.id] ?? (medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null);
-    p._simDist = distById[p.id] || null;
+    const _d = distById[p.id];
+    p._simLegacy = compositeScoreById[p.id] ?? null;
+    p._simP50 = (_d && _d.mean != null) ? Math.round(_d.mean*10)/10
+              : (compositeScoreById[p.id] ?? (medianScoreById[p.id]!=null ? Math.round(medianScoreById[p.id]*10)/10 : null));
+    p._simDist = _d || null;
     // Optimal rate for the board + Sim CSV: P(fighter in the per-sim optimal).
     // Visible fighters from the curated pass; hidden fighters from the
     // full-slate rate pass when the pool is curated (null otherwise).
@@ -32899,6 +32911,12 @@ const NFL_GPP_B_STAKE_MULT = 20;
 // runNflGppBoard.
 const UFC_EXPO_WIN_MULT = 1.5;
 const UFC_EXPO_FLOOR = 10;
+// ck119: fight balance — a side's share of its fight's lineups may exceed its
+// market win probability by at most this much. See runNflGppEngine.
+const UFC_FIGHT_SLACK = 0.10;
+// ck119b: a side counts as viable for the balance rule when the search put him
+// on at least this share of the menu.
+const UFC_FIGHT_VIABLE = 0.12;
 function nflGppFallbackB(slate){
   const ev = (slate && slate._ufcEv) || {};
   const fee = Math.max(0.01, parseFloat(ev.fee) || 1);
@@ -34931,6 +34949,50 @@ function gppKernelFactory(){
     const FP = foldPort(selW, menu);
     const expCount = new Int32Array(nP);
     const capOf = function(i){ return P.capSlots[i]; };
+    // ck119: fight balance. fightOf[i] = index into P.fightPairs (or -1);
+    // a candidate holding side X of fight f is blocked when, after adding it,
+    // X's share of the lineups holding either side would exceed P(X) + slack
+    // (only once that fight is on 6+ lineups).
+    const fightOf = new Int32Array(nP).fill(-1);
+    const FP_ = P.fightPairs || [];
+    for(let f = 0; f < FP_.length; f++){ fightOf[FP_[f].a] = f; fightOf[FP_[f].b] = f; }
+    const fightSlack = (P.fightSlack != null) ? P.fightSlack : 0.15;
+    // Stated as a running ratio so the greedy cannot stall on it: side X may
+    // hold at most lim/(1−lim) × (side Y's count) + FIGHT_FREE lineups. The
+    // first few lineups of a fight are free; past that, every further X
+    // lineup has to be earned by Y lineups in the market's proportion, and
+    // when the menu holds no Y lineups X simply stops at FIGHT_FREE and the
+    // greedy fills from lineups that skip the fight.
+    const FIGHT_FREE = 5;
+    // ck119b: the ratio applies only where the OTHER side is a viable play —
+    // the search put him in at least `fightViable` of the menu. A fight
+    // where one side is a great play and the other is not viable at all is
+    // allowed to be one-sided (Matt: "there are fights where 1 side is a
+    // great play and the other is not viable at all"); the rule is for the
+    // fights where both sides are live and the board would otherwise go all
+    // in on one of them.
+    const fightViable = (P.fightViable != null) ? P.fightViable : 0.08;
+    const menuShare = new Float64Array(nP);
+    if(FP_.length && M){
+      for(let m = 0; m < M; m++) for(const i of menu[m].ids) menuShare[i] += 1 / M;
+    }
+    const fightApplied = FP_.map(function(pr){
+      return {a: pr.a, b: pr.b, shareA: menuShare[pr.a], shareB: menuShare[pr.b],
+              aBound: menuShare[pr.b] >= fightViable && Math.min(1, pr.pa + fightSlack) < 1,
+              bBound: menuShare[pr.a] >= fightViable && Math.min(1, pr.pb + fightSlack) < 1};
+    });
+    const fightOk = function(ids){
+      if(!FP_.length) return true;
+      for(const i of ids){
+        const f = fightOf[i]; if(f < 0) continue;
+        const pr = FP_[f], fa = fightApplied[f]; const isA = (pr.a === i);
+        if(!(isA ? fa.aBound : fa.bBound)) continue;
+        const lim = Math.min(1, (isA ? pr.pa : pr.pb) + fightSlack);
+        const cX = expCount[i] + 1, cY = expCount[isA ? pr.b : pr.a];
+        if(cX > (lim / (1 - lim)) * cY + FIGHT_FREE + 1e-9) return false;
+      }
+      return true;
+    };
     const inPort = new Uint8Array(M);
     let stalled = 0, gPeak = -Infinity, peakN = 0;
     const nakedPicks = [];
@@ -34946,6 +35008,7 @@ function gppKernelFactory(){
         let blocked = false;
         for(const i of menu[m].ids) if(expCount[i] + 1 > capOf(i)){ blocked = true; break; }
         if(blocked) continue;
+        if(!fightOk(menu[m].ids)) continue;
         const g = FP.growthWith(m, n1, stake1);
         if(g > bestG){ bestG = g; bestM = m; }
         // The best STACKED alternative available at this same step, so a naked
@@ -35050,6 +35113,7 @@ function gppKernelFactory(){
         convStreak: bud.convStreak, convWindows: bud.convWindows,
         convMinFrac: bud.convMinFrac, budgetMs: bud.budgetMs,
         menuTarget: P.menuTarget, nakedPicks: nakedOut,
+        fightBalance: (typeof fightApplied !== 'undefined') ? fightApplied : [],
         optima: nOptima, survived: kept.length, dropped: nOptima - nFilter, floored: floored,
         medRatio: medRatio, overfitCut: cut,
         meanSE: repSE, selMeanSE: seSum/Math.max(1, priced.length),
@@ -35623,6 +35687,33 @@ async function runNflGppEngine(ctx){
   });
   const qbPartner = new Uint8Array(nQbRow * nP);
   _rowMasks.forEach((m, r) => qbPartner.set(m, r * nP));
+  // ck119: FIGHT BALANCE (head-to-head sports). Within one fight, the board's
+  // split between the two sides may not be more lopsided than the market's by
+  // more than UFC_FIGHT_SLACK: side A's share of the lineups that hold either
+  // side ≤ P(A wins) + slack. The sim has no edge on WHO wins — it prices with
+  // the market's probability — so a board that is 85/2 on a 73/27 fight is
+  // an outcome bet the model never made; when the 27% lands, 85% of the
+  // entries eat it together. Applied inside the greedy as a running ratio
+  // (see the kernel): side X ≤ lim/(1−lim) × side Y + 5 free lineups, so a
+  // fight the board barely uses is left alone and the greedy cannot stall. Steveson at 92% + 15 clears
+  // 100% and is unconstrained; Tsarukyan (73%) ≤ 88% of his fight's lineups;
+  // Pantoja (43%) ≤ 58%.
+  const fightPairs = [];
+  if(slate.sport === 'ufc' && typeof ufcSameFight === 'function' && typeof vigRemovedWinProb === 'function'){
+    const seen = new Set();
+    fieldPool.forEach((p, i) => {
+      if(seen.has(i)) return;
+      const j = fieldPool.findIndex((q, k) => k !== i && ufcSameFight(p, q));
+      if(j < 0) return;
+      seen.add(i); seen.add(j);
+      const pa = vigRemovedWinProb(parseFloat(p.ml), parseFloat(fieldPool[j].ml));
+      if(pa == null) return;
+      fightPairs.push({a: i, b: j, pa: pa, pb: 1 - pa});
+    });
+    if(fightPairs.length){
+      log(`Fight balance (ck119): where BOTH sides of a fight are viable plays (each on ≥ ${Math.round(100*UFC_FIGHT_VIABLE)}% of the search's menu), a side's share of that fight's lineups may not exceed its market win probability by more than ${Math.round(100*UFC_FIGHT_SLACK)} pts (after 5 free). A fight with one viable side is left one-sided.`);
+    }
+  }
   // Hard caps: Max% and per-player overrides, expressed in lineup slots.
   const capSlots = new Int32Array(nP);
   fieldPool.forEach((p, i) => {
@@ -35657,7 +35748,7 @@ async function runNflGppEngine(ctx){
     calShrink: {s1: _calFx.s1, s23: _calFx.s23, capTop10: !!evCalCap(slate.sport || 'nfl').capTop10, on: _calFx.on},
     // ck118: bootstrap-resampled search seeds + Bayesian-bootstrap greedy steps (slate._gppRobust === false turns both off).
     robust: slate._gppRobust !== false,
-    maxSal, minSal, N: target, B, capSlots,
+    maxSal, minSal, N: target, B, capSlots, fightPairs, fightSlack: UFC_FIGHT_SLACK, fightViable: UFC_FIGHT_VIABLE,
     // ck74: the partner definition the LABEL uses, so the kernel's naked-pick
     // explanation and `nflStackShape` cannot disagree about what "naked" means.
     stackRb: !!slate._nflStackRbCounts,
@@ -36035,7 +36126,11 @@ async function runNflGppBoard(ctx){
   // ck111: build long, screen after the held-out pass. Exposure caps are scaled
   // so a cap of X% of the WANTED board is exactly the same number of slots on
   // the longer one; the search budget is the one the wanted count earns.
-  const _want = ctx.target, _long = evOvergen(ctx.slate, _want, 'gpp');
+  const _want = ctx.target;
+  // ck119: the fight-balance ratio and the market ceilings push the greedy
+  // onto weaker candidates that the edge screen then drops, so a UFC board
+  // is built 2× long (ck111's 1.4× shipped 30 of 50 on UFC 331 under them).
+  const _long = Math.max(evOvergen(ctx.slate, _want, 'gpp'), ctx.slate.sport === 'ufc' ? Math.ceil(_want * 2.0) : 0);
   const log = ctx.log || function(){};
   // ck117: the exposure ceiling the SHIPPED board is held to. Max Exp is the
   // user's number and applies to everyone. On a head-to-head sport (UFC) each
@@ -36155,8 +36250,18 @@ async function runNflGppBoard(ctx){
       // ck117: exposure caps hold on the KEPT board — override or the ceiling, in wanted-board slots.
       const _ovrC = _effOverrides;
       const _capSlots = id => { const pct = (_ovrC[id] != null) ? _ovrC[id] : _capPct; return Math.max(0, Math.ceil(Math.max(0, Math.min(100, pct))/100*target)); };
+      // ck119b: the fight ratio holds on the KEPT board too (the greedy held it
+      // on the long build; drops can unbalance it). Same rule, same constants.
+      const _fbRule = (() => {
+        const fb = (d && d.fightBalance) || []; if(!fb.length) return null;
+        const byId = new Map(); fb.forEach(f => { byId.set(fieldPool[f.a].id, {other: fieldPool[f.b].id, bound: f.aBound}); byId.set(fieldPool[f.b].id, {other: fieldPool[f.a].id, bound: f.bBound}); });
+        const pWin = new Map(); (r.payload.fightPairs || []).forEach(f => { pWin.set(fieldPool[f.a].id, f.pa); pWin.set(fieldPool[f.b].id, f.pb); });
+        return (ids, countOf) => { for(const id of ids){ const e = byId.get(id); if(!e || !e.bound) continue;
+          const lim = Math.min(1, (pWin.get(id) || 0) + UFC_FIGHT_SLACK); if(lim >= 1) continue;
+          if(countOf(id) + 1 > (lim/(1-lim)) * countOf(e.other) + 5 + 1e-9) return false; } return true; };
+      })();
       const _scr = evScreenBoard(slate, _pr0, target, log,
-        {caps: {ids: i => out[i].map(p => p.id), cap: _capSlots},
+        {caps: {ids: i => out[i].map(p => p.id), cap: _capSlots}, extraOk: _fbRule,
          floors: _minIds.length ? {list:_minIds, ids: i => out[i].map(p => p.id),
                                    min: id => Math.ceil(Math.max(0, Math.min(100, _mo[id]||0))/100*target)} : null});
       const _pr = _scr.keep.map(i => _pr0[i]);
@@ -36295,6 +36400,19 @@ async function runNflGppBoard(ctx){
     const byDup = out.map((l,i) => ({l, i, d:l._gpp.dups}))
                      .sort((a,b) => b.d - a.d).slice(0, 5);
     if(byDup.length && byDup[0].d > 0.01){
+      // ck119b: which fights the balance rule actually bound, and which were left one-sided.
+      try {
+        const fb = (d.fightBalance || []);
+        if(fb.length){
+          const nm = i => surnameOf((fieldPool[i] || {}).name || '');
+          const bound = [], free = [];
+          fb.forEach(f => {
+            if(f.aBound) bound.push(`${nm(f.a)} (vs ${nm(f.b)})`); else if(f.shareA >= 0.15) free.push(`${nm(f.a)} (${nm(f.b)} on ${Math.round(100*f.shareB)}% of the menu)`);
+            if(f.bBound) bound.push(`${nm(f.b)} (vs ${nm(f.a)})`); else if(f.shareB >= 0.15) free.push(`${nm(f.b)} (${nm(f.a)} on ${Math.round(100*f.shareA)}% of the menu)`);
+          });
+          log(`  Fight balance — sides held to the market split: ${bound.length ? bound.join(', ') : 'none'}.${free.length ? ` Free to be one-sided (other side not viable): ${free.join(', ')}.` : ''}`);
+        }
+      } catch(e){}
       log('Most-duplicated lineups on the board (expected duplicates in the modeled field): '
         + byDup.map(x => {
             return `#${x.i+1} ${x.d.toFixed(1)}× (${shapeLabel(x.l)}, EV $${x.l._gpp.heldEV.toFixed(2)})`;
@@ -36437,7 +36555,7 @@ async function runNflGppBoard(ctx){
         `| engine=gpp | gppB=${Math.round(r.B)} | gppSeed=m32:${(((slate._gppSeed!=null)?slate._gppSeed:((typeof _runSeed!=='undefined'&&_runSeed!=null)?_runSeed:0x5eed1)) >>> 0)}`);
     }
   } catch(e){}
-  window._lastGppRun = {slateId:slate.id, ts:Date.now(), diag:d,
+  window._lastGppRun = {slateId:slate.id, ts:Date.now(), diag:d, fieldIds: fieldPool.map(p => p.id),
     // ck88: the calibration objects ride along so the Sim CSV can export the
     // calibrated per-lineup EV beside the model one.
     cal: r.cal, bands: r.bands, calNet: r.calNet, calRoi: r.calRoi,
