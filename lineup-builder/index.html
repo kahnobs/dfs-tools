@@ -6654,7 +6654,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck119/2026-09-19';
+const BUILD_ID = '2.0/ck120/2026-09-19';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -17295,12 +17295,16 @@ function beatersEstimate(beating, tied, sampleN, arr, t, F, refine, ftPre){
     const ft = ftPre || gppTailFit(arr, sampleN);
     if(t >= ft.xM){ pHat = ft.pre * gppTailSurv(ft.xM, ft.alpha, ft.k, t, ft.aExp, ft.M); nEff = ft.M; }
   }
+  // ck120: the smooth first-place term — P(no entry among all F beats t) from
+  // the fitted tail. null (the sample's own 0/1) below the threshold or when
+  // the sample is the contest.
+  const p0 = (pHat >= 0 && F > sampleN) ? Math.exp(-F * pHat) : null;
   if(pHat < 0){ pHat = (obs + 0.5)/sampleN; nEff = obs + 0.5; }
   const lam = Math.max(0, F - sampleN) * pHat;
   const m = obs + lam;
   // ck92: reachable only when sampleN >= F (nothing unobserved to estimate) —
   // the survival floor keeps pHat > 0, so F > sampleN always leaves lam > 0.
-  if(!(m > 0)) return { shape: 0, scale: 0, beat: 0, obs: obs };
+  if(!(m > 0)) return { shape: 0, scale: 0, beat: 0, obs: obs, p0: p0 };
   const varm = lam * (1 + lam/(nEff > 1e-9 ? nEff : 1e-9));
   // The point mass is carried as a NEGLIGIBLE scale rather than a zero one, so
   // every existing consumer keeps working unchanged: they all read shape·scale
@@ -17310,7 +17314,7 @@ function beatersEstimate(beating, tied, sampleN, arr, t, F, refine, ftPre){
   // branch in four integrators and in the worker's stringified copy of two of
   // them. The relative error of the round trip is ~1e-16.
   const sc = Math.max(varm/m, m*1e-9);
-  return { shape: m/sc, scale: sc, beat: m, obs: obs };
+  return { shape: m/sc, scale: sc, beat: m, obs: obs, p0: p0 };
 }
 
 // ── SHARED FIELD-SCENARIO CONSTANTS (hoisted 2026-09-04) ────────────────────
@@ -17675,7 +17679,31 @@ function evTiePayoutOf(payFn){
   return tie;
 }
 const EV_HEAD_K = 10;          // places 1..10 are priced exactly
-function evHeadBands(shape, scale, dOff, payFn, F, bands, probs, obs){
+// ── THE FIRST-PLACE TERM, SMOOTH (checkpoint 120) ───────────────────────────
+// `p0`, when given, REPLACES the routine's own band-0 mass: P(nobody in the
+// contest outscores us) taken from the world's fitted tail over all F entries,
+// exp(−F·S(t)) — a smooth, strictly decreasing function of the lineup's score
+// — instead of the 0/1 the sample gives ("did anything in the 20,000 draw beat
+// us"), which at 750 worlds resolves first place at 1/750 and nowhere finer:
+// a chalk build read P(first) = 0 exactly, a unique one that happened to top
+// the draw in two worlds read 300% ROI. The rest of the distribution keeps its
+// shape and is rescaled to 1 − p0. Only band 0 changes, so every real-field
+// check on ranks ≥ 2 (test_ck92_head) is untouched; the GPD over-counts
+// beaters at the head (ck92: 2.6× at the true rank-10 score), so this is a
+// CONSERVATIVE first-place term. Applied only when no own entry is ahead
+// (dOff < 0.5) and the caller had a tail fit (p0 != null).
+function evHeadBands(shape, scale, dOff, payFn, F, bands, probs, obs, p0){
+  const useP0 = (p0 != null && p0 >= 0 && p0 <= 1 && !(dOff >= 0.5));
+  if(useP0){
+    const sb = [0, 0, 0, 0], sp = [0, 0, 0, 0];
+    const tot0 = evHeadBands(shape, scale, dOff, payFn, F, sb, sp, obs, null);
+    const rest = 1 - sp[0];
+    const k = rest > 1e-12 ? (1 - p0) / rest : 0;
+    const pay1 = payFn(1 + dOff);
+    if(bands){ bands[0] += p0 * pay1; for(let b = 1; b < 4; b++) bands[b] += sb[b] * k; }
+    if(probs){ probs[0] += p0; for(let b = 1; b < 4; b++) probs[b] += sp[b] * k; }
+    return p0 * pay1 + (tot0 - sb[0]) * k;
+  }
   const add = (b, amt, pr) => { if(bands) bands[b] += amt; if(probs) probs[b] += pr; };
   // ck78: shape 0 is "nobody is above us and there is nothing left to estimate"
   // — a point mass at k = 0.
@@ -17737,8 +17765,8 @@ const EV_ZERO_PAY = () => 0;
 // `evBandSplit` takes the dollars per band and `evBandProb` the probability per
 // band — so Σ bands === the reported gross and P(band 0) === the win rate, by
 // construction rather than by agreement.
-function evBandSplit(shape, scale, offset, payFn, F, bands, obs){
-  return evHeadBands(shape, scale, offset - 1, payFn, F, bands, null, obs);
+function evBandSplit(shape, scale, offset, payFn, F, bands, obs, p0){
+  return evHeadBands(shape, scale, offset - 1, payFn, F, bands, null, obs, p0);
 }
 // ── THE PROBABILITY TWIN OF evBandSplit (checkpoint 95) ─────────────────────
 // Same five Wilson–Hilferty atoms, same rank definition (shape·c³·scale +
@@ -17762,8 +17790,8 @@ function evBandSplit(shape, scale, offset, payFn, F, bands, obs){
 // discrete figure is still returned as `winPctExact` for diagnostics, and ck88's
 // cap now scales the rank-1 band by a ratio computed from the SAME object that
 // band is made of.
-function evBandProb(shape, scale, offset, F, probs, obs){
-  evHeadBands(shape, scale, offset - 1, EV_ZERO_PAY, F, null, probs, obs);
+function evBandProb(shape, scale, offset, F, probs, obs, p0){
+  evHeadBands(shape, scale, offset - 1, EV_ZERO_PAY, F, null, probs, obs, p0);
 }
 // Turn accumulated raw band sums into SHARES and into dollars against whatever
 // gross the surface actually reports. The legacy path aggregates its gross
@@ -33343,8 +33371,8 @@ function gppKernelFactory(){
   // sample actually SAW (ck78), which is what keeps band 0 equal to the win
   // rate. The deep-tail fast path inside evHeadBands is what keeps the hill
   // climb affordable; see the timing note in AGENT_NOTES ck96 §2.
-  function payAt(shape, scale, offset, payFn, obs){
-    return evHeadBands(shape, scale, offset - 1, payFn, 0, null, null, obs);
+  function payAt(shape, scale, offset, payFn, obs, p0){
+    return evHeadBands(shape, scale, offset - 1, payFn, 0, null, null, obs, p0);
   }
 
   // Rank posterior of total `t` against one world's sorted field sample.
@@ -33375,7 +33403,7 @@ function gppKernelFactory(){
   // agree bit-for-bit). `RP_obs` is the exact number of sampled entries above
   // us; win% reads it so that "somebody in the field already beat you" is a
   // zero rather than a small positive number.
-  let RP_shape = 0, RP_scale = 1, RP_obs = 0;
+  let RP_shape = 0, RP_scale = 1, RP_obs = 0, RP_p0 = null;   // ck120: RP_p0 — see evHeadBands
   function rankPostFast(t, view, NF, F, w, ws){
     const NV = ws.NV;
     let lo = 0, h = NV;
@@ -33394,8 +33422,10 @@ function gppKernelFactory(){
       pHat = ws.tailPre * gppTailSurv(ws.tailXM[w], ws.tailAl[w], ws.tailK[w], t,
                                       ws.tailAE[w], ws.tailM);
       nEff = ws.tailM;
+      RP_p0 = (F > NF) ? Math.exp(-F * pHat) : null;
     } else {
       pHat = (obs + 0.5)/NF; nEff = obs + 0.5;
+      RP_p0 = null;
     }
     const lam = (F > NF ? F - NF : 0) * pHat;
     const m = obs + lam;
@@ -33693,7 +33723,7 @@ function gppKernelFactory(){
       const d = dups[w % K];
       const off = 1 + dupOff*d, dv = 1 + dupDiv*d;
       BLK_D = dupDiv ? 0 : d;
-      const p = payAt(RP_shape, RP_scale, off, payFn, RP_obs) / dv;
+      const p = payAt(RP_shape, RP_scale, off, payFn, RP_obs, RP_p0) / dv;
       sum += p;
       if(stats){
         sq += p*p;
@@ -33702,14 +33732,14 @@ function gppKernelFactory(){
         // the hand builder's win% is this identical expression. ck78: an entry
         // we SAW above us is not a probability, so the observed count gates it;
         // the Gamma term now prices only the unobserved F − NF entries.
-        win += RP_obs >= 1 ? 0 : (RP_scale > 0 ? Math.pow(1 + RP_scale, -RP_shape) : 1);
+        win += (RP_p0 != null) ? RP_p0 : (RP_obs >= 1 ? 0 : (RP_scale > 0 ? Math.pow(1 + RP_scale, -RP_shape) : 1));
         // ck88: the CHECKABLE rates. Same posterior, integrated to a rank
         // instead of to a prize — these are the numbers two real contests have
         // already scored, and they now headline every card.
         top1  += evRankAtMost(RP_shape, RP_scale, off, K1);
         top10 += evRankAtMost(RP_shape, RP_scale, off, K10);
         const b4 = [0, 0, 0, 0];
-        evBandSplit(RP_shape, RP_scale, off, payFn, F, b4, RP_obs);
+        evBandSplit(RP_shape, RP_scale, off, payFn, F, b4, RP_obs, RP_p0);
         bands[0] += b4[0]/dv; bands[1] += b4[1]/dv; bands[2] += b4[2]/dv; bands[3] += b4[3]/dv;
       }
     }
@@ -33738,7 +33768,7 @@ function gppKernelFactory(){
       rankPostFast(t, views[w], NF, F, w, ws);
       const d = dups[w % K];
       BLK_D = dupDiv ? 0 : d;
-      sum += payAt(RP_shape, RP_scale, 1 + dupOff*d, payFn, RP_obs) / (1 + dupDiv*d);
+      sum += payAt(RP_shape, RP_scale, 1 + dupOff*d, payFn, RP_obs, RP_p0) / (1 + dupDiv*d);
     }
     return sum / n;
   }
@@ -33753,7 +33783,7 @@ function gppKernelFactory(){
       rankPostFast(t, views[w], NF, F, w, ws);
       const d = dups[w % K];
       BLK_D = dupDiv ? 0 : d;
-      sum += payAt(RP_shape, RP_scale, 1 + dupOff*d, payFn, RP_obs) / (1 + dupDiv*d);
+      sum += payAt(RP_shape, RP_scale, 1 + dupOff*d, payFn, RP_obs, RP_p0) / (1 + dupDiv*d);
     }
     return sum / n;
   }
@@ -34764,7 +34794,8 @@ function gppKernelFactory(){
       const W = ws.W, M = items.length, thr = ws.cashThr;
       const mShape = new Float64Array(M*W), mScale = new Float64Array(M*W),
             mScore = new Float64Array(M*W), mDup = new Float64Array(M*W),
-            mObs = new Float64Array(M*W);   // ck88: sampled field entries seen above us
+            mObs = new Float64Array(M*W),   // ck88: sampled field entries seen above us
+            mP0 = new Float64Array(M*W).fill(-1);   // ck120: smooth first-place term (−1 = none)
       const live = new Array(M);
       const tt = new Float64Array(W);
       for(let m = 0; m < M; m++){
@@ -34776,7 +34807,7 @@ function gppKernelFactory(){
           mScore[base] = tt[q]; mDup[base] = d[q % ws.K];
           if(tt[q] < thr[q]) continue;                 // dead world: 0 at every offset
           rankPostFast(tt[q], ws.views[q], ws.NF, ws.F, q, ws);
-          mShape[base] = RP_shape; mScale[base] = RP_scale; mObs[base] = RP_obs;
+          mShape[base] = RP_shape; mScale[base] = RP_scale; mObs[base] = RP_obs; mP0[base] = (RP_p0 != null) ? RP_p0 : -1;
           lv.push(q);
         }
         live[m] = Int32Array.from(lv);
@@ -34804,8 +34835,9 @@ function gppKernelFactory(){
             const dq = mDup[m*W+q];
             const sh = mShape[m*W+q], sc = mScale[m*W+q], dv = 1 + dupDiv*dq, dof = dupOff*dq;
             BLK_D = dupDiv ? 0 : dq;
-            const now = payAt(sh, sc, 1+k+dof, ws.payFn) / dv;
-            memStep[q*memN+k] = payAt(sh, sc, 2+k+dof, ws.payFn) / dv - now;
+            const p0m = mP0[m*W+q] >= 0 ? mP0[m*W+q] : null;
+            const now = payAt(sh, sc, 1+k+dof, ws.payFn, 0, p0m) / dv;
+            memStep[q*memN+k] = payAt(sh, sc, 2+k+dof, ws.payFn, 0, p0m) / dv - now;
             s2 += now;
           }
           memSuf[q*(memN+1)+memN] = 0;
@@ -34869,7 +34901,7 @@ function gppKernelFactory(){
         while(lo < h){ const mid = (lo + h) >> 1; if(memScore[q*memN+mid] > t) lo = mid + 1; else h = mid; }
         const dq = mDup[m*W+q];
         BLK_D = dupDiv ? 0 : dq;
-        return payAt(mShape[m*W+q], mScale[m*W+q], 1+lo+dupOff*dq, ws.payFn) / (1 + dupDiv*dq)
+        return payAt(mShape[m*W+q], mScale[m*W+q], 1+lo+dupOff*dq, ws.payFn, 0, mP0[m*W+q] >= 0 ? mP0[m*W+q] : null) / (1 + dupDiv*dq)
              + memSuf[q*(memN+1)+lo];
       };
       const growthNow = function(n){
@@ -34905,13 +34937,13 @@ function gppKernelFactory(){
             const sh = mShape[m*W+q], sc = mScale[m*W+q], off = 1 + k + dupOff*dq;
             BLK_D = dupDiv ? 0 : dq;
             b4[0] = b4[1] = b4[2] = b4[3] = 0;
-            const tot0 = evBandSplit(sh, sc, off, payFn, F, b4);
+            const tot0 = evBandSplit(sh, sc, off, payFn, F, b4, 0, mP0[m*W+q] >= 0 ? mP0[m*W+q] : null);
             bands[0] += b4[0]/dv; bands[1] += b4[1]/dv; bands[2] += b4[2]/dv; bands[3] += b4[3]/dv;
             if(tot0 > 0) nCash++;
             // Win = our top entry in this world, nobody in the sampled field
             // above it, and the unobserved F − NF entries all behind — the same
             // gate grossEV's win% uses (ck78), with our own board added to it.
-            nWin   += (k > 0 || mObs[m*W+q] >= 1) ? 0 : (sc > 0 ? Math.pow(1 + sc, -sh) : 1);
+            nWin   += k > 0 ? 0 : (mP0[m*W+q] >= 0 ? mP0[m*W+q] : (mObs[m*W+q] >= 1 ? 0 : (sc > 0 ? Math.pow(1 + sc, -sh) : 1)));
             nTop1  += evRankAtMost(sh, sc, off, K1);
             nTop10 += evRankAtMost(sh, sc, off, K10);
           }
@@ -39819,8 +39851,8 @@ function hbField(slate, ctx, contest, opts){
 const HB_WH_Z=[-1.2816,-0.5244,0,0.5244,1.2816];
 // ck96: ONE routine — see evHeadBands. Places 1..10 from the negative-binomial
 // pmf at exact integer places, the quadrature only for k >= 10.
-function hbExpPayout(shape, scale, offset, payout, obs){
-  return evHeadBands(shape, scale, offset - 1, payout, 0, null, null, obs);
+function hbExpPayout(shape, scale, offset, payout, obs, p0){
+  return evHeadBands(shape, scale, offset - 1, payout, 0, null, null, obs, p0);
 }
 // Price ONE lineup. `players` in any order; `cptId` names the captain on
 // showdown. Returns null when the roster can't be priced (missing sim scores,
@@ -39899,9 +39931,9 @@ function hbPriceLineup(players, cptId, opts){
     // copies occupy, priced at the block's TOP rank (which is the rank DK shows
     // every tied entry). Was the midpoint rank 1 + dups/2 on the raw ladder.
     const _tieK=_tieByK[k];
-    paySum[k]+=hbExpPayout(est.shape, est.scale, 1, _tieK, est.obs);
+    paySum[k]+=hbExpPayout(est.shape, est.scale, 1, _tieK, est.obs, est.p0);
     payCnt[k]++;
-    evBandSplit(est.shape, est.scale, 1, _tieK, fieldSize, bandRaw, est.obs);
+    evBandSplit(est.shape, est.scale, 1, _tieK, fieldSize, bandRaw, est.obs, est.p0);
     top1 +=evRankAtMost(est.shape, est.scale, 1, K1);
     top10+=evRankAtMost(est.shape, est.scale, 1, K10);
     // ── WIN% IS THE PROBABILITY OF THE MONEY THE RANK-1 BAND CHARGES (ck95) ──
@@ -39931,7 +39963,7 @@ function hbPriceLineup(players, cptId, opts){
     // discrete figure is kept as `winPctExact`, unrendered, for diagnostics.
     // ck78: an entry we SAW above us is a fact, not a probability — the Gamma
     // term prices only the F − N entries the sample did not draw.
-    evBandProb(est.shape, est.scale, 1, fieldSize, bandProb, est.obs);
+    evBandProb(est.shape, est.scale, 1, fieldSize, bandProb, est.obs, est.p0);
     winExact+=(est.obs != null && est.obs >= 1) ? 0
          : (est.scale > 0 ? Math.pow(1+est.scale, -est.shape) : 1);
     const rank=1+lam;
