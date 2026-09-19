@@ -124,6 +124,15 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .sort-btn:hover,.sort-btn.active{border-color:var(--accent);color:var(--accent);}
 .show-hidden-btn{background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:3px 6px;border-radius:4px;font-size:10px;font-family:'DM Mono',monospace;cursor:pointer;transition:all .15s;}
 .show-hidden-btn.active{border-color:var(--accent2);color:var(--accent2);background:rgba(232,66,26,.1);}
+/* ck121: the hide-below control is one bordered pill: label · select · label · number · button */
+.hide-below{display:inline-flex;align-items:center;gap:0;background:var(--surface2);border:1px solid var(--border);border-radius:4px;font-size:10px;font-family:'DM Mono',monospace;color:var(--muted);overflow:hidden;}
+.hide-below .hb-lbl{padding:3px 5px;white-space:nowrap;}
+.hide-below select,.hide-below input{background:transparent;border:0;border-left:1px solid var(--border);border-right:1px solid var(--border);color:var(--text);font:inherit;padding:3px 4px;outline:none;height:100%;}
+.hide-below input{width:44px;text-align:center;-moz-appearance:textfield;}
+.hide-below input::-webkit-outer-spin-button,.hide-below input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+.hide-below button{background:rgba(232,66,26,.12);border:0;border-left:1px solid var(--border);color:var(--accent2);font:inherit;padding:3px 8px;cursor:pointer;white-space:nowrap;}
+.hide-below button:hover{background:rgba(232,66,26,.22);}
+.hide-below button:disabled{color:var(--muted);background:transparent;cursor:default;}
 .col-headers,.driver-row{display:grid;align-items:center;gap:4px;padding:5px 7px;}
 /* Header/row alignment: rows render inside .driver-list, which adds 5px side
    padding plus a vertical scrollbar. The header grid sits outside that list,
@@ -1607,13 +1616,14 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
       <button class="show-hidden-btn" id="showHiddenBtn" onclick="toggleShowHidden()">👁 Hidden</button>
       <button class="show-hidden-btn" id="unhideAllBtn" onclick="unhideAll()" style="display:none;">✕ Unhide All</button>
       <button class="show-hidden-btn" id="hideOutBtn" onclick="hideAllOut()" style="display:none;" title="Hide every player DraftKings lists as OUT / IR / suspended (⛔) from the pool — one click instead of one ✕ per row. OUT players never reach a generated lineup anyway; this just clears them off the list.">⛔ Hide OUT</button>
-      <!-- ck121: bulk-hide by a projection / sim floor. -->
-      <span id="hideBelowWrap" style="display:inline-flex;align-items:center;gap:4px;">
-        <select id="hideBelowMetric" class="show-hidden-btn" style="padding:3px 4px;" title="Which number the floor applies to" onchange="refreshHiddenBadge()">
-          <option value="proj">Proj</option><option value="sim">Sim</option>
-        </select>
-        <input type="number" id="hideBelowVal" class="show-hidden-btn" value="5" min="0" step="0.5" style="width:56px;padding:3px 6px;" title="Hide every visible player whose value is below this" oninput="refreshHiddenBadge()">
-        <button class="show-hidden-btn" id="hideBelowBtn" onclick="hideBelow()" title="Hide every visible player whose projection (or sim score) is below the number — one click instead of hundreds of ✕. Anyone already in a saved or current lineup is left alone.">⌄ Hide below</button>
+      <!-- ck121: bulk-hide by a projection / sim floor — ONE control: a sentence
+           with two blanks and one button, inside one border. -->
+      <span id="hideBelowWrap" class="hide-below" title="Hide every visible player whose projection (or sim score) is below the number — one click instead of hundreds of ✕. Anyone in a saved or current lineup is left alone.">
+        <span class="hb-lbl">Hide</span>
+        <select id="hideBelowMetric" onchange="refreshHiddenBadge()"><option value="proj">Proj</option><option value="sim">Sim</option></select>
+        <span class="hb-lbl">under</span>
+        <input type="number" id="hideBelowVal" value="5" min="0" step="0.5" oninput="refreshHiddenBadge()">
+        <button id="hideBelowBtn" onclick="hideBelow()">Hide 0</button>
       </span>
       <button class="show-hidden-btn" id="resetMaxExpBtn" onclick="resetMaxExposures()" style="display:none;" title="Clear all MAX% overrides back to default (100)">↺ Reset Max</button>
       <button class="show-hidden-btn" id="updatePoolBtn" onclick="openUpdatePoolModal()" title="Re-upload CSV to refresh projections, ownership, salary, tee times">↺ Update</button>
@@ -7532,7 +7542,8 @@ function refreshHiddenBadge(){
   const hbb=document.getElementById('hideBelowBtn');
   if(hbb){
     const k=slate?hideBelowCandidates(slate).length:0;
-    hbb.textContent=`⌄ Hide below (${k})`;
+    hbb.textContent=`Hide ${k}`;
+    hbb.disabled=!(k>0);
     const wrap=document.getElementById('hideBelowWrap'); if(wrap) wrap.style.display=slate?'':'none';
   }
 }
