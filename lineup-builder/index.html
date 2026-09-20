@@ -510,6 +510,46 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
   .sdash-grid{grid-template-columns:1fr;}
 }
 /* ── The two launchers ─────────────────────────────────────────────────────── */
+/* ck124: STACK DASHBOARD */
+#stackDashModal #stackDashPanel{flex:1;min-height:0;display:flex;flex-direction:column;}
+.stk-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding-right:26px;margin-bottom:8px;flex-wrap:wrap;}
+.stk-title{font-size:14px;font-weight:600;color:var(--text);}
+.stk-sub{font-size:10px;color:var(--muted);margin-top:2px;line-height:1.45;max-width:900px;}
+.stk-ctl{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:10px;color:var(--muted);}
+.stk-ctl select,.stk-ctl input{background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:5px;font-size:10px;padding:2px 5px;font-family:'DM Sans',sans-serif;}
+.stk-ctl input{width:44px;text-align:right;}
+.stk-body{flex:1;min-height:0;overflow-y:auto;padding-right:4px;}
+.stk-team{border:1px solid var(--border);border-radius:9px;margin-bottom:8px;background:var(--surface);}
+.stk-thdr{display:grid;grid-template-columns:minmax(220px,1.4fr) repeat(6,minmax(58px,.6fr)) 34px;gap:6px;align-items:center;padding:7px 10px;cursor:pointer;font-size:11px;}
+.stk-thdr:hover{background:var(--panel);}
+.stk-tname{font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.stk-tname .stk-team-tag{font-size:9px;font-weight:700;letter-spacing:.4px;color:var(--accent);border:1px solid rgba(245,197,24,.45);border-radius:3px;padding:0 4px;}
+.stk-tname .stk-env{font-size:9px;color:var(--muted);font-weight:500;}
+.stk-num{font-family:'DM Mono',monospace;font-size:10.5px;color:var(--text);text-align:right;white-space:nowrap;}
+.stk-num.mut{color:var(--muted);}
+.stk-num.good{color:var(--green);}
+.stk-col{font-size:8.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;text-align:right;}
+.stk-inner{padding:2px 10px 8px;border-top:1px solid var(--border);}
+.stk-mates{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 8px;}
+.stk-mate{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);border-radius:5px;padding:2px 6px;font-size:10px;color:var(--text);background:var(--panel);}
+.stk-mate .pos-badge{font-size:8px;}
+.stk-mate i{font-style:normal;font-family:'DM Mono',monospace;font-size:9.5px;color:var(--muted);}
+.stk-mate.hid{opacity:.5;}
+.stk-sec{font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:8px 0 3px;display:flex;justify-content:space-between;align-items:center;}
+.stk-sec button{background:none;border:none;color:var(--accent);font-size:9.5px;cursor:pointer;font-family:'DM Sans',sans-serif;text-transform:none;letter-spacing:0;}
+.stk-row{display:grid;grid-template-columns:minmax(220px,1.4fr) repeat(6,minmax(58px,.6fr)) 34px;gap:6px;align-items:center;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:11px;}
+.stk-row:hover{background:var(--panel);}
+.stk-row.best .stk-num.sim{color:var(--accent);}
+.stk-members{color:var(--text);display:flex;flex-wrap:wrap;gap:3px;align-items:center;}
+.stk-members span{white-space:nowrap;}
+.stk-members .stk-bb{color:#53b4ff;}
+.stk-add{background:none;border:1px solid var(--border);color:var(--muted);border-radius:5px;font-size:12px;line-height:1;padding:2px 0;width:26px;cursor:pointer;justify-self:end;}
+.stk-add:hover{border-color:var(--accent);color:var(--accent);}
+.stk-add.in{border-color:var(--green);color:var(--green);}
+.stk-empty{font-size:11px;color:var(--muted);font-style:italic;padding:20px 4px;}
+.stk-sw{background:none;border:1px solid var(--border);color:var(--muted);border-radius:4px;font-size:9.5px;padding:1px 5px;cursor:pointer;font-family:'DM Sans',sans-serif;}
+.stk-sw:hover{border-color:var(--accent);color:var(--accent);}
+@media (max-width:900px){ .stk-thdr,.stk-row{grid-template-columns:minmax(160px,1.2fr) repeat(6,minmax(44px,.5fr)) 30px;} }
 .sim-open-btn{display:inline-flex;align-items:center;gap:5px;background:none;border:1px solid var(--border);
   color:var(--muted);border-radius:6px;font-size:11px;font-weight:600;padding:4px 9px;cursor:pointer;
   font-family:'DM Sans',sans-serif;white-space:nowrap;transition:border-color .12s,color .12s,background .12s;}
@@ -1673,6 +1713,14 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
         <div id="simDashPanel"></div>
       </div>
     </div>
+    <!-- ck124: STACK DASHBOARD — every team's QB with his stacking pieces, ranked as QB+2 / QB+3 off the joint sim draws -->
+    <div id="stackDashModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9010;align-items:center;justify-content:center;backdrop-filter:blur(2px);"
+      onclick="if(event.target===this)closeStackDashModal()">
+      <div class="sim-modal-card">
+        <button onclick="closeStackDashModal()" class="sim-modal-x" title="Close (Esc)">✕</button>
+        <div id="stackDashPanel"></div>
+      </div>
+    </div>
 
     <!-- DK ENTRIES — fill DraftKings' entries file from the saved lineups -->
     <div id="dkEntriesModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9000;align-items:center;justify-content:center;backdrop-filter:blur(2px);">
@@ -2010,6 +2058,8 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
             <div style="margin-bottom:7px;">
               <button class="sim-open-btn" id="autogenSimInputsBtn" onclick="openSimInputsModal()"
                 title="Game totals, spreads, team lean and every player's share of his team — the inputs this simulation runs on">⚙ Sim inputs</button>
+              <button class="sim-open-btn" id="autogenStackDashBtn" onclick="openStackDashModal()"
+                title="Every team's QB with his stacking pieces — QB+2 and QB+3 ranked by their joint sim total, ceiling, boom rate, value and ownership">⛓ Stacks</button>
             </div>
             <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">Simulates each game outside-in: the consensus total and spread set the game's score, that score sets each team's yardage and pass/run script, and every player's prop line rides those team factors. Stack and bring-back correlation come out of that structure — a QB and his WR share the same team draw. Needs Team + Position; O/U, Spread and TmTot (from the odds puller) make the game environments real.</div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
@@ -6681,7 +6731,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck123/2026-09-20';
+const BUILD_ID = '2.0/ck124/2026-09-20';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -8000,9 +8050,10 @@ function renderNflGameTiles(slate){
   const simBtn = `<button class="sim-open-btn ngt-simbtn${(typeof simInputsBadgeHtml==='function'&&simInputsBadgeHtml(slate))?' armed':''}"
       onclick="event.stopPropagation();openSimInputsModal()"
       title="Open the simulation inputs: game totals, spreads, team lean and every player's share">⚙ Sim inputs${typeof simInputsBadgeHtml==='function'?simInputsBadgeHtml(slate):''}</button>`;
+  const stkBtn = (typeof isNflClassic==='function' && isNflClassic(slate)) ? `<button class="sim-open-btn ngt-simbtn" onclick="event.stopPropagation();openStackDashModal()" title="Stack dashboard: every QB with his stacking pieces, ranked off the joint sim draws">⛓ Stacks</button>` : '';
   el.innerHTML=tiles
     +((activeKey||activeTeam)?`<button class="ngt-clear" onclick="toggleGameFilter(null)" title="Show every player">✕ ${activeTeam?activeTeam+' only':'All games'}</button>`:'')
-    +simBtn
+    +simBtn+stkBtn
     +(noEnv?`<div class="ngt-note">No O/U / spread on this sheet — run the odds puller for real game environments (the sim falls back to a 44.5 total).</div>`:'');
   el.style.display='flex';
 }
@@ -29216,6 +29267,248 @@ if(typeof document !== 'undefined') document.addEventListener('keydown', functio
   if(ev.key !== 'Escape' || !simInputsModalOpen()) return;
   closeSimInputsModal();
 });
+// ═══════════════════════════════════════════════════════════════════════════
+// ck124: STACK DASHBOARD
+// Every team's QB with every viable stacking piece, ranked as QB+2 and QB+3.
+// The numbers come from the JOINT sim draws — a stack's total in world w is
+// the sum of its members' scores in that same world — so the correlation the
+// sim builds in (shared game total, pace, team pass/run script) shows up in
+// the ceiling and boom rate, which adding per-player means could never show.
+//   Proj   sum of the sheet projections
+//   Sim    mean of the stack's per-sim total (all sims)
+//   Ceil   90th percentile of that total
+//   Boom   share of sims where the total reaches STK_BOOM_PER × members (an
+//          absolute bar; adjustable on the panel)
+//   Val    Sim per $1k of combined salary
+//   Own    cumulative ownership — the members' own (SS Own, else the Own
+//          Model) summed, the number DFS content quotes for a stack
+// ═══════════════════════════════════════════════════════════════════════════
+const STK_MATES_MAX = 7;        // stacking pieces per team the combos are built from
+const STK_SHOW = 5;             // rows per shape before "show all"
+const STK_BOOM_PER = 24;        // boom bar, DK points per member (QB+2 ≥ 72, QB+3 ≥ 96)
+function stackDashModalOpen(){ const m = document.getElementById('stackDashModal'); return !!m && m.style.display !== 'none'; }
+function openStackDashModal(){
+  const slate = activeSlate();
+  if(!slate || !(typeof isNflClassic === 'function' && isNflClassic(slate))){ showToast('The stack dashboard is for NFL classic slates.','err'); return; }
+  const m = document.getElementById('stackDashModal'); if(!m) return;
+  m.style.display = 'flex';
+  renderStackDash();
+}
+function closeStackDashModal(){
+  const m = document.getElementById('stackDashModal'); if(m) m.style.display = 'none';
+  if(typeof renderAll === 'function') renderAll();
+}
+if(typeof document !== 'undefined') document.addEventListener('keydown', function(ev){
+  if(ev.key !== 'Escape' || !stackDashModalOpen()) return;
+  closeStackDashModal();
+});
+function stkOwnOf(p){
+  const ss = parseFloat(p && p.own), md = parseFloat(p && p.own_model);
+  return Number.isFinite(ss) && ss > 0 ? ss : (Number.isFinite(md) && md > 0 ? md : 0);
+}
+// Per-player sim stats from the context (all sims). null when he was not in the run.
+function stkPlayerSim(ctx, p){
+  const a = ctx && ctx.simScoresById && ctx.simScoresById[p.id]; if(!a || !a.length) return null;
+  let t = 0; for(let i = 0; i < a.length; i++) t += a[i];
+  return { mean: t / a.length, n: a.length };
+}
+// Joint stats of a set of players. Uses every sim the run kept.
+function stkComboSim(ctx, players, boomBar){
+  const arrs = players.map(p => ctx.simScoresById[p.id]);
+  if(arrs.some(a => !a || !a.length)) return null;
+  const n = Math.min.apply(null, arrs.map(a => a.length));
+  const tot = new Float64Array(n);
+  for(const a of arrs) for(let i = 0; i < n; i++) tot[i] += a[i];
+  let sum = 0; for(let i = 0; i < n; i++) sum += tot[i];
+  const mean = sum / n;
+  const sorted = Array.from(tot).sort((x, y) => x - y);
+  const p90 = sorted[Math.min(n - 1, Math.floor(n * 0.9))];
+  const p50 = sorted[Math.min(n - 1, Math.floor(n * 0.5))];
+  // Boom is against an ABSOLUTE bar (points per member), not the stack's own
+  // mean: a relative bar crowned every cheap backup stack, whose mean is small
+  // enough that 1.5× it is nothing.
+  let boom = 0; const bar = (Number.isFinite(boomBar) ? boomBar : STK_BOOM_PER) * players.length; for(let i = 0; i < n; i++) if(tot[i] >= bar) boom++;
+  return { mean, p50, p90, boom: boom / n, n };
+}
+function stkCombos(list, k){
+  const out = [];
+  const rec = (start, acc) => { if(acc.length === k){ out.push(acc.slice()); return; } for(let i = start; i < list.length; i++){ acc.push(list[i]); rec(i + 1, acc); acc.pop(); } };
+  rec(0, []); return out;
+}
+// The stack rows for one QB: every QB+k combo over his top stacking pieces.
+function stkRowsFor(slate, ctx, qb, mates, k){
+  const rows = [];
+  const boomBar = parseFloat((slate._stackDash || {}).boom);
+  for(const combo of stkCombos(mates, k)){
+    const members = [qb].concat(combo);
+    const sal = members.reduce((t, p) => t + (p.salary || 0), 0);
+    const proj = members.reduce((t, p) => t + (parseFloat(p.proj) || 0), 0);
+    const sim = ctx ? stkComboSim(ctx, members, boomBar) : null;
+    const ownJ = members.reduce((t, p) => t + stkOwnOf(p), 0);   // cumulative ownership
+    rows.push({ members, sal, proj, sim, ownJ, val: sim ? sim.mean / Math.max(1, sal / 1000) : (proj / Math.max(1, sal / 1000)) });
+  }
+  return rows;
+}
+function stkSortRows(rows, key){
+  const v = r => key === 'ceil' ? (r.sim ? r.sim.p90 : r.proj) : key === 'boom' ? (r.sim ? r.sim.boom : 0) : key === 'val' ? r.val
+            : key === 'proj' ? r.proj : key === 'own' ? -r.ownJ : (r.sim ? r.sim.mean : r.proj);
+  return rows.slice().sort((a, b) => v(b) - v(a));
+}
+function stkSet(key, val){
+  const slate = activeSlate(); if(!slate) return;
+  slate._stackDash = Object.assign({}, slate._stackDash || {});
+  if(key === 'open'){ slate._stackDash.open = Object.assign({}, slate._stackDash.open || {}); slate._stackDash.open[val] = !slate._stackDash.open[val]; }
+  else if(key === 'all'){ slate._stackDash.all = Object.assign({}, slate._stackDash.all || {}); slate._stackDash.all[val] = !slate._stackDash.all[val]; }
+  else if(key === 'qb'){ const [t, id] = String(val).split('|'); slate._stackDash.qbPick = Object.assign({}, slate._stackDash.qbPick || {}); slate._stackDash.qbPick[t] = id; slate._stackDash.open = Object.assign({}, slate._stackDash.open || {}); slate._stackDash.open[id] = true; }
+  else slate._stackDash[key] = val;
+  save(); renderStackDash();
+}
+// Load a stack into the current lineup: the QB replaces any QB already there;
+// the pieces fill open slots. Anyone who does not fit is named in the toast.
+function stkLoad(ids){
+  const slate = activeSlate(); if(!slate) return;
+  const members = ids.split(',').map(id => playerById(slate, id)).filter(Boolean);
+  if(!members.length) return;
+  slate.currentLineup = slate.currentLineup || [];
+  const qb = members.find(p => nflPosOf(p) === 'QB');
+  if(qb){
+    const curQb = slate.currentLineup.map(id => playerById(slate, id)).find(p => p && nflPosOf(p) === 'QB' && p.id !== qb.id);
+    if(curQb && !playerLockedById(slate, curQb.id)) slate.currentLineup = slate.currentLineup.filter(id => id !== curQb.id);
+  }
+  const skipped = [];
+  for(const p of members){
+    if(slate.currentLineup.includes(p.id)) continue;
+    if(!canAddPlayer(slate, p.id)){ skipped.push(p.name); continue; }
+    slate.currentLineup.push(p.id);
+  }
+  save(); renderAll(); renderStackDash();
+  showToast(skipped.length ? `Loaded the stack; no room for ${skipped.join(', ')} — clear a slot and add by hand.` : `Stack loaded into the current lineup (${slate.currentLineup.length}/9).`, skipped.length ? 'err' : 'ok');
+}
+function renderStackDash(){
+  const el = document.getElementById('stackDashPanel'); if(!el) return;
+  const slate = activeSlate();
+  if(!slate || !(typeof isNflClassic === 'function' && isNflClassic(slate))){ el.innerHTML = '<div class="stk-empty">The stack dashboard is for NFL classic slates.</div>'; return; }
+  const ctx = slateSimCtx(slate);
+  const st = slate._stackDash || {};
+  const sortKey = st.sort || 'sim';
+  const shape = st.shape || 'both';
+  const nMates = Math.max(3, Math.min(10, parseInt(st.mates) || STK_MATES_MAX));
+  const boomPer = Math.max(10, Math.min(40, parseFloat(st.boom) || STK_BOOM_PER));
+  const outS = nflOutSet(slate), hid = new Set(slate.hiddenIds || []);
+  const envs = new Map(); for(const g of nflGameEnvs(slate)) for(const ti of g.teams) envs.set(ti.team, ti);
+  const fmt1 = v => (v == null || !Number.isFinite(v)) ? '—' : (Math.round(v * 10) / 10).toFixed(1);
+  const pct = v => (v == null || !Number.isFinite(v)) ? '—' : (Math.round(v * 10) / 10).toFixed(1) + '%';
+  const sal = v => '$' + (Math.round(v / 100) / 10).toFixed(1) + 'k';
+  const cur = new Set(slate.currentLineup || []);
+  // Every QB with a salary who is not scratched — hidden QBs included (the
+  // user asked to see the whole slate; a hidden man is tagged, not dropped).
+  const qbsAll = (slate.players || []).filter(p => nflPosOf(p) === 'QB' && (p.salary || 0) > 0 && !outS.has(p.id) && nflTeamOf(p));
+  const qbScore = p => { const ps = ctx ? stkPlayerSim(ctx, p) : null; return (ps ? ps.mean : (parseFloat(p.proj) || 0)) * 1000 + (p.salary || 0) / 1000; };
+  // One card per team. A DK sheet lists every backup with a salary; the card
+  // is the starter (best Sim, or projection before a sim, salary as the tie
+  // break) and the others are offered as a switch inside the card.
+  const byTeam = new Map();
+  for(const qb of qbsAll){ const t = nflTeamOf(qb); if(!byTeam.has(t)) byTeam.set(t, []); byTeam.get(t).push(qb); }
+  const pick = st.qbPick || {};
+  const qbs = [];
+  for(const [t, list] of byTeam){
+    list.sort((a, b) => qbScore(b) - qbScore(a));
+    const chosen = list.find(p => p.id === pick[t]) || list[0];
+    qbs.push(chosen);
+  }
+  const teams = [];
+  for(const qb of qbs){
+    const t = nflTeamOf(qb); if(!t) continue;
+    const others = (byTeam.get(t) || []).filter(p => p !== qb);
+    const matesAll = nflQbTeammates(slate, qb).filter(p => !outS.has(p.id));
+    const mateSim = p => { const s = ctx ? stkPlayerSim(ctx, p) : null; return s ? s.mean : (parseFloat(p.proj) || 0); };
+    const mates = matesAll.slice().sort((a, b) => mateSim(b) - mateSim(a)).slice(0, nMates);
+    const qbSim = ctx ? stkPlayerSim(ctx, qb) : null;
+    const qbOnly = ctx ? stkComboSim(ctx, [qb]) : null;
+    const rows2 = stkRowsFor(slate, ctx, qb, mates, 2);
+    const rows3 = stkRowsFor(slate, ctx, qb, mates, 3);
+    const best2 = stkSortRows(rows2, sortKey)[0] || null, best3 = stkSortRows(rows3, sortKey)[0] || null;
+    const head = (shape === '3' ? best3 : best2) || best3;
+    teams.push({ qb, t, others, env: envs.get(t) || null, mates, matesAll, qbSim, qbOnly, rows2, rows3, head });
+  }
+  // Teams ordered by their best stack under the current sort.
+  const headV = T => { const r = T.head; if(!r) return -Infinity; return sortKey === 'ceil' ? (r.sim ? r.sim.p90 : r.proj) : sortKey === 'boom' ? (r.sim ? r.sim.boom : 0) : sortKey === 'val' ? r.val : sortKey === 'proj' ? r.proj : sortKey === 'own' ? -r.ownJ : (r.sim ? r.sim.mean : r.proj); };
+  teams.sort((a, b) => headV(b) - headV(a));
+  let html = `<div class="stk-top">
+    <div>
+      <div class="stk-title">Stacks</div>
+      <div class="stk-sub">Every team's QB with his stacking pieces, ranked as QB+2 and QB+3. Sim, Ceil and Boom are read off the <b>joint</b> sim draws — the stack's total in each simulated game — so a QB and his receivers sharing a shootout counts. ${ctx ? `${ctx.simsDone || (ctx.totalSims || 0)} sims.` : '<b style="color:var(--accent)">No sim has run for this slate</b> — Sim / Ceil / Boom are blank; Proj and Val use the sheet projection until you run one.'} Own is the members' cumulative ownership (summed). ＋ loads a stack into the current lineup.</div>
+    </div>
+    <div class="stk-ctl">
+      <span>Sort</span>
+      <select onchange="stkSet('sort',this.value)">
+        ${[['sim','Sim mean'],['ceil','Ceiling (p90)'],['boom','Boom %'],['val','Value (Sim/$1k)'],['proj','Projection'],['own','Lowest own']].map(([k,l]) => `<option value="${k}"${sortKey===k?' selected':''}>${l}</option>`).join('')}
+      </select>
+      <span>Shape</span>
+      <select onchange="stkSet('shape',this.value)">
+        ${[['both','QB+2 and QB+3'],['2','QB+2 only'],['3','QB+3 only']].map(([k,l]) => `<option value="${k}"${shape===k?' selected':''}>${l}</option>`).join('')}
+      </select>
+      <span>Pieces per team</span>
+      <input type="number" min="3" max="10" value="${nMates}" onchange="stkSet('mates',this.value)" title="How many of each team's pass-catchers / receiving backs (by Sim) the combos are built from">
+      <span>Boom bar</span>
+      <input type="number" min="10" max="40" step="1" value="${boomPer}" onchange="stkSet('boom',this.value)" title="DK points per member a stack must reach to count as a boom: QB+2 ≥ ${boomPer*3}, QB+3 ≥ ${boomPer*4}"><span>pts/man</span>
+    </div>
+  </div>`;
+  if(!teams.length){ el.innerHTML = html + '<div class="stk-empty">No quarterbacks with a salary on this slate.</div>'; return; }
+  const colHdr = `<div class="stk-row" style="border-bottom:1px solid var(--border);"><span class="stk-col" style="text-align:left">Stack</span><span class="stk-col">Sal</span><span class="stk-col">Proj</span><span class="stk-col">Sim</span><span class="stk-col">Ceil p90</span><span class="stk-col" title="Share of sims at or above ${boomPer} pts per member">Boom ≥${boomPer}/man</span><span class="stk-col">Val · Own</span><span></span></div>`;
+  const rowHtml = (r, best) => {
+    const ids = r.members.map(p => p.id).join(',');
+    const allIn = r.members.every(p => cur.has(p.id));
+    return `<div class="stk-row${best?' best':''}">
+      <div class="stk-members">${r.members.map((p, i) => `<span${i?'':' style="font-weight:600"'} title="${esc(p.name)} · ${sal(p.salary||0)} · own ${pct(stkOwnOf(p))}${hid.has(p.id)?' · hidden from pool':''}">${i?'+ ':''}${esc(surnameOf(p.name))}${hid.has(p.id)?'<i style="color:var(--muted)">*</i>':''}</span>`).join(' ')}</div>
+      <span class="stk-num mut">${sal(r.sal)}</span>
+      <span class="stk-num mut">${fmt1(r.proj)}</span>
+      <span class="stk-num sim">${r.sim ? fmt1(r.sim.mean) : '—'}</span>
+      <span class="stk-num">${r.sim ? fmt1(r.sim.p90) : '—'}</span>
+      <span class="stk-num${r.sim && r.sim.boom >= 0.15 ? ' good' : ''}">${r.sim ? pct(100 * r.sim.boom) : '—'}</span>
+      <span class="stk-num" title="Sim (or Proj) per $1k · cumulative ownership">${fmt1(r.val)} <span class="mut" style="color:var(--muted)">· ${r.ownJ > 0 ? Math.round(r.ownJ) + '%' : '—'}</span></span>
+      <button class="stk-add${allIn?' in':''}" onclick="stkLoad('${ids}')" title="${allIn?'Already in the current lineup':'Load this stack into the current lineup'}">${allIn?'✓':'＋'}</button>
+    </div>`;
+  };
+  html += `<div class="stk-body"><div class="stk-row" style="border-bottom:1px solid var(--border);padding:2px 10px;position:sticky;top:0;background:var(--panel);z-index:1;"><span class="stk-col" style="text-align:left">Team · QB — best stack under the current sort</span><span class="stk-col">QB sim / p90</span><span class="stk-col">Sal</span><span class="stk-col">Sim</span><span class="stk-col">Ceil p90</span><span class="stk-col">Boom</span><span class="stk-col">Val · Own</span><span></span></div>`;
+  for(const T of teams){
+    const key = T.qb.id;
+    const isOpen = !!(st.open && st.open[key]);
+    const env = T.env;
+    const envTxt = env ? `${env.opp ? (env.home === false ? '@ ' : 'vs ') + env.opp : ''}${env.implied != null ? ` · implied ${fmt1(env.implied)}` : ''}${env.total != null ? ` · O/U ${fmt1(env.total)}` : ''}${env.spread != null ? ` · ${env.spread > 0 ? '+' : ''}${fmt1(env.spread)}` : ''}` : '';
+    const h = T.head;
+    html += `<div class="stk-team">
+      <div class="stk-thdr" onclick="stkSet('open','${key}')">
+        <div class="stk-tname"><span class="stk-team-tag">${esc(T.t)}</span>${esc(T.qb.name)}${hid.has(T.qb.id)?'<span class="sd-hid-badge both" title="Hidden from your lineup pool">HIDDEN</span>':''} <span class="stk-env">${sal(T.qb.salary||0)} · own ${pct(stkOwnOf(T.qb))}${envTxt ? ' · ' + esc(envTxt) : ''}</span></div>
+        <span class="stk-num mut" title="QB alone: Sim mean / p90">${T.qbOnly ? fmt1(T.qbOnly.mean) + ' / ' + fmt1(T.qbOnly.p90) : (fmt1(parseFloat(T.qb.proj)||0) + ' proj')}</span>
+        <span class="stk-num mut" title="Best stack under the current sort: salary">${h ? sal(h.sal) : '—'}</span>
+        <span class="stk-num sim" title="Best stack: Sim mean">${h && h.sim ? fmt1(h.sim.mean) : (h ? fmt1(h.proj) + ' proj' : '—')}</span>
+        <span class="stk-num" title="Best stack: ceiling (p90)">${h && h.sim ? fmt1(h.sim.p90) : '—'}</span>
+        <span class="stk-num" title="Best stack: boom rate">${h && h.sim ? pct(100 * h.sim.boom) : '—'}</span>
+        <span class="stk-num" title="Best stack: value · cumulative own">${h ? fmt1(h.val) + ' · ' + (h.ownJ > 0 ? Math.round(h.ownJ) + '%' : '—') : '—'}</span>
+        <span class="stk-num mut">${isOpen ? '▾' : '▸'}</span>
+      </div>`;
+    if(isOpen){
+      html += `<div class="stk-inner">
+        ${T.others.length ? `<div style="font-size:9.5px;color:var(--muted);margin-top:6px;">Other ${esc(T.t)} QBs on the sheet: ${T.others.map(p => `<button class="stk-sw" onclick="stkSet('qb','${esc(T.t)}|${p.id}')" title="Build ${esc(T.t)}'s stacks around ${esc(p.name)} instead">${esc(p.name)} ${sal(p.salary||0)}</button>`).join(' ')}</div>` : ''}
+        <div class="stk-mates">${T.mates.map(p => { const ps = ctx ? stkPlayerSim(ctx, p) : null; return `<span class="stk-mate${hid.has(p.id)?' hid':''}" title="${esc(p.name)}${hid.has(p.id)?' — hidden from your pool':''}"><span class="pos-badge">${nflPosOf(p)}</span>${esc(p.name)} <i>${sal(p.salary||0)} · ${ps ? fmt1(ps.mean) : fmt1(parseFloat(p.proj)||0) + 'p'} · ${pct(stkOwnOf(p))}</i></span>`; }).join('')}${T.matesAll.length > T.mates.length ? `<span class="stk-mate" style="color:var(--muted)" title="Raise 'Pieces per team' to include them">+${T.matesAll.length - T.mates.length} more not in the combos</span>` : ''}</div>`;
+      const sec = (label, rows, k) => {
+        if(!rows.length) return '';
+        const sorted = stkSortRows(rows, sortKey);
+        const allKey = key + '|' + k;
+        const showAll = !!(st.all && st.all[allKey]);
+        const shown = showAll ? sorted : sorted.slice(0, STK_SHOW);
+        return `<div class="stk-sec"><span>${label} — ${rows.length} combo${rows.length===1?'':'s'}</span>${sorted.length > STK_SHOW ? `<button onclick="stkSet('all','${allKey}')">${showAll ? 'Top ' + STK_SHOW + ' only' : 'Show all ' + sorted.length}</button>` : ''}</div>${colHdr}${shown.map((r, i) => rowHtml(r, i === 0)).join('')}`;
+      };
+      if(shape !== '3') html += sec('QB + 2', T.rows2, 2);
+      if(shape !== '2') html += sec('QB + 3', T.rows3, 3);
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
 // One badge, two launchers: "N adjustments" and/or "N out", or nothing at all
 // when the board is still at Vegas.
 function simInputsBadgeHtml(slate){
