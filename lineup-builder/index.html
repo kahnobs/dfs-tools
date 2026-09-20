@@ -332,6 +332,7 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .sdash-prenews-row span:first-of-type{color:var(--text);font-weight:600;}
 .sdash-prenews-state{opacity:.8;}
 .sdash-prenews-btn.on{color:#f59e0b;border-color:rgba(245,158,11,.45);}
+.sdash-hid-tag{font-size:8px;color:var(--muted);border:1px solid var(--border);border-radius:3px;padding:0 3px;margin-left:4px;white-space:nowrap;}
 .sdash-auto-tag{font-size:8px;color:var(--red);border:1px solid rgba(239,68,68,.4);border-radius:3px;padding:0 3px;margin-left:4px;white-space:nowrap;}
 /* ── Sim tab: game grid + detail panel ───────────────────────────────────────
    A 13-game main slate rendered as thirteen stacked per-game editors is a
@@ -5440,9 +5441,10 @@ function nflRoleUnsettled(slate){
   }
   if(!rooms.size) return out;
   const outS = nflOutSet(slate);
-  const hid = new Set(slate.hiddenIds || []);
+  // ck123: a player hidden from the lineup pool is still on the field and still
+  // absorbs a scratched teammate's role — only OUT players leave the room.
   for(const p of (slate.players || [])){
-    if(!p || outS.has(p.id) || hid.has(p.id) || !((p.salary||0) > 0)) continue;
+    if(!p || outS.has(p.id) || !((p.salary||0) > 0)) continue;
     const t = nflTeamOf(p), pos = nflPosOf(p);
     const r = rooms.get(t + '|' + pos);
     if(!r) continue;
@@ -6679,7 +6681,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck122/2026-09-19';
+const BUILD_ID = '2.0/ck123/2026-09-20';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -29451,7 +29453,10 @@ function simDashGameHtml(ctx, g){
         const teamTot = tot[st.key], baseTot = T.base[st.key];
         if(!(baseTot > 0)) continue;
         const res = nflAdjShares(T, st.key, adj);
-        const rows = T.players.filter(pl => !pl.skip && !hidden.has(pl.p.id))
+        // ck123: hiding a man from the LINEUP pool does not take him off the
+        // field — he still runs his routes and keeps his share, so he stays on
+        // this board (tagged). Only OUT removes a share.
+        const rows = T.players.filter(pl => !pl.skip)
           .map(pl => ({pl, share: res.shares[pl.p.id]||0, base: pl.share[st.key]||0}))
           .filter(r => r.base > 0 || r.share > 0 || (adj.players[r.pl.p.id] && Number.isFinite(adj.players[r.pl.p.id][st.key])))
           .sort((x,y) => y.share - x.share);
@@ -29459,7 +29464,7 @@ function simDashGameHtml(ctx, g){
         const sOpen = !!open[sid];
         const statAdj = rows.some(r => adj.players[r.pl.p.id] && Number.isFinite(adj.players[r.pl.p.id][st.key]));
         // Unpriced teammates the user can hand a share to.
-        const extras = T.players.filter(pl => !pl.skip && !hidden.has(pl.p.id) && !rows.some(r => r.pl === pl) && (st.key !== 'passYds' || pl.e.pos === 'QB'));
+        const extras = T.players.filter(pl => !pl.skip && !rows.some(r => r.pl === pl) && (st.key !== 'passYds' || pl.e.pos === 'QB'));
         html += `<div class="sdash-stat${statAdj?' adj':''}">
           <div class="sdash-stat-hdr" onclick="simDashToggle('${sid}')">
             <span class="sdash-caret">${sOpen?'▾':'▸'}</span>
@@ -29480,8 +29485,9 @@ function simDashGameHtml(ctx, g){
           const isOutRow = _dashOut.has(id);
           const autoWhy = isAuto ? (_outMoveFor.get(id + '|' + st.key) || '') : '';
           const mean = teamTot * r.share, baseMean = baseTot * r.base;
+          const isHidRow = hidden.has(id) && !isOutRow;
           html += `<div class="sdash-prow${isOv?' ov':''}${a.lock?' lock':''}${isOutRow?' isout':''}">
-            <div class="sdash-pname" title="${esc(r.pl.p.name)}"><span class="pos-badge" style="font-size:8px;margin-right:4px;">${r.pl.e.pos||'?'}</span>${esc(r.pl.p.name)}${isAuto?`<span class="sdash-auto-tag" title="Written automatically when ${esc(autoWhy||'a teammate')} was marked OUT. Drag the slider to take it over by hand.">auto — ${esc(autoWhy||'out')} out</span>`:''}</div>
+            <div class="sdash-pname" title="${esc(r.pl.p.name)}${isHidRow?' — hidden from your lineup pool; still playing, still simmed with this share':''}"><span class="pos-badge" style="font-size:8px;margin-right:4px;">${r.pl.e.pos||'?'}</span>${esc(r.pl.p.name)}${isHidRow?`<span class="sdash-hid-tag" title="Hidden from YOUR lineup pool only. He is still playing, so the sim keeps his share of the offense — mark him OUT (⛔) if he is not playing.">hidden from pool</span>`:''}${isAuto?`<span class="sdash-auto-tag" title="Written automatically when ${esc(autoWhy||'a teammate')} was marked OUT. Drag the slider to take it over by hand.">auto — ${esc(autoWhy||'out')} out</span>`:''}</div>
             ${rng('sdP_'+id+'_'+st.key, pct(r.share), 0, 100, 0.5, `simDashSet('player/${id}/${st.key}',this.value)`, '', '%')}
             <div class="sdash-pshare${isOv?' hot':''}">${pct(r.share)}%${Math.abs(r.share-r.base)>=0.0005?`<i>${pct(r.base)}%</i>`:''}</div>
             <div class="sdash-pmean">${st.fmt(mean)}${Math.abs(mean-baseMean)>=0.05?`<i>${st.fmt(baseMean)}</i>`:''}</div>
