@@ -6752,7 +6752,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck127/2026-09-24';
+const BUILD_ID = '2.0/ck128/2026-09-24';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -26359,7 +26359,10 @@ function nflCalibrateDst(entries, games){
     };
     // Monotone increasing in c, so bisect. Out-of-range lines clamp rather than
     // fail: a defense cannot score fewer points than the tiers alone pay it.
-    let lo = 0.02, hi = 8;
+    // ck128: a projection is an opinion, not a book — it may move the takeaway
+    // rates by a bounded factor only, so a weak defense keeps a sack/turnover
+    // tail (a pts LINE is the market's whole opinion and may go further).
+    let lo = e.dstPtsSrc === 'proj' ? 0.35 : 0.02, hi = e.dstPtsSrc === 'proj' ? 3 : 8;
     if(mean(lo) > e.dstPtsOu){ e.dstCal = lo; continue; }
     if(mean(hi) < e.dstPtsOu){ e.dstCal = hi; continue; }
     for(let k = 0; k < 40; k++){ const mid = (lo + hi) / 2; if(mean(mid) < e.dstPtsOu) lo = mid; else hi = mid; }
@@ -27120,9 +27123,17 @@ function nflPropEntry(p, t, gameKey){
       // it leaves over once the interception leg is taken out.
       e.dstFum  = to != null ? Math.max(0.10, to - e.dstInt) : NFL_DST_BASE.fumRec;
       e.dstPtsOu = nflDstCount(p.dst_pts_ou, 0.55);
-      e.dstCal  = 1;                       // set by nflCalibrateDst when a pts line exists
+      // ck128: no pts line → the sheet's own projection is the calibration
+      // target. The three rates fall back to LEAGUE averages, so without this
+      // every defense without a book sat within a point of the same mean and
+      // the only thing separating the Dolphins from the 49ers was the opponent's
+      // implied total (Week 2 main: sheet 2.5–9.4 became sim 4.3–8.4; the four
+      // cheapest defenses were lifted 1–2 pts and scored −4, −2, 3, 8).
+      e.dstPtsSrc = e.dstPtsOu != null ? 'pts' : null;
+      if(e.dstPtsOu == null){ const pj = parseFloat(p.proj); if(Number.isFinite(pj) && pj > 0){ e.dstPtsOu = pj; e.dstPtsSrc = 'proj'; } }
+      e.dstCal  = 1;                       // set by nflCalibrateDst when a pts line (or the proj) exists
       e.dstProps = [sk != null && 'sacks', iv != null && 'int', to != null && 'TO',
-                    e.dstPtsOu != null && 'pts'].filter(Boolean);
+                    e.dstPtsSrc === 'pts' && 'pts', e.dstPtsSrc === 'proj' && 'sheet proj'].filter(Boolean);
     }
     if(!e.hasProps){
       const proj = parseFloat(p.proj);
