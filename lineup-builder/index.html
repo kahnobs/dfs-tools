@@ -11255,7 +11255,8 @@ function exportSimCSV(){
         const ps = L.ids.map(id=>playerById(slate,id)).filter(Boolean);
         const slotted = (slate.sport === 'nfl' && !isShowdown(slate) && typeof nflAssignSlots==='function') ? nflAssignSlots(slate, L.ids) : null;
         const names = slotted ? slotted.map(x=>(playerById(slate,x)||{}).name||'') : ps.map(p=>p.name);
-        const salT = ps.reduce((t,p)=>t+(p.salary||0),0);
+        // ck127: showdown — slot 0 is the captain and pays the 1.5× premium (the export said 45,600 for a $50,000 lineup)
+        const salT = ps.reduce((t,p,k)=>t+((isShowdown(slate) && k === 0 && typeof cptSalaryOf==='function') ? cptSalaryOf(p) : (p.salary||0)),0);
         const cEV = (L.calEV != null) ? L.calEV : L.heldEV;
         lines.push([i+1, L.shape||'', L.heldEV.toFixed(2), (100*L.heldEV/Math.max(0.01,feeG)).toFixed(1),
                     cEV.toFixed(2), (100*cEV/Math.max(0.01,feeG)).toFixed(1),
