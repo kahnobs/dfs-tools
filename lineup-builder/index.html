@@ -6752,7 +6752,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck126/2026-09-24';
+const BUILD_ID = '2.0/ck127/2026-09-24';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -8521,14 +8521,17 @@ function renderPool(){
         }
        if(f.key==='minExp'||f.key==='maxExp'){
          const isMin = f.key==='minExp';
-         const expOverrides = isMin ? (slate.playerMinOverrides||{}) : (slate.playerExpOverrides||{});
+         // ck127: in the CAPTAIN list the Min% cell is "at least this share of
+         // the board with him as captain" (sdCptMinOverrides), not the player floor.
+         const cptMin = isMin && SDm && mode==='cpt';
+         const expOverrides = cptMin ? (slate.sdCptMinOverrides||{}) : isMin ? (slate.playerMinOverrides||{}) : (slate.playerExpOverrides||{});
          const expVal = expOverrides[p.id]!=null ? String(expOverrides[p.id]) : '';
          const expColor = isMin ? 'var(--green)' : 'var(--accent)';
          const hasVal = expVal !== '';
-         const fnName = isMin ? 'stepMinExp' : 'stepMaxExp';
-         const saveFn = isMin ? 'setPlayerMinOverride' : 'setPlayerExpOverride';
+         const fnName = cptMin ? 'stepSdCptMin' : isMin ? 'stepMinExp' : 'stepMaxExp';
+         const saveFn = cptMin ? 'setSdCptMinOverride' : isMin ? 'setPlayerMinOverride' : 'setPlayerExpOverride';
          return `<div class="exp-cell-wrap" onclick="event.stopPropagation()">
-           <input type="text" inputmode="numeric" placeholder="—" value="${expVal}"
+           <input type="text" inputmode="numeric" placeholder="—" value="${expVal}" title="${cptMin?'Captain conviction: at least this % of the board captains him (Contest EV mode)':isMin?'Min% of the board holding him (Contest EV mode)':'Max% of the board holding him'}"
              style="flex:1;min-width:0;background:${hasVal?'rgba(255,255,255,.04)':'none'};border:1px solid ${hasVal?expColor:'transparent'};color:${hasVal?expColor:'var(--muted)'};padding:2px 4px;border-radius:3px;font-size:11px;font-family:'DM Mono',monospace;outline:none;text-align:right;box-sizing:border-box;"
              onfocus="this.style.borderColor='${expColor}';this.style.background='rgba(255,255,255,.06)';this.select();event.stopPropagation();"
              onblur="event.stopPropagation();${saveFn}('${p.id}',this.value);renderPool();"
@@ -12408,10 +12411,32 @@ function setPlayerMinOverride(pid, val){
   else slate.playerMinOverrides[pid]=Math.min(100,Math.max(0,n));
   save();
 }
+// ck127: CAPTAIN CONVICTION (showdown). A minimum share of the board a player
+// must CAPTAIN — set from the Captain list's Min% cell. Measured on four real
+// showdowns (NE@SEA, DEN@KC, IND@KC, NYG@LAR): Matt's boards captained one
+// man at 95–98% and cashed 47% of entries; the engine spread its captains
+// across 4–6 men at ≤ 40% each and cashed 29%; the legacy spread cashed 12%.
+// The captain is the one call the engine's EV cannot separate (Nix vs Walker
+// price within noise of each other) and the one that decides the board, so
+// it is the user's to make and the engine builds the flex slots around it.
+function sdCptMinOf(slate, id){ const m = slate && slate.sdCptMinOverrides; const v = m && m[id]; return Number.isFinite(v) ? v : 0; }
+function setSdCptMinOverride(pid, val){
+  const slate=activeSlate(); if(!slate) return;
+  slate.sdCptMinOverrides=slate.sdCptMinOverrides||{};
+  const n=parseFloat(val);
+  if(isNaN(n)||val===''||n<=0) delete slate.sdCptMinOverrides[pid];
+  else slate.sdCptMinOverrides[pid]=Math.min(100,Math.max(0,n));
+  if(!Object.keys(slate.sdCptMinOverrides).length) delete slate.sdCptMinOverrides;
+  save(); if(typeof refreshResetMaxBtn==='function') refreshResetMaxBtn();
+}
+function stepSdCptMin(pid, d){
+  const slate=activeSlate(); if(!slate) return;
+  setSdCptMinOverride(pid, String(Math.min(100,Math.max(0,sdCptMinOf(slate,pid)+d))));
+}
 
 function resetPlayerExposures(){
   const slate=activeSlate();if(!slate)return;
-  slate.playerExpOverrides={};slate.playerMinOverrides={};save();renderPool();refreshResetMaxBtn();
+  slate.playerExpOverrides={};slate.playerMinOverrides={};delete slate.sdCptMinOverrides;save();renderPool();refreshResetMaxBtn();
 }
 
 
@@ -18367,7 +18392,7 @@ function evScreenBoard(slate, rows, target, log, opts){
     const kept=new Set(keep);
     for(const [id, m] of need){
       let deficit=m-have(id);
-      if(deficit<=0) continue;
+      if(deficit<=0){ floorRep.push({id, want:m, have:have(id), swapped:0}); continue; }   // ck127: met floors are reported too
       const cands=[]; for(let i=0;i<rows.length;i++) if(!kept.has(i) && passed(i) && floors.ids(i).includes(id)) cands.push(i);
       let swapped=0;
       for(const ci of cands){
@@ -18394,7 +18419,8 @@ function evScreenBoard(slate, rows, target, log, opts){
   }
   const short=Math.max(0, target-keep.length);
   if(log && floorRep.length){
-    const nm=id=>{ const p=(slate&&typeof playerById==='function')?playerById(slate,id):null; return p?p.name:String(id); };
+    const nm=id=>{ const cpt=/^CPT:/.test(String(id)); const pid=cpt?String(id).slice(4):id;   // ck127: captain floors carry a 'CPT:' prefix
+      const p=(slate&&typeof playerById==='function')?playerById(slate,pid):null; return (cpt?'CPT ':'')+(p?p.name:String(pid)); };
     const unmet=floorRep.filter(f=>f.have<f.want);
     log(`Exposure floors on the kept board (ck113): ${floorRep.map(f=>`${nm(f.id)} ${f.have}/${f.want}${f.swapped?` (+${f.swapped} swapped in)`:''}`).join(', ')}.`
       + (unmet.length?` ⚠ ${unmet.length} floor${unmet.length===1?'':'s'} could not be met from lineups that pass the screen — a floored player whose lineups price under 1.00× is not forced onto the board.`:''));
@@ -34859,6 +34885,8 @@ function gppKernelFactory(){
     // index that may not be swapped IN during this climb (−1 = none) — the
     // counterfactual phase below climbs "the best board without him".
     const climbSeed = function(seedObj, ban){
+      // `ban`: −1 / null = none; an index; or a Set / array of indices (ck127: the recovery bans every capped player at once)
+      const banHas = (ban == null || ban === -1) ? null : (ban instanceof Set ? ban : new Set(Array.isArray(ban) ? ban : [ban]));
       const seedW = P.robust === false ? searchW : bootstrapW(searchW);
       let cur = seedObj.ids.slice();
       let spent = 0; for(let j = 0; j < cur.length; j++) spent += sal[cur[j]] * slotMul(j);
@@ -34896,7 +34924,7 @@ function gppKernelFactory(){
             const list = short[pc];
             for(let k = 0; k < list.length; k++){
               const b = list[k];
-              if(ban >= 0 && b === ban) continue;
+              if(banHas && banHas.has(b)) continue;
               if(inSet.has(b)) continue;
               if(sal[b] * sm > room || sal[b] * sm < low) continue;
               if(exclOn){ const x = exclOf[b]; if(x >= 0 && x !== a && inSet.has(x)) continue; }
@@ -34975,7 +35003,7 @@ function gppKernelFactory(){
             const nLim = Math.min(ls.length, REPAIR_CANDS);
             for(let k = 0; k < nLim; k++){
               const p2 = ls[k];
-              if(ban >= 0 && p2 === ban) continue;
+              if(banHas && banHas.has(p2)) continue;
               if(inSet.has(p2) || p2 === b) continue;
               for(let cSlot = 0; cSlot < RSIZE; cSlot++){
                 if(cSlot === aSlot) continue;
@@ -35156,6 +35184,17 @@ function gppKernelFactory(){
     // like every other row; whether they make the board is the greedy's call
     // (see the projection-scenario step there).
     let concClimbs = 0; const concPlayers = [];
+    const feasibleCF = function(ids){
+      const c = [0,0,0,0,0,0]; let sp = 0;
+      for(let j = 0; j < RSIZE; j++){ const i = ids[j]; if(!sel[i]) return false; c[pos[i]]++; sp += sal[i] * slotMul(j); }
+      if(!posOk(c) || sp > cap || sp < floor) return false;
+      if(new Set(ids).size !== RSIZE) return false;
+      if(exclOn){ for(const i of ids){ const x = exclOf[i]; if(x >= 0 && ids.indexOf(x) >= 0) return false; } }
+      if(groupsOn && !groupsOk(ids)) return false;
+      if(stackOn && !stackOkIdx(ids)) return false;
+      if(!teamsOk(ids)) return false;
+      return true;
+    };
     if(!P.searchOnly && optima.size >= RSIZE && P.concShare > 0){
       const tc0 = Date.now();
       const menuN = Math.max(1, Math.min(optima.size, P.menuTarget || optima.size));
@@ -35165,17 +35204,6 @@ function gppKernelFactory(){
       const conc = [];
       for(let i = 0; i < nP; i++) if(cnt[i] / menuN >= P.concShare) conc.push({i:i, share:cnt[i] / menuN});
       conc.sort(function(a, b){ return b.share - a.share; });
-      const feasibleCF = function(ids){
-        const c = [0,0,0,0,0,0]; let sp = 0;
-        for(let j = 0; j < RSIZE; j++){ const i = ids[j]; if(!sel[i]) return false; c[pos[i]]++; sp += sal[i] * slotMul(j); }
-        if(!posOk(c) || sp > cap || sp < floor) return false;
-        if(new Set(ids).size !== RSIZE) return false;
-        if(exclOn){ for(const i of ids){ const x = exclOf[i]; if(x >= 0 && ids.indexOf(x) >= 0) return false; } }
-        if(groupsOn && !groupsOk(ids)) return false;
-        if(stackOn && !stackOkIdx(ids)) return false;
-        if(!teamsOk(ids)) return false;
-        return true;
-      };
       const maxP = P.concMax || 4, perP = P.concSeeds || 48, msCap = P.concMs || 25000;
       for(let cI = 0; cI < Math.min(conc.length, maxP); cI++){
         const star = conc[cI].i; let done = 0;
@@ -35668,11 +35696,11 @@ function gppKernelFactory(){
     // ck121: the cap-aware neighbours ride along even when they price below the
     // menu cut — they exist so the greedy has somewhere to go once a cap binds.
     { const inM = new Set(menu); for(const x of kept) if(!inM.has(x) && x.seedKind === 'neighbour-cap') menu.push(x); }
-    const M = menu.length;
-    const N = Math.min(P.N, M);
+    let M = menu.length;
+    const N = Math.min(P.N, Math.max(M, P.N));   // ck127: the board may grow past the first menu on a recovery
     const B = P.B, fee = P.fee, linear = !!P.linear;
     const robust = P.robust !== false;   // ck118: bootstrap-weighted greedy steps
-    const menuStackN = new Int8Array(M);
+    let menuStackN = new Int8Array(M);
     for(let m = 0; m < M; m++) menuStackN[m] = stackNOf(menu[m].ids);
     say({phase:'portfolio', n:0, of:N});
     // ck126: projection-error inputs for the scenario step — per-player τ_i
@@ -35685,7 +35713,7 @@ function gppKernelFactory(){
       for(let i = 0; i < nP; i++) ownF[i] = Math.max(0, Math.min(1, (P.ownG[i] || 0) / 100));
       selW.projSd = P.projSd; selW.projMu = mu; selW.projOwn = ownF; selW.projTau = P.projTau; selW.projLambda = (P.projLambda != null) ? P.projLambda : 1; selW.projScen = P.projScen || 32;
     }
-    const FP = foldPort(selW, menu);
+    let FP = foldPort(selW, menu);
     const expCount = new Int32Array(nP);
     const capOf = function(i){ return P.capSlots[i]; };
     // ck119: fight balance. fightOf[i] = index into P.fightPairs (or -1);
@@ -35732,16 +35760,100 @@ function gppKernelFactory(){
       }
       return true;
     };
-    const inPort = new Uint8Array(M);
+    let inPort = new Uint8Array(M);
+    const cptMin = P.cptMin || null, cptMinOn = !!(cptMin && cptMin.length === nP), wantN = P.want || P.N;
+    const cptCount = new Int32Array(nP);
     let stalled = 0, gPeak = -Infinity, peakN = 0;
     const nakedPicks = [];
+    // ck127: STALL RECOVERY. On a two-team showdown (or any small pool) every
+    // candidate holds the same few stars, so once a cap fills the greedy has
+    // nothing legal left and shipped short boards (IND@KC at Max 50: 28 of
+    // 40). When it stalls, the players sitting AT their cap are each banned in
+    // turn and the best optima holding them are re-climbed without them, the
+    // new optima are priced on the select fold like every other row, the menu
+    // grows, the fold is rebuilt with the board so far replayed into it, and
+    // the greedy continues. At most NFL_GPP_RECOVER_ROUNDS rounds.
+    let recoverRounds = 0, recoverAdded = 0;
+    const recover = function(){
+      if(recoverRounds >= (P.recoverRounds != null ? P.recoverRounds : 6)) return false;
+      recoverRounds++;
+      const atCap = []; for(let i = 0; i < nP; i++) if(sel[i] && expCount[i] > 0 && expCount[i] >= capOf(i)) atCap.push(i);
+      if(!atCap.length) return false;
+      const before = optima.size;
+      const ranked = Array.from(optima.values()).sort(function(x, y){ return y.searchGross - x.searchGross; });
+      const capSet = new Set(atCap);
+      // Seeds: the best optima, with EVERY capped man in them swapped for the
+      // best feasible uncapped replacement (slot by slot), then climbed with
+      // the whole capped set banned. A seed that still holds a capped player
+      // climbs to an optimum the greedy cannot use, which is what the first
+      // cut of this did (57 rows added, none playable).
+      const bases = ranked.slice(0, Math.max(48, (P.concSeeds || 48) * 2));
+      let made = 0;
+      for(const o of bases){
+        if(cancelled()) return false;
+        if(!o.ids.some(function(i){ return capSet.has(i); })) continue;   // already playable; the greedy has it
+        let seed = o.ids.slice(), ok = true;
+        for(let sIdx = 0; sIdx < RSIZE && ok; sIdx++){
+          const a = seed[sIdx]; if(!capSet.has(a)) continue;
+          const list = short[pos[a]]; let rep = -1;
+          for(let k = 0; k < list.length; k++){
+            const b = list[k]; if(capSet.has(b) || seed.indexOf(b) >= 0 || expCount[b] >= capOf(b)) continue;
+            const nb = seed.slice(); nb[sIdx] = b;
+            if(feasibleCF(nb)){ rep = b; break; }
+          }
+          if(rep < 0){ ok = false; break; }
+          seed[sIdx] = rep;
+        }
+        if(!ok) continue;
+        climbSeed({ids:seed, kind:'recover-' + recoverRounds}, capSet);
+        made++;
+      }
+      if(!made) return false;
+      if(optima.size === before) return false;
+      // price the new rows and append them to the menu (kept order does not matter to the greedy)
+      const inMenu = new Set(menu.map(function(x){ return x.ids.join('|'); }));
+      let added = 0;
+      for(const [k, o] of optima){
+        if(o.seedKind && /^recover-/.test(o.seedKind) && !inMenu.has(o.ids.join('|'))){
+          const r = priceSel(k, o); menu.push(r); inMenu.add(o.ids.join('|')); added++;
+        }
+      }
+      if(!added) return false;
+      recoverAdded += added;
+      M = menu.length;
+      const ms2 = new Int8Array(M); ms2.set(menuStackN); for(let m = menuStackN.length; m < M; m++) ms2[m] = stackNOf(menu[m].ids); menuStackN = ms2;
+      const ip2 = new Uint8Array(M); ip2.set(inPort); inPort = ip2;
+      const was = FP.chosen.slice();
+      FP = foldPort(selW, menu);
+      for(const m of was) FP.add(m);
+      say({phase:'portfolio', n:FP.chosen.length, of:N, recover:recoverRounds, added:added});
+      return true;
+    };
     while(FP.chosen.length < N){
       if(cancelled()) return {cancelled:true};
       const n1 = FP.chosen.length + 1;
       const stake1 = FP.prepare(n1);
       let bestM = -1, bestG = -Infinity, bestStackM = -1, bestStackG = -Infinity;
+      // ck127: CAPTAIN FLOORS. The pinned captain furthest behind pace — his
+      // count against ceil(min × n1 / want) — is the only captain eligible at
+      // this step, when any candidate captained by him is still playable.
+      let mustCpt = -1;
+      if(cptMinOn && SHAPE === 'sd'){
+        let worst = 0;
+        for(let i = 0; i < nP; i++){ if(!(cptMin[i] > 0)) continue;
+          const pace = Math.ceil(cptMin[i] * n1 / Math.max(1, wantN) - 1e-9) - cptCount[i];
+          if(pace > worst){ worst = pace; mustCpt = i; } }
+        if(mustCpt >= 0){
+          let any = false;
+          for(let m = 0; m < M && !any; m++){ if(inPort[m] || menu[m].ids[0] !== mustCpt) continue;
+            let bl = false; for(const i of menu[m].ids) if(expCount[i] + 1 > capOf(i)){ bl = true; break; }
+            if(!bl && fightOk(menu[m].ids)) any = true; }
+          if(!any) mustCpt = -1;
+        }
+      }
       for(let m = 0; m < M; m++){
         if(inPort[m]) continue;
+        if(mustCpt >= 0 && menu[m].ids[0] !== mustCpt) continue;
         // Hard caps: Max% exposure and per-player overrides, plus the house
         // rule (no duplicate lineups — the menu is distinct by construction).
         let blocked = false;
@@ -35755,7 +35867,7 @@ function gppKernelFactory(){
         // assertion. Nothing here influences the choice.
         if(menuStackN[m] >= 1 && g > bestStackG){ bestStackG = g; bestStackM = m; }
       }
-      if(bestM < 0){ stalled = 1; break; }
+      if(bestM < 0){ if(recover()) continue; stalled = 1; break; }
       // Adding a lineup always costs another entry fee, so G(P) can fall — and
       // where it PEAKS is the answer to "how many bullets is this slate worth",
       // which is real information. The user asked for N lineups, so the greedy
@@ -35768,6 +35880,7 @@ function gppKernelFactory(){
         nakedPicks.push({step: FP.chosen.length + 1, m: bestM, altM: bestStackM});
       inPort[bestM] = 1;
       for(const i of menu[bestM].ids) expCount[i]++;
+      if(SHAPE === 'sd') cptCount[menu[bestM].ids[0]]++;
       FP.add(bestM);
       if((FP.chosen.length & 7) === 0) say({phase:'portfolio', n:FP.chosen.length, of:N});
     }
@@ -35862,6 +35975,7 @@ function gppKernelFactory(){
         menu: M, stalled: stalled, peakN: peakN, gPeak: gPeak,
         // ck126: the scenario step and the counterfactual climbs.
         projOn: !!FP.projOn, projTau: P.projTau || 0, projLambda: P.projLambda, projBoard: FP.projBoard(), concClimbs: concClimbs, concPlayers: concPlayers,
+        recoverRounds: recoverRounds, recoverAdded: recoverAdded, cptMinOn: cptMinOn,
         // ck75: what the stack constraints cost the search.
         stackOn: stackOn, stackQbs: (P.nQbRow|0), stackRejects: stackRejects,
         stackRepairs: stackRepairs, stackSeedFix: stackSeedFix,
@@ -36478,10 +36592,22 @@ async function runNflGppEngine(ctx){
     }
   }
   // Hard caps: Max% and per-player overrides, expressed in lineup slots.
+  // ck127: in slots of the board the user WANTS, not of the long build. The
+  // greedy used to hold caps at 1.4× (28 of 56) and the edge screen then
+  // re-enforced them at 20 of 40 on the kept rows — IND@KC at Max 50 shipped
+  // 28 of 40. Now the long build never exceeds the shipped ceiling, so every
+  // subset the screen keeps satisfies it; the surplus is for the screen only.
+  const capN = (ctx.want > 0) ? ctx.want : target;
+  // ck127: captain floors (showdown), in wanted-board slots.
+  let cptMinSlots = null;
+  if(SD && slate.sdCptMinOverrides && Object.keys(slate.sdCptMinOverrides).length){
+    cptMinSlots = new Int32Array(nP);
+    fieldPool.forEach((p, i) => { const v = sdCptMinOf(slate, p.id); if(v > 0 && sel[i] && (!cptOkMask || cptOkMask[i])) cptMinSlots[i] = Math.ceil(Math.min(100, v) / 100 * capN - 1e-9); });
+  }
   const capSlots = new Int32Array(nP);
   fieldPool.forEach((p, i) => {
     const pct = (overrides && overrides[p.id] != null) ? overrides[p.id] : maxExpPct;
-    capSlots[i] = Math.max(0, Math.floor((Math.max(0, Math.min(100, pct))/100) * target + 1e-9));
+    capSlots[i] = Math.max(0, Math.ceil((Math.max(0, Math.min(100, pct))/100) * capN - 1e-9));
     if(capSlots[i] < 1 && pct > 0) capSlots[i] = 1;
   });
 
@@ -36516,7 +36642,7 @@ async function runNflGppEngine(ctx){
     calShrink: {s1: _calFx.s1, s23: _calFx.s23, capTop10: !!evCalCap(slate.sport || 'nfl').capTop10, on: _calFx.on},
     // ck118: bootstrap-resampled search seeds + Bayesian-bootstrap greedy steps (slate._gppRobust === false turns both off).
     robust: slate._gppRobust !== false,
-    maxSal, minSal, N: target, B, capSlots, fightPairs, fightSlack: UFC_FIGHT_SLACK, fightViable: UFC_FIGHT_VIABLE,
+    maxSal, minSal, N: target, want: capN, B, capSlots, cptMin: cptMinSlots, fightPairs, fightSlack: UFC_FIGHT_SLACK, fightViable: UFC_FIGHT_VIABLE,
     // ck74: the partner definition the LABEL uses, so the kernel's naked-pick
     // explanation and `nflStackShape` cannot disagree about what "naked" means.
     stackRb: !!slate._nflStackRbCounts,
@@ -36940,7 +37066,7 @@ async function runNflGppBoard(ctx){
   // to wanted-board slots on the long build instead, and the screen then
   // dropped lineups without re-checking — a 40% cap shipped Pantoja at 83%.
   const r = await runNflGppEngine(Object.assign({}, ctx, {
-    target: _long, maxExpPct: _capPct, overrides: _effOverrides,
+    target: _long, want: _want, maxExpPct: _capPct, overrides: _effOverrides,
     budget: Object.assign({budgetMs: nflGppSearchMs(ctx.slate, _want)}, ctx.budget || {}),
   }));
   if(!r) return null;
@@ -37035,10 +37161,18 @@ async function runNflGppBoard(ctx){
           const lim = Math.min(1, (pWin.get(id) || 0) + UFC_FIGHT_SLACK); if(lim >= 1) continue;
           if(countOf(id) + 1 > (lim/(1-lim)) * countOf(e.other) + 5 + 1e-9) return false; } return true; };
       })();
+      // ck127: captain floors ride the same floors pass under pseudo ids
+      // ('CPT:<id>'), so a swap that fixes a captain shortfall is checked
+      // against caps and the other floors exactly like a player floor.
+      const _cm = (SDb && slate.sdCptMinOverrides) || {};
+      const _cptMinIds = Object.keys(_cm).filter(id => (_cm[id]||0) > 0).map(id => 'CPT:' + id);
+      const _floorIds = i => out[i].map(p => p.id).concat(SDb && out[i]._sdCaptain ? ['CPT:' + out[i]._sdCaptain] : []);
+      const _capSlotsF = id => /^CPT:/.test(String(id)) ? Infinity : _capSlots(id);
       const _scr = evScreenBoard(slate, _pr0, target, log,
-        {caps: {ids: i => out[i].map(p => p.id), cap: _capSlots}, extraOk: _fbRule,
-         floors: _minIds.length ? {list:_minIds, ids: i => out[i].map(p => p.id),
-                                   min: id => Math.ceil(Math.max(0, Math.min(100, _mo[id]||0))/100*target)} : null});
+        {caps: {ids: i => out[i].map(p => p.id), cap: _capSlotsF}, extraOk: _fbRule,
+         floors: (_minIds.length || _cptMinIds.length) ? {list:_minIds.concat(_cptMinIds), ids: _floorIds,
+                                   min: id => /^CPT:/.test(String(id)) ? Math.ceil(Math.max(0, Math.min(100, _cm[String(id).slice(4)]||0))/100*target)
+                                                                       : Math.ceil(Math.max(0, Math.min(100, _mo[id]||0))/100*target)} : null});
       const _pr = _scr.keep.map(i => _pr0[i]);
       out = _scr.keep.map(i => out[i]);
       let nOk=0, gross=0, calGross=0, winS=0, cashS=0, top1S=0, top10S=0, favS=0, favN=0;
