@@ -6752,7 +6752,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck128/2026-09-24';
+const BUILD_ID = '2.0/ck129/2026-09-25';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -26551,6 +26551,25 @@ function buildNflSimInputs(pool, opts){
     const gameKey = ti ? (ti.opp ? [ti.team, ti.opp].sort().join('@') : ti.team) : null;
     return nflPropEntry(p, t, gameKey);
   });
+  // ── ck129: ONE KICKER PER TEAM ────────────────────────────────────────────
+  // A kicker is modeled straight off the team score, which is right for the
+  // man who kicks and wrong for the one who does not: GB@ATL (9/24) listed
+  // Trey Smack AND Lenny Krieg at $5,200, and Krieg — SS Proj 0, 0.1% owned,
+  // scored 0 — drew Smack's full 9.2-point distribution, so the engine held a
+  // "free" 9-point kicker in 57% of a backtest board. When a team lists more
+  // than one kicker, the one the sheet projects (then owns, then prices)
+  // highest is the kicker; the rest score 0 (`e.kBackup`), and the run log
+  // says so. A lone kicker is never touched, whatever his projection.
+  {
+    const byTeam = new Map();
+    entries.forEach((e, i) => { if(e && e.pos === 'K' && e.team && !e.out) (byTeam.get(e.team) || byTeam.set(e.team, []).get(e.team)).push(i); });
+    for(const [t, idx] of byTeam){
+      if(idx.length < 2) continue;
+      const key = i => { const p = pool[i]; return [parseFloat(p.proj) || 0, parseFloat(p.own) || 0, p.salary || 0]; };
+      idx.sort((a, b) => { const A = key(a), B = key(b); return (B[0] - A[0]) || (B[1] - A[1]) || (B[2] - A[2]); });
+      for(const i of idx.slice(1)){ entries[i].kBackup = pool[idx[0]].name; entries[i].fallbackMean = 0; }
+    }
+  }
   // ── THE ROLE-UNCERTAINTY HALF OF THE MEDIAN→MEAN CONVERSION ──────────────
   // nflPropEntry applied each stat's own CV. A player whose room just lost
   // somebody carries an EXTRA, independent log-normal on the same quantity
@@ -31702,6 +31721,7 @@ function simNflPlayer(e, te, gauss, out){
   // same projection-dependent gamma as any other Proj-only quantity.
   const exAdd = () => exBoost > 0 ? nflProjDraw(exBoost, gauss) : 0;
   if(e.pos === 'K'){
+    if(e.kBackup){ if(out){ out.pos = 'K'; out.pts = 0; } return 0; }   // ck129: not the team's kicker
     const kp = dkKickerScore(te.score, gauss, te.pie ? te.pie.teamTD : undefined);
     if(out){ out.pos = 'K'; out.xp = te.pie ? te.pie.teamTD : null; out.pts = kp; }
     return kp;
@@ -32815,6 +32835,7 @@ async function runNflSims(pool, numSims, log){
   const teamModeled = entries.filter(e => !e.hasProps && (e.pos === 'K' || e.pos === 'DST')).length;
   const zeroed = entries.filter(e => e.unpriced);
   const gamesWithEnv = games.filter(g => g.total != null).length;
+  { const kb = entries.filter(e => e.kBackup); if(kb.length) log(`Kickers (ck129): ${kb.map(e => `${(pool[entries.indexOf(e)]||{}).name} (${e.team}) scores 0 — ${e.kBackup} is the team's kicker`).join(' · ')}.`); }
   // SLATE CHECK, first line of the run log. The panel above the pool says the
   // same thing, but a sim run is the moment the slate's gaps start costing money
   // and the log is what a user reads afterwards when a number looks wrong.
