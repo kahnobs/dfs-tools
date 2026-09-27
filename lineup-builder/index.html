@@ -5398,7 +5398,16 @@ function nflAssignSlots(slate, ids){
   // ck122: a FLEX-only hidden player takes a base slot first, so the extra man
   // at his position (the FLEX) is one who is allowed to flex.
   const nfh = (typeof nflFlexHidden === 'function') ? (id => nflFlexHidden(slate, id) ? 1 : 0) : (() => 0);
-  const bySal = a => a.sort((x,y)=>(nfh(y)-nfh(x)) || ((playerById(slate,y)?.salary||0)-(playerById(slate,x)?.salary||0)));
+  // ck133: LATE-SWAP ORDER. The base slots take the EARLIEST kickoffs at the
+  // position and the extra man — the FLEX — is the one whose game locks last,
+  // so the slot that can still be swapped after the early games is the one
+  // holding the late player (4 WR with one at 4:25 → he is the FLEX). A
+  // player with no kickoff on the sheet sorts as early (he takes a base slot;
+  // the FLEX goes to a man we KNOW is late). Salary breaks ties.
+  const kick = id => { const p = playerById(slate, id); if(!p || !Number.isFinite(p.kick_mins)) return -1;
+    const kd = (typeof nflKickDateParts === 'function') ? nflKickDateParts(p.kick_date) : null;
+    return kd ? nflEtKey(kd.y, kd.m, kd.d, p.kick_mins) : p.kick_mins; };
+  const bySal = a => a.sort((x,y)=>(nfh(y)-nfh(x)) || (kick(x)-kick(y)) || ((playerById(slate,y)?.salary||0)-(playerById(slate,x)?.salary||0)));
   Object.values(groups).forEach(g=>Array.isArray(g)&&bySal(g));
   const out = {QB:groups.QB[0]||null, RB:groups.RB[0]||null, RB2:groups.RB[1]||null,
     WR:groups.WR[0]||null, WR2:groups.WR[1]||null, WR3:groups.WR[2]||null,
@@ -6758,7 +6767,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck132/2026-09-27';
+const BUILD_ID = '2.0/ck133/2026-09-27';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
