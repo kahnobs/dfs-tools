@@ -2692,6 +2692,9 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
 const SALARY_CAP = 50000;
 const MAX = 6;
 const STORAGE_KEY = 'dfs_builder_v2';
+// ck132: per-slate sim contexts (see simCtxRemember); declared here so switchSlate can run during page init.
+const SIM_CTX_KEEP = 4;
+const _simCtxBySlate = new Map();
 
 const SPORT_CFG = {
   nascar:{label:'Drivers',pos:'D',pillClass:'sport-nascar'},
@@ -3245,6 +3248,7 @@ function nflParseLineupString(s){
   };
   let marks = scan(/(?:^|\s)(QB|RB|WR|TE|FLEX|DST|CPT)(?=\s)/g);
   if(!marks.length) marks = scan(/(?:^|\s)(F)(?=\s)/g);
+  if(!marks.length) marks = scan(/(?:^|\s)(D)(?=\s)/g);   // ck130: NASCAR exports six 'D' slots
   const out = [];
   for(let i = 0; i < marks.length; i++){
     const end = (i + 1 < marks.length) ? marks[i+1].tokStart : str.length;
@@ -4228,10 +4232,12 @@ function nflIngestStandings(slate, text, fileName, parsed){
   // Model feature rows and therefore the β refit, the QB-stack / bring-back
   // rates, the showdown captain block, and the per-player PIT (an NFL sim
   // object) — are each switched off individually and SAID so in the report.
-  if(!slate || !(isNfl(slate) || slate.sport === 'ufc'))
-    return { ok: false, error: 'Standings ingest is NFL and UFC only.' };
+  // ck130: NASCAR is admitted on the same terms as UFC — a flat six-driver
+  // roster with no QB, team or game; every UFC gate below is a flat-roster gate.
+  if(!slate || !(isNfl(slate) || slate.sport === 'ufc' || slate.sport === 'nascar'))
+    return { ok: false, error: 'Standings ingest is NFL, UFC and NASCAR only.' };
   const SD = isNfl(slate) && isShowdown(slate);
-  const UFC = slate.sport === 'ufc';
+  const UFC = slate.sport === 'ufc' || slate.sport === 'nascar';   // flat roster (ck130: NASCAR too)
   const P = parsed && parsed.ok ? parsed : nflParseStandings(text);
   if(!P.ok) return P;
   const match = nflStandingsMatcher(slate);
@@ -4635,8 +4641,8 @@ function nflBacktestLog(slate, key){
   const pc = v => (v == null ? '—' : (100 * v).toFixed(0) + '%');
   const mae = m => (m && m.mae != null) ? m.mae.toFixed(2) + 'pp (n=' + m.n + ')' : 'n/a';
   const out = [];
-  const UFC = (rec.sport || 'nfl') === 'ufc';
-  out.push(`Backtest ${rec.key}${rec.showdown ? ' [SHOWDOWN]' : ''}${UFC ? ' [UFC]' : ''}: ${rec.fieldSize.toLocaleString()} entries`
+  const _sp = rec.sport || 'nfl'; const UFC = _sp === 'ufc' || _sp === 'nascar';
+  out.push(`Backtest ${rec.key}${rec.showdown ? ' [SHOWDOWN]' : ''}${UFC ? ' [' + _sp.toUpperCase() + ']' : ''}: ${rec.fieldSize.toLocaleString()} entries`
          + (rec.unfilled ? ` (${rec.unfilled.toLocaleString()} unfilled — ${(rec.lineups||rec.entries).toLocaleString()} lineups submitted)` : '')
          + ` · winning score ${rec.winningScore != null ? rec.winningScore.toFixed(2) : '—'}`
          + (rec.cashLine ? ` · ~cash line ${rec.cashLine.score.toFixed(2)} (score at rank ${rec.cashLine.rank}, an APPROXIMATION — DK does not export the paid-rank cutoff)` : ''));
@@ -4919,14 +4925,14 @@ function renderNflBacktest(){
   // ck90: UFC slates get it too, for the same reason — the ingest works on them,
   // and a UFC standings export is the only real measurement of a UFC field this
   // app holds. The Own Model section stays NFL-classic.
-  const UFCs = !!s && s.sport === 'ufc';
+  const UFCs = !!s && (s.sport === 'ufc' || s.sport === 'nascar');   // flat roster (ck130: NASCAR too)
   const SDs = !UFCs && isShowdown(s);
   if(!s || !(isNfl(s) || UFCs) || !(s.players || []).length){ el.style.display = 'none'; el.innerHTML = ''; return; }
   let stat = null;
   try { stat = (SDs || UFCs) ? null : nflOwnEnsure(s); } catch(e){ stat = null; }
   const keys = Object.keys(s._standings || {}).sort((a, b) => (s._standings[b].loadedAt || 0) - (s._standings[a].loadedAt || 0));
   const open = !!s._backtestOpen;
-  const inp = UFCs ? { ok: true, label: 'UFC — the mapped Own% column' }
+  const inp = UFCs ? { ok: true, label: (s.sport === 'nascar' ? 'NASCAR' : 'UFC') + ' — the mapped Own% column' }
             : SDs ? { ok: true, label: 'Showdown — CPT/FLEX Own% as published' } : nflOwnInput(s);
   const head = keys.length
     ? `${keys.length} contest${keys.length === 1 ? '' : 's'} ingested · ${esc(inp.ok ? inp.label : 'no ownership source')}`
@@ -4950,7 +4956,7 @@ function renderNflBacktest(){
         ${rec.scoreQ ? `<br><span style="color:var(--muted);">Score curve: max ${qf(rec.scoreQ.max)} · p0.01% ${qf(rec.scoreQ.p001)} · p0.1% ${qf(rec.scoreQ.p01)} · p1% ${qf(rec.scoreQ.p1)} · p10% ${qf(rec.scoreQ.p10)} · med ${qf(rec.scoreQ.p50)}</span>` : ''}
         ${rec.showdown
           ? `<br>MAE vs %Drafted — FLEX (SS Own) <b>${mae(rp.sabersim)}</b> · CPT (SS CPT Own) <b>${mae(rp.sd && rp.sd.cptMae)}</b> <span style="color:var(--muted);">— Own Model is NFL-classic only, not scored or refit on showdown.</span>`
-          : (rec.sport === 'ufc')
+          : (rec.sport === 'ufc' || rec.sport === 'nascar')
           ? `<br>MAE vs %Drafted — Own% column <b>${mae(rp.sabersim)}</b> over ${rec.matched} matched fighters <span style="color:var(--muted);">— Own Model is NFL-classic only, not scored or refit on UFC.</span>`
           : `<br>MAE vs %Drafted — Own Model ${rp.modelOk ? `<b>${mae(rp.model)}</b>` : `<span style="color:var(--muted);">not built (${rp.modelCovered}/${rp.modelMatched} players carry a modelled %)</span>`} · SS Own ${mae(rp.sabersim)} · Blend ${rp.modelOk ? mae(rp.blend) : '<span style="color:var(--muted);">n/a</span>'}`}
         ${rp.sd ? `<br>Captains: top ${rp.sd.cptTop1.toFixed(1)}% <span style="color:var(--muted);">(field model's fallback prior assumes ~${rp.sd.cptConcentrationAssumed}%)</span> · top-3 ${rp.sd.cptTop3.toFixed(1)}% · ${rp.sd.cptDistinct} distinct · effective ${rp.sd.cptEffective.toFixed(1)}` : ''}
@@ -6752,7 +6758,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck129/2026-09-25';
+const BUILD_ID = '2.0/ck132/2026-09-27';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -7446,6 +7452,7 @@ function renderTopBar() {
     return `<div class="slate-tab${s.id===activeSlateId?' active':''}" onclick="switchSlate('${s.id}')">
       <span class="sport-pill ${cfg.pillClass}">${s.sport.toUpperCase()}</span>
       <span>${s.name}</span>
+      <span class="del-tab" title="Duplicate this slate (pool, hides, OUT marks, sim inputs, settings)" onclick="event.stopPropagation();duplicateSlate('${s.id}')">⧉</span>
       <span class="del-tab" onclick="event.stopPropagation();deleteSlate('${s.id}')">✕</span>
     </div>`;
   }).join('');
@@ -7456,6 +7463,7 @@ function renderTopBar() {
 function switchSlate(id){
   activeSlateId=id;
   try { localStorage.setItem('dfs_active_slate', id); } catch(e){}
+  simCtxRestore(id);   // ck132: the slate's own sim comes back with it
   sortKey='salary';
   // sortDir is half of the sort: resetting only the key left the new slate
   // sorted salary ASCENDING (cheapest first, with a "$ ↓" indicator) whenever
@@ -7478,8 +7486,49 @@ function switchSlate(id){
 function deleteSlate(id){
   if(!confirm('Delete this slate and all its data?'))return;
   slates=slates.filter(s=>s.id!==id);
+  simCtxForget(id);
   if(activeSlateId===id) activeSlateId=slates[0]?.id||null;
   save(); renderTopBar(); if(activeSlateId) renderSlate();
+}
+// ck132: DUPLICATE. Two versions of one slate — a 150-max build and a
+// single-entry build off the same sheet — start from one set of hides, OUT
+// marks and sim inputs. The copy is a deep clone under a new id: pool, hides,
+// FLEX hides, OUT list, overrides, Min/Max%, captain floors, groups, contest
+// and sim settings, sheet tab. Saved lineups are copied only on request;
+// standings records (a contest's results belong to the board that entered
+// it) are not.
+function duplicateSlate(id){
+  const src = slates.find(s => s.id === id); if(!src) return;
+  const name = prompt('Name for the copy:', src.name + ' (SE)'); if(name == null) return;
+  const copyLineups = (src.savedLineups || []).length ? confirm(`Copy the ${src.savedLineups.length} saved lineup(s) too?\n\nOK — copy them.  Cancel — the copy starts with none.`) : false;
+  let dup; try { dup = JSON.parse(JSON.stringify(src)); } catch(e){ alert('Could not copy this slate: ' + e.message); return; }
+  dup.id = uid(); dup.name = (name.trim() || (src.name + ' (copy)'));
+  if(!copyLineups){ dup.savedLineups = []; dup._lineupMeta = {}; }
+  delete dup._standings; delete dup._backtestOpen;
+  dup._dupOf = src.id; dup._dupTs = Date.now();
+  const at = slates.findIndex(s => s.id === id);
+  slates.splice(at + 1, 0, dup);
+  save(); switchSlate(dup.id); renderTopBar(); renderSlate();
+  showToast(`Duplicated as "${dup.name}" — pool, hides, OUT marks, sim inputs and settings copied${copyLineups ? ', saved lineups too' : ''}. Sim it once; each copy keeps its own sim from then on.`, 'ok');
+}
+// ck132: SIM CONTEXTS PER SLATE. The live sim (per-player score arrays the
+// generators, Details panels and pricing read) used to be one global for the
+// last slate simmed, so switching slates threw it away and the other slate
+// had to be re-simmed before it could generate. The last SIM_CTX_KEEP slates'
+// contexts are kept in memory (LRU; a 500-player × 10,000-sim NFL main slate
+// is ~20 MB) and switchSlate restores the one that belongs to the slate.
+function simCtxRemember(ctx){
+  if(!ctx || !ctx.slateId) return ctx;
+  _simCtxBySlate.delete(ctx.slateId); _simCtxBySlate.set(ctx.slateId, ctx);
+  while(_simCtxBySlate.size > SIM_CTX_KEEP){ const k = _simCtxBySlate.keys().next().value; _simCtxBySlate.delete(k); }
+  return ctx;
+}
+function simCtxForget(slateId){ _simCtxBySlate.delete(slateId); if(window._lastSimCtx && window._lastSimCtx.slateId === slateId) window._lastSimCtx = null; }
+function simCtxRestore(slateId){
+  const c = _simCtxBySlate.get(slateId) || null;
+  if(c){ _simCtxBySlate.delete(slateId); _simCtxBySlate.set(slateId, c); }
+  window._lastSimCtx = c;
+  return c;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -22540,7 +22589,7 @@ async function runPgaSimGen(){
   // the run so the Builder's lineup card can score and price a hand-typed
   // roster with the same numbers the generator used. Same shape runNflSimGen
   // publishes; runUFCContestEV hangs `evField` and `sharpCands` off it.
-  window._lastSimCtx = {simScoresById, simsDone, sport:'pga', sd:false, slateId:slate.id, ts:Date.now()};
+  window._lastSimCtx = simCtxRemember({simScoresById, simsDone, sport:'pga', sd:false, slateId:slate.id, ts:Date.now()});
   if(typeof renderHbEv==='function') renderHbEv();   // the builder's stats card can now score/price
   // ck112: the pricing field (the ONE pricing surface's independent draw) is
   // needed by evRunNorm before the search and by the report pass after it —
@@ -22921,7 +22970,7 @@ async function runUFCSimGenInner(){
   // the run so the Builder's lineup card can score and price a hand-typed
   // roster with the same numbers the generator used. Same shape runNflSimGen
   // publishes; runUFCContestEV hangs `evField` and `sharpCands` off it.
-  if(simScoresById) window._lastSimCtx = {simScoresById, simsDone:totalSims, sport:'ufc', sd:false, slateId:slate.id, ts:Date.now()};
+  if(simScoresById) window._lastSimCtx = simCtxRemember({simScoresById, simsDone:totalSims, sport:'ufc', sd:false, slateId:slate.id, ts:Date.now()});
   if(simScoresById) evPrewarmKick(slate);   // ck112: draw the pricing field in worker lanes now
   if(typeof renderHbEv==='function') renderHbEv();   // the builder's stats card can now score/price
 
@@ -24804,7 +24853,7 @@ async function runNascarSimGen(){
   {
     const _ssb={};
     fullField.forEach((p,i)=>{ if(simScoreArrays[i]) _ssb[p.id]=simScoreArrays[i]; });
-    window._lastSimCtx = {simScoresById:_ssb, simsDone:simTopScorer.length, sport:'nascar', sd:false, slateId:slate.id, ts:Date.now()};
+    window._lastSimCtx = simCtxRemember({simScoresById:_ssb, simsDone:simTopScorer.length, sport:'nascar', sd:false, slateId:slate.id, ts:Date.now()});
     evPrewarmKick(slate);   // ck112: draw the pricing field in worker lanes now
   if(typeof renderHbEv==='function') renderHbEv();   // the builder's stats card can now score/price
   }
@@ -37776,7 +37825,7 @@ async function runNflSimGenInner(){
   // A new run invalidates the previous run's per-sim scores immediately: the
   // "Details" panels read _lastSimCtx, and a half-stale context would describe
   // lineups that were built from different numbers.
-  window._lastSimCtx = null;
+  window._lastSimCtx = null; simCtxForget(slate.id);   // ck132: a half-run sim must not be restored either
   if(typeof gppProgressPhase==='function') gppProgressPhase(`simulating ${numSims.toLocaleString()} slates`);
   log(`Running ${numSims.toLocaleString()} simulated slates (${simPool.length} players${pool.length<simPool.length?`, ${pool.length} in selection pool`:''})…`);
   await new Promise(r=>setTimeout(r,0));
@@ -37875,7 +37924,7 @@ async function runNflSimGenInner(){
   // explain itself on demand (see lineupDetailStats). One slate is live at a
   // time and the arrays are the ones the run already allocated, so this costs
   // nothing beyond holding them; the next run clears it above.
-  window._lastSimCtx = {simScoresById, simsDone, sport:'nfl', sd:SD, slateId:slate.id, ts:Date.now()};
+  window._lastSimCtx = simCtxRemember({simScoresById, simsDone, sport:'nfl', sd:SD, slateId:slate.id, ts:Date.now()});
   if(typeof renderHbEv==='function') renderHbEv();   // the builder's stats card can now score/price
   // ck112: the pricing field (the ONE pricing surface's independent draw) is
   // needed by evRunNorm before the search and by the report pass after it —
@@ -42830,11 +42879,19 @@ function createSlate(){
   // speedway Rating", "Road Course Rating"…). Auto-selecting prevents simming
   // a plate race on intermediate physics by accident; the buttons still override.
   if(sport==='nascar'){
-    const H=parsedCSV.headers.join(' | ').toLowerCase();
-    const tt = /super\s*speedway/.test(H) ? 'superspeedway'
-             : /road\s*course/.test(H)    ? 'road'
-             : /short\s*track/.test(H)    ? 'short'
-             : /intermediate/.test(H)     ? 'intermediate' : null;
+    // ck131: the sheet carries EVERY track type's rating column (Trucks Kansas
+    // 9/26/2026: "Intermediate Rating" and "Kansas Rating" filled, "Super
+    // Speedway Rating" and "Daytona Rating" empty) and the old test matched
+    // the first header that EXISTED — superspeedway — so Kansas was simmed as
+    // a plate race: friction 0.15, heavy attrition, and every back-marker
+    // gained 5 DK points of phantom pass-through. The type is now the one
+    // whose rating column is FILLED for the most drivers; a sheet with no
+    // filled type column keeps the button default and says so.
+    const TT=[['superspeedway',/super\s*speedway/i],['road',/road\s*course/i],['short',/short\s*track/i],['intermediate',/intermediate/i]];
+    const filled={};
+    parsedCSV.headers.forEach((h,ci)=>{ for(const [t,re] of TT){ if(!re.test(h)) continue; const n=parsedCSV.rows.reduce((c,r)=>c+((r[ci]!=null&&String(r[ci]).trim()!=='')?1:0),0); filled[t]=Math.max(filled[t]||0,n); } });
+    const tt = Object.keys(filled).filter(t=>filled[t]>0).sort((a,b)=>filled[b]-filled[a])[0] || null;
+    if(!tt && Object.keys(filled).length) showToast('Track type: the sheet has rating columns but none are filled — pick the track type in Simulate settings before simming.','warn');
     if(tt){
       slate._nascarTrackType=tt;
       slate._nascarLaps={road:100,intermediate:300,short:500,superspeedway:188}[tt];
@@ -42859,12 +42916,31 @@ function createSlate(){
     showToast(`Status column: ${_st.out} marked OUT${_st.q ? `, ${_st.q} questionable` : ''} — see the Slate check.`, 'ok');
 }
 
+// ck131: a backup is EVERYTHING the builder keeps — every slate exactly as it
+// stands (player pool hides, FLEX hides, OUT marks, sim-input overrides, Min/
+// Max%, captain floors, contest settings, saved lineups, standings records:
+// all of that lives on the slate object and is serialised whole), plus the
+// stores that live beside the slates: the lineup history, the contest
+// presets, the GPP bankroll multiple and the calibration records (EV cal,
+// Own history + β, PIT). Restoring puts the same slate back: a slate that
+// already exists under the same id is REPLACED with the backup copy after one
+// confirmation (the old rule kept the current copy and silently skipped the
+// backup's, which is how a restore "brought the hidden players back" — it
+// had not restored anything).
+const BACKUP_STORE_KEYS = ['dfs_contest_presets', 'dfs_last_contest_preset', 'dfs_nfl_gpp_bankmult', 'dfs_nfl_gpp_bankroll',
+                           'dfs_evcal_v1', 'dfs_nfl_own_history', 'dfs_nfl_own_beta', 'nflPitHistory/1'];
 function backupData(){
+  save();
+  const stores = {};
+  for(const k of BACKUP_STORE_KEYS){ try { const v = localStorage.getItem(k); if(v != null) stores[k] = v; } catch(e){} }
   const payload = {
-    version: 2,
+    version: 3,
     ts: new Date().toISOString(),
+    build: (typeof BUILD_ID !== 'undefined') ? BUILD_ID : null,
+    activeSlateId: activeSlateId || null,
     slates: slates,
-    history: lineupHistory
+    history: lineupHistory,
+    stores
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
@@ -42874,6 +42950,57 @@ function backupData(){
   a.click(); URL.revokeObjectURL(url);
 }
 
+// The restore itself, separated from the file reader so it can be tested and
+// reused. `opts.replace` decides what happens to a slate whose id already
+// exists: true → the backup copy replaces it, false → it is kept and the
+// backup copy skipped. Returns {added, replaced, skipped, stores}.
+function restorePayload(payload, opts){
+  opts = opts || {};
+  if(!payload || !payload.slates || !Array.isArray(payload.slates)) throw new Error('Invalid backup file');
+  const byId = new Map(slates.map((s, i) => [s.id, i]));
+  let added = 0, replaced = 0, skipped = 0;
+  payload.slates.forEach(s => {
+    if(!s || !s.id) return;
+    for(const pl of (s.players||[])) if(pl && typeof pl.name==='string') pl.name=cleanName(pl.name);
+    if(byId.has(s.id)){
+      if(opts.replace){ slates[byId.get(s.id)] = s; replaced++; }
+      else skipped++;
+    } else { slates.push(s); byId.set(s.id, slates.length - 1); added++; }
+  });
+  if(payload.history){ Object.assign(lineupHistory, payload.history); saveHistory(); }
+  // Stores: the calibration records merge by contest key (a row the backup
+  // has and this browser does not is added; a row both have keeps the backup's
+  // when replacing, the current one otherwise); presets merge by id; the
+  // scalar settings are taken from the backup only when replacing.
+  let storesN = 0;
+  const S = payload.stores || {};
+  const mergeRows = (key, get, put) => {
+    if(S[key] == null) return;
+    let theirs; try { theirs = JSON.parse(S[key]); } catch(e){ return; }
+    const tRows = get(theirs); if(!tRows) return;
+    let mine = null; try { mine = JSON.parse(localStorage.getItem(key) || 'null'); } catch(e){ mine = null; }
+    const mRows = get(mine) || [];
+    const out = new Map(); const kOf = r => String(r && (r.key != null ? r.key : r.id));
+    for(const r of mRows) out.set(kOf(r), r);
+    for(const r of tRows){ const k = kOf(r); if(!out.has(k) || opts.replace) out.set(k, r); }
+    try { localStorage.setItem(key, JSON.stringify(put([...out.values()], mine, theirs))); storesN++; } catch(e){}
+  };
+  mergeRows('dfs_evcal_v1', v => v && Array.isArray(v.rows) ? v.rows : null, rows => ({rows: rows.slice(-80)}));
+  mergeRows('dfs_nfl_own_history', v => Array.isArray(v) ? v : null, rows => rows.sort((a,b) => (a.ts||0) - (b.ts||0)).slice(-16));
+  mergeRows('nflPitHistory/1', v => Array.isArray(v) ? v : null, rows => rows.slice(-60));
+  mergeRows('dfs_contest_presets', v => Array.isArray(v) ? v : null, rows => rows);
+  for(const k of ['dfs_nfl_own_beta', 'dfs_last_contest_preset', 'dfs_nfl_gpp_bankmult', 'dfs_nfl_gpp_bankroll']){
+    if(S[k] == null) continue;
+    let have = null; try { have = localStorage.getItem(k); } catch(e){}
+    if(have == null || opts.replace){ try { localStorage.setItem(k, S[k]); storesN++; } catch(e){} }
+  }
+  slates.forEach(imputeMissingRatings);
+  if(payload.activeSlateId && slates.some(s => s.id === payload.activeSlateId) && (opts.replace || !activeSlateId)) activeSlateId = payload.activeSlateId;
+  if(slates.length && !activeSlateId) activeSlateId = slates[0].id;
+  save();
+  return { added, replaced, skipped, stores: storesN };
+}
+
 function restoreData(input){
   const file = input.files[0]; if(!file) return;
   const reader = new FileReader();
@@ -42881,19 +43008,16 @@ function restoreData(input){
     try {
       const payload = JSON.parse(e.target.result);
       if(!payload.slates || !Array.isArray(payload.slates)) throw new Error('Invalid backup file');
-      if(!confirm(`Restore ${payload.slates.length} slate(s) from backup dated ${(payload.ts||'unknown').slice(0,10)}?\n\nThis will merge with your current data — existing slates are kept, restored slates are added.`)) return;
-      // Merge: add restored slates that don't already exist by id
-      const existingIds = new Set(slates.map(s=>s.id));
-      let added = 0;
-      payload.slates.forEach(s=>{ if(!existingIds.has(s.id)){
-        for(const pl of (s.players||[])) if(pl && typeof pl.name==='string') pl.name=cleanName(pl.name);
-        slates.push(s); added++; } });
-      // Merge history
-      if(payload.history){ Object.assign(lineupHistory, payload.history); saveHistory(); }
-      slates.forEach(imputeMissingRatings);
-      if(slates.length && !activeSlateId) activeSlateId = slates[0].id;
-      save(); renderTopBar(); renderSlate();
-      alert(`Restored ${added} slate(s). ${payload.slates.length - added} already existed and were skipped.`);
+      const existing = new Set(slates.map(s=>s.id));
+      const dup = payload.slates.filter(s => s && existing.has(s.id)).length;
+      const when = (payload.ts||'unknown').slice(0,10);
+      if(!confirm(`Restore ${payload.slates.length} slate(s) from the backup dated ${when}?`)) { input.value = ''; return; }
+      let replace = false;
+      if(dup) replace = confirm(`${dup} of them already exist here.\n\nOK — REPLACE the existing copies with the backup's (player pool, hides, OUT marks, sim inputs, settings and saved lineups all come back exactly as backed up; the current copies are lost).\nCancel — keep the current copies and only add the ${payload.slates.length - dup} new slate(s).`);
+      const r = restorePayload(payload, { replace });
+      try { if(typeof loadFromStorage === 'function') loadFromStorage(); } catch(e){}
+      renderTopBar(); renderSlate();
+      alert(`Restored: ${r.added} slate(s) added, ${r.replaced} replaced, ${r.skipped} kept as they were` + (r.stores ? `; ${r.stores} setting/record store(s) restored.` : '.'));
     } catch(err) {
       alert('Failed to restore: ' + err.message);
     }
