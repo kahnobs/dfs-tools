@@ -6767,7 +6767,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck137b/2026-09-28';
+const BUILD_ID = '2.0/ck137c/2026-09-28';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -41521,6 +41521,12 @@ function hbSetStakes(v){
   const fmt=hbPresetKey(s);
   if(!contestFormat(fmt)) return;
   setSlateContest(s, fmt, v, true);
+  // ck137c: an explicit pick IS the new fee. setSlateContest only fills a fee
+  // that is missing (its other callers pass the current stakes key to keep a
+  // typed fee like $3), so without this the picker was stuck on whatever fee
+  // the slate already had — Matt: "nothing happens, it is stuck on .50".
+  const _stk=contestStake(v);
+  if(_stk && s._ufcEv) s._ufcEv.fee=_stk.fee;
   save();
   syncContestEvInputs();
   renderHbEv(); renderSaved();
