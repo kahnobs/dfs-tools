@@ -6767,7 +6767,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck137/2026-09-28';
+const BUILD_ID = '2.0/ck137b/2026-09-28';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -9305,9 +9305,15 @@ function renderSaved(){
     // pass. The rows go out now with a "pricing…" chip; `hbPriceSavedDeferred`
     // prices them in small batches between paints and writes each result into
     // the lineup meta under the price stamp, so the next render reads it back.
-    if(!_pr){
+    // ck137: a row is queued ONLY when the slate can price at all (a sim
+    // context AND a contest — `_priceStamp` is null otherwise) and only once
+    // per stamp: a roster the pricer returns null for is remembered as
+    // `{none:true}` under the stamp, so it is not re-queued on the next
+    // render. Without both guards a slate with the contest picker on Off
+    // showed "Edge …" on every card forever and re-rendered in a loop.
+    if(!_pr && _priceStamp){
       const _live=slate._livePrice && slate._livePrice[lk];
-      if(_live && _live.pricedStamp===_priceStamp){ _pr=_live; _priceLive=true; }
+      if(_live && _live.pricedStamp===_priceStamp){ if(!_live.none){ _pr=_live; _priceLive=true; } }
       else _pendPrice.push({lk, players, cptId});
     }
     const evStale=!_priceLive && priceIsStale(_pr, _priceStamp);
@@ -9432,8 +9438,14 @@ function renderSaved(){
   }
   // Keep the filter panel honest: metrics available and the match count both
   // change when lineups are added, deleted or re-simmed.
-  if(document.getElementById('savedFilterPanel')?.style.display!=='none') renderSavedFilterRow();
-  if(_pendPrice.length) hbPriceSavedDeferred(slate, _pendPrice, _priceStamp);   // ck135
+  // ck137: never rebuild the filter controls under the user's cursor — a
+  // background re-render (deferred pricing finishing) used to replace the
+  // value box mid-click, closing it before anything could be typed.
+  if(document.getElementById('savedFilterPanel')?.style.display!=='none'){
+    const _fh=document.getElementById('savedFilterRows');
+    if(_fh && _fh.contains(document.activeElement) && _fh.querySelector('input')) updateSavedFilterCount(); else renderSavedFilterRow();
+  }
+  if(_pendPrice.length && _priceStamp) hbPriceSavedDeferred(slate, _pendPrice, _priceStamp);   // ck135/ck137
 }
 // ck135: price the unpriced saved rows in the background — a few rows per
 // macrotask so the page paints and stays responsive between batches. Results
@@ -9455,7 +9467,9 @@ function hbPriceSavedDeferred(slate, rows, stamp){
     let n = 0;
     while(i < rows.length && n < BATCH && (performance.now() - t0) < 40){ n++;
       const r = rows[i++];
-      try { const pr = priceLineupHeldOut(r.players, r.cptId); if(pr){ const m = pricedMetaFrom(pr, slate); if(m){ m.pricedStamp = stamp; slate._livePrice[r.lk] = m; } } } catch(e){}
+      let done = false;
+      try { const pr = priceLineupHeldOut(r.players, r.cptId); if(pr){ const m = pricedMetaFrom(pr, slate); if(m){ m.pricedStamp = stamp; slate._livePrice[r.lk] = m; done = true; } } } catch(e){}
+      if(!done) slate._livePrice[r.lk] = { none: true, pricedStamp: stamp };   // ck137: unpriceable under this stamp — do not re-queue
     }
     if(i < rows.length){ setTimeout(step, 0); return; }
     if(tok === _hbDeferTok && activeSlate() === slate) renderSaved();   // one re-render with every price in place
