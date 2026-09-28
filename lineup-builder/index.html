@@ -6767,7 +6767,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck133/2026-09-27';
+const BUILD_ID = '2.0/ck137/2026-09-28';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -9234,6 +9234,7 @@ function renderSaved(){
   // whose stamp no longer matches is DIMMED and the panel offers one action
   // that re-prices the whole list (`repriceAllSaved`).
   const _priceStamp=lineupPriceStamp(slate);
+  const _pendPrice=[];   // ck135: rows to price after this render paints
   // Only offer sort metrics that actually render on the cards, so the dropdown can't
   // advertise a metric (e.g. Sim) that no saved lineup has.
   const avail=new Set(['saved','sal']);
@@ -9296,9 +9297,18 @@ function renderSaved(){
     const _m=meta[lk]||{};
     let _pr=(_m.evPct!=null&&!isNaN(parseFloat(_m.evPct))) ? _m : null;
     let _priceLive=false;
-    if(!_pr && typeof priceLineupHeldOut==='function'){
-      try{ const _r=priceLineupHeldOut(players, cptId);
-           if(_r){ _pr=pricedMetaFrom(_r, slate); _priceLive=true; } }catch(e){}
+    // ck135: a row with no stored price is NOT priced here. Pricing a row is a
+    // pass over every held-out sim against the modeled field (and the first
+    // row on a new contest draws that field: seconds), and this render used to
+    // do it for every unpriced row synchronously — changing the builder's
+    // contest or stakes with a 150-lineup board froze the page for the whole
+    // pass. The rows go out now with a "pricing…" chip; `hbPriceSavedDeferred`
+    // prices them in small batches between paints and writes each result into
+    // the lineup meta under the price stamp, so the next render reads it back.
+    if(!_pr){
+      const _live=slate._livePrice && slate._livePrice[lk];
+      if(_live && _live.pricedStamp===_priceStamp){ _pr=_live; _priceLive=true; }
+      else _pendPrice.push({lk, players, cptId});
     }
     const evStale=!_priceLive && priceIsStale(_pr, _priceStamp);
     const evPct=_pr ? _pr.evPct : null;
@@ -9359,6 +9369,7 @@ function renderSaved(){
   else if(sortBy==='rtg_asc')     entries.sort((a,b)=>(a.rtg||0)-(b.rtg||0));
   else if(sortBy==='own_desc')    entries.sort((a,b)=>(b.own||0)-(a.own||0));
   else if(sortBy==='own_asc')     entries.sort((a,b)=>(a.own||0)-(b.own||0));
+  const pendingSet=new Set(_pendPrice.map(x=>x.lk));
   list.innerHTML=entries.map(({lineup,i,players,sal,proj,rtg,simScore,evPct,edge,evCal,evTip,evStale,winPct,top10Pct,cashPct,hbEv,hbEvModel,hbEvTip,winEq,top5Eq,top10Eq,top20Eq,mlEq,own})=>{
     const stats=[];
     // ck95: a stale price is DIMMED and struck through in its label, not
@@ -9376,6 +9387,7 @@ function renderSaved(){
     // was better. `data-ev` keeps the calibrated EV% on the element.
     if(evPct!=null){ const _eg=(edge!=null)?edge:null; const _col=_eg==null?'var(--muted)':(_eg>=1?'var(--green)':'var(--red)');
       stats.push(`<span class="saved-stat hb-ev-chip" data-ev="${evPct.toFixed(1)}" data-edge="${_eg!=null?_eg.toFixed(3):''}" style="color:${_col};${_stCss}" title="${esc(evTip||'')}"><span class="saved-stat-lbl" style="color:${_col};opacity:.7;">Edge</span>${_stMark}${_eg!=null?evEdgeFmt(_eg):(evPct>=0?'+':'')+evPct.toFixed(0)+'%'}</span>`); }
+    if(evPct==null && pendingSet.has(lineupKey(lineup))) stats.push(`<span class="saved-stat hb-ev-chip" data-pending="1" style="color:var(--muted);opacity:.6;" title="Pricing this lineup against the modeled field in the background…"><span class="saved-stat-lbl">Edge</span>…</span>`);
     // THE win rate: P(rank 1), held out, one decimal in the same units as the
     // hand-builder card. Nothing else on this card may wear this label.
     if(winPct!=null)   stats.push(`<span class="saved-stat saved-win-chip" style="${_stCss}" title="${esc(WINPCT_TIP)}"><span class="saved-stat-lbl">Win%</span>${_stMark}${hbPct(winPct)}%</span>`);
@@ -9421,6 +9433,34 @@ function renderSaved(){
   // Keep the filter panel honest: metrics available and the match count both
   // change when lineups are added, deleted or re-simmed.
   if(document.getElementById('savedFilterPanel')?.style.display!=='none') renderSavedFilterRow();
+  if(_pendPrice.length) hbPriceSavedDeferred(slate, _pendPrice, _priceStamp);   // ck135
+}
+// ck135: price the unpriced saved rows in the background — a few rows per
+// macrotask so the page paints and stays responsive between batches. Results
+// are cached on `slate._livePrice[key]` (not persisted) under the price stamp;
+// a new render or a changed stamp abandons a pass in flight. The first row on
+// a new contest still draws the field (seconds) — that block is unavoidable
+// until the draw moves off the main thread, but it now happens AFTER the
+// select has responded and the rows are on screen.
+let _hbDeferTok = 0;
+function hbPriceSavedDeferred(slate, rows, stamp){
+  const tok = ++_hbDeferTok;
+  slate._livePrice = slate._livePrice || {};
+  const BATCH = 4;
+  let i = 0;
+  const step = () => {
+    if(tok !== _hbDeferTok || activeSlate() !== slate) return;        // superseded
+    if(lineupPriceStamp(slate) !== stamp) return;                      // the world changed — the next render restarts
+    const t0 = performance.now();
+    let n = 0;
+    while(i < rows.length && n < BATCH && (performance.now() - t0) < 40){ n++;
+      const r = rows[i++];
+      try { const pr = priceLineupHeldOut(r.players, r.cptId); if(pr){ const m = pricedMetaFrom(pr, slate); if(m){ m.pricedStamp = stamp; slate._livePrice[r.lk] = m; } } } catch(e){}
+    }
+    if(i < rows.length){ setTimeout(step, 0); return; }
+    if(tok === _hbDeferTok && activeSlate() === slate) renderSaved();   // one re-render with every price in place
+  };
+  setTimeout(step, 0);
 }
 function exportCSV(){
   const slate=activeSlate();if(!slate)return;
@@ -18417,7 +18457,7 @@ function evOvergen(slate, target, kind){
 // hold no floored player still short, caps respected; what cannot be met is
 // logged, never silently dropped.
 function evScreenBoard(slate, rows, target, log, opts){
-  const cfg=evEdgeScreenCfg(slate);
+  const cfg=(opts && opts.cfg) || evEdgeScreenCfg(slate);   // ck134: the tournament objective passes floors of 0
   const keep=[], dropped=[];
   // ck112: optional exposure caps enforced ON THE KEPT BOARD — `caps.ids(i)`
   // lists a lineup's player ids, `caps.cap(id)` the slot cap; a lineup that
@@ -33728,8 +33768,36 @@ function nflEngineSet(v){
   save();
   if(typeof renderNflEngineNote === 'function') renderNflEngineNote();
 }
+// ck134/ck135: ONE objective. A GPP board is entered to win the tournament,
+// so the GPP engine always maximises P(at least one of our lineups finishes
+// FIRST) — max-coverage over the sim worlds' first-place probabilities (see
+// foldPort in the kernel). There is no EV-mode selector: Matt — "if we are
+// entering lineups into GPP tournaments we are always playing with a
+// tournament objective, trying to win 1st place." The expected-value
+// figures are still priced and reported; they are no longer what is
+// optimised. Legacy Sim Score mode (engine off) is unchanged.
+// ck136: the band is not strictly first — Matt: "it is mostly variance at
+// that point, we just want to get live bullets into the top 1% and hope
+// variance shakes our way a few times."
+// ck137: the band the greedy COVERS is the TOP 5% (at least the top 10
+// places). The target is still the top 1%; a 5% band is how the engine gets
+// there. Measured on all nine settled NFL contests (810 entries per variant,
+// same sim seed, settled on the real standings): covering the top 1% directly
+// went -13.5% ROI / 13 top-1% finishes, covering the top 5% went +23.3% /
+// 25 top-1% finishes and beat the EV objective in 8 of 9 contests, because
+// the per-lineup P(top 1%) in a 2-3K-world sim is a handful of worlds and
+// the greedy chases that noise (selection fold 100%, held-out far lower);
+// the 5% band is the same tail with a stable gradient. objtest.js / obj_all.
+function gppObjectiveOf(slate){ return { mode: (typeof window !== 'undefined' && window.__objMode === 'ev') ? 'ev' : 'top', band: 'top5' }; }   // __objMode: harness A/B only
+const GPP_TOP_BAND_FRAC = 0.05;   // ck137
+function gppObjectiveCutoff(slate, F){ const frac = (typeof window !== 'undefined' && window.__topBandFrac > 0) ? window.__topBandFrac : GPP_TOP_BAND_FRAC;   // __topBandFrac: harness A/B only
+  return Math.max(10, Math.ceil(frac * Math.max(1, F || 0))); }
+function gppObjectiveBlend(){ const b = (typeof window !== 'undefined' && window.__topBlend != null) ? +window.__topBlend : 0; return (b > 0 && b <= 1) ? b : 0; }   // harness A/B: β of EV growth mixed into the coverage pick
+function setGppObjective(){ /* ck135: no selector */ }
+function renderGppObjective(){ /* ck135: no selector */ }
 function renderNflEngineNote(){
   const el = document.getElementById('nflEngineNote');
+  try { const _s0 = (typeof activeSlate === 'function') ? activeSlate() : null; if(_s0) renderGppObjective(_s0); } catch(e){}
   const s = (typeof activeSlate === 'function') ? activeSlate() : null;
   const sel = document.getElementById('nflEngineSel');
   const wrap = document.getElementById('nflEngineWrap');
@@ -35723,7 +35791,39 @@ function gppKernelFactory(){
       const add = function(m){
         chosen.push(m); rebuild();
         if(projOn){ for(let sc = 0; sc < NS; sc++) boardD[sc] += projD[m*NS + sc]; const st = projStats(-1); boardMean = st.mean; boardSd = st.sd; }
+        if(topMeasure) covAdd(m);
       };
+      // ── ck134: TOURNAMENT OBJECTIVE — cover the top-band worlds ───────────
+      // The EV objective scores a board on its calibrated expected payout, and
+      // the results record shrinks the first-place band to a few percent of
+      // the model's claim — so the greedy buys cash and top-10% equity and
+      // never chases the top. For a top-heavy GPP the question is different:
+      // maximise P(at least one lineup of ours finishes inside the top band).
+      // Per (candidate, world) the rank posterior gives h = P(rank ≤ cutoff);
+      // the board's chance in a world is 1 − Π(1 − h) over its members, and
+      // the greedy adds the candidate that raises the mean of that over worlds
+      // the most — max-coverage, which naturally spreads the board across
+      // DIFFERENT ceiling scenarios (different dominators, different punts)
+      // instead of stacking the one the means favour. `topCut` is the rank
+      // cutoff (1 = win, 10, or ceil(1% of the field)).
+      // `ws.topCut` is the band to MEASURE (always set, so the EV board reports
+      // its own P(any in the band)); `ws.topObjective` says whether the greedy
+      // optimises it.
+      const topCut = ws.topCut || 0, topMeasure = topCut > 0, topOn = topMeasure && !!ws.topObjective;
+      const mHit = new Float64Array(topMeasure ? M*W : 0);
+      const covNone = new Float64Array(W).fill(1);   // Π(1 − h) over chosen, per world
+      if(topMeasure){
+        for(let m = 0; m < M; m++){ const lv = live[m];
+          for(let z = 0; z < lv.length; z++){ const q = lv[z], base = m*W + q, dq = mDup[base];
+            const off = 1 + dupOff*dq;
+            let h = (mP0[base] >= 0 && topCut <= 1) ? mP0[base] : evRankAtMost(mShape[base], mScale[base], off, topCut);
+            if(mObs[base] >= 1 && topCut <= 1) h = 0;
+            mHit[base] = h > 1 ? 1 : (h > 0 ? h : 0); } }
+      }
+      const covGain = function(m){ if(!topMeasure) return 0; const lv = live[m]; let g = 0;
+        for(let z = 0; z < lv.length; z++){ const q = lv[z]; g += covNone[q] * mHit[m*W + q]; } return g / W; };
+      const covAdd = function(m){ const lv = live[m]; for(let z = 0; z < lv.length; z++){ const q = lv[z]; covNone[q] *= (1 - mHit[m*W + q]); } };
+      const covNow = function(){ let s = 0; for(let q = 0; q < W; q++) s += 1 - covNone[q]; return s / W; };
       // ── ck88: the portfolio's EV, decomposed by rank band ────────────────
       // The same walk `rebuild` makes — every chosen member, in each world, at
       // the rank OUR OWN entries push it to — with each payout atom charged to
@@ -35779,6 +35879,7 @@ function gppKernelFactory(){
       };
       return {W:W, chosen:chosen, prepare:prepare, growthWith:growthWith, growthNow:growthNow,
               add:add, report:report, bandReport:bandReport, liveOf:function(m){ return live[m]; },
+              topOn:topOn, topMeasure:topMeasure, covGain:covGain, covNow:covNow,
               projOn:projOn, gSens:gSens, projBoard:function(){ return projOn ? {mean:boardMean, sd:boardSd, scen:NS} : null; }};
     }
 
@@ -35804,6 +35905,10 @@ function gppKernelFactory(){
       for(let i = 0; i < nP; i++) ownF[i] = Math.max(0, Math.min(1, (P.ownG[i] || 0) / 100));
       selW.projSd = P.projSd; selW.projMu = mu; selW.projOwn = ownF; selW.projTau = P.projTau; selW.projLambda = (P.projLambda != null) ? P.projLambda : 1; selW.projScen = P.projScen || 32;
     }
+    // ck134: tournament objective — the rank cutoff the greedy covers (0 = EV objective)
+    const topObjective = !!(P.objective && P.objective.mode === 'top');
+    const topCut = topObjective ? Math.max(1, P.objective.cutoff | 0) : Math.max(10, Math.ceil(0.01 * Math.max(1, P.F)));   // measured in EV mode too (top 1%)
+    selW.topCut = topCut; selW.topObjective = topObjective;
     let FP = foldPort(selW, menu);
     const expCount = new Int32Array(nP);
     const capOf = function(i){ return P.capSlots[i]; };
@@ -35942,6 +36047,15 @@ function gppKernelFactory(){
           if(!any) mustCpt = -1;
         }
       }
+      // ck136 harness knob: β > 0 mixes the EV growth into the coverage pick
+      // (each normalised to [0,1] over this step's playable candidates).
+      const blendB = (FP.topOn && P.objective && P.objective.blend > 0) ? P.objective.blend : 0;
+      let covArr = null, grwArr = null, covMax = -Infinity, covMin = Infinity, grwMax = -Infinity, grwMin = Infinity;
+      if(blendB > 0){ covArr = new Float64Array(M); grwArr = new Float64Array(M);
+        for(let m = 0; m < M; m++){ if(inPort[m]) continue; if(mustCpt >= 0 && menu[m].ids[0] !== mustCpt) continue;
+          let bl = false; for(const i of menu[m].ids) if(expCount[i] + 1 > capOf(i)){ bl = true; break; } if(bl || !fightOk(menu[m].ids)) continue;
+          const c = FP.covGain(m), gg = FP.growthWith(m, n1, stake1); covArr[m] = c; grwArr[m] = gg;
+          if(c > covMax) covMax = c; if(c < covMin) covMin = c; if(gg > grwMax) grwMax = gg; if(gg < grwMin) grwMin = gg; } }
       for(let m = 0; m < M; m++){
         if(inPort[m]) continue;
         if(mustCpt >= 0 && menu[m].ids[0] !== mustCpt) continue;
@@ -35951,7 +36065,9 @@ function gppKernelFactory(){
         for(const i of menu[m].ids) if(expCount[i] + 1 > capOf(i)){ blocked = true; break; }
         if(blocked) continue;
         if(!fightOk(menu[m].ids)) continue;
-        const g = FP.growthWith(m, n1, stake1);
+        const g = blendB > 0
+          ? (1 - blendB) * ((covArr[m] - covMin) / Math.max(1e-12, covMax - covMin)) + blendB * ((grwArr[m] - grwMin) / Math.max(1e-12, grwMax - grwMin))
+          : (FP.topOn ? FP.covGain(m) : FP.growthWith(m, n1, stake1));
         if(g > bestG){ bestG = g; bestM = m; }
         // The best STACKED alternative available at this same step, so a naked
         // pick can be reported as a margin over a real competitor instead of an
@@ -35964,9 +36080,9 @@ function gppKernelFactory(){
       // which is real information. The user asked for N lineups, so the greedy
       // still builds N; the peak is recorded and reported instead of silently
       // truncating a board the user is waiting for.
-      const gNow = FP.growthNow(FP.chosen.length);
+      const gNow = FP.topOn ? -Infinity : FP.growthNow(FP.chosen.length);
       if(FP.chosen.length === 0 || bestG >= gPeak){ gPeak = bestG; peakN = FP.chosen.length + 1; }
-      if(FP.chosen.length > 0 && bestG < gNow && !stalled) stalled = 2;
+      if(!FP.topOn && FP.chosen.length > 0 && bestG < gNow && !stalled) stalled = 2;
       if(menuStackN[bestM] === 0)
         nakedPicks.push({step: FP.chosen.length + 1, m: bestM, altM: bestStackM});
       inPort[bestM] = 1;
@@ -36005,7 +36121,17 @@ function gppKernelFactory(){
     const repIdxOfMenu = new Map();
     chosen.forEach(function(m, i){ repIdxOfMenu.set(m, i); });
     altSet.forEach(function(m, i){ repIdxOfMenu.set(m, chosen.length + i); });
+    repW.topCut = topCut; repW.topObjective = false;
     const RP = foldPort(repW, repItems);
+    // ck134: P(at least one of ours in the top band) on the untouched report
+    // fold — reported for BOTH objectives so the trade is visible.
+    let topCov = null, topCovSel = null;
+    if(topCut > 0){
+      topCovSel = FP.covNow();
+      const RP2 = foldPort(repW, chosen.map(function(m){ return menu[m]; }));
+      for(let k = 0; k < chosen.length; k++){ RP2.prepare(k + 1); RP2.add(k); }
+      topCov = RP2.covNow();
+    }
     const nakedOut = [];
     for(let k = 0; k < chosen.length; k++){
       const np = nakedPicks.find(function(x){ return x.step === k + 1; });
@@ -36067,6 +36193,7 @@ function gppKernelFactory(){
         // ck126: the scenario step and the counterfactual climbs.
         projOn: !!FP.projOn, projTau: P.projTau || 0, projLambda: P.projLambda, projBoard: FP.projBoard(), concClimbs: concClimbs, concPlayers: concPlayers,
         recoverRounds: recoverRounds, recoverAdded: recoverAdded, cptMinOn: cptMinOn,
+        topCut: topCut, topObjective: topObjective, topCov: topCov, topCovSel: topCovSel,   // ck134
         // ck75: what the stack constraints cost the search.
         stackOn: stackOn, stackQbs: (P.nQbRow|0), stackRejects: stackRejects,
         stackRepairs: stackRepairs, stackSeedFix: stackSeedFix,
@@ -36734,6 +36861,7 @@ async function runNflGppEngine(ctx){
     // ck118: bootstrap-resampled search seeds + Bayesian-bootstrap greedy steps (slate._gppRobust === false turns both off).
     robust: slate._gppRobust !== false,
     maxSal, minSal, N: target, want: capN, B, capSlots, cptMin: cptMinSlots, fightPairs, fightSlack: UFC_FIGHT_SLACK, fightViable: UFC_FIGHT_VIABLE,
+    objective: { mode: gppObjectiveOf(slate).mode, cutoff: gppObjectiveCutoff(slate, F), blend: gppObjectiveBlend() },   // ck134/ck136
     // ck74: the partner definition the LABEL uses, so the kernel's naked-pick
     // explanation and `nflStackShape` cannot disagree about what "naked" means.
     stackRb: !!slate._nflStackRbCounts,
@@ -37041,6 +37169,13 @@ async function runNflGppEngine(ctx){
   const L = res.lineups;
   if(!L.length){ log('⚠ The portfolio greedy selected nothing — loosen Max% or widen the pool.'); return null; }
   if(d.stalled === 1) log(`  (stopped at ${L.length} of ${target}: every remaining candidate would break a Max%/override cap, or the menu ran out)`);
+  if(d.topCut > 0 && !d.topObjective && d.topCov != null){
+    log(`Objective (ck134): EXPECTED VALUE — P(at least one of ours finishes in the top 1%) = ${(100*d.topCov).toFixed(1)}% on the held-out fold. The Tournament objective would raise that number at the cost of cash rate; switch it in the Contest EV panel.`);
+  }
+  if(d.topCut > 0 && d.topObjective){
+    const bandTxt = d.topCut <= 1 ? '1st place' : d.topCut <= 10 ? 'the top 10' : `the top ${(100*d.topCut/Math.max(1,F)).toFixed(d.topCut/Math.max(1,F) < 0.02 ? 1 : 0)}%`;
+    log(`Objective (ck137): TOURNAMENT — at every step the greedy added the lineup that most raised P(at least one of ours finishes in ${bandTxt}), so the board is spread across different winning scenarios rather than stacked on the one the means favour; the EV edge screen stands down (the coverage order is the board). Held-out report fold: P(any of ours in ${bandTxt}) = ${(100*(d.topCov||0)).toFixed(2)}% for this board (selection fold ${(100*(d.topCovSel||0)).toFixed(2)}%). The band is wider than the top-1% target on purpose: measured over nine settled NFL contests it lands about twice the top-1% finishes that covering the top 1% directly does. The EV, cash and top-10% figures below are priced, not optimised.`);
+  }
   if(d.stalled === 2 && d.peakN < L.length) log(`  Expected log growth PEAKED at ${d.peakN} lineup${d.peakN===1?'':'s'} and falls after that — past ${d.peakN} each extra entry fee costs more growth than its share of the payout curve returns. The board below is the ${L.length} you asked for; the first ${d.peakN} are the ones the bankroll actually wants.`);
   const roi = d.stake > 0 ? (d.meanNet / d.stake) * 100 : 0;
   const roiSE = d.stake > 0 ? (d.seNet / d.stake) * 100 : 0;
@@ -37259,8 +37394,10 @@ async function runNflGppBoard(ctx){
       const _cptMinIds = Object.keys(_cm).filter(id => (_cm[id]||0) > 0).map(id => 'CPT:' + id);
       const _floorIds = i => out[i].map(p => p.id).concat(SDb && out[i]._sdCaptain ? ['CPT:' + out[i]._sdCaptain] : []);
       const _capSlotsF = id => /^CPT:/.test(String(id)) ? Infinity : _capSlots(id);
+      const _topMode = gppObjectiveOf(slate).mode === 'top';   // ck134: no EV floors — the greedy's coverage order is the board
       const _scr = evScreenBoard(slate, _pr0, target, log,
-        {caps: {ids: i => out[i].map(p => p.id), cap: _capSlotsF}, extraOk: _fbRule,
+        {cfg: _topMode ? Object.assign({}, evEdgeScreenCfg(slate), {floor: 0, ex1Floor: 0}) : null,
+         caps: {ids: i => out[i].map(p => p.id), cap: _capSlotsF}, extraOk: _fbRule,
          floors: (_minIds.length || _cptMinIds.length) ? {list:_minIds.concat(_cptMinIds), ids: _floorIds,
                                    min: id => /^CPT:/.test(String(id)) ? Math.ceil(Math.max(0, Math.min(100, _cm[String(id).slice(4)]||0))/100*target)
                                                                        : Math.ceil(Math.max(0, Math.min(100, _mo[id]||0))/100*target)} : null});
