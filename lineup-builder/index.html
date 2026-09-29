@@ -77,6 +77,11 @@ a:focus-visible,[tabindex]:focus-visible{outline:none;box-shadow:var(--focus);}
 .sport-pga{background:rgba(34,197,94,.2);color:var(--green);}
 .sport-ufc{background:rgba(59,130,246,.2);color:var(--blue);}
 .sport-nfl{background:rgba(168,85,247,.2);color:#a855f7;}
+.sport-nhl{background:rgba(34,211,238,.18);color:#22d3ee;}
+.nhl-tag{font-size:9px;font-family:'DM Mono',monospace;padding:1px 4px;border-radius:3px;border:1px solid var(--border);color:var(--muted);letter-spacing:.3px;vertical-align:1px;}
+.nhl-pos{color:var(--text);}
+.nhl-pp{color:#22d3ee;border-color:rgba(34,211,238,.4);}
+.nhl-conf{color:var(--green);border-color:rgba(34,197,94,.4);}
 .slot-pos-tag{font-family:'DM Mono',monospace;font-size:9px;font-weight:700;color:var(--muted);width:32px;display:inline-block;}
 .pos-badge{font-family:'DM Mono',monospace;font-size:10px;font-weight:700;padding:1px 4px;border-radius:3px;background:rgba(168,85,247,.15);color:#c084fc;}
 .del-tab{color:var(--muted);font-size:12px;opacity:0;transition:opacity .1s;}
@@ -2049,6 +2054,29 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
             </div>
           </div>
 
+          <div class="autogen-section" id="nhlSection" style="display:none;">
+            <div class="autogen-section-title">NHL Simulation</div>
+            <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:6px;">Each game is simmed from the team totals: every goal is credited to a scorer and 0-2 assisters from the unit on the ice (his forward line + a D pair at even strength, his PP unit on the power play), so linemates score together. Shots and blocks are drawn around the sheet's numbers; a goalie's saves are the other team's shots minus the goals he allows. Stacking is not forced — the sim carries the line correlation. With Contest EV on (and a contest picked) the GPP engine builds a tournament board against a modelled field; with it off, Sim Score picks from the sim's own best lineups by their joint ceiling.</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+              <span class="setting-label">Simulations</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <input type="range" min="1000" max="20000" step="1000" value="5000" id="nhlSimCountSlider"
+                style="width:100%;accent-color:#22d3ee;"
+                oninput="document.getElementById('nhlSimCountLabel').textContent=this.value;const _s=activeSlate();if(_s){_s._simCount=parseInt(this.value);save();}">
+              <span id="nhlSimCountLabel" style="font-family:'DM Mono',monospace;font-size:11px;color:#22d3ee;font-weight:600;min-width:38px;">5000</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+              <span class="setting-label" style="flex:none;">Every lineup stacks</span>
+              <select id="nhlMinStack" class="form-input" style="width:170px;padding:3px 6px;font-size:11px;"
+                title="Minimum skaters from ONE forward line or ONE power-play unit in every generated lineup. The size above the minimum (2, 3, 4) is the builder's choice."
+                onchange="const _s=activeSlate();if(_s){_s._nhlMinStack=parseInt(this.value);save();}">
+                <option value="2">2+ from a line / PP unit</option>
+                <option value="3">3+ from a line / PP unit</option>
+                <option value="0">Off</option>
+              </select>
+            </div>
+          </div>
           <div class="autogen-section" id="nflSection" style="display:none;">
             <div class="autogen-section-title">NFL Simulation</div>
             <!-- The board that feeds this sim (game totals, spreads, team lean,
@@ -2569,6 +2597,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
             <option value="pga">PGA (Golfers)</option>
             <option value="ufc">UFC (Fighters)</option>
             <option value="nfl">NFL (Classic)</option>
+            <option value="nhl">NHL (Classic)</option>
           </select>
         </div>
       </div>
@@ -2705,7 +2734,17 @@ const SPORT_CFG = {
   nfl:   {label:'Players',pos:'FLEX',pillClass:'sport-nfl',
           slots:['QB','RB','RB','WR','WR','WR','TE','FLEX','DST'],
           flex:['RB','WR','TE'], size:9},
+  // NHL Classic (ck138): C, C, W, W, W, D, D, G, UTIL — UTIL takes any skater;
+  // skaters from at least three NHL teams (NHL_MIN_SKATER_TEAMS).
+  nhl:   {label:'Players',pos:'UTIL',pillClass:'sport-nhl',
+          slots:['C','C','W','W','W','D','D','G','UTIL'],
+          flex:['C','W','D'], size:9},
 };
+const isNhl = (slate) => slate?.sport === 'nhl';
+// A sport whose roster is named positional slots (the hand builder, export,
+// DK entries and the engine's positional shape all follow SPORT_CFG.slots).
+const isPositional = (slate) => (slate?.sport === 'nfl' && !isShowdown(slate)) || slate?.sport === 'nhl';
+const NHL_MIN_SKATER_TEAMS = 3;
 // DK NFL SHOWDOWN (Captain Mode) is a different game from Classic:
 //   • 6 players from ONE game: 1 CPT + 5 FLEX
 //   • ANY position fills any slot (kickers included — Classic has no K)
@@ -2737,6 +2776,8 @@ const isNfl = (slate) => slate?.sport === 'nfl';
 const isNflClassic = (slate) => slate?.sport === 'nfl' && !isShowdown(slate);
 // Captain salary/score multiplier.
 const CPT_MULT = 1.5;
+// ck137: see the sheet-anchor block at the end of runNflSims for the measurement.
+const NFL_SHEET_ANCHOR = { on: false, lo: 0.6, hi: 0.9, q: 0.8, minSim: 2 };   // on: pending the board backtest (queue137 'anchor' lane)
 const cptSalaryOf = (p) => Number.isFinite(p?.cptSalary) ? p.cptSalary : Math.round((p?.salary||0) * CPT_MULT);
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -5360,6 +5401,7 @@ function sdSalary(slate, ids, cptOverride, mode){
   return s;
 }
 function nflCounts(slate, ids){
+  if(isNhl(slate)) return nhlCounts(slate, ids);   // ck138
   const c = {QB:0,RB:0,WR:0,TE:0,DST:0,UNK:0};
   for(const id of ids||[]){
     const pos = nflPosOf(playerById(slate,id));
@@ -5370,6 +5412,7 @@ function nflCounts(slate, ids){
   return c;
 }
 function nflFeasible(c){
+  if(c && c._nhl) return nhlFeasible(c);   // ck138
   if(c.UNK>0) return false;
   const flexPool = c.RB+c.WR+c.TE;
   if(c.QB>1 || c.DST>1 || c.RB>3 || c.WR>4 || c.TE>2) return false;
@@ -5381,12 +5424,14 @@ function nflFeasible(c){
   return excess<=1;
 }
 function nflComplete(c){
+  if(c && c._nhl) return nhlComplete(c);   // ck138
   return c.UNK===0 && c.QB===1 && c.DST===1 && c.RB>=2 && c.WR>=3 && c.TE>=1 &&
          (c.RB+c.WR+c.TE)===7;
 }
 // Assign a COMPLETE 9-id set to named slots for display/export. Base slots
 // first (RB1/RB2, WR1-3, TE), the leftover skill player lands in FLEX.
 function nflAssignSlots(slate, ids){
+  if(isNhl(slate)) return nhlAssignSlots(slate, ids);   // ck138
   const groups = {QB:[],RB:[],WR:[],TE:[],DST:[]};
   for(const id of ids||[]){
     const pos = nflPosOf(playerById(slate,id));
@@ -5415,11 +5460,88 @@ function nflAssignSlots(slate, ids){
     FLEX:groups.RB[2]||groups.WR[3]||groups.TE[1]||null};
   return [out.QB,out.RB,out.RB2,out.WR,out.WR2,out.WR3,out.TE,out.FLEX,out.DST];
 }
+// ── NHL CLASSIC ROSTER (ck138) ─────────────────────────────────────────────
+// DK lists eligibility as "C/UTIL", "W/UTIL", "D/UTIL", "G". LW/RW read as W.
+function nhlPosOf(p){
+  const toks = String(p?.position||'').toUpperCase().split(/[^A-Z]+/).filter(t => t && t !== 'UTIL');
+  for(const t of toks){ if(t === 'C' || t === 'W' || t === 'D' || t === 'G') return t; if(t === 'LW' || t === 'RW') return 'W'; }
+  return null;
+}
+// Position of a player on whichever positional sport the slate is.
+function rosterPosOf(slate, p){ return isNhl(slate) ? nhlPosOf(p) : nflPosOf(p); }
+// ── NHL STACK RULE (ck139) ────────────────────────────────────────────────
+// Matt: every lineup carries a stack — skaters from the same forward line or
+// the same power-play unit; "3 man or 2 mans are both viable, even 4 mans".
+// So the rule is a MINIMUM (default 2) and the size above it is the engine's
+// choice on EV. Units: forward lines F1-F4 and PP1/PP2 (a D pair is not a
+// stack; a D on a PP unit counts through the unit). slate._nhlMinStack: 0 off,
+// 2 (default), 3.
+const NHL_MIN_STACK_DEFAULT = 2;
+function nhlMinStackOf(slate){ const v = slate && slate._nhlMinStack; return (v === 0 || v === 2 || v === 3) ? v : NHL_MIN_STACK_DEFAULT; }
+function nhlUnitKeys(p){
+  const t = String(p && p.team || '').toUpperCase(), L = String(p && p.nhlLine || '').toUpperCase(), U = String(p && p.nhlPP || '').toUpperCase();
+  const k = []; if(/^F[1-4]$/.test(L)) k.push(t + '|' + L); if(U === 'PP1' || U === 'PP2') k.push(t + '|' + U); return k;
+}
+// the biggest same-unit group among a lineup's skaters
+function nhlStackMax(players){
+  const c = {}; let m = 0;
+  for(const p of players){ if(!p || nhlPosOf(p) === 'G') continue; for(const k of nhlUnitKeys(p)){ c[k] = (c[k] || 0) + 1; if(c[k] > m) m = c[k]; } }
+  return m;
+}
+// Pool-row tags: position, line / pair, PP unit, and the sheet status. The
+// line and PP unit are what an NHL stack is built from, so they sit on the row.
+function nhlRowTags(p){
+  const pos = nhlPosOf(p) || '?';
+  const bits = [`<span class="nhl-tag nhl-pos">${pos}</span>`];
+  if(p.nhlLine) bits.push(`<span class="nhl-tag nhl-line" title="${pos==='G' ? (p.nhlLine==='G1' ? 'Projected starter' : 'Backup') : (/^D/.test(p.nhlLine) ? 'Defence pair ' : 'Forward line ') + p.nhlLine.slice(1)}">${esc(p.nhlLine)}</span>`);
+  if(p.nhlPP) bits.push(`<span class="nhl-tag nhl-pp" title="Power-play unit ${p.nhlPP.slice(2)}">${esc(p.nhlPP)}</span>`);
+  const st = String(p.status||'').trim();
+  if(/^o$/i.test(st)) bits.push(`<span class="out-badge" title="Status O on the sheet">OUT</span>`);
+  else if(/^q$/i.test(st)) bits.push(`<span class="q-badge" title="Questionable on the sheet">Q</span>`);
+  else if(/^confirmed$/i.test(st)) bits.push(`<span class="nhl-tag nhl-conf" title="Confirmed starter">✓ CONF</span>`);
+  return ' ' + bits.join(' ');
+}
+function nhlCounts(slate, ids){
+  const c = {C:0,W:0,D:0,G:0,UNK:0,_nhl:true,_teams:new Set()};
+  for(const id of ids||[]){ const p = playerById(slate,id); const pos = nhlPosOf(p);
+    c[(pos && c[pos]!==undefined) ? pos : 'UNK']++;
+    if(p && pos && pos !== 'G' && p.team) c._teams.add(String(p.team).toUpperCase()); }
+  return c;
+}
+// Can this partial roster still become a legal 9? One UTIL: at most one
+// skater position may run over its base (2 C / 3 W / 2 D), by one.
+function nhlFeasible(c){
+  if(c.UNK>0 || c.G>1 || c.C>3 || c.W>4 || c.D>3) return false;
+  const sk = c.C + c.W + c.D; if(sk > 8) return false;
+  const excess = Math.max(0,c.C-2) + Math.max(0,c.W-3) + Math.max(0,c.D-2);
+  if(excess > 1) return false;
+  // three skater teams: the open skater slots must still be able to add the
+  // missing teams
+  const open = 8 - sk, have = c._teams ? c._teams.size : NHL_MIN_SKATER_TEAMS;
+  return have + open >= NHL_MIN_SKATER_TEAMS;
+}
+function nhlComplete(c){
+  return c.UNK===0 && c.G===1 && c.C>=2 && c.W>=3 && c.D>=2 && (c.C+c.W+c.D)===8
+      && (!c._teams || c._teams.size >= NHL_MIN_SKATER_TEAMS);
+}
+// Slot a COMPLETE 9 into C,C,W,W,W,D,D,G,UTIL. The UTIL is the extra skater;
+// when several could take it, the one whose game starts LATEST (late swap —
+// the ck133 rule), then the cheaper.
+function nhlAssignSlots(slate, ids){
+  const g = {C:[],W:[],D:[],G:[]};
+  for(const id of ids||[]){ const pos = nhlPosOf(playerById(slate,id)); if(pos && g[pos]) g[pos].push(id); else (g._bad=g._bad||[]).push(id); }
+  const start = id => { const p = playerById(slate,id); return (p && Number.isFinite(p.kick_mins)) ? p.kick_mins : -1; };
+  const ord = a => a.sort((x,y)=>(start(x)-start(y)) || ((playerById(slate,y)?.salary||0)-(playerById(slate,x)?.salary||0)));
+  ['C','W','D'].forEach(k => ord(g[k]));
+  const util = g.C[2] || g.W[3] || g.D[2] || null;
+  return [g.C[0]||null, g.C[1]||null, g.W[0]||null, g.W[1]||null, g.W[2]||null, g.D[0]||null, g.D[1]||null, g.G[0]||null, util];
+}
+
 // Display order for an NFL classic lineup: QB / RB / RB / WR / WR / WR / TE /
 // FLEX / DST, the order DraftKings shows it in. Any id the slotter could not
 // place (an over-full position, a kicker) is appended so nothing disappears.
 function nflDisplayOrder(slate, ids){
-  if(!slate || slate.sport !== 'nfl' || isShowdown(slate) || !ids || ids.length !== 9) return ids;
+  if(!slate || !isPositional(slate) || !ids || ids.length !== 9) return ids;
   const slots = nflAssignSlots(slate, ids).filter(Boolean);
   const seen = new Set(slots);
   return slots.concat(ids.filter(id => !seen.has(id)));
@@ -5789,6 +5911,38 @@ function nflPropsTooltip(p){
     ${own.length?`<div class="odds-tip-sec" style="margin-top:8px;">${own.join(' · ')}</div>`:''}`;
 }
 
+// ── NHL SHEET COLUMNS (ck138) ─────────────────────────────────────────────
+// Matt's NHL template: Line (F1-F4 / D1-D3 / G1-G2), PP (PP1/PP2), Goal%
+// (anytime goal, %), Ast / Pts / SOG / Blk (expected counts), PPP (unused),
+// Saves / GA / Win% (goalies), O/U, TmTot, OppTot, Odds Proj, Odds Src,
+// Status (O / Q / Confirmed). Like applyNflStats, a column that is absent
+// from the source writes nothing (a DK salary file must not blank the props).
+function applyNhlStats(p, row, headers){
+  const idx = rx => headers.findIndex(h => rx.test((h||'').trim()));
+  const has = rx => idx(rx) >= 0;
+  const get = rx => { const i = idx(rx); return i >= 0 ? String(row[i]||'').trim() : null; };
+  const num = rx => { const v = parseFloat(get(rx)); return Number.isFinite(v) ? v : null; };
+  const setStr = (k, rx) => { if(has(rx)) p[k] = get(rx) || null; };
+  const setNum = (k, rx) => { if(has(rx)) p[k] = num(rx); };
+  setStr('status', /^status$/i);
+  setStr('nhlLine', /^line$/i);
+  setStr('nhlPP', /^pp$/i);
+  setNum('goalPct', /^goal ?%$/i);
+  setNum('astExp', /^ast$/i);
+  setNum('ptsExp', /^pts$/i);
+  setNum('sogExp', /^sog$/i);
+  setNum('blkExp', /^blk$/i);
+  setNum('savesExp', /^saves$/i);
+  setNum('gaExp', /^ga$/i);
+  setNum('winPctG', /^win ?%$/i);
+  setNum('gameTotal', /^o\/u$/i);
+  setNum('tmTot', /^tm ?tot$/i);
+  setNum('oppTot', /^opp ?tot$/i);
+  setNum('oddsProj', /^odds ?proj$/i);
+  setStr('oddsSrc', /^odds ?src$/i);
+  if(p.nhlLine) p.nhlLine = p.nhlLine.toUpperCase();
+  if(p.nhlPP) p.nhlPP = p.nhlPP.toUpperCase();
+}
 function applyNflStats(p, row, headers){
   const idx = (rx)=>headers.findIndex(h=>rx.test((h||'').trim()));
   const get = (rx)=>{ const i=idx(rx); return i>=0?(row[i]||'').trim():null; };
@@ -6429,7 +6583,7 @@ function applyAutoMap(headers, mapping, sport) {
     const t = h.trim();
     if(mapping.position != null) return;
     if(/^roster[\s_]?position$/i.test(t)) mapping.position = i;
-    else if(sport === 'nfl' && /^(pos|position)$/i.test(t)) mapping.position = i;
+    else if((sport === 'nfl' || sport === 'nhl') && /^(pos|position)$/i.test(t)) mapping.position = i;
   });
   // Pass 1: priority matches
   headers.forEach((h, i) => {
@@ -6767,7 +6921,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck137c/2026-09-28';
+const BUILD_ID = '2.0/ck139/2026-09-29';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -7040,7 +7194,57 @@ function previewHistorySet(id){
 // ═══════════════════════════════════════════════════════════
 // PERSISTENCE
 // ═══════════════════════════════════════════════════════════
-function save() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(slates)); } catch(e){} }
+// ck137: TWO-TAB SAFETY. save() writes EVERY slate as one blob, so a second
+// builder tab that saved anything used to write its older copy of all of them
+// over the first tab's work. Now: the moment another tab saves (the browser's
+// `storage` event, which fires only in the OTHER tabs), this tab stops writing
+// and shows a bar with the two honest choices — reload and take that tab's
+// version, or keep this tab's version (which writes it, and the other tab then
+// gets the same bar). A tab opened while the builder is already open elsewhere
+// says so up front (BroadcastChannel hello/here).
+let _tabStale = false;
+// ck138: NOT Math.random — harnesses seed Math.random before this script runs
+// (test_boards, test_ck89_seed) and a draw at load would shift their stream.
+const _tabId = (function(){ try { const a = new Uint32Array(2); crypto.getRandomValues(a); return a[0].toString(36) + a[1].toString(36); } catch(e){ return String(Date.now()) + String(performance.now()).replace('.', ''); } })();
+function save() {
+  if(_tabStale){ tabGuardBar('stale'); return; }
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(slates)); } catch(e){}
+}
+function tabGuardBar(kind){
+  if(typeof document === 'undefined' || !document.body) return;
+  let bar = document.getElementById('tabGuardBar');
+  if(!bar){ bar = document.createElement('div'); bar.id = 'tabGuardBar';
+    bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:100000;padding:9px 14px;font:13px "DM Sans",sans-serif;display:flex;gap:10px;align-items:center;flex-wrap:wrap;box-shadow:0 2px 10px rgba(0,0,0,.5);';
+    document.body.appendChild(bar); }
+  if(bar.dataset.kind === 'stale' && kind !== 'stale') return;   // the stale bar outranks the notice
+  bar.dataset.kind = kind;
+  const btn = (label, fn, strong) => `<button onclick="${fn}" style="padding:4px 10px;border-radius:4px;border:1px solid ${strong?'#fff':'rgba(255,255,255,.5)'};background:${strong?'#fff':'transparent'};color:${strong?'#111':'#fff'};font-weight:600;cursor:pointer;">${label}</button>`;
+  if(kind === 'stale'){
+    bar.style.background = '#b91c1c'; bar.style.color = '#fff';
+    bar.innerHTML = `<b>The builder was saved in another tab.</b><span style="flex:1;min-width:220px;">Saving is paused here so this tab can't overwrite that work. Changes you make here stay in this tab only until you choose.</span>`
+      + btn('Reload — use the other tab\'s version', 'tabGuardReload()', true) + btn('Keep this tab\'s version', 'tabGuardKeepMine()');
+  } else {
+    bar.style.background = '#92400e'; bar.style.color = '#fff';
+    bar.innerHTML = `<b>The builder is already open in another tab.</b><span style="flex:1;min-width:220px;">Work in one tab at a time. If both save, this bar turns red and asks which version to keep.</span>`
+      + btn('OK', 'tabGuardDismiss()');
+  }
+}
+function tabGuardDismiss(){ const b = document.getElementById('tabGuardBar'); if(b && b.dataset.kind !== 'stale') b.remove(); }
+function tabGuardReload(){ try { location.reload(); } catch(e){} }
+function tabGuardKeepMine(){ _tabStale = false; const b = document.getElementById('tabGuardBar'); if(b) b.remove(); save(); }
+try {
+  window.addEventListener('storage', e => {
+    if(e.key === STORAGE_KEY && e.storageArea === localStorage){ _tabStale = true; tabGuardBar('stale'); }
+  });
+  if(typeof BroadcastChannel === 'function'){
+    const _tabCh = new BroadcastChannel('dfs_builder_tabs');
+    _tabCh.onmessage = ev => { const m = ev.data || {}; if(m.id === _tabId) return;
+      if(m.t === 'hello'){ _tabCh.postMessage({ t: 'here', id: _tabId }); tabGuardBar('notice'); }
+      else if(m.t === 'here') tabGuardBar('notice'); };
+    const _hello = () => _tabCh.postMessage({ t: 'hello', id: _tabId });
+    if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _hello); else _hello();
+  }
+} catch(e){}
 function imputeMissingRatings(slate){
   if(slate.columnMapping?.rating == null) return;
   const BAND = 500;
@@ -7896,6 +8100,13 @@ function nflToggleFlexHidden(slate, id){
   const k = slate.flexHiddenIds.indexOf(id);
   if(k >= 0) slate.flexHiddenIds.splice(k, 1); else slate.flexHiddenIds.push(id);
 }
+function nhlPosMatch(f, p){   // ck138
+  if(!f || f==='ALL') return true;
+  const pos=nhlPosOf(p);
+  if(f==='UTIL') return pos==='C'||pos==='W'||pos==='D';
+  return pos===f;
+}
+function posMatchFor(slate, f, p){ return isNhl(slate) ? nhlPosMatch(f, p) : nflPosMatch(f, p); }
 function nflPosMatch(f, p){
   if(!f || f==='ALL') return true;
   const pos=nflPosOf(p);
@@ -7915,7 +8126,7 @@ function setExpPosFilter(f){
 }
 function renderPosFilterBar(slate){
   const el=document.getElementById('posFilterBar'); if(!el) return;
-  if(!slate || slate.sport!=='nfl'){ el.style.display='none'; el.innerHTML=''; return; }
+  if(!slate || (slate.sport!=='nfl' && slate.sport!=='nhl')){ el.style.display='none'; el.innerHTML=''; return; }
   const cur=slate._posFilter||'ALL';
   // Counts respect the search box and the game / team tile filter, not the
   // position filter itself — the numbers say how many of each position are
@@ -7926,11 +8137,12 @@ function renderPosFilterBar(slate){
   // must not count men you have hidden as captains.
   const hidden=poolHiddenIds(slate);
   const base=(slate.players||[]).filter(p=>p.name.toLowerCase().includes(q) && (!gf||gf.has(nflTeamOf(p))) && !hidden.includes(p.id));
-  const hasK=base.some(p=>nflPosOf(p)==='K');
-  const tabs=[['ALL','All'],['QB','QB'],['RB','RB'],['WR','WR'],['TE','TE'],['FLEX','FLEX'],['DST','DST']];
+  const hasK=!isNhl(slate) && base.some(p=>nflPosOf(p)==='K');
+  const tabs=isNhl(slate) ? [['ALL','All'],['C','C'],['W','W'],['D','D'],['UTIL','UTIL'],['G','G']]   // ck138
+    : [['ALL','All'],['QB','QB'],['RB','RB'],['WR','WR'],['TE','TE'],['FLEX','FLEX'],['DST','DST']];
   if(hasK || isShowdown(slate)) tabs.push(['K','K']);
   el.innerHTML=`<span class="pf-lbl">POS</span>`+tabs.map(([k,l])=>{
-    const n=base.filter(p=>nflPosMatch(k,p)).length;
+    const n=base.filter(p=>posMatchFor(slate,k,p)).length;
     return `<button class="pf-btn${cur===k?' active':''}" onclick="setPosFilter('${k}')" title="${k==='FLEX'?'RB / WR / TE — everyone who can fill the FLEX slot':k==='ALL'?'Every position':'Only '+l}">${l}<span class="pf-n">${n}</span></button>`;
   }).join('');
   el.style.display='flex';
@@ -7943,7 +8155,7 @@ function getSortedPlayers(){
   return [...(slate.players||[])]
     .filter(p=>p.name.toLowerCase().includes(q))
     .filter(p=>!gf || gf.has(nflTeamOf(p)))
-    .filter(p=>slate.sport!=='nfl' || nflPosMatch(slate._posFilter, p))
+    .filter(p=>(slate.sport!=='nfl' && slate.sport!=='nhl') || posMatchFor(slate, slate._posFilter, p))
     // ck122: on the FLEX tab a FLEX-only hide behaves like a hide (Show Hidden reveals him).
     .filter(p=>!(slate.sport==='nfl' && slate._posFilter==='FLEX' && !showHidden && nflFlexHidden(slate, p.id)))
     .sort((a,b)=>{
@@ -8421,9 +8633,11 @@ function renderPool(){
   // NFL: "full" is per-position — a 4th WR is unusable even with slots open.
   // Count the current roster ONCE here rather than per row: nflCounts does a
   // linear playerById lookup per id, and renderPool runs on every keystroke.
-  const _nflCur = isNflClassic(slate) ? nflCounts(slate, current) : null;
+  const _nflCur = isPositional(slate) ? nflCounts(slate, current) : null;
   const _nflFullFor = (p) => {
     if(isShowdown(slate)) return !canAddPlayer(slate, p.id);
+    // ck138: NHL recounts with him in — the three-team rule needs his team.
+    if(isNhl(slate)) return !nhlPosOf(p) || !nflFeasible(nflCounts(slate, [...current, p.id]));
     const pos = nflPosOf(p);
     if(!pos) return true;                       // no position → can't be slotted
     const c = {..._nflCur}; c[pos]++;
@@ -8470,7 +8684,7 @@ function renderPool(){
     } else if(mode==='flex'){
       isFull=!isSelected && !inCur && !canAddPlayer(slate,p.id);
     } else {
-      isFull=!isSelected&&((isNfl(slate)||isShowdown(slate)) ? _nflFullFor(p) : current.length>=rosterSize(slate));
+      isFull=!isSelected&&((isPositional(slate)||isShowdown(slate)) ? _nflFullFor(p) : current.length>=rosterSize(slate));
     }
     const cantAfford=!isSelected&&!inCur&&rowSal>rem;
     // OUT and locked players can't be added at all — a scratch has no lineup and
@@ -8674,7 +8888,8 @@ function renderPool(){
     const flexHidBadge = (_flexHid && !_flexTab) ? ` <span class="sd-hid-badge flex" title="Hidden from FLEX only — still eligible at ${nflPosOf(p)||'his position'}. Unhide from the FLEX tab (Show Hidden).">NO FLEX</span>` : '';
     const nameHtml = (isOut ? `<span class="out-name">${nameHtml0}</span> <span class="out-badge" title="Marked OUT — scores 0 and his market share was handed to his teammates">OUT</span>` : nameHtml0 + qBadge)
       + sdHidBadge + flexHidBadge
-      + (isLocked ? ` <span class="lock-badge" title="Locked — ${esc(nflKickText(p)||'his game has started')}">🔒</span>` : '');
+      + (isLocked ? ` <span class="lock-badge" title="Locked — ${esc(nflKickText(p)||'his game has started')}">🔒</span>` : '')
+      + (isNhl(slate) ? nhlRowTags(p) : '');   // ck138
 
     return `<div class="${rowClass}" style="grid-template-columns:${gt}${isHidden&&!showHidden?';display:none':''}${isGroupEdit?';cursor:pointer':''}" data-pid="${p.id}" onclick="${rowClick}">
       ${isGroupEdit ? `<div class="col-c" style="font-size:13px;color:${inGroup?'var(--purple)':'var(--muted)'};">${inGroup?'☑':'☐'}</div>` : ''}
@@ -8789,8 +9004,8 @@ function canAddPlayer(slate, id){
   }
   const used=cur.reduce((s,i)=>s+(playerById(slate,i)?.salary||0),0);
   if(used+(p?.salary||0)>SALARY_CAP) return false;
-  if(isNfl(slate)){
-    if(!nflPosOf(p)) return false;                  // unknown position — can't slot it
+  if(isPositional(slate)){
+    if(!rosterPosOf(slate,p)) return false;          // unknown position — can't slot it
     return nflFeasible(nflCounts(slate,[...cur,id]));
   }
   return cur.length<MAX;
@@ -8895,12 +9110,18 @@ function renderLineup(){
     if(sel.length===6&&teams.size<2) showToast('DK requires at least one player from each team.','err');
     return;
   }
-  if(isNfl(slate)){
+  if(isPositional(slate)){
     // Named slots. A complete 9 gets a true slot assignment; a partial roster
     // shows players under their base position with leftovers in FLEX.
     const names=cfg.slots;                          // QB,RB,RB,WR,WR,WR,TE,FLEX,DST
     const counts=nflCounts(slate,current);
-    const filled=nflComplete(counts)?nflAssignSlots(slate,current):(()=>{
+    const filled=isNhl(slate) ? (()=>{              // ck138: C,C,W,W,W,D,D,G,UTIL
+      const g={C:[],W:[],D:[],G:[]};
+      current.forEach(id=>{const pos=nhlPosOf(playerById(slate,id));if(pos)g[pos].push(id);});
+      const take=(k)=>g[k].shift()||null;
+      const base=[take('C'),take('C'),take('W'),take('W'),take('W'),take('D'),take('D'),take('G')];
+      return [...base, g.C[0]||g.W[0]||g.D[0]||null];
+    })() : nflComplete(counts)?nflAssignSlots(slate,current):(()=>{
       const g={QB:[],RB:[],WR:[],TE:[],DST:[]};
       current.forEach(id=>{const pos=nflPosOf(playerById(slate,id));if(pos)g[pos].push(id);});
       const take=(k)=>g[k].shift()||null;
@@ -8937,7 +9158,7 @@ function renderLineup(){
   const avgEl=document.getElementById('salAvg');
   if(slotsLeft>0&&slotsLeft<size){avgEl.style.display='block';avgEl.innerHTML=`<span>${fmt(Math.floor(remSal/slotsLeft))}</span> avg / slot (${slotsLeft} left)`;}else avgEl.style.display='none';
   const bar=document.getElementById('barFill');bar.style.width=pct+'%';bar.className='bar-fill'+(pct>100?' over':pct>90?' warn':'');
-  const rosterOk=isNfl(slate)?nflComplete(nflCounts(slate,current)):sel.length===size;
+  const rosterOk=isPositional(slate)?nflComplete(nflCounts(slate,current)):sel.length===size;
   document.getElementById('saveBtn').disabled=!rosterOk||used>SALARY_CAP;
   if(typeof renderHbEv==='function') renderHbEv();
   renderLsEditBar();
@@ -8966,7 +9187,7 @@ function saveLineup(){
   const slate=activeSlate();if(!slate)return;
   const current=slate.currentLineup||[];
   if(isShowdown(slate)){ if(!sdComplete(slate,current) || sdSalary(slate,current,null,'builder')>SALARY_CAP) return; }
-  else if(isNfl(slate)){ if(!nflComplete(nflCounts(slate,current))) return; }
+  else if(isPositional(slate)){ if(!nflComplete(nflCounts(slate,current))) return; }
   else if(current.length!==rosterSize(slate)) return;
   const key=lineupKey(current);
   slate.savedLineups=slate.savedLineups||[];
@@ -9274,7 +9495,7 @@ function renderSaved(){
     const SDl=isShowdown(slate);
     const cptId=SDl?sdLineupCaptain(slate,lineup):null;
     // Showdown: captain first, charged/projected at 1.5×.
-    const players=(SDl?sdAssignSlots(slate,lineup,cptId):(slate.sport==='nfl'?nflDisplayOrder(slate,lineup):lineup)).map(id=>playerById(slate,id)).filter(Boolean);
+    const players=(SDl?sdAssignSlots(slate,lineup,cptId):(isPositional(slate)?nflDisplayOrder(slate,lineup):lineup)).map(id=>playerById(slate,id)).filter(Boolean);
     const sal=SDl?sdSalary(slate,lineup,cptId):players.reduce((s,p)=>s+(p.salary||0),0);
     const proj=players.reduce((s,p)=>s+(parseFloat(p.proj)||0)*(SDl&&p.id===cptId?CPT_MULT:1),0);
     const rtg=players.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
@@ -9412,7 +9633,7 @@ function renderSaved(){
     // small badge — the label matters less there and was pushing the metrics
     // onto a second line. Classic keeps it in the stats row where it reads
     // with the numbers.
-    const _stackHtml = isNfl(slate) ? (nflStackLabelHtml(slate, Array.isArray(lineup)?lineup:players.map(p=>p.id), isShowdown(slate)?players[0]&&players[0].id:null) || '') : '';
+    const _stackHtml = (isNfl(slate) || isNhl(slate)) ? (nflStackLabelHtml(slate, Array.isArray(lineup)?lineup:players.map(p=>p.id), isShowdown(slate)?players[0]&&players[0].id:null) || '') : '';
     const _sdBadge = (isShowdown(slate) && _stackHtml) ? `<span class="saved-stack-badge">${_stackHtml}</span>` : '';
     return `<div class="saved-lineup" id="saved-${i}">
       <div class="saved-top"><div class="saved-num">Lineup #${i+1}${_sdBadge}</div>
@@ -9474,7 +9695,20 @@ function hbPriceSavedDeferred(slate, rows, stamp){
     if(i < rows.length){ setTimeout(step, 0); return; }
     if(tok === _hbDeferTok && activeSlate() === slate) renderSaved();   // one re-render with every price in place
   };
-  setTimeout(step, 0);
+  // ck137: draw the pricing field in the WORKERS first. The first row on a new
+  // contest / stakes / sim otherwise drew the whole field (up to 5 × 20,000
+  // opponents) synchronously inside step() — measured 140 s of frozen page on
+  // GB@ATL after a stakes change under load. hbFieldPrewarm is the same draw
+  // hbField would make (it runs hbField's own prologue as a probe), so the
+  // numbers are identical; it resolves false at once when the field is cached.
+  (async () => {
+    try {
+      const ctx = slateSimCtx(slate), c = pricingContest(slate);
+      if(ctx && c && typeof hbFieldPrewarm === 'function') await hbFieldPrewarm(slate, ctx, c, {fold:'report', reuseGenField:false}, 0);
+    } catch(e){}
+    if(tok !== _hbDeferTok) return;
+    setTimeout(step, 0);
+  })();
 }
 function exportCSV(){
   const slate=activeSlate();if(!slate)return;
@@ -9493,7 +9727,7 @@ function exportCSV(){
         return (i===0 && p && p.cptId) ? p.cptId : id;
       });
     }
-    return isNfl(slate)?nflAssignSlots(slate,l):l;
+    return isPositional(slate)?nflAssignSlots(slate,l):l;
   };
   const csv=[header,...(slate.savedLineups||[]).map(l=>rowIds(l).join(','))].join('\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download=slate.name.replace(/\s+/g,'_').toLowerCase()+'_lineups.csv';a.click();
@@ -9732,7 +9966,7 @@ function dkSlotFormat(slots){
 // positional template, so everything else is positionless 'flat'.
 function dkSlateFormat(slate){
   if(isShowdown(slate)) return 'showdown';
-  if(isNfl(slate)) return 'classic';
+  if(isNfl(slate) || isNhl(slate)) return 'classic';   // ck138
   return 'flat';
 }
 // Parse a DKEntries.csv into {slots, contests[]}. Rows whose Entry ID is
@@ -9831,7 +10065,7 @@ function dkMoney(v){
 // the number the user types is the "Lineup #N" printed on the saved card.
 function dkLineupList(slate){
   const SD=isShowdown(slate);
-  const NFL=isNfl(slate);
+  const NFL=isPositional(slate) || isNfl(slate);   // ck138: NHL completes by slots too
   // Never hardcode 9 or 6 here: the positionless sports are 6-man today but the
   // roster size is a per-sport config value, and a UFC/PGA/NASCAR lineup is
   // "complete" purely by count.
@@ -10439,7 +10673,7 @@ function dkRowIds(slate, l, slots){
   // Positionless sports have nothing to assign: every slot is interchangeable,
   // so the ids go out in the order the lineup was saved and the (identical)
   // slot labels are never matched against anything.
-  if(!SD && !isNfl(slate)){
+  if(!SD && !isPositional(slate)){
     return (slots||[]).map((_,i)=>{ const id=l.ids[i]; return id==null?'':String(id); });
   }
   const pairs = SD
@@ -10447,7 +10681,7 @@ function dkRowIds(slate, l, slots){
         const p=playerById(slate,id);
         return {slot:i===0?'CPT':'FLEX', id:(i===0 && p && p.cptId) ? p.cptId : id};
       })
-    : nflAssignSlots(slate, l.ids).map((id,i)=>({slot:['QB','RB','RB','WR','WR','WR','TE','FLEX','DST'][i], id}));
+    : nflAssignSlots(slate, l.ids).map((id,i)=>({slot:(SPORT_CFG[slate.sport]||SPORT_CFG.nfl).slots[i], id}));   // ck138: the sport's own slot names
   const left=[...pairs];
   return slots.map((s,i)=>{
     const k=left.findIndex(x=>x.slot.toUpperCase()===String(s).toUpperCase());
@@ -10923,7 +11157,7 @@ function dkLateSwapApply(){
   const ids=(slate.currentLineup||[]).slice();
   const RS=rosterSize(slate);
   if(ids.length!==RS){ showToast(`That roster is ${ids.length}/${RS} — fill it before applying.`,'err'); return; }
-  if(isNflClassic(slate) && !nflComplete(nflCounts(slate,ids))){ showToast('That roster does not fill the 9 DK slots.','err'); return; }
+  if(isPositional(slate) && !nflComplete(nflCounts(slate,ids))){ showToast(isNhl(slate) ? 'That roster does not fill the 9 DK slots with skaters from 3+ teams.' : 'That roster does not fill the 9 DK slots.','err'); return; }
   const cptId=isShowdown(slate)?sdCaptainId(slate,ids,'builder'):null;
   const sal=isShowdown(slate)?sdLateSalary(slate,ids,cptId):ids.reduce((s,id)=>s+(playerById(slate,id)?.salary||0),0);
   if(sal>SALARY_CAP){ showToast('Over the salary cap.','err'); return; }
@@ -11360,12 +11594,12 @@ function exportSimCSV(){
         + '; calibrated EV is the bankroll-planning figure, model EV is unvalidated at rank 1');
       lines.push(['Lineup','Build','HeldOutEV$','EV%ofFee','CalibratedEV$','CalEV%ofFee','Rank1Share',
                   'Win%','Top1%','Top10%','Cash%','ExpDupes','Salary',
-                  ...((slate.sport === 'nfl' && !isShowdown(slate)) ? SPORT_CFG.nfl.slots
+                  ...(isPositional(slate) ? SPORT_CFG[slate.sport].slots
                       : Array.from({length: rosterSize(slate)}, (_, k) => (isShowdown(slate) && k === 0) ? 'CPT' : ('P' + (k + 1))))].join(','));
       const feeG = parseFloat((slate._ufcEv||{}).fee)||1;   // ck71: fee is optional; 1 means "one entry"
       g.lineups.forEach((L,i)=>{
         const ps = L.ids.map(id=>playerById(slate,id)).filter(Boolean);
-        const slotted = (slate.sport === 'nfl' && !isShowdown(slate) && typeof nflAssignSlots==='function') ? nflAssignSlots(slate, L.ids) : null;
+        const slotted = (isPositional(slate) && typeof nflAssignSlots==='function') ? nflAssignSlots(slate, L.ids) : null;
         const names = slotted ? slotted.map(x=>(playerById(slate,x)||{}).name||'') : ps.map(p=>p.name);
         // ck127: showdown — slot 0 is the captain and pays the 1.5× premium (the export said 45,600 for a $50,000 lineup)
         const salT = ps.reduce((t,p,k)=>t+((isShowdown(slate) && k === 0 && typeof cptSalaryOf==='function') ? cptSalaryOf(p) : (p.salary||0)),0);
@@ -11934,7 +12168,7 @@ function renderGroupRulesSummary(){
   if(ufcSection) ufcSection.style.display = slate.sport==='ufc' ? 'block' : 'none';
   // Show/hide Simulate tab — only UFC and NASCAR have simulation support
   const simTab = document.getElementById('modeTabSimulate');
-  const hasSimulation = slate.sport==='ufc' || slate.sport==='nascar' || slate.sport==='pga' || slate.sport==='nfl';
+  const hasSimulation = slate.sport==='ufc' || slate.sport==='nascar' || slate.sport==='pga' || slate.sport==='nfl' || slate.sport==='nhl';
   if(simTab) simTab.style.display = hasSimulation ? '' : 'none';
   // Default mode per slate: simulate wherever simulation exists (incl. PGA —
   // the sim engine is the golf builder's primary mode). A manual override the
@@ -12011,6 +12245,15 @@ function renderGroupRulesSummary(){
     restoreContestEvUI(slate);
   }
 
+  // ck138: NHL — sim count + the shared Contest EV block
+  const nhlSection = document.getElementById('nhlSection');
+  if(nhlSection) nhlSection.style.display = slate.sport==='nhl' ? 'block' : 'none';
+  if(slate.sport==='nhl'){
+    const hS = document.getElementById('nhlSimCountSlider'), hL = document.getElementById('nhlSimCountLabel');
+    if(hS){ const c = slate._simCount || parseInt(hS.value) || 5000; hS.value = c; if(hL) hL.textContent = c; }
+    const hM = document.getElementById('nhlMinStack'); if(hM) hM.value = String(nhlMinStackOf(slate));   // ck139
+    restoreContestEvUI(slate);
+  }
   const nflSection = document.getElementById('nflSection');
   if(nflSection) nflSection.style.display = slate.sport==='nfl' ? 'block' : 'none';
   if(slate.sport==='nfl'){
@@ -14860,6 +15103,9 @@ function restoreContestEvUI(slate){
     } else if(slate.sport==='nfl'){
       const ns=document.getElementById('nflSection');
       if(ns && blk.parentElement!==ns) ns.appendChild(blk);
+    } else if(slate.sport==='nhl'){   // ck138
+      const ns=document.getElementById('nhlSection');
+      if(ns && blk.parentElement!==ns) ns.appendChild(blk);
     } else {
       const home=document.getElementById('ufcEvHome');
       if(home && home.nextElementSibling!==blk) home.after(blk);
@@ -15637,6 +15883,10 @@ function fieldBoardTilts(base, sigma, B, rnd, frac){
   });
 }
 
+// ck138: NHL field stack shapes (P(no forced stack) / primary 2 / 3 / 4, and
+// P(a second team's pair)). ASSUMED from common NHL MME construction — the
+// line trio is the modal build — pending an NHL standings measurement.
+const NHL_FIELD_STACK = { none: 0.10, two: 0.25, three: 0.50, four: 0.15, second: 0.55, minTeams: 3 };
 const NFL_FIELD_STACK = {
   double: 0.31,          // measured  (FTN 2024, losing lineups)
   triple: 0.15,          // residual of the two measured buckets
@@ -15908,7 +16158,7 @@ function sampleUfcField(pool, N, ownArr, opts){
   // corner where the remaining SLOTS can't be filled under the cap).
   let posIdx=null, minRest=null, posIdxSet=null;
   if(slots){
-    const eligFor = s => s==='FLEX' ? flexOk : [s];
+    const eligFor = s => (s==='FLEX' || s==='UTIL') ? flexOk : [s];   // ck138: NHL's flex slot is UTIL
     posIdx = slots.map(s => {
       const ok = eligFor(s);
       return pool.map((p,i)=>ok.includes(posOf(p)) ? i : -1).filter(i=>i>=0);
@@ -15973,6 +16223,28 @@ function sampleUfcField(pool, N, ownArr, opts){
   // lever against the REALIZED rate each iteration, the same way ownership is
   // re-weighted. Forcing 31% doubles and observing 33% would leave the model
   // mis-specified; this drives the observable onto the measurement.
+  // ── Field stacking (NHL, ck138) ─────────────────────────────────────────────
+  // An NHL GPP entry is built around line stacks: a primary stack of 2-4
+  // skaters off one forward line or power-play unit, often a secondary pair
+  // from another team, and the rest by ownership. `opts.nhlStack` carries the
+  // shape rates — ASSUMED from common MME construction, not yet measured on an
+  // NHL contest (refit when NHL standings are ingested) — and `minTeams` is
+  // DK's rule that the skaters come from 3+ teams (a drawn entry that breaks
+  // it is redrawn). Everything is read off the pool rows, so the worker copy
+  // behaves identically.
+  const NS = (slots && opts && opts.nhlStack) || null;
+  let nsUnits = null, nsTeamOf = null, nsGoalie = null;
+  if(NS){
+    nsTeamOf = pool.map(p => String(p.team||'').toUpperCase());
+    nsGoalie = pool.map(p => posOf(p) === 'G');
+    const byKey = {};
+    pool.forEach((p, i) => { if(nsGoalie[i]) return;
+      const L = String(p.nhlLine||'').toUpperCase(), U = String(p.nhlPP||'').toUpperCase(), t = nsTeamOf[i];
+      if(/^F[1-3]$/.test(L)) (byKey[t+'|'+L] = byKey[t+'|'+L] || []).push(i);
+      if(U === 'PP1') (byKey[t+'|PP1'] = byKey[t+'|PP1'] || []).push(i); });
+    nsUnits = Object.keys(byKey).map(k => ({ team: k.split('|')[0], ids: byKey[k] })).filter(u => u.ids.length >= 2);
+    if(!nsUnits.length) nsUnits = null;
+  }
   const shapeP = SM ? {
     single: SM.singleOrNone * (SM.SINGLE_SHARE ?? 2/3),
     double: SM.double,
@@ -16098,6 +16370,33 @@ function sampleUfcField(pool, N, ownArr, opts){
           }
         }
       }
+      if(NS && nsUnits){
+        const r0 = Math.random();
+        const nPri = r0 < NS.none ? 0 : r0 < NS.none + NS.two ? 2 : r0 < NS.none + NS.two + NS.three ? 3 : 4;
+        if(nPri > 0){
+          const uw = nsUnits.map(u => { let t = 0; for(const i of u.ids) t += pw ? pw[i] : Math.pow(wq[i], gamma); return t; });
+          let tu = 0; for(const x of uw) tu += x;
+          let r = Math.random() * tu, ui = nsUnits.length - 1;
+          for(let k = 0; k < uw.length; k++){ r -= uw[k]; if(r <= 0){ ui = k; break; } }
+          const U = nsUnits[ui], seen = new Set(), pri = [];
+          for(let c = 0; c < Math.min(nPri, U.ids.length); c++){ const m = pickWeighted(U.ids, seen, gamma, pw, wq); if(m < 0) break; seen.add(m); pri.push(m); }
+          // a 4-man stack is the unit plus one more skater from the same team
+          if(nPri === 4 && pri.length === 3){
+            const mates = []; for(let i = 0; i < pool.length; i++) if(!nsGoalie[i] && nsTeamOf[i] === U.team && !seen.has(i)) mates.push(i);
+            const m = pickWeighted(mates, seen, gamma, pw, wq); if(m >= 0){ seen.add(m); pri.push(m); }
+          }
+          forced = pri;
+          if(Math.random() < NS.second){
+            const others = nsUnits.filter(u => u.team !== U.team);
+            if(others.length){
+              const ow = others.map(u => { let t = 0; for(const i of u.ids) t += pw ? pw[i] : Math.pow(wq[i], gamma); return t; });
+              let to = 0; for(const x of ow) to += x; let r2 = Math.random() * to, oi = others.length - 1;
+              for(let k = 0; k < ow.length; k++){ r2 -= ow[k]; if(r2 <= 0){ oi = k; break; } }
+              for(let c = 0; c < 2; c++){ const m = pickWeighted(others[oi].ids, seen, gamma, pw, wq); if(m < 0) break; seen.add(m); forced.push(m); }
+            }
+          }
+        }
+      }
 
       for(let slot=0; slot<SIZE && !dead; slot++){
         const left=SIZE-1-slot;
@@ -16171,6 +16470,10 @@ function sampleUfcField(pool, N, ownArr, opts){
       }
       if(dead || picks.length<SIZE) return null;
       if(forced && forced.length) return null;   // stack didn't fit — redraw
+      if(NS && NS.minTeams > 0){                 // ck138: DK NHL — skaters from 3+ teams
+        const ts = new Set(); for(const i of picks) if(!nsGoalie[i]) ts.add(nsTeamOf[i]);
+        if(ts.size < NS.minTeams) return null;
+      }
       if(sal>CAP) return null;
       if(_FLOOR_OK && !_FLOOR_OK(sal)) return null;
       return picks;
@@ -16711,6 +17014,7 @@ function fieldWorkerPool(pool, posOf){
   for(let i=0;i<pool.length;i++){ const p = pool[i];
     out[i] = {salary:p.salary||0, own:p.own, proj:p.proj, name:p.name||'',
               team:p.team||'', opp:p.opp||'', fightNum:p.fightNum||0,
+              nhlLine:p.nhlLine||null, nhlPP:p.nhlPP||null,   // ck138: the NHL field stacks by unit
               _pos: posOf ? posOf(p) : null}; }
   return out;
 }
@@ -18997,6 +19301,11 @@ function evFieldOptsFor(slate, SD, cap){
         // all, which put 52% of the modelled SF@LAR field under $49,000 against
         // a real 25%.
         floor: FIELD_SD_FLOOR }
+    : (slate.sport === 'nhl')
+    ? { sport: SPORT, mme: MME,   // ck138
+        slots: SPORT_CFG.nhl.slots, flexOk: SPORT_CFG.nhl.flex, posOf: nhlPosOf,
+        cap: CAP, floor: Math.round((CAP) * 0.94), portfolio: PF, fieldOpt: FO,
+        nhlStack: Object.assign({}, NHL_FIELD_STACK, slate._nhlFieldStack||{}) }
     : (slate.sport === 'nfl')
     ? { sport: SPORT, mme: MME,
         slots: SPORT_CFG.nfl.slots, flexOk: SPORT_CFG.nfl.flex, posOf: nflPosOf,
@@ -32115,7 +32424,34 @@ function nflTeamOf(p){ return nflTeamNorm(p && p.team); }
 function nflStackPartnerPos(slate){
   return (slate && slate._nflStackRbCounts) ? ['RB','WR','TE'] : ['WR','TE'];
 }
+// ck138: NHL — the team counts and the unit each stack came from, e.g.
+// "EDM 4 PP1×3 · MTL 3 F1×3". `oppDst` carries the hockey warning: skaters
+// facing your own goalie.
+function nhlStackShape(slate, ids){
+  const ps = (ids || []).map(id => playerById(slate, id)).filter(Boolean);
+  const sk = ps.filter(p => nhlPosOf(p) !== 'G'), g = ps.find(p => nhlPosOf(p) === 'G');
+  const T = p => String(p.team || '').toUpperCase();
+  const byTeam = {}; sk.forEach(p => { (byTeam[T(p)] = byTeam[T(p)] || []).push(p); });
+  const teams = Object.keys(byTeam).sort((a, b) => byTeam[b].length - byTeam[a].length);
+  const unitTag = t => { const ms = byTeam[t]; const lc = {}; let pp1 = 0;
+    ms.forEach(p => { const L = String(p.nhlLine || ''); if(/^F\d$/.test(L)) lc[L] = (lc[L] || 0) + 1; if(p.nhlPP === 'PP1') pp1++; });
+    const bestL = Object.entries(lc).sort((a, b) => b[1] - a[1])[0];
+    if(bestL && bestL[1] >= 3) return `${bestL[0]}×${bestL[1]}`;
+    if(pp1 >= 3) return `PP1×${pp1}`;
+    if(bestL && bestL[1] >= 2) return `${bestL[0]}×${bestL[1]}`;
+    return pp1 >= 2 ? `PP1×${pp1}` : ''; };
+  const parts = teams.filter(t => byTeam[t].length >= 2).map(t => { const u = unitTag(t); return `${t} ${byTeam[t].length}${u ? ' ' + u : ''}`; });
+  const singles = teams.filter(t => byTeam[t].length === 1).length;
+  const vsG = g ? sk.filter(p => T(p) === String(g.opp || '').toUpperCase()) : [];
+  const n = teams.length ? byTeam[teams[0]].length : 0;
+  const umax = nhlStackMax(ps);   // ck139
+  const label = (parts.length ? parts.join(' · ') : 'no stack') + (singles ? ` · +${singles}` : '') + (umax < 2 ? ' · no line/PP stack' : '');
+  const tip = teams.map(t => `${t}: ${byTeam[t].map(p => `${p.name} (${nhlPosOf(p)}${p.nhlLine ? ' ' + p.nhlLine : ''}${p.nhlPP ? ' ' + p.nhlPP : ''})`).join(', ')}`).join(' | ')
+    + (g ? ` | G ${g.name} (${T(g)})` : '') + (vsG.length ? ` — ${vsG.length} skater${vsG.length === 1 ? '' : 's'} facing your own goalie` : '');
+  return { n: n >= 2 ? n : 0, bb: 0, nRb: 0, mates: [], backs: [], rbMates: [], rbPartners: [], oppDst: vsG.length > 0, ownDst: false, label, tip, partnerPos: [] };
+}
 function nflStackShape(slate, ids, cptId){
+  if(isNhl(slate)) return nhlStackShape(slate, ids);   // ck138
   const ps = (ids || []).map(id => playerById(slate, id)).filter(Boolean);
   const qbs = ps.filter(p => nflPosOf(p) === 'QB');
   if(!qbs.length) return null;
@@ -32155,7 +32491,7 @@ function nflStackLabelHtml(slate, ids, cptId){
   return `<span class="stack-tag${cls}" title="${esc(sh.tip)}">${esc(sh.label)}`
     + (rbOk ? ` <span class="stack-rb-ok" title="${esc((sh.rbPartners||[]).map(m=>m.name).join(', '))} — a same-team RB the market prices as a receiver, counted as a real stack partner">RB✓</span>` : '')
     + (sh.nRb ? ` <span class="stack-rb" title="${esc(sh.rbMates.map(m=>m.name).join(', '))} — a same-team RB, not counted as a stack partner under the current setting">+${sh.nRb} RB</span>` : '')
-    + (sh.oppDst ? ' <span class="stack-warn" title="the DST plays against your QB">⚠ opp DST</span>' : '') + `</span>`;
+    + (sh.oppDst ? (isNhl(slate) ? ' <span class="stack-warn" title="skaters facing your own goalie">⚠ vs own G</span>' : ' <span class="stack-warn" title="the DST plays against your QB">⚠ opp DST</span>') : '') + `</span>`;
 }
 function nflOppOf(p){ return nflTeamNorm(p && p.opp); }
 
@@ -33132,6 +33468,57 @@ async function runNflSims(pool, numSims, log){
     if(parts.length) log(`DST: ${parts.join(' · ')}`);
   }
 
+  // ── ck137: SHEET ANCHOR FOR PLAYERS THE SHEET RATES WELL BELOW THE SIM ────
+  // The sim builds a player from his prop lines and team shares and never
+  // looked at the sheet projection. For thin-line fringe players (a TD price
+  // and a 1.5-reception line, typically $2.5-3.9K) the two can disagree by 2-4×,
+  // and when the SHEET is the lower one it is the better number. MEASURED on
+  // the three settled 2026 mains (1,450 skill players with results;
+  // /tmp/lb/csim_*.json): sheet < 0.75× sim, n = 42 — sim mean 2.0 pts too
+  // high, sheet unbiased (−0.1), MAE 2.94 vs 4.05, the same in every week;
+  // 0.75-0.9× — the best mix is 75% sim; above 0.9× (and whenever the sheet is
+  // HIGHER) the sim is as good or better and is left alone. A sheet
+  // projection of exactly 0 is NOT used: it is a missing number as often as a
+  // benched player (Zay Flowers and Carson Wentz both scored 15+ from a 0).
+  // HOW the mean comes down matters for a tournament: these players are
+  // boom-or-bust (48% scored ≤ 1 pt against the sim's 21%, yet 10% still beat
+  // the sim's own p90 — exactly the sim's rate), so the ceiling is real and the
+  // missing piece is the no-role game. The adjustment therefore ZEROES a share
+  // q of the player's worlds at random and leaves the rest untouched, rather
+  // than shrinking every world (which would cut the ceiling: 26% of them beat a
+  // shrunk p90). q = NFL_SHEET_ANCHOR.q × (1 − target/sim), where the target
+  // mean is the sheet below lo× and blends to the sim by hi×; q's 0.8 sits
+  // between the dud rate (full q over-predicts ≤1 pt, 55% vs 48%) and the
+  // ceiling (full q under-predicts it, 6% vs 10%). NFL_SHEET_ANCHOR.on is the
+  // default; window.__sheetAnchor = true / false overrides it (harness).
+  const _anchorFlag = (typeof window !== 'undefined') ? window.__sheetAnchor : undefined;
+  if(_anchorFlag === true || (_anchorFlag !== false && NFL_SHEET_ANCHOR.on)){
+    const A = NFL_SHEET_ANCHOR, moved = [];
+    for(let i = 0; i < N; i++){
+      const p = pool[i], e = entries[i]; if(!p || !e) continue;
+      const pos = e.pos || (typeof nflPosOf === 'function' ? nflPosOf(p) : '');
+      if(pos === 'DST' || pos === 'K') continue;
+      const sp = parseFloat(p.proj); if(!(sp > 0)) continue;
+      const arr = simScores[i]; let m = 0; for(let s = 0; s < simsDone; s++) m += arr[s]; m /= Math.max(1, simsDone);
+      if(!(m >= A.minSim)) continue;
+      const r = sp / m; if(r >= A.hi) continue;
+      const w = Math.max(0, Math.min(1, (r - A.lo) / (A.hi - A.lo)));
+      const f = (sp + w * (m - sp)) / m, q = A.q * (1 - f);
+      if(!(q > 0.005)) continue;
+      let z = 0; for(let s = 0; s < simsDone; s++){ if(arr[s] !== 0 && Math.random() < q){ arr[s] = 0; z++; } }
+      let m2 = 0; for(let s = 0; s < simsDone; s++) m2 += arr[s]; m2 /= Math.max(1, simsDone);
+      moved.push({ name: p.name, sal: p.salary, sheet: sp, sim: m, after: m2, q });
+    }
+    const _as = (typeof activeSlate === 'function') ? activeSlate() : null;
+    if(_as) _as._sheetAnchor = moved.map(x => ({ name: x.name, sheet: +x.sheet.toFixed(2), sim: +x.sim.toFixed(2), after: +x.after.toFixed(2), q: +x.q.toFixed(3) }));
+    if(moved.length){
+      moved.sort((a, b) => (b.sim - b.after) - (a.sim - a.after));
+      log(`Sheet anchor (ck137): ${moved.length} player${moved.length === 1 ? '' : 's'} the sheet projects well below the sim (under ${A.hi}×) got more no-role games, ceiling kept — `
+        + moved.slice(0, 8).map(x => `${x.name} ${x.sim.toFixed(1)}→${x.after.toFixed(1)} (sheet ${x.sheet.toFixed(1)})`).join(', ')
+        + (moved.length > 8 ? `, +${moved.length - 8} more` : '') + '.');
+    }
+  }
+
   return { simScores, simsDone, entries, games, teamEnvSeed };
 }
 
@@ -33701,7 +34088,7 @@ function nflEngineMode(slate){
 // ck114: the GPP engine is the engine for EVERY sport (UFC / PGA / NASCAR and
 // NFL showdown run through the same kernel with a roster SHAPE). The sports
 // switched on here; the engine selector's 'legacy' pin still wins per slate.
-const GPP_ENGINE_SPORTS = {nfl:true, ufc:true, pga:true, nascar:true};
+const GPP_ENGINE_SPORTS = {nfl:true, ufc:true, pga:true, nascar:true, nhl:true};
 function nflEngineDecide(slate, evOn){
   const sport = (slate && slate.sport) || 'nfl';
   if(!GPP_ENGINE_SPORTS[sport]) return {engine:'legacy', why:`the GPP engine is not enabled for ${sport}`};
@@ -34164,6 +34551,9 @@ function gppKernelFactory(){
   }
 
   function posOk(c){
+    // ck138: NHL — codes 0 G · 1 C · 2 W · 3 D (4 unused): 1 G, 2+ C, 3+ W,
+    // 2+ D and exactly 8 skaters (one UTIL).
+    if(SHAPE === 'nhl') return c[5] === 0 && c[4] === 0 && c[0] === 1 && c[1] >= 2 && c[2] >= 3 && c[3] >= 2 && (c[1] + c[2] + c[3]) === 8;
     if(SHAPE !== 'nfl') return c[5] === 0;
     return c[5] === 0 && c[0] === 1 && c[4] === 1 && c[1] >= 2 && c[2] >= 3 && c[3] >= 1 &&
            (c[1] + c[2] + c[3]) === 7;
@@ -34523,6 +34913,8 @@ function gppKernelFactory(){
     const exclOf = new Int32Array(nP).fill(-1);
     if(P.excl && P.excl.length){ for(let e = 0; e + 1 < P.excl.length; e += 2){ exclOf[P.excl[e]] = P.excl[e+1]; exclOf[P.excl[e+1]] = P.excl[e]; } }
     const exclOn = P.excl && P.excl.length > 0;
+    // ck138: NHL unit pairs (flattened [i,j, i,j, …]) for the line move.
+    const unitPairs = (P.unitPairs && P.unitPairs.length) ? P.unitPairs : [];
     // ck114: group count rules. `groupsOk(ids)` is the kernel's copy of the
     // page's checkGroupRules (min / max over a mask, hard conditionals).
     const groups = P.groups || [];
@@ -34562,8 +34954,36 @@ function gppKernelFactory(){
       for(let j = 0; j < ids.length; j++){ const i = ids[j]; if(!noFlex[i]) continue; const pc = pos[i]; if(pc === 1) r++; else if(pc === 2) w++; else if(pc === 3) t++; }
       return r <= NOFLEX_BASE[1] && w <= NOFLEX_BASE[2] && t <= NOFLEX_BASE[3];
     };
+    // ck138: DK NHL — skaters (everyone but the goalie, code 0) from at least
+    // P.minSkaterTeams teams. `team` is the page's per-player team index.
+    const minSkTeams = (SHAPE === 'nhl') ? (P.minSkaterTeams | 0) : 0;
+    const skTeamSeen = new Int32Array(Math.max(1, (function(){ let m = 0; for(let i = 0; i < nP; i++) if(team[i] > m) m = team[i]; return m + 2; })()));
+    let skTeamStamp = 0;
+    const skTeamsOk = function(ids){
+      skTeamStamp++; let n = 0;
+      for(let j = 0; j < ids.length; j++){ const i = ids[j]; if(pos[i] === 0) continue; const t = team[i] + 1;
+        if(skTeamSeen[t] !== skTeamStamp){ skTeamSeen[t] = skTeamStamp; n++; if(n >= minSkTeams) return true; } }
+      return n >= minSkTeams;
+    };
+    // ck139: NHL stack rule — some forward line or PP unit holds at least
+    // P.minStack of the lineup's skaters. unitA / unitB: each player's line
+    // and PP unit ids (-1 none).
+    const minStack = (SHAPE === 'nhl') ? (P.minStack | 0) : 0;
+    const unitA = P.unitA || null, unitB = P.unitB || null;
+    const nUnitIds = (function(){ let m = 0; if(unitA) for(let i = 0; i < nP; i++){ if(unitA[i] > m) m = unitA[i]; if(unitB[i] > m) m = unitB[i]; } return m + 1; })();
+    const unitCnt = new Int32Array(Math.max(1, nUnitIds)), unitStamp = new Int32Array(Math.max(1, nUnitIds)); let unitSt = 0;
+    const stackOkIdx2 = function(ids){
+      unitSt++;
+      for(let j = 0; j < ids.length; j++){ const i = ids[j]; if(pos[i] === 0) continue;
+        const a = unitA[i], b = unitB[i];
+        if(a >= 0){ if(unitStamp[a] !== unitSt){ unitStamp[a] = unitSt; unitCnt[a] = 0; } if(++unitCnt[a] >= minStack) return true; }
+        if(b >= 0){ if(unitStamp[b] !== unitSt){ unitStamp[b] = unitSt; unitCnt[b] = 0; } if(++unitCnt[b] >= minStack) return true; } }
+      return false;
+    };
     const teamsOk = function(ids){
       if(noFlexOn && !noFlexOk(ids)) return false;
+      if(minSkTeams > 0 && !skTeamsOk(ids)) return false;
+      if(minStack > 0 && unitA && !stackOkIdx2(ids)) return false;
       if(SHAPE !== 'sd') return true;
       if(cptOk && !cptOk[ids[0]]) return false;
       if(flexOk){ for(let j = 1; j < ids.length; j++) if(!flexOk[ids[j]]) return false; }
@@ -34827,7 +35247,7 @@ function gppKernelFactory(){
 
     // Slot order QB,RB,RB,WR,WR,WR,TE,FLEX,DST. Ownership-weighted draws under
     // a cheapest-completion lookahead so the cap cannot corner the draw.
-    const SLOTS = [0,1,1,2,2,2,3,-1,4];
+    const SLOTS = (SHAPE === 'nhl') ? [0,1,1,2,2,2,3,3,-1] : [0,1,1,2,2,2,3,-1,4];   // ck138: NHL G,C,C,W,W,W,D,D,UTIL
     const own0 = P.ownG;   // scenario 0 is the as-projected column
     // ck114: the positionless draw — RSIZE distinct players, ownership-weighted,
     // with a cheapest-completion lookahead; slot 0 at the captain multiplier.
@@ -34856,7 +35276,7 @@ function gppKernelFactory(){
       return outIds;
     };
     const randomSeed = function(){
-      if(SHAPE !== 'nfl') return randomSeedFlat();
+      if(SHAPE !== 'nfl' && SHAPE !== 'nhl') return randomSeedFlat();
       const usedFlags = new Uint8Array(nP);
       const outIds = []; let spent = 0;
       for(let sIdx = 0; sIdx < RSIZE; sIdx++){
@@ -34883,7 +35303,7 @@ function gppKernelFactory(){
     // then a greedy value fill. This is a SUPPLY device — the search is free to
     // dismantle every stack it is handed, and the log reports what survived.
     const qbs = [];
-    for(let i = 0; i < nP; i++) if(sel[i] && pos[i] === 0) qbs.push(i);
+    if(SHAPE === 'nfl') for(let i = 0; i < nP; i++) if(sel[i] && pos[i] === 0) qbs.push(i);
     qbs.sort(function(a,b){ return mean[b] - mean[a]; });
     const fillFrom = function(startIds){
       const used = new Set(startIds);
@@ -34895,7 +35315,14 @@ function gppKernelFactory(){
       for(let i = 0; i < nP; i++) if(sel[i] && !used.has(i) && pos[i] < 5) order.push(i);
       order.sort(function(a,b){ return mean[b]/Math.max(1,sal[b]) - mean[a]/Math.max(1,sal[a]); });
       // Fill the still-missing REQUIRED positions first, then the FLEX.
-      const need = function(){
+      const need = SHAPE === 'nhl' ? function(){   // ck138: G, then 2 C / 3 W / 2 D, then the UTIL
+        if(c[0] < 1) return 0;
+        if(c[1] < 2) return 1;
+        if(c[2] < 3) return 2;
+        if(c[3] < 2) return 3;
+        if(c[1] + c[2] + c[3] < 8) return -1;
+        return -2;
+      } : function(){
         if(c[0] < 1) return 0;
         if(c[4] < 1) return 4;
         if(c[1] < 2) return 1;
@@ -34972,6 +35399,31 @@ function gppKernelFactory(){
         }
       }
     }
+    // ck138: NHL STACKED SEEDS. The unit is the hockey stack: every forward
+    // line and power-play unit on the slate (P.units, fieldPool indices) x
+    // every 2- and 3-man subset of its best three by mean, with and without a
+    // second team's best pair. SUPPLY, exactly like the QB family above — the
+    // search keeps or dismantles each one on EV.
+    if(SHAPE === 'nhl' && P.units && P.units.length){
+      const units = P.units.map(function(u){ return u.filter(function(i){ return sel[i]; }).sort(function(a,b){ return mean[b] - mean[a]; }).slice(0, 4); })
+                           .filter(function(u){ return u.length >= 2; });
+      units.sort(function(a,b){ return (mean[b[0]] + mean[b[1]]) - (mean[a[0]] + mean[a[1]]); });
+      const pairOf = function(u){ return u.slice(0, 2); };
+      for(let ui = 0; ui < units.length && seeds.length < stackCap; ui++){
+        const u = units[ui];
+        const subs = [u.slice(0, 2)]; if(u.length >= 3){ subs.push(u.slice(0, 3)); subs.push([u[0], u[2]]); subs.push([u[1], u[2]]); }
+        if(u.length >= 4) subs.push(u.slice(0, 4));   // ck139: a 4-man PP1 stack (a team total separating)
+        for(const sub of subs){
+          if(seeds.length >= stackCap) break;
+          const l1 = fillFrom(sub); if(l1) pushSeed(l1, 'stacked');
+          for(let vi = 0; vi < units.length && vi < 12; vi++){
+            const v = units[vi]; if(team[v[0]] === team[sub[0]]) continue;
+            const l2 = fillFrom(sub.concat(pairOf(v))); if(l2) pushSeed(l2, 'stacked');
+            if(seeds.length >= stackCap) break;
+          }
+        }
+      }
+    }
     const nStackSeeds = seeds.length - nOptSeeds;
     // Ownership-weighted randoms are the BULK: they top the plan up to its total
     // and they are what stops the menu being a catalogue of the same twelve
@@ -34996,6 +35448,7 @@ function gppKernelFactory(){
     // (positions are 0 QB / 1 RB / 2 WR / 3 TE / 4 DST).
     const stackLo = P.stackRb ? 1 : 2;
     const stackNOf = function(idxs){
+      if(SHAPE !== 'nfl') return -1;   // ck138: a QB-stack count means nothing off NFL classic
       let q = -1;
       for(const i of idxs) if(pos[i] === 0){ q = i; break; }
       if(q < 0) return -1;
@@ -35101,7 +35554,7 @@ function gppKernelFactory(){
               if(inSet.has(b)) continue;
               if(sal[b] * sm > room || sal[b] * sm < low) continue;
               if(exclOn){ const x = exclOf[b]; if(x >= 0 && x !== a && inSet.has(x)) continue; }
-              if(groupsOn || noFlexOn || SHAPE === 'sd'){ for(let z = 0; z < RSIZE; z++) tmpIds[z] = (z === sIdx) ? b : cur[z];
+              if(groupsOn || noFlexOn || SHAPE === 'sd' || minSkTeams > 0){ for(let z = 0; z < RSIZE; z++) tmpIds[z] = (z === sIdx) ? b : cur[z];
                 if(groupsOn && !groupsOk(tmpIds)) continue; if(!teamsOk(tmpIds)) continue; }
               // Duplication moves with the swap: his ownership ratio AND the
               // ratio of his measured pair lifts against the eight players that
@@ -35221,7 +35674,7 @@ function gppKernelFactory(){
         // catcher) for another game's (QB, catcher). It is a MOVE, not a rule —
         // it is taken only when it raises EV, and unstacked lineups reach it
         // through the same door in reverse.
-        if(!bestMove){
+        if(!bestMove && SHAPE === 'nfl'){
           const qbSlot = cur.findIndex(function(i){ return pos[i] === 0; });
           if(qbSlot >= 0){
             const qa = cur[qbSlot];
@@ -35266,6 +35719,44 @@ function gppKernelFactory(){
                   const e = grossEVSwap2(gen, tot, qa*gen.W, a2*gen.W, qb2*gen.W, i*gen.W, nd1, seedW);
                   if(e > bestEV + 1e-12){ bestEV = e; bestMove = {kind:2, sIdx:sIdx, qbSlot:qbSlot, qb2:qb2, b:i}; }
                 }
+              }
+            }
+          }
+        }
+        // ── ck138: THE NHL LINE MOVE ──
+        // The stack move's hockey form. A one-player swap cannot move a lineup
+        // off one line stack onto another: dropping one linemate alone breaks
+        // the correlation that made him worth it, so the climb is stuck on the
+        // first stack a seed handed it. This swaps TWO same-team skaters for a
+        // PAIR from one unit (a forward line or a power-play unit — P.unitPairs,
+        // precomputed). A MOVE, not a rule: taken only when it raises EV.
+        if(!bestMove && SHAPE === 'nhl' && unitPairs.length){
+          const c0 = [0,0,0,0,0,0];
+          for(let z = 0; z < RSIZE; z++) c0[pos[cur[z]]]++;
+          for(let s1 = 0; s1 < RSIZE; s1++){
+            const a1 = cur[s1]; if(pos[a1] === 0) continue;
+            for(let s2 = s1 + 1; s2 < RSIZE; s2++){
+              const a2 = cur[s2]; if(pos[a2] === 0 || team[a2] !== team[a1]) continue;
+              for(let u = 0; u + 1 < unitPairs.length; u += 2){
+                const b1 = unitPairs[u], b2 = unitPairs[u+1];
+                if(!sel[b1] || !sel[b2] || inSet.has(b1) || inSet.has(b2)) continue;
+                const ns = spent - sal[a1] - sal[a2] + sal[b1] + sal[b2];
+                if(ns > cap || ns < floor) continue;
+                c0[pos[a1]]--; c0[pos[a2]]--; c0[pos[b1]]++; c0[pos[b2]]++;
+                const okPos = posOk(c0);
+                c0[pos[b1]]--; c0[pos[b2]]--; c0[pos[a1]]++; c0[pos[a2]]++;
+                if(!okPos) continue;
+                for(let z = 0; z < RSIZE; z++) tmpIds[z] = (z === s1) ? b1 : (z === s2) ? b2 : cur[z];
+                if(!teamsOk(tmpIds)) continue;
+                if(groupsOn && !groupsOk(tmpIds)) continue;
+                if(exclOn){ let bad = false; for(let z = 0; z < RSIZE && !bad; z++){ const x = exclOf[tmpIds[z]]; if(x >= 0) for(let y = 0; y < RSIZE; y++) if(tmpIds[y] === x){ bad = true; break; } } if(bad) continue; }
+                for(let kk = 0; kk < gen.K; kk++){
+                  const mid = cur.map(function(z){ return z === a1 ? b1 : z; });
+                  nd1[kk] = dups[kk] * dupSwapRatio(dm, kk, cur, a1, b1) * dupSwapRatio(dm, kk, mid, a2, b2);
+                }
+                evalCount++;
+                const e = grossEVSwap2(gen, tot, a1*gen.W, a2*gen.W, b1*gen.W, b2*gen.W, nd1, seedW);
+                if(e > bestEV + 1e-12){ bestEV = e; bestMove = {kind:2, sIdx:s2, qbSlot:s1, qb2:b1, b:b2}; }
               }
             }
           }
@@ -35532,7 +36023,7 @@ function gppKernelFactory(){
     if(stackOn){
       for(const [k, o] of optima){ if(!stackOkIdx(o.ids)){ optima.delete(k); stackMenuDrop++; } }
     }
-    if(groupsOn || exclOn || noFlexOn || SHAPE === 'sd'){
+    if(groupsOn || exclOn || noFlexOn || SHAPE === 'sd' || minSkTeams > 0){
       for(const [k, o] of optima){
         let bad = (groupsOn && !groupsOk(o.ids)) || !teamsOk(o.ids);
         if(!bad && exclOn){ for(const i of o.ids){ const x = exclOf[i]; if(x >= 0 && o.ids.indexOf(x) >= 0){ bad = true; break; } } }
@@ -36370,8 +36861,8 @@ async function runNflGppEngine(ctx){
   // three; the NFL-only blocks (stack rules, the sharp-pass neighbourhood) are
   // gated on `SHAPE === 'nfl'`.
   const SD = isShowdown(slate);
-  const SHAPE = (slate.sport === 'nfl') ? (SD ? 'sd' : 'nfl') : 'flat';
-  const R = (SHAPE === 'nfl') ? 9 : (SD ? 6 : rosterSize(slate));
+  const SHAPE = (slate.sport === 'nfl') ? (SD ? 'sd' : 'nfl') : (slate.sport === 'nhl' ? 'nhl' : 'flat');   // ck138
+  const R = (SHAPE === 'nfl' || SHAPE === 'nhl') ? 9 : (SD ? 6 : rosterSize(slate));
   const bud = Object.assign({}, NFL_GPP_BUDGET, {budgetMs: nflGppSearchMs(slate, target)}, ctx.budget || {});
   const cfg = slate._ufcEv || {};
   // ck96: ONE resolver — see contestResolve. The kernel and the pricing surface
@@ -36690,6 +37181,7 @@ async function runNflGppEngine(ctx){
 
   // ── Player frame ──────────────────────────────────────────────────────────
   const POSC = {QB:0, RB:1, WR:2, TE:3, DST:4};
+  const NHL_POSC = {G:0, C:1, W:2, D:3};   // ck138: the kernel's NHL codes (see posOk)
   const teamCode = new Map(); let nextTeam = 1;
   const codeOf = t => { const k = nflTeamNorm(t) || ''; if(!k) return 0;
     if(!teamCode.has(k)) teamCode.set(k, nextTeam++); return teamCode.get(k); };
@@ -36698,6 +37190,7 @@ async function runNflGppEngine(ctx){
   const poolIds = new Set(pool.map(p => p.id));
   fieldPool.forEach((p, i) => {
     if(SHAPE === 'nfl'){ const pc = nflPosOf(p); pos[i] = (pc != null && POSC[pc] != null) ? POSC[pc] : 5; }
+    else if(SHAPE === 'nhl'){ const pc = nhlPosOf(p); pos[i] = (pc != null && NHL_POSC[pc] != null) ? NHL_POSC[pc] : 5; }   // ck138
     else pos[i] = 1;                       // ck114: one interchangeable slot type
     sal[i] = p.salary || 0;
     team[i] = codeOf(p.team); opp[i] = codeOf(p.opp);
@@ -36843,6 +37336,31 @@ async function runNflGppEngine(ctx){
     if(capSlots[i] < 1 && pct > 0) capSlots[i] = 1;
   });
 
+  // ck138: NHL units — forward lines F1-F3 and the two power-play units, as
+  // fieldPool indices of selectable players. The kernel seeds stacks from them
+  // and prices its line move over their pairs.
+  let nhlUnits = null, nhlUnitPairs = null, nhlUnitA = null, nhlUnitB = null;
+  if(SHAPE === 'nhl'){
+    // ck139: per-player line / PP unit ids for the kernel's stack rule
+    const kid = new Map(); const idOf = k => { if(!kid.has(k)) kid.set(k, kid.size); return kid.get(k); };
+    nhlUnitA = new Int32Array(nP).fill(-1); nhlUnitB = new Int32Array(nP).fill(-1);
+    fieldPool.forEach((p, i) => { if(pos[i] === 0) return; const L = String(p.nhlLine || '').toUpperCase(), U = String(p.nhlPP || '').toUpperCase();
+      if(/^F[1-4]$/.test(L)) nhlUnitA[i] = idOf(team[i] + '|' + L); if(U === 'PP1' || U === 'PP2') nhlUnitB[i] = idOf(team[i] + '|' + U); });
+    const byKey = new Map();
+    const add = (k, i) => { if(!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(i); };
+    fieldPool.forEach((p, i) => { if(!sel[i] || pos[i] === 0) return;
+      const L = String(p.nhlLine || '').toUpperCase(), U = String(p.nhlPP || '').toUpperCase();
+      if(/^F[1-3]$/.test(L)) add(team[i] + '|' + L, i);
+      if(U === 'PP1' || U === 'PP2') add(team[i] + '|' + U, i); });
+    nhlUnits = [...byKey.values()].filter(u => u.length >= 2);
+    const seenPair = new Set(); nhlUnitPairs = [];
+    for(const u of nhlUnits) for(let a = 0; a < u.length; a++) for(let b = a + 1; b < u.length; b++){
+      const x = Math.min(u[a], u[b]), y = Math.max(u[a], u[b]), k = x + ',' + y;
+      if(!seenPair.has(k)){ seenPair.add(k); nhlUnitPairs.push(x, y); } }
+    const _ms = nhlMinStackOf(slate);
+    log(`NHL roster (ck138): C,C,W,W,W,D,D,G,UTIL with skaters from ${NHL_MIN_SKATER_TEAMS}+ teams. ${nhlUnits.length} stackable units (forward lines 1-3 and PP1/PP2) seed the search, and a line move lets it swap one linemate pair for another in a single step.`
+      + (_ms ? ` Stack rule (ck139): every lineup holds ${_ms}+ skaters from one forward line or PP unit — a hard constraint on the seeds, the moves and the menu; the size above ${_ms} is the search's choice on EV.` : ' Stack rule OFF for this slate.'));
+  }
   // Seeds from the per-sim optimals — starting points only, never candidates.
   const seedOptArr = [];
   for(const e of (ctx.ranked || [])){
@@ -36857,6 +37375,8 @@ async function runNflGppEngine(ctx){
     NFg: NFs, NFp: NFp, K, F, fee, dupK: SD ? SD_DUP_K : evDupK(slate.sport || 'nfl'),
     // ck114: roster shape.
     R, shape: SHAPE, capMul: (typeof CPT_MULT === 'number') ? CPT_MULT : 1.5,
+    minSkaterTeams: SHAPE === 'nhl' ? NHL_MIN_SKATER_TEAMS : 0, units: nhlUnits, unitPairs: nhlUnitPairs ? Int32Array.from(nhlUnitPairs) : null,   // ck138
+    minStack: SHAPE === 'nhl' ? nhlMinStackOf(slate) : 0, unitA: nhlUnitA, unitB: nhlUnitB,   // ck139
     cptOk: cptOkMask, flexOk: flexOkMask, noFlex: noFlexMask,
     // ck126: projection scenarios + counterfactual climbs
     projTau: (typeof window !== 'undefined' && window.__projTau != null) ? +window.__projTau : NFL_GPP_PROJ_TAU, projSd,
@@ -37316,7 +37836,7 @@ async function runNflGppBoard(ctx){
   const fee = r.fee, d = r.res.diag;
   // ck114: shape-aware labels — stack shapes are an NFL notion.
   const SDb = isShowdown(slate);
-  const shapeOf = l => (slate.sport === 'nfl' && !SDb) ? nflStackShape(slate, l.map(p => p.id)) : null;
+  const shapeOf = l => ((slate.sport === 'nfl' && !SDb) || isNhl(slate)) ? nflStackShape(slate, l.map(p => p.id)) : null;
   const shapeLabel = l => { const sh = shapeOf(l); return sh ? sh.label : (SDb ? ('CPT ' + surnameOf((l[0]||{}).name || '')) : 'lineup'); };
   // Held-out world indices, re-derived exactly as the engine derived them, so
   // the Sim column on a card is a mean over the same worlds its EV was priced on.
@@ -37767,6 +38287,583 @@ async function runNflGppBoard(ctx){
   addToHistory(slate.id, `${out.length} lineups (GPP) @ ${now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`, out);
   openPreviewModal(out, 'proj');
   return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NHL GAME SIMULATION (ck138) — standalone module, pasted into index.html.
+// Every DK point comes out of one simulated game per matchup:
+//   team goals (from the sheet's team totals, a shared pace draw, regulation →
+//   empty net → OT / shootout) → each goal gets a TYPE (EV / PP / SH) → a
+//   SCORER weighted by his expected goals for that type → 0-2 ASSISTERS drawn
+//   from the unit on the ice (his forward line + a D pair at even strength, his
+//   power-play unit on the PP). Linemates rise and fall together because they
+//   are on the ice for the same goals — the correlation is the hockey, not a
+//   matrix bolted on. Shots are drawn around each player's SOG number with the
+//   goals inside them; blocks around BLK; the goalie's saves are the
+//   opponent's shots minus the goals he allowed.
+// ═══════════════════════════════════════════════════════════════════════════
+const NHL_SIM = {
+  goalsPerTeam: 3.05,        // league mean, used when a team total is missing
+  paceShape: 30,             // shared game pace ~ Gamma(k, k): CV ≈ 18%
+  engPerGame: 0.25,          // empty-net goals per game (league; a check, not a parameter)
+  lateTie: 0.20,             // one-goal game: P(the trailer ties it late)
+  enOneGoal: 0.62,           // …else P(the leader scores into the empty net)
+  enTwoGoal: 0.45,           // two-goal game: P(empty-net goal)
+  ppShare: 0.20, shShare: 0.025,
+  otProb: 0.22, otDecidedInOT: 0.62,
+  assistDist: [0.04, 0.24, 0.72],   // P(0 / 1 / 2 assists)
+  teamSog: 29.0,             // shots per team per game (league)
+  sogDispK: 7,               // NB dispersion of a player's non-goal shots
+  blkDispK: 3.5,
+  pullAfterGA: 4, pullProb: 0.45,   // starter pulled after allowing 4+ (then 45%)
+  // EV ice time shares
+  fLineToi: { F1: 0.34, F2: 0.30, F3: 0.23, F4: 0.13 },
+  dPairToi: { D1: 0.40, D2: 0.34, D3: 0.26 },
+  // share of a player's goals that come on the power play, by PP unit
+  ppGoalFrac: { PP1: 0.30, PP2: 0.14, none: 0.02 },
+  // defaults when the sheet has no number (per game)
+  xgDefault: { F1: 0.32, F2: 0.24, F3: 0.16, F4: 0.10, D1: 0.10, D2: 0.07, D3: 0.05, F: 0.12, D: 0.06 },
+  astDefault: { F1: 0.45, F2: 0.34, F3: 0.24, F4: 0.15, D1: 0.40, D2: 0.28, D3: 0.18, F: 0.2, D: 0.2 },
+  sogPerXg: 9.0,             // a shooter with no SOG line: ~11% shooting
+  blkDefault: { F: 0.45, D: 1.2 },
+  scoring: { g: 8.5, a: 5, sog: 1.5, blk: 1.3, sh: 2, hat: 3, sog5: 3, blk3: 3, pts3: 3,
+             win: 6, save: 0.7, ga: -3.5, so: 4, otl: 2, sv35: 3 },
+};
+
+function nhlRng(seed){ let a = seed >>> 0; return function(){ a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function nhlPoisson(lam, R){ if(!(lam > 0)) return 0; if(lam > 30){ const g = Math.round(lam + Math.sqrt(lam) * nhlNorm(R)); return g < 0 ? 0 : g; } const L = Math.exp(-lam); let k = 0, p = 1; do { k++; p *= R(); } while(p > L); return k - 1; }
+function nhlNorm(R){ let u = 0, v = 0; while(u === 0) u = R(); while(v === 0) v = R(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+function nhlGamma(k, R){ // Marsaglia-Tsang, k >= 1
+  if(k < 1){ const u = R(); return nhlGamma(1 + k, R) * Math.pow(u, 1 / k); }
+  const d = k - 1/3, c = 1 / Math.sqrt(9 * d);
+  for(;;){ let x, v; do { x = nhlNorm(R); v = 1 + c * x; } while(v <= 0); v = v * v * v; const u = R();
+    if(u < 1 - 0.0331 * x * x * x * x) return d * v; if(Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v; }
+}
+function nhlNegBin(mean, k, R){ if(!(mean > 0)) return 0; return nhlPoisson(nhlGamma(k, R) / k * mean, R); }
+function nhlPick(ws, R, tot){ let t = tot != null ? tot : ws.reduce((s, w) => s + w, 0); if(!(t > 0)) return -1; let u = R() * t; for(let i = 0; i < ws.length; i++){ u -= ws[i]; if(u <= 0) return i; } return ws.length - 1; }
+
+// ── INPUTS ──────────────────────────────────────────────────────────────────
+// players: objects with position, team, opp, proj, nhlLine, nhlPP, goalPct,
+// astExp, ptsExp, sogExp, blkExp, savesExp, gaExp, winPctG, tmTot, oppTot,
+// status. Returns {teams, games, idx} — idx[i] describes pool[i].
+function nhlBuildInputs(pool, posOf, opts){
+  const C = NHL_SIM; opts = opts || {};
+  const out = opts.outIds || new Set();
+  const teams = new Map();
+  const T = t => { t = String(t || '').toUpperCase(); if(!teams.has(t)) teams.set(t, { team: t, opp: null, tot: null, sk: [], goalie: null, goalies: [] }); return teams.get(t); };
+  const idx = pool.map((p, i) => {
+    const pos = posOf(p); const team = String(p.team || '').toUpperCase();
+    const tm = T(team); if(p.opp) tm.opp = String(p.opp).toUpperCase(); if(Number.isFinite(p.tmTot) && p.tmTot > 0) tm.tot = p.tmTot;
+    const e = { i, pos, team, line: p.nhlLine || null, pp: p.nhlPP || null, active: false, name: p.name, notes: [] };
+    const isOut = out.has(p.id) || /^o$/i.test(String(p.status || '').trim());
+    if(pos === 'G'){
+      e.goalie = true;
+      tm.goalies.push(e);
+      // the starter: Confirmed, else G1, else the one with a projection
+      e.startScore = (/^confirmed$/i.test(String(p.status || '').trim()) ? 4 : 0) + (e.line === 'G1' ? 2 : 0) + ((parseFloat(p.proj) || 0) > 0 ? 1 : 0) - (isOut ? 10 : 0);
+      e.savesExp = Number.isFinite(p.savesExp) ? p.savesExp : null; e.gaExp = Number.isFinite(p.gaExp) ? p.gaExp : null; e.winPct = Number.isFinite(p.winPctG) ? p.winPctG / 100 : null;
+      return e;
+    }
+    if(!pos || isOut) return e;
+    // a skater plays if the sheet gives him a line or any production number
+    const hasLine = !!(e.line && /^[FD]\d$/.test(e.line));
+    const projd = (parseFloat(p.proj) || 0) > 0;
+    if(!hasLine && !projd) return e;
+    e.active = true; e.isD = pos === 'D';
+    if(!hasLine){ e.line = e.isD ? 'D2' : 'F2'; e.notes.push('no line on the sheet — simmed on ' + e.line); e.floater = true; }
+    const lk = e.line;
+    e.xg = (Number.isFinite(p.goalPct) && p.goalPct > 0) ? -Math.log(1 - Math.min(0.95, p.goalPct / 100)) : (C.xgDefault[lk] || (e.isD ? C.xgDefault.D : C.xgDefault.F));
+    const ast = Number.isFinite(p.astExp) && p.astExp > 0 ? p.astExp
+      : (Number.isFinite(p.ptsExp) && p.ptsExp > 0 ? Math.max(0.05, p.ptsExp - e.xg) : (C.astDefault[lk] || C.astDefault.F));
+    e.astTarget = ast; e.astFromSheet = Number.isFinite(p.astExp) && p.astExp > 0;
+    e.sogTarget = Number.isFinite(p.sogExp) && p.sogExp > 0 ? p.sogExp : Math.max(0.4, e.xg * C.sogPerXg);
+    e.blkTarget = Number.isFinite(p.blkExp) && p.blkExp >= 0 ? p.blkExp : (e.isD ? C.blkDefault.D : C.blkDefault.F);
+    e.ppFrac = C.ppGoalFrac[e.pp === 'PP1' ? 'PP1' : e.pp === 'PP2' ? 'PP2' : 'none'];
+    e.aW = e.astTarget;          // assist weight, calibrated below
+    tm.sk.push(e);
+    return e;
+  });
+  for(const tm of teams.values()){
+    tm.goalies.sort((a, b) => b.startScore - a.startScore);
+    tm.goalie = tm.goalies.length && tm.goalies[0].startScore > 0 ? tm.goalies[0] : (tm.goalies[0] || null);
+    if(tm.goalie){ tm.goalie.active = true; tm.goalie.starter = true; }
+    // units
+    tm.lines = {}; tm.pairs = {}; tm.ppu = { PP1: [], PP2: [] };
+    for(const e of tm.sk){ const bag = e.isD ? tm.pairs : tm.lines; (bag[e.line] = bag[e.line] || []).push(e); if(e.pp === 'PP1' || e.pp === 'PP2') tm.ppu[e.pp].push(e); }
+    const xgSum = tm.sk.reduce((s, e) => s + e.xg, 0);
+    tm.xgSum = xgSum;
+    if(!(tm.tot > 0)) tm.tot = C.goalsPerTeam;
+  }
+  // games
+  const games = []; const seen = new Set();
+  for(const tm of teams.values()){
+    if(!tm.opp || seen.has(tm.team) || !teams.has(tm.opp)) continue;
+    seen.add(tm.team); seen.add(tm.opp);
+    games.push({ a: tm, b: teams.get(tm.opp) });
+  }
+  return { teams, games, idx };
+}
+
+// ── ONE GAME ────────────────────────────────────────────────────────────────
+// Writes per-player counting stats for this world into `st` (flat arrays).
+function nhlSimGame(g, R, st){
+  const C = NHL_SIM;
+  const pace = nhlGamma(C.paceShape, R) / C.paceShape;
+  // regulation goals before the late push (tm.lamScale is calibrated so the
+  // team's FINAL mean — late push, empty net and OT included — is its total)
+  let gA = nhlPoisson(g.a.tot * g.a.lamScale * pace, R), gB = nhlPoisson(g.b.tot * g.b.lamScale * pace, R);
+  const goals = [];   // {tm, op, en, ot}
+  for(let k = 0; k < gA; k++) goals.push({ tm: g.a, op: g.b });
+  for(let k = 0; k < gB; k++) goals.push({ tm: g.b, op: g.a });
+  // LATE GAME. Score effects are why hockey ties more than two independent
+  // Poissons say: down one, the trailer pushes and pulls his goalie — he ties
+  // it sometimes (6-on-5, charged to the goalie), and otherwise the leader
+  // often scores into the empty net; down two, an empty-netter sometimes.
+  const diff = gA - gB;
+  if(diff !== 0 && Math.abs(diff) <= 2){
+    const lead = diff > 0 ? g.a : g.b, trail = diff > 0 ? g.b : g.a;
+    if(Math.abs(diff) === 1 && R() < C.lateTie) goals.push({ tm: trail, op: lead });
+    else if(R() < (Math.abs(diff) === 1 ? C.enOneGoal : C.enTwoGoal)) goals.push({ tm: lead, op: trail, en: true });
+  }
+  // result
+  let fa = goals.filter(x => x.tm === g.a).length, fb = goals.length - fa;
+  let ot = false, so = false, winner = null;
+  if(fa === fb){
+    ot = true;
+    // OT winner by relative strength
+    const pa = g.a.tot / (g.a.tot + g.b.tot);
+    const aWins = R() < pa;
+    if(R() < C.otDecidedInOT){ const w = aWins ? g.a : g.b; goals.push({ tm: w, op: w === g.a ? g.b : g.a, ot: true }); }
+    else so = true;
+    winner = aWins ? g.a : g.b;
+  } else winner = fa > fb ? g.a : g.b;
+  // credit each goal
+  for(const x of goals) nhlCreditGoal(x, R, st);
+  if(st.diag){ const d = st.diag; d.games++; if(ot) d.ot++; if(so) d.so++;
+    for(const x of goals){ d.goals++; if(x.en) d.en++; if(x.ot) d.otg++; }
+    for(const tm of [g.a, g.b]){ const n = goals.filter(x => x.tm === tm).length; d.teamHist[Math.min(8, n)]++; }
+  }
+  // shots + blocks per skater, goalie lines
+  for(const tm of [g.a, g.b]){
+    const op = tm === g.a ? g.b : g.a;
+    for(const e of tm.sk){
+      const nonGoal = Math.max(0, e.sogTarget - e.goalsMean);
+      st.sog[e.i] += st.g[e.i] + nhlNegBin(nonGoal * pace, C.sogDispK, R);
+      st.blk[e.i] += nhlNegBin(e.blkTarget, C.blkDispK, R);
+    }
+  }
+  for(const tm of [g.a, g.b]){
+    const G = tm.goalie; if(!G) continue;
+    const op = tm === g.a ? g.b : g.a;
+    // shots against = the opponent's rostered shots + the rest of their team
+    let rostered = 0; for(const e of op.sk) rostered += st.sog[e.i];
+    const other = Math.max(0, op.shotsOther || 0);
+    const shotsAgainst = rostered + nhlNegBin(other * pace, 10, R);
+    const against = goals.filter(x => x.op === tm && !x.en);
+    let ga = against.length;
+    let saves = Math.max(0, shotsAgainst - ga);
+    // pulled: after the 4th goal, sometimes — keeps what he had to that point
+    let pulled = false;
+    if(ga > C.pullAfterGA && R() < C.pullProb){
+      pulled = true; const frac = C.pullAfterGA / ga;   // share of the game he played (goal order ≈ time)
+      saves = Math.round(saves * frac); ga = C.pullAfterGA;
+    }
+    st.sv[G.i] += saves; st.ga[G.i] += ga;
+    if(!pulled){
+      if(winner === tm) st.w[G.i] += 1;
+      else if(ot) st.otl[G.i] += 1;
+      if(ga === 0) st.so[G.i] += 1;
+    }
+  }
+}
+
+// a goal → scorer (by type-weighted xg) → assisters from the unit on the ice
+function nhlCreditGoal(x, R, st){
+  const C = NHL_SIM, tm = x.tm; if(!tm.sk.length) return;
+  const u = R();
+  const type = x.en ? 'EV' : (u < C.ppShare ? 'PP' : (u < C.ppShare + C.shShare ? 'SH' : 'EV'));
+  if(st.diag){ st.diag.type[type] = (st.diag.type[type] || 0) + 1; }
+  const cand = tm.sk; const ws = new Array(cand.length); let tot = 0;
+  for(let k = 0; k < cand.length; k++){ const e = cand[k];
+    let w = e.xgW;
+    if(type === 'PP') w *= (e.pp ? e.ppFrac : 0);
+    else if(type === 'SH') w *= (e.line === 'F4' || e.line === 'F3' || e.line === 'D1' || e.line === 'D2' ? 1 : 0.4) * (1 - e.ppFrac);
+    else w *= (1 - e.ppFrac);
+    ws[k] = w; tot += w; }
+  if(!(tot > 0)) return;
+  const s = cand[nhlPick(ws, R, tot)];
+  st.g[s.i] += 1;
+  if(type === 'SH') st.sh[s.i] += 1;
+  // unit on the ice
+  let unit;
+  if(type === 'PP'){ unit = (tm.ppu[s.pp] || []).filter(e => e !== s); if(unit.length < 3) unit = unit.concat(nhlEvMates(tm, s, R)); }
+  else unit = nhlEvMates(tm, s, R);
+  // assists
+  const na = nhlPick(C.assistDist, R, 1);
+  if(st.diag){ st.diag.ast += na; }
+  const pool = unit.slice();
+  for(let k = 0; k < na && pool.length; k++){
+    let t = 0; const aw = pool.map(e => { const w = e.aW; t += w; return w; });
+    const j = nhlPick(aw, R, t); if(j < 0) break;
+    const a = pool[j]; st.a[a.i] += 1; if(type === 'SH') st.sh[a.i] += 1;
+    pool.splice(j, 1);
+  }
+}
+// the other four skaters on the ice at even strength
+function nhlEvMates(tm, s, R){
+  const C = NHL_SIM, out = [];
+  if(!s.isD){
+    for(const e of (tm.lines[s.line] || [])) if(e !== s) out.push(e);
+    const pk = Object.keys(tm.pairs); const pw = pk.map(k => C.dPairToi[k] || 0.2);
+    const pair = tm.pairs[pk[nhlPick(pw, R)]] || [];
+    out.push(...pair);
+  } else {
+    for(const e of (tm.pairs[s.line] || [])) if(e !== s) out.push(e);
+    const lk = Object.keys(tm.lines); const lw = lk.map(k => (C.fLineToi[k] || 0.15) * (tm.lineXg[k] || 0.3));
+    const line = tm.lines[lk[nhlPick(lw, R)]] || [];
+    out.push(...line);
+  }
+  return out;
+}
+
+// ── CALIBRATION + RUN ───────────────────────────────────────────────────────
+// Goal weights are normalized so a team's goals follow its total; assist
+// weights are nudged (3 pilot passes) until each player's simulated assists
+// match his target; the team's "other shots" fill its SOG up to the goalie
+// line (saves + GA against) or the league mean.
+function nhlCalibrate(inp, R, pilot){
+  const C = NHL_SIM;
+  for(const tm of inp.teams.values()){
+    for(const e of tm.sk){ e.xgW = e.xg; e.goalsMean = e.xg; }
+    tm.lineXg = {}; for(const [k, L] of Object.entries(tm.lines)) tm.lineXg[k] = L.reduce((s, e) => s + e.xg, 0);
+  }
+  const nP = inp.idx.length;
+  for(let pass = 0; pass < 4; pass++){
+    const st = nhlNewStats(nP);
+    for(let w = 0; w < pilot; w++) for(const g of inp.games) nhlSimGameGoalsOnly(g, R, st);
+    for(const tm of inp.teams.values()) for(const e of tm.sk){
+      const gm = st.g[e.i] / pilot, am = st.a[e.i] / pilot;
+      e.goalsMean = gm;
+      // assists: move the weight toward the target, damped
+      if(am > 0) e.aW *= Math.pow(e.astTarget / am, 0.7);
+    }
+  }
+  // team scale: run full games, match each team's FINAL mean goals to its total
+  for(const tm of inp.teams.values()) tm.lamScale = 0.92;
+  for(let pass = 0; pass < 3; pass++){
+    const gsum = new Map();
+    const P2 = pilot * 4, d = { byTeam: gsum };   // scoreboard only — cheap, so 4× the pilot
+    for(let w = 0; w < P2; w++) for(const g of inp.games) nhlSimGameGoalsScore(g, R, d);
+    for(const tm of inp.teams.values()){ const m = (gsum.get(tm) || 0) / P2; if(m > 0) tm.lamScale *= tm.tot / m; }
+  }
+  // shots: the rest of the team's shots (unrostered players / sheet gaps)
+  for(const tm of inp.teams.values()){
+    const op = inp.teams.get(tm.opp);
+    const G = op && op.goalie; // the goalie facing THIS team
+    const target = (G && G.savesExp != null && G.gaExp != null) ? (G.savesExp + G.gaExp) : C.teamSog;
+    const rost = tm.sk.reduce((s, e) => s + e.sogTarget, 0);
+    tm.shotsOther = Math.max(0, target - rost);
+    tm.shotsTarget = target;
+  }
+}
+function nhlNewStats(n){ const f = () => new Float64Array(n); return { g: f(), a: f(), sog: f(), blk: f(), sh: f(), sv: f(), ga: f(), w: f(), otl: f(), so: f() }; }
+// pilot pass: goals + assists only
+function nhlSimGameGoalsOnly(g, R, st){
+  const C = NHL_SIM, pace = nhlGamma(C.paceShape, R) / C.paceShape;
+  for(const tm of [g.a, g.b]){ const op = tm === g.a ? g.b : g.a; const n = nhlPoisson(tm.tot * pace, R); for(let k = 0; k < n; k++) nhlCreditGoal({ tm, op }, R, st); }
+}
+// the scoreboard of one game — the same regulation / late / OT logic as
+// nhlSimGame, without crediting players (the team-scale calibration pass)
+function nhlSimGameGoalsScore(g, R, d){
+  const C = NHL_SIM, pace = nhlGamma(C.paceShape, R) / C.paceShape;
+  let a = nhlPoisson(g.a.tot * g.a.lamScale * pace, R), b = nhlPoisson(g.b.tot * g.b.lamScale * pace, R);
+  const diff = a - b;
+  if(diff !== 0 && Math.abs(diff) <= 2){
+    if(Math.abs(diff) === 1 && R() < C.lateTie){ if(diff > 0) b++; else a++; }
+    else if(R() < (Math.abs(diff) === 1 ? C.enOneGoal : C.enTwoGoal)){ if(diff > 0) a++; else b++; }
+  }
+  if(a === b){ const aW = R() < g.a.tot / (g.a.tot + g.b.tot); if(R() < C.otDecidedInOT){ if(aW) a++; else b++; } }
+  d.byTeam.set(g.a, (d.byTeam.get(g.a) || 0) + a); d.byTeam.set(g.b, (d.byTeam.get(g.b) || 0) + b);
+}
+function nhlDkPoints(e, st, i){
+  const S = NHL_SIM.scoring;
+  if(e.goalie){
+    const sv = st.sv[i], ga = st.ga[i];
+    let pts = sv * S.save + ga * S.ga + st.w[i] * S.win + st.otl[i] * S.otl + st.so[i] * S.so + (sv >= 35 ? S.sv35 : 0);
+    pts += st.g[i] * S.g + st.a[i] * S.a;   // DK: goalies score skater stats too
+    return pts;
+  }
+  const g = st.g[i], a = st.a[i], sog = st.sog[i], blk = st.blk[i];
+  return g * S.g + a * S.a + sog * S.sog + blk * S.blk + st.sh[i] * S.sh
+       + (g >= 3 ? S.hat : 0) + (sog >= 5 ? S.sog5 : 0) + (blk >= 3 ? S.blk3 : 0) + (g + a >= 3 ? S.pts3 : 0);
+}
+// Main entry: returns {simScores (Float64Array per pool index), simsDone,
+// entries, games, inputs, stats (per-player means of every counting stat)}.
+function nhlRunSims(pool, numSims, opts){
+  opts = opts || {};
+  const R = opts.rng || Math.random;
+  const inp = nhlBuildInputs(pool, opts.posOf, opts);
+  nhlCalibrate(inp, R, opts.pilot || 1500);
+  const nP = pool.length;
+  const simScores = pool.map(() => new Float64Array(numSims));
+  const sums = nhlNewStats(nP);
+  const bon = { hat: new Float64Array(nP), sog5: new Float64Array(nP), blk3: new Float64Array(nP), pts3: new Float64Array(nP), sv35: new Float64Array(nP) };
+  const byI = inp.idx;
+  const diag = opts.diag ? { games: 0, ot: 0, so: 0, goals: 0, en: 0, otg: 0, ast: 0, type: {}, teamHist: new Array(9).fill(0) } : null;
+  for(let w = 0; w < numSims; w++){
+    const st = nhlNewStats(nP); if(diag) st.diag = diag;
+    for(const g of inp.games) nhlSimGame(g, R, st);
+    for(const e of byI){
+      if(!(e.active)) continue;
+      const i = e.i;
+      simScores[i][w] = nhlDkPoints(e, st, i);
+      for(const k in sums) sums[k][i] += st[k][i];
+      if(st.g[i] >= 3) bon.hat[i]++; if(st.sog[i] >= 5) bon.sog5[i]++; if(st.blk[i] >= 3) bon.blk3[i]++; if(st.g[i] + st.a[i] >= 3) bon.pts3[i]++; if(st.sv[i] >= 35) bon.sv35[i]++;
+    }
+  }
+  const stats = byI.map(e => { const i = e.i; const o = {}; for(const k in sums) o[k] = sums[k][i] / numSims; for(const k in bon) o[k] = bon[k][i] / numSims; return o; });
+  return { simScores, simsDone: numSims, entries: byI, games: inp.games, inputs: inp, stats, diag };
+}
+
+// ── NHL GENERATOR ENTRY (ck138) ─────────────────────────────────────────────
+// Same seeding contract as runNflSimGen: a 32-bit run seed (or
+// window.__runSeed, the harness hook) installs a mulberry32 stream over
+// Math.random for the whole run, restored in a finally.
+async function runNhlSimGen(){
+  window._fieldWCache = new Map();
+  _runSeed = (typeof window !== 'undefined' && window.__runSeed != null) ? (window.__runSeed >>> 0) : (Math.floor(Math.random() * 4294967296) >>> 0);
+  const _origRandom = Math.random, _seeded = mulberry32(_runSeed);
+  try { Math.random = _seeded; return await runNhlSimGenInner(); }
+  finally { Math.random = _origRandom; }
+}
+// The NHL outcome sim for the active slate: sims every game, decorates the
+// pool (Sim, distribution, usable-game and boom rates) and stores the sim
+// context every downstream surface reads (lineup details, pricing, the GPP
+// engine). Returns the context.
+async function nhlSimulateSlate(slate, numSims){
+  const simPool = (slate.players||[]).filter(p => p.salary > 0);
+  const outIds = new Set(slate._outIds || []);
+  const res = nhlRunSims(simPool, numSims, { posOf: nhlPosOf, rng: Math.random, pilot: 1500, outIds, diag: true });
+  const { simScores, simsDone } = res;
+  // decorate — the same fields the NFL path writes, so the pool / details /
+  // exposure surfaces need nothing sport-specific
+  const NBINS = 32;
+  for(let i = 0; i < simPool.length; i++){
+    const p = simPool[i]; const arr = Array.from(simScores[i]).sort((a, b) => a - b); const n = arr.length || 1;
+    const q = f => arr[Math.min(n - 1, Math.floor(n * f))]; const mean = arr.reduce((a, b) => a + b, 0) / n;
+    p._simP50 = Math.round((0.6 * q(0.8) + 0.4 * mean) * 10) / 10;
+    const dMin = Math.floor(q(0.01)), dMax = Math.ceil(Math.max(q(0.99), dMin + 1)), span = (dMax - dMin) || 1;
+    const bins = new Array(NBINS).fill(0);
+    for(let k = 0; k < n; k++){ let b = Math.floor((arr[k] - dMin) / span * NBINS); if(b < 0) b = 0; if(b >= NBINS) b = NBINS - 1; bins[b]++; }
+    p._simDist = { p10: q(0.1), p25: q(0.25), p50: q(0.5), p75: q(0.75), p90: q(0.9), mean: Math.round(mean * 10) / 10, min: Math.round(arr[0] * 10) / 10, max: Math.round(arr[n - 1] * 10) / 10, bins, domainMin: dMin, domainMax: dMax };
+    const bar = Math.max(3, (p.salary || 3000) / 1000 * 1.5);
+    let usable = 0; for(let k = 0; k < n; k++) if(arr[k] >= bar) usable++;
+    p._simCut = Math.round(100 * usable / n);
+  }
+  // boom: a top-N score at his position in the simulated slate (N ≈ twice the
+  // slots the position fills in a winning lineup: C 4, W 6, D 4, G 2)
+  { const TOPN = { C: 4, W: 6, D: 4, G: 2 }; const groups = {};
+    simPool.forEach((p, i) => { const g = nhlPosOf(p) || 'UNK'; (groups[g] = groups[g] || []).push(i); });
+    const hits = new Float64Array(simPool.length);
+    for(const g in groups){ const idx = groups[g], N = TOPN[g] || 2; if(idx.length <= N){ idx.forEach(i => { hits[i] = simsDone; }); continue; }
+      const col = new Float64Array(idx.length);
+      for(let k = 0; k < simsDone; k++){ for(let j = 0; j < idx.length; j++) col[j] = simScores[idx[j]][k];
+        const srt = Float64Array.from(col).sort(); const thr = srt[srt.length - N]; if(!(thr > 0)) continue;
+        for(let j = 0; j < idx.length; j++) if(col[j] >= thr) hits[idx[j]]++; } }
+    simPool.forEach((p, i) => { p._simBoom = Math.round(1000 * hits[i] / Math.max(1, simsDone)) / 10; }); }
+  const simScoresById = {}; simPool.forEach((p, i) => { simScoresById[p.id] = simScores[i]; });
+  const ctx = simCtxRemember({ simScoresById, simsDone, sport: 'nhl', sd: false, slateId: slate.id, ts: Date.now(), nhl: { diag: res.diag, inputs: res.inputs, stats: res.stats, entries: res.entries } });
+  window._lastSimCtx = ctx;
+  slate._nhlSimSummary = nhlSimSummary(slate, simPool, res);
+  return ctx;
+}
+// The readable account of a run — what the log prints and a test can read.
+function nhlSimSummary(slate, simPool, res){
+  const d = res.diag || {}, mean = a => { let s = 0; for(const v of a) s += v; return s / Math.max(1, a.length); };
+  const teams = []; for(const g of res.games) for(const tm of [g.a, g.b]){
+    let gs = 0; for(const e of tm.sk) gs += res.stats[e.i].g;
+    const G = tm.goalie; const gst = G ? res.stats[G.i] : null;
+    teams.push({ team: tm.team, opp: tm.opp, total: +tm.tot.toFixed(2), goals: +gs.toFixed(2), skaters: tm.sk.length,
+      goalie: G ? simPool[G.i].name : null, goalieWin: gst ? +(100 * gst.w).toFixed(1) : null, sheetWin: G && G.winPct != null ? +(100 * G.winPct).toFixed(1) : null,
+      saves: gst ? +gst.sv.toFixed(1) : null, ga: gst ? +gst.ga.toFixed(2) : null, goalieSim: G ? +mean(res.simScores[G.i]).toFixed(2) : null }); }
+  const floaters = res.entries.filter(e => e.active && e.floater).map(e => simPool[e.i].name);
+  const noGoalie = teams.filter(t => !t.goalie).map(t => t.team);
+  return { games: res.games.length, teams, floaters, noGoalie,
+    ot: d.games ? +(100 * d.ot / d.games).toFixed(1) : null, en: d.games ? +(d.en / d.games).toFixed(2) : null,
+    goalsPerGame: d.games ? +(d.goals / d.games).toFixed(2) : null, astPerGoal: d.goals ? +(d.ast / d.goals).toFixed(2) : null,
+    ppShare: d.goals ? +(100 * (d.type.PP || 0) / d.goals).toFixed(1) : null };
+}
+
+// ── NHL PER-WORLD OPTIMALS (ck138) ─────────────────────────────────────────
+// The best legal lineup in ONE simulated world: seeds for the search and the
+// field's sharp slice. A heuristic, not an exact solver (the engine's search is
+// what optimizes; these are starting points): take the best player at every
+// slot, downgrade by the least points lost per dollar until under the cap,
+// then 1-for-1 upgrades until none helps, with the 3-skater-team rule and the
+// salary floor held throughout.
+// `fixed` (ck139): candidates that must stay in the lineup (a forced stack).
+function nhlOptimalForSim(cands, cap, minSal, fixed){
+  const need = { G: 1, C: 2, W: 3, D: 2 };
+  const byPos = { G: [], C: [], W: [], D: [] };
+  for(const c of cands) if(byPos[c.pos]) byPos[c.pos].push(c);
+  for(const k in byPos){ byPos[k].sort((a, b) => b.score - a.score); if(byPos[k].length < need[k]) return null; }
+  const FX = new Set(fixed || []);
+  const pick = [...FX];
+  const have = { G: 0, C: 0, W: 0, D: 0 }; for(const c of pick) have[c.pos]++;
+  if(have.G > 1 || have.C + have.W + have.D > 8) return null;
+  for(const k of ['G','C','W','D']) for(const c of byPos[k]){ if(have[k] >= need[k]) break; if(FX.has(c)) continue; pick.push(c); have[k]++; }
+  if(have.G < 1 || have.C < 2 || have.W < 3 || have.D < 2) return null;
+  const used = new Set(pick);
+  while(pick.length < 9){ const util = cands.filter(c => c.pos !== 'G' && !used.has(c)).sort((a, b) => b.score - a.score)[0];
+    if(!util) return null; pick.push(util); used.add(util); }
+  const salOf = l => l.reduce((t, c) => t + c.sal, 0);
+  const ok = l => { const ts = new Set(); for(const c of l) if(c.pos !== 'G') ts.add(c.team); return ts.size >= NHL_MIN_SKATER_TEAMS; };
+  // position-legal replacements: same position, or any skater for the UTIL
+  const legal = (l, slot, b) => { const a = l[slot]; if(b.pos === 'G' || a.pos === 'G') return a.pos === b.pos;
+    const c = { C: 0, W: 0, D: 0 }; for(let j = 0; j < l.length; j++){ const x = j === slot ? b : l[j]; if(x.pos !== 'G') c[x.pos]++; }
+    return c.C >= 2 && c.W >= 3 && c.D >= 2; };
+  let guard = 0;
+  while(salOf(pick) > cap && guard++ < 60){
+    let best = null, bestR = Infinity;
+    for(let s = 0; s < pick.length; s++){ const a = pick[s]; if(FX.has(a)) continue;
+      for(const b of cands){ if(used.has(b) || b.sal >= a.sal || !legal(pick, s, b)) continue;
+        const r = (a.score - b.score) / (a.sal - b.sal); if(r < bestR){ bestR = r; best = { s, b }; } } }
+    if(!best) return null;
+    used.delete(pick[best.s]); pick[best.s] = best.b; used.add(best.b);
+  }
+  if(salOf(pick) > cap) return null;
+  for(let pass = 0; pass < 6; pass++){
+    let improved = false;
+    for(let s = 0; s < pick.length; s++){ const a = pick[s]; if(FX.has(a)) continue; let best = null;
+      for(const b of cands){ if(used.has(b) || b.score <= (best ? best.score : a.score) || !legal(pick, s, b)) continue;
+        const ns = salOf(pick) - a.sal + b.sal; if(ns > cap) continue; best = b; }
+      if(best){ used.delete(a); pick[s] = best; used.add(best); improved = true; } }
+    if(!improved) break;
+  }
+  // three skater teams: swap the cheapest-loss skater to a new team if short
+  let g2 = 0;
+  while(!ok(pick) && g2++ < 8){
+    const teams = new Set(pick.filter(c => c.pos !== 'G').map(c => c.team));
+    let best = null, bestLoss = Infinity;
+    for(let s = 0; s < pick.length; s++){ const a = pick[s]; if(a.pos === 'G' || FX.has(a)) continue;
+      for(const b of cands){ if(used.has(b) || teams.has(b.team) || !legal(pick, s, b)) continue;
+        if(salOf(pick) - a.sal + b.sal > cap) continue; const loss = a.score - b.score; if(loss < bestLoss){ bestLoss = loss; best = { s, b }; } } }
+    if(!best) return null;
+    used.delete(pick[best.s]); pick[best.s] = best.b; used.add(best.b);
+  }
+  if(!ok(pick) || salOf(pick) > cap || (minSal > 0 && salOf(pick) < minSal)) return null;
+  return pick;
+}
+// Distinct per-world optimals over the generation worlds, most frequent first
+// — the `ranked` candidate list every sport hands the engine.
+function nhlPerSimOptimals(slate, pool, simScoresById, simsDone, cap, minSal, maxWorlds){
+  const base = pool.map(p => ({ p, pos: nhlPosOf(p), sal: p.salary || 0, team: String(p.team || '').toUpperCase(), arr: simScoresById[p.id], score: 0, keys: nhlUnitKeys(p) })).filter(c => c.pos && c.arr && c.sal > 0);
+  // ck139: the stack rule. A world's optimal that already carries a stack of
+  // the minimum size is kept as is; otherwise the world is re-solved around
+  // each of its best few units (their top `need` members that world, fixed)
+  // and the best legal result is kept.
+  const need = nhlMinStackOf(slate);
+  const unitsOf = {}; if(need > 0) for(const c of base){ if(c.pos === 'G') continue; for(const k of c.keys) (unitsOf[k] = unitsOf[k] || []).push(c); }
+  const unitKeys = Object.keys(unitsOf).filter(k => unitsOf[k].length >= need);
+  const stackOf = l => { const m = {}; let x = 0; for(const c of l){ if(c.pos === 'G') continue; for(const k of c.keys){ m[k] = (m[k] || 0) + 1; if(m[k] > x) x = m[k]; } } return x; };
+  const tot = l => l.reduce((t, c) => t + c.score, 0);
+  const solve = cands => {
+    const l0 = nhlOptimalForSim(cands, cap, minSal); if(!need || (l0 && stackOf(l0) >= need)) return l0;
+    const ranked = unitKeys.map(k => { const top = unitsOf[k].slice().sort((a, b) => b.score - a.score).slice(0, need); return { top, v: tot(top) }; })
+                           .sort((a, b) => b.v - a.v).slice(0, 4);
+    let best = null;
+    for(const u of ranked){ const l = nhlOptimalForSim(cands, cap, minSal, u.top); if(l && stackOf(l) >= need && (!best || tot(l) > tot(best))) best = l; }
+    return best;
+  };
+  const found = new Map(); let tried = 0;
+  const step = Math.max(2, Math.floor(simsDone / Math.max(1, maxWorlds)) * 2);
+  for(let w = 0; w < simsDone && tried < maxWorlds; w += step){
+    tried++;
+    for(const c of base) c.score = c.arr[w] || 0;
+    // only players who could matter in this world (keeps the scan short)
+    const cands = base.filter(c => c.score > 0 || c.pos === 'G');
+    const l = solve(cands); if(!l) continue;
+    const key = l.map(c => c.p.id).sort().join(',');
+    const e = found.get(key); if(e) e.count++; else found.set(key, { lineup: l.map(c => c.p), count: 1 });
+  }
+  return [...found.values()].sort((a, b) => b.count - a.count);
+}
+// Build the NHL board: the engine front door every other sport uses.
+async function runNhlBoard(slate){
+  const sc = slateSimCtx(slate); if(!sc || sc.sport !== 'nhl'){ log('⚠ No NHL sim on this slate — run the sim first.'); return null; }
+  const target = parseInt(document.getElementById('genCount').value) || 20;
+  const maxExpPct = parseInt(document.getElementById('genMaxExp').value) || 100;
+  const maxSal = Math.min(SALARY_CAP, parseInt(document.getElementById('genMaxSal')?.value) || SALARY_CAP);
+  const minSal = parseInt(document.getElementById('genMinSal').value) || 0;
+  const overrides = slate.playerExpOverrides || {};
+  const evOn = !!(slate._ufcEv && slate._ufcEv.on);
+  const eng = nflEngineDecide(slate, evOn);
+  const simScoreMode = eng.engine !== 'gpp';   // ck138b: Contest EV off → Sim Score, as on every other sport
+  const outSet = new Set(slate._outIds || []);
+  const isOut = p => outSet.has(p.id) || /^o$/i.test(String(p.status || '').trim());
+  const meanOf = a => { let t = 0; for(let k = 0; k < a.length; k++) t += a[k]; return t / Math.max(1, a.length); };
+  // the modelled field rosters everyone who plays (hidden players included —
+  // the field does not see our curation); nobody with no role, nobody OUT
+  const fieldPool = (slate.players || []).filter(p => p.salary > 0 && !isOut(p) && sc.simScoresById[p.id] && meanOf(sc.simScoresById[p.id]) > 0.25);
+  const hid = new Set(slate.hiddenIds || []);
+  const pool = fieldPool.filter(p => !hid.has(p.id));
+  const byPos = { G: 0, C: 0, W: 0, D: 0 }; pool.forEach(p => { const k = nhlPosOf(p); if(byPos[k] != null) byPos[k]++; });
+  if(byPos.G < 1 || byPos.C < 2 || byPos.W < 3 || byPos.D < 2){ log(`⚠ The pool cannot fill an NHL roster (G ${byPos.G}, C ${byPos.C}, W ${byPos.W}, D ${byPos.D}) — unhide players.`); return null; }
+  log(`Pool: ${pool.length} players (${byPos.C} C · ${byPos.W} W · ${byPos.D} D · ${byPos.G} G); the modelled field draws from ${fieldPool.length}.`);
+  const t0 = Date.now();
+  // Sim Score has no search to widen the candidate set, so it draws its
+  // candidates from more worlds (every generation world up to 2,500).
+  const nWorlds = simScoreMode ? Math.min(2500, Math.floor(sc.simsDone / 2)) : Math.min(800, Math.floor(sc.simsDone / 2));
+  const ranked = nhlPerSimOptimals(slate, pool, sc.simScoresById, sc.simsDone, maxSal, minSal, nWorlds);
+  log(`${ranked.length.toLocaleString()} distinct per-world optimal lineups from ${nWorlds.toLocaleString()} worlds (${((Date.now() - t0) / 1000).toFixed(1)}s) — ${simScoreMode ? 'the candidates Sim Score ranks' : 'search seeds and the field\'s sharp slice'}.`);
+  if(!ranked.length){ log('⚠ No legal lineup could be built in any simulated world — check salaries and the pool.'); return null; }
+  if(simScoreMode){
+    // ck138b: EV OFF. Every candidate is a legal NHL roster (the per-world
+    // optimizer enforces the slots, the cap and the 3-team rule), and the Sim
+    // Score selector only ever takes WHOLE candidates, so the board is legal by
+    // construction. Same selector NFL / PGA use with Contest EV off: joint
+    // lineup ceiling (0.6×P80 + 0.4×mean of the lineup TOTAL on held-out
+    // worlds), Max% / overrides, the usable-game exposure cap, near-duplicate
+    // limits. Line correlation is in the lineup totals, so stacks rank high on
+    // their own. No ownership, no payout curve.
+    const _ms = nhlMinStackOf(slate);
+    log(`Engine: Sim Score (${eng.why}). Lineups are the sim's own best builds, ranked by their joint ceiling — no field, no payout curve, no ownership leverage. Turn on Contest EV and pick a contest for tournament-objective boards.`
+      + (_ms ? ` Stack rule (ck139): every candidate holds ${_ms}+ skaters from one forward line or PP unit (a world whose best lineup has none is re-solved around its best units).` : ' Stack rule OFF for this slate.'));
+    return await runPgaSimScoreSelect({ slate, pool, ranked, simScoresById: sc.simScoresById, simsDone: sc.simsDone, target, maxExpPct, overrides, rosterSize: 9, unitLabel: 'players' });
+  }
+  return await runContestEvBoard({ slate, pool, ranked, simScoresById: sc.simScoresById, totalSims: sc.simsDone, genSims: Math.ceil(sc.simsDone / 2),
+    target, maxExpPct, overrides, fieldPool, oosParity: 1, sharpShare: contestSharpShare(slate), ownTemp: contestOwnTemp(slate),
+    se: !!(slate._ufcEv && slate._ufcEv.se), dominanceRepair: false, maxSal, minSal, log });
+}
+async function runNhlSimGenInner(){
+  const slate = activeSlate(); if(!slate || !isNhl(slate)) return;
+  setPendingHistStamp && setPendingHistStamp(null);
+  const numSims = slate._simCount || parseInt(document.getElementById('nhlSimCountSlider')?.value) || 5000;
+  document.getElementById('genBtn').disabled = true;
+  const el = document.getElementById('genLog'); el.textContent = 'Starting NHL simulation…';
+  if(typeof renderGppCard === 'function') renderGppCard(null);
+  if(typeof gppProgressStart === 'function') gppProgressStart();
+  window._genCancelled = false;
+  const done = note => { document.getElementById('genBtn').disabled = false; if(typeof gppProgressStop === 'function') gppProgressStop(note === undefined ? null : note); };
+  try {
+    log(`Simulating ${numSims.toLocaleString()} NHL slates…`);
+    await new Promise(r => setTimeout(r, 0));
+    const t0 = Date.now();
+    await nhlSimulateSlate(slate, numSims);
+    const S = slate._nhlSimSummary;
+    log(`NHL sim (ck138): ${numSims.toLocaleString()} worlds × ${S.games} game${S.games === 1 ? '' : 's'} in ${((Date.now() - t0) / 1000).toFixed(1)}s. Goals come from each team's total; every goal is credited to a scorer and 0-2 assisters from the unit on the ice (his line + a D pair at even strength, his PP unit on the power play), so linemates score together.`);
+    log(`  League texture: ${S.goalsPerGame} goals/game, ${S.ppShare}% on the power play, ${S.astPerGoal} assists/goal, OT in ${S.ot}% of games, ${S.en} empty-netters/game.`);
+    for(const t of S.teams) log(`  ${t.team} vs ${t.opp}: total ${t.total} → simmed ${t.goals} · ${t.skaters} skaters · G ${t.goalie || '— none —'}${t.goalie ? ` win ${t.goalieWin}%${t.sheetWin != null ? ` (sheet ${t.sheetWin}%)` : ''}, ${t.saves} saves, ${t.ga} GA, ${t.goalieSim} DK` : ''}`);
+    if(S.floaters.length) log(`  ⚠ No line on the sheet (simmed on a 2nd line / pair): ${S.floaters.join(', ')}.`);
+    if(S.noGoalie.length) log(`  ⚠ No starting goalie found for ${S.noGoalie.join(', ')} — mark one G1 or Confirmed on the sheet.`);
+    const xb = document.getElementById('simCsvBtn'); if(xb) xb.style.display = '';
+    if(typeof renderPool === 'function') renderPool();
+    if(typeof renderHbEv === 'function') renderHbEv();
+    // ck138 stage 3 hands the context to the GPP engine here.
+    if(typeof runNhlBoard === 'function'){ const out = await runNhlBoard(slate); done(); return out; }
+    log('Lineup generation for NHL is the next step — the sim is stored, so saved and hand-built lineups can already be scored.');
+    done('sim done');
+  } catch(e){ log('⚠ NHL sim failed: ' + (e && e.message || e)); console.error(e); done(); }
 }
 
 // ── Seeded entry point for the NFL generator (ck89) ─────────────────────────
@@ -38324,6 +39421,10 @@ async function runNflSimGenInner(){
     if(out===null){ if(window._genCancelled) log('Cancelled.'); done(); return; }
   }
 
+  // ck137: the legacy pipelines (Contest EV off, or the engine pinned to
+  // legacy) never read captain Min% — only the GPP kernel paced it. Enforce
+  // it here as a re-captain pass over the built board (see the function).
+  if(SD && out && out.length && _eng.engine !== 'gpp') sdApplyCptFloorsLegacy(slate, out, maxSal, minSal, log);
   // Showdown: carry the sim's preferred captain onto each saved lineup so the
   // export puts the right player in the CPT slot at his captain id.
   if(SD && out && out.length){
@@ -38369,6 +39470,64 @@ async function runNflSimGenInner(){
   // Hand the built board back to the caller. The UI ignores it (the preview
   // modal is already open by now), but a harness — and any future caller that
   // wants to post-process — has no other way to reach the lineups.
+  return out;
+}
+
+// ck137: CAPTAIN Min% ON THE LEGACY PIPELINES. The GPP kernel paces captain
+// floors while it builds (ck127); the legacy Sim Score / Contest-EV paths did
+// not look at them at all, so a Min% typed in the Captain list did nothing
+// whenever Contest EV was off. This pass works on the finished board: for each
+// floored captain short of his target it moves the CPT slot to him in lineups
+// that ALREADY roster him (the six players do not change — only who is
+// captain), taking the lineups whose current captain is the most over-used
+// first. A swap must keep the salary inside [minSal, maxSal], the new captain
+// captain-eligible, the old one flex-eligible, must not push another floored
+// captain below his own target, and must not duplicate a lineup already on the
+// board. What cannot be met is reported, not forced.
+function sdApplyCptFloorsLegacy(slate, out, maxSal, minSal, log){
+  const floors = slate && slate.sdCptMinOverrides; if(!floors) return out;
+  const ids = Object.keys(floors).filter(id => sdCptMinOf(slate, id) > 0); if(!ids.length) return out;
+  const L = out.length, cap = (maxSal > 0 ? maxSal : SALARY_CAP), lo = (minSal > 0 ? minSal : 0);
+  const want = {}, have = {};
+  ids.forEach(id => { want[id] = Math.ceil(Math.min(100, sdCptMinOf(slate, id)) / 100 * L - 1e-9); });
+  const cptOf = l => l._sdCaptain || sdCaptainId(slate, l.map(p => p.id), true);
+  out.forEach(l => { const c = cptOf(l); have[c] = (have[c] || 0) + 1; });
+  const keyOf = (l, c) => l.map(p => p.id).sort().join(',') + '|' + c;
+  const keys = new Set(out.map(l => keyOf(l, cptOf(l))));
+  const moved = [], short = [];
+  const order = ids.slice().sort((a, b) => (want[b] - (have[b] || 0)) - (want[a] - (have[a] || 0)));
+  for(const X of order){
+    let need = want[X] - (have[X] || 0); if(need <= 0) continue;
+    if(!sdCptEligible(slate, X)){ short.push({ X, why: 'he is hidden from the captain pool', hidden: true }); continue; }
+    const cands = [];
+    out.forEach((l, i) => {
+      const O = cptOf(l); if(O === X || !l.some(p => p.id === X)) return;
+      if(want[O] != null && (have[O] || 0) <= want[O]) return;          // would break O's own floor
+      if(!sdFlexEligible(slate, O)) return;
+      const sal = sdSalary(slate, l.map(p => p.id), X);
+      if(sal > cap || sal < lo) return;
+      if(keys.has(keyOf(l, X))) return;
+      cands.push({ i, O });
+    });
+    cands.sort((a, b) => (have[b.O] || 0) - (have[a.O] || 0));
+    let did = 0;
+    for(const c of cands){
+      if(need <= 0) break;
+      const l = out[c.i]; const O = cptOf(l);
+      if(O !== c.O || (want[O] != null && (have[O] || 0) <= want[O])) continue;
+      keys.delete(keyOf(l, O)); l._sdCaptain = X; keys.add(keyOf(l, X));
+      have[O]--; have[X] = (have[X] || 0) + 1; need--; did++;
+    }
+    if(did) moved.push({ X, did });
+    if(need > 0){ const on = out.filter(l => l.some(p => p.id === X)).length;
+      short.push({ X, why: `he is on ${on} of ${L} lineups and only ${have[X] || 0} of those could take him at captain under the cap / other floors` }); }
+  }
+  const nm = id => ((playerById(slate, id) || {}).name || id);
+  if(typeof log === 'function'){
+    log(`Captain Min% (legacy pipeline, ck137): ` + ids.map(id => `CPT ${nm(id)} ${have[id] || 0}/${want[id]}`).join(' · ')
+      + (moved.length ? ` — re-captained ${moved.map(m => `${m.did} for ${nm(m.X)}`).join(', ')} (same six players, captain slot moved).` : '.'));
+    short.forEach(s => log(`  ⚠ CPT ${nm(s.X)} is short of his Min%: ${s.why}.` + (s.hidden ? ' Un-hide him from the captain pool, or clear the Min%.' : ' Raise his overall exposure, or run with Contest EV on (the GPP engine builds toward captain floors).')));
+  }
   return out;
 }
 
@@ -38940,6 +40099,17 @@ async function runAutoGen(){
     if(slate.sport==='nascar') return runNascarSimGen();
     if(slate.sport==='pga') return runPgaSimGen();
     if(slate.sport==='nfl') return runNflSimGen();
+    if(slate.sport==='nhl' && typeof runNhlSimGen === 'function') return runNhlSimGen();   // ck138
+  }
+  // ck138: NHL is positional (C,C,W,W,W,D,D,G,UTIL, three skater teams) and
+  // has no simulation engine yet — the generic builder below is positionless
+  // and would emit illegal rosters, so it is refused, not attempted.
+  if(slate.sport==='nhl'){
+    alert(typeof runNhlSimGen === 'function'
+      ? 'NHL lineups are built by the simulation engine (positional 9-slot rosters).\n\nSwitch to the Simulate tab and hit Generate.'
+      : 'NHL auto-generation is not available in this build.');
+    if(typeof runNhlSimGen === 'function') switchGenMode('simulate');
+    return;
   }
   // The generic (non-sim) builder is positionless — it would happily emit a
   // 6-man NFL "lineup" with no QB and no DST, which then exports as a broken
@@ -41646,7 +42816,7 @@ function renderHbEv(){
   const cptId=SD?sdCaptainId(slate,ids,'builder'):null;
   const players=(SD?sdAssignSlots(slate,ids,null,'builder'):ids).map(id=>playerById(slate,id)).filter(Boolean);
   const done=SD ? sdComplete(slate,ids)
-                : isNfl(slate) ? nflComplete(nflCounts(slate,ids))
+                : isPositional(slate) ? nflComplete(nflCounts(slate,ids))
                 : players.length===need;
   const has=players.length>0;
   // A rostered player who has since been marked OUT is worth 0 — say so
@@ -41810,7 +42980,7 @@ function renderPreviewLineupsList(){
     // saved card for the same quality of lineup.
     const simTotal = previewLineupSim(slate, lineup);
     const ordered = SDp ? [...lineup].sort((a,b)=>(b.id===cptId)-(a.id===cptId))
-      : (slate.sport==='nfl' ? (()=>{ const byId={}; lineup.forEach(p=>byId[p.id]=p); return nflDisplayOrder(slate, lineup.map(p=>p.id)).map(id=>byId[id]).filter(Boolean); })() : lineup);
+      : (isPositional(slate) ? (()=>{ const byId={}; lineup.forEach(p=>byId[p.id]=p); return nflDisplayOrder(slate, lineup.map(p=>p.id)).map(id=>byId[id]).filter(Boolean); })() : lineup);
     // Same CPT/FLEX ownership split as the saved cards (see renderSaved).
     const ownTotal = lineup.reduce((s,p)=>s+(SDp?sdOwnOf(p,p.id===cptId):(parseFloat(p.own)||0)),0);
     const stats=[];
@@ -41857,7 +43027,7 @@ function renderPreviewLineupsList(){
     const origIdx = previewLineups.indexOf(lineup);
     return `<div class="preview-lineup-card">
       <div class="preview-lineup-top">
-        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;"><div class="preview-lineup-num">Lineup ${origIdx+1}</div>${(typeof isNfl==='function'&&isNfl(activeSlate()))?nflStackLabelHtml(activeSlate(), lineup.map(p=>p.id), cptId):''}${arcTag}${wTag}${bTag}${themeTags}</div>
+        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;"><div class="preview-lineup-num">Lineup ${origIdx+1}</div>${(typeof isNfl==='function'&&(isNfl(activeSlate())||isNhl(activeSlate())))?nflStackLabelHtml(activeSlate(), lineup.map(p=>p.id), cptId):''}${arcTag}${wTag}${bTag}${themeTags}</div>
         <div style="display:flex;align-items:center;gap:8px">
           <div class="preview-lineup-meta">${fmt(sal)}</div>
           <button class="lu-det-btn" onclick="event.stopPropagation();togglePreviewDetails(${origIdx},this)" title="Outcome distribution, captain share and per-player sim numbers for this lineup">Details</button>
@@ -42520,6 +43690,7 @@ async function refreshFromSheet(){
       if(slate.sport==='nascar') applyNascarStats(p, row, headers, true);
       if(slate.sport==='pga') applyPgaStats(p, row, headers);
       if(slate.sport==='nfl') applyNflStats(p, row, headers);
+      else if(slate.sport==='nhl') applyNhlStats(p, row, headers);   // ck138
     });
 
     // Late adds: sheet rows whose id didn't match any player become new pool
@@ -42558,6 +43729,7 @@ async function refreshFromSheet(){
       if(slate.sport==='nascar') applyNascarStats(p, row, headers, false);
       if(slate.sport==='pga') applyPgaStats(p, row, headers);
       if(slate.sport==='nfl') applyNflStats(p, row, headers);
+      else if(slate.sport==='nhl') applyNhlStats(p, row, headers);   // ck138
       slate.players.push(p);
       lateAdds++;
     });
@@ -42995,6 +44167,7 @@ function createSlate(){
     if(sport==='nfl'){
       applyNflStats(p, row, parsedCSV.headers);
     }
+    if(sport==='nhl') applyNhlStats(p, row, parsedCSV.headers);   // ck138
 
     // PGA: pick up cheat-sheet stat columns (dist/acc/gir + weighted SG) for archetypes
     if(sport==='pga') applyPgaStats(p, row, parsedCSV.headers);
@@ -43534,6 +44707,7 @@ function applyPoolUpdate(){
     applyUfcOdds(p, row);
     if(slate.sport==='pga') applyPgaStats(p, row, updateParsedCSV.headers);
     if(slate.sport==='nfl') applyNflStats(p, row, updateParsedCSV.headers);
+    else if(slate.sport==='nhl') applyNhlStats(p, row, updateParsedCSV.headers);   // ck138
   });
 
   // Add brand-new players that weren't in the pool (e.g. late adds).
@@ -43580,6 +44754,7 @@ function applyPoolUpdate(){
     applyUfcOdds(p, row);
     if(slate.sport==='pga') applyPgaStats(p, row, updateParsedCSV.headers);
     if(slate.sport==='nfl') applyNflStats(p, row, updateParsedCSV.headers);
+    else if(slate.sport==='nhl') applyNhlStats(p, row, updateParsedCSV.headers);   // ck138
     slate.players.push(p);
     added++;
   });
