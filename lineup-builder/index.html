@@ -3291,6 +3291,8 @@ function nflParseLineupString(s){
     return out;
   };
   let marks = scan(/(?:^|\s)(QB|RB|WR|TE|FLEX|DST|CPT)(?=\s)/g);
+  // ck140: DK NHL classic — "C … C … D … D … G … UTIL … W … W … W …"
+  if(!marks.length && /(?:^|\s)UTIL\s/.test(str) && /(?:^|\s)G\s/.test(str)) marks = scan(/(?:^|\s)(C|W|D|G|UTIL)(?=\s)/g);
   if(!marks.length) marks = scan(/(?:^|\s)(F)(?=\s)/g);
   if(!marks.length) marks = scan(/(?:^|\s)(D)(?=\s)/g);   // ck130: NASCAR exports six 'D' slots
   const out = [];
@@ -4069,6 +4071,7 @@ function nflStandingsPit(slate, fptsById){
   if(!ctx || !ctx.simScoresById || !slate || ctx.slateId !== slate.id) return null;
   const n = ctx.simsDone || 0;
   if(!(n > 0)) return null;
+  const NHLp = slate.sport === 'nhl';   // ck140: the NHL sim's per-player distributions, NHL positions, no NFL exit flags
   const rows = [];
   let degenerate = 0;
   // PRICED vs PROJ-ONLY is a real split — a market-prop player rides the pie,
@@ -4076,6 +4079,7 @@ function nflStandingsPit(slate, fptsById){
   // reported apart. Read off the sim inputs rather than guessed from the sheet.
   const pricedIds = new Set();
   try {
+    if(slate.sport === 'nhl') throw 0;   // ck140: the NFL prop-pricing split has no NHL meaning
     const _pl = (slate.players || []).filter(x => (x.salary || 0) > 0);
     const _inp = buildNflSimInputs(_pl);
     (_inp.entries || []).forEach((e, i) => { if(e && e.hasProps && _pl[i]) pricedIds.add(_pl[i].id); });
@@ -4097,7 +4101,7 @@ function nflStandingsPit(slate, fptsById){
     const sd = Math.sqrt(vv / Math.max(1, n - 1));
     const srt = Array.from(arr.subarray ? arr.subarray(0, n) : arr).sort((a,b) => a - b);
     const q = f => srt[Math.min(n - 1, Math.max(0, Math.round(f * n) - 1))];
-    rows.push({ id: p.id, name: p.name, pos: (typeof nflPosOf === 'function' ? nflPosOf(p) : p.pos) || p.pos || '',
+    rows.push({ id: p.id, name: p.name, pos: (NHLp ? nhlPosOf(p) : (typeof nflPosOf === 'function' ? nflPosOf(p) : p.pos)) || p.pos || '',
                 team: String(p.team || ''), salary: p.salary || 0,
                 proj: parseFloat(p.proj) || 0,
                 priced: pricedIds.has(p.id),
@@ -4109,7 +4113,7 @@ function nflStandingsPit(slate, fptsById){
   if(!rows.length) return null;
   // ── FLAGS ────────────────────────────────────────────────────────────────
   const byId = new Map(rows.map(r => [r.id, r]));
-  const exits = rows.filter(r => r.proj >= NFL_PIT_EXIT_PROJ
+  const exits = NHLp ? [] : rows.filter(r => r.proj >= NFL_PIT_EXIT_PROJ
     && r.realized <= r.proj * NFL_PIT_EXIT_FRAC && r.pos !== 'DST' && r.pos !== 'K');
   for(const r of exits) r.flag = 'exit';
   for(const e of exits){
@@ -4161,51 +4165,57 @@ function nflStandingsPit(slate, fptsById){
     { label: 'Proj < 3',   test: r => r.proj < 3 },
   ];
   const byPos = {}, byTier = {};
-  for(const P of ['QB','RB','WR','TE','K','DST']){
+  for(const P of (NHLp ? ['C','W','D','G'] : ['QB','RB','WR','TE','K','DST'])){
     const a = agg(r => !r.flag && r.pos === P); if(a) byPos[P] = a;
   }
   for(const T of tiers){ const a = agg(r => !r.flag && T.test(r)); if(a) byTier[T.label] = a; }
   return { sims: n, degenerate, rows,
            all: agg(() => true), unflagged: agg(r => !r.flag), flagged: agg(r => !!r.flag),
            byPos, byTier,
-           priced: agg(r => !r.flag && r.priced), projOnly: agg(r => !r.flag && !r.priced),
+           priced: NHLp ? null : agg(r => !r.flag && r.priced), projOnly: NHLp ? null : agg(r => !r.flag && !r.priced),
+           sport: slate.sport || 'nfl',
            flags: { exit: rows.filter(r => r.flag === 'exit').map(r => r.name),
                     inherit: rows.filter(r => r.flag === 'inherit').map(r => r.name),
                     room: rows.filter(r => r.flag === 'room').length },
-           exitModelOn: (typeof nflExitOn === 'function') ? nflExitOn(slate) : null };
+           exitModelOn: NHLp ? null : (typeof nflExitOn === 'function') ? nflExitOn(slate) : null };
 }
 // Pooled PIT across every contest ever ingested, so two games can grow into a
 // sample that can actually say something. Keyed by contest so a re-ingest
 // replaces rather than double-counts.
 const NFL_PIT_HISTORY_KEY = 'nflPitHistory/1';
-function nflPitHistoryLoad(){
+// ck140: pooled PER SPORT — NHL player-games never pool with NFL ones (the
+// NFL key is unchanged, so every existing history keeps reading).
+const nflPitHistKey = sport => (sport && sport !== 'nfl') ? NFL_PIT_HISTORY_KEY + '/' + sport : NFL_PIT_HISTORY_KEY;
+function nflPitHistoryLoad(sport){
   let v = [];
-  try { v = JSON.parse(localStorage.getItem(NFL_PIT_HISTORY_KEY) || '[]'); if(!Array.isArray(v)) v = []; } catch(e){ v = []; }
-  if(typeof NFL_PIT_HISTORY_SEED !== 'undefined'){
+  try { v = JSON.parse(localStorage.getItem(nflPitHistKey(sport)) || '[]'); if(!Array.isArray(v)) v = []; } catch(e){ v = []; }
+  if((!sport || sport === 'nfl') && typeof NFL_PIT_HISTORY_SEED !== 'undefined'){
     const have = new Set(v.map(c => String(c.key)));
     const add = NFL_PIT_HISTORY_SEED.filter(c => !have.has(String(c.key)));
     if(add.length) v = add.concat(v);
   }
   return v;
 }
-function nflPitHistorySave(list){
-  try { localStorage.setItem(NFL_PIT_HISTORY_KEY, JSON.stringify(list.slice(-60))); } catch(e){}
+function nflPitHistorySave(list, sport){
+  try { localStorage.setItem(nflPitHistKey(sport), JSON.stringify(list.slice(-60))); } catch(e){}
 }
 function nflPitHistoryAdd(key, slateName, pit){
-  if(!pit || !pit.rows || !pit.rows.length) return nflPitHistoryLoad();
-  const list = nflPitHistoryLoad().filter(c => c.key !== key);
+  const sport = (pit && pit.sport) || 'nfl';
+  if(!pit || !pit.rows || !pit.rows.length) return nflPitHistoryLoad(sport);
+  const list = nflPitHistoryLoad(sport).filter(c => c.key !== key);
   list.push({ key, ts: Date.now(), slate: slateName || null, sims: pit.sims,
               exitModelOn: pit.exitModelOn,
               rows: pit.rows.map(r => ({ pos: r.pos, proj: r.proj, u: r.u, flag: r.flag || null,
                                          priced: !!r.priced, bias: r.realized - r.simMean })) });
-  nflPitHistorySave(list.sort((a,b) => (a.ts||0) - (b.ts||0)));
-  return nflPitHistoryLoad();
+  nflPitHistorySave(list.sort((a,b) => (a.ts||0) - (b.ts||0)), sport);
+  return nflPitHistoryLoad(sport);
 }
 // The pooled view the Backtest card renders, plus the one sentence this file
 // owes the reader: what the sample would have to look like before any of it
 // licenses moving a constant.
-function nflPitPooled(){
-  const list = nflPitHistoryLoad();
+function nflPitPooled(sport){
+  const NHLq = sport === 'nhl';
+  const list = nflPitHistoryLoad(sport);
   const rows = [];
   for(const c of list) for(const r of (c.rows || [])) rows.push(r);
   if(!rows.length) return { contests: 0, rows: 0 };
@@ -4222,7 +4232,7 @@ function nflPitPooled(){
   const out = { contests: list.length, rows: rows.length,
                 all: agg(() => true), unflagged: agg(r => !r.flag), flagged: agg(r => !!r.flag),
                 byPos: {}, byTier: {} };
-  for(const P of ['QB','RB','WR','TE','K','DST']){ const a = agg(r => !r.flag && r.pos === P); if(a) out.byPos[P] = a; }
+  for(const P of (NHLq ? ['C','W','D','G'] : ['QB','RB','WR','TE','K','DST'])){ const a = agg(r => !r.flag && r.pos === P); if(a) out.byPos[P] = a; }
   for(const T of [['Proj ≥ 15', r => r.proj >= 15], ['Proj 8–15', r => r.proj >= 8 && r.proj < 15],
                   ['Proj 3–8', r => r.proj >= 3 && r.proj < 8], ['Proj < 3', r => r.proj < 3]]){
     const a = agg(r => !r.flag && T[1](r)); if(a) out.byTier[T[0]] = a;
@@ -4246,7 +4256,12 @@ function nflPitPooled(){
              ready: nEff >= 262 },
     tail:  { detect: '1% → 3% at p99', needRows: 1000, have: out.rows, ready: out.rows >= 1000 },
     // The constants each signal would point at, once the sample is large enough.
-    points: [
+    points: NHLq ? [
+      { signal: 'mean u below 0.5 across many contests', constant: 'the team totals / NHL_SIM.goalsPerTeam — the sim would be running hot' },
+      { signal: 'u piled at BOTH ends (deciles 1 and 10)', constant: 'NHL_SIM.sogDispK / blkDispK / paceShape — per-player spread too narrow' },
+      { signal: 'D mean u off C/W mean u', constant: 'NHL_SIM.dPairToi / xgDefault.D — the goal split between forwards and D' },
+      { signal: 'G mean u off 0.5', constant: 'NHL_SIM.pullProb / teamSog — the goalie line' },
+    ] : [
       { signal: 'mean u below 0.5 across many contests', constant: 'NFL_SD_TOTAL / the team implied anchor — the sim would be running hot' },
       { signal: 'u piled at BOTH ends (deciles 1 and 10)', constant: 'NFL_SIG_IDIO_REC / _RUSH / NFL_PROJ_CV — per-player spread too narrow' },
       { signal: 'p99 exceedance well above 1%, concentrated in Proj < 3', constant: 'NFL_PROJ_CV.hi — the Proj-only gamma is too thin in the right tail at low projections' },
@@ -4261,6 +4276,53 @@ function nflPitPooled(){
 // Everything above, wired together: parse → match → store on the slate →
 // append to the global history → refit → report. Pure enough to be driven from
 // a test with a string of CSV.
+// ── NHL STANDINGS: LINE / PP-UNIT STACKS (ck140) ────────────────────────────
+// The first NHL file (DK 195958011, opening night 9/29/2026, 11,764 entries)
+// is what NHL_FIELD_STACK is now fitted to. Measured per entry off the slate's
+// Line / PP columns: the biggest group of skaters sharing one forward line, D
+// pair or PP unit ("primary"), the biggest such group on ANOTHER team
+// ("secondary"), whether the primary rides a PP unit, the skaters-per-team
+// shape (4-3-1 …), how many teams, and skaters facing the entry's own goalie.
+function nhlStandingsStacks(slate, entries, match){
+  const out = { n: 0, skipped: 0, pri: [0, 0, 0, 0, 0, 0], sec2: 0, sec3: 0, viaPP: 0, teamsSum: 0, team5: 0, vsOwnG: 0, shapes: {} };
+  for(const e of (entries || [])){
+    const slots = e.slots || nflParseLineupString(e.lineup);
+    const ps = slots.map(x => match(x.name)).filter(Boolean);
+    if(ps.length !== 9){ out.skipped++; continue; }
+    const sk = ps.filter(p => nhlPosOf(p) !== 'G'), g = ps.find(p => nhlPosOf(p) === 'G');
+    const m = {}, tc = {};
+    for(const p of sk){ const t = String(p.team || '').toUpperCase(); tc[t] = (tc[t] || 0) + 1;
+      const L = String(p.nhlLine || '').toUpperCase(), U = String(p.nhlPP || '').toUpperCase();
+      if(L) m[t + '|' + L] = (m[t + '|' + L] || 0) + 1; if(U) m[t + '|' + U] = (m[t + '|' + U] || 0) + 1; }
+    const ks = Object.keys(m).sort((a, b) => m[b] - m[a]);
+    const big = ks.length ? m[ks[0]] : 0, t0 = ks.length ? ks[0].split('|')[0] : '';
+    let sec = 0; for(const k of ks) if(k.split('|')[0] !== t0 && m[k] > sec) sec = m[k];
+    out.n++; out.pri[Math.min(5, big)]++;
+    if(sec >= 2) out.sec2++; if(sec >= 3) out.sec3++;
+    if(ks.some(k => m[k] === big && /\|PP\d$/.test(k))) out.viaPP++;
+    const tv = Object.values(tc).sort((a, b) => b - a); out.teamsSum += tv.length; if(tv[0] >= 5) out.team5++;
+    const sh = tv.join('-'); out.shapes[sh] = (out.shapes[sh] || 0) + 1;
+    if(g){ const opp = String(g.opp || '').toUpperCase(); if(opp && sk.some(p => String(p.team || '').toUpperCase() === opp)) out.vsOwnG++; }
+  }
+  const n = Math.max(1, out.n), r = v => v / n;
+  return { n: out.n, skipped: out.skipped,
+           primary: { le1: r(out.pri[0] + out.pri[1]), two: r(out.pri[2]), three: r(out.pri[3]), four: r(out.pri[4]), five: r(out.pri[5]) },
+           second2: r(out.sec2), second3: r(out.sec3), viaPP: r(out.viaPP), teams: out.teamsSum / n, team5: r(out.team5), vsOwnG: r(out.vsOwnG),
+           shapes: Object.entries(out.shapes).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => [k, v / n]) };
+}
+function nhlStandingsCmp(rec, slate){
+  const a = rec.stacks.all, t = rec.stacks.top1pct;
+  return { all: a, top: t && t.n ? t : null, topN: rec.stacks.top1pctN, assumed: slate ? nhlFieldStackFor(slate) : Object.assign({}, NHL_FIELD_STACK), games: rec.nhlGames || null };
+}
+function nhlStandingsLines(c){
+  const pc = v => v == null ? '—' : (100 * v).toFixed(0) + '%';
+  const pr = x => `≤1 ${pc(x.primary.le1)} · 2 ${pc(x.primary.two)} · 3 ${pc(x.primary.three)} · 4 ${pc(x.primary.four)} · 5 ${pc(x.primary.five)}`;
+  const A = c.all, T = c.top, F = c.assumed;
+  const L = [`NHL field stacks over ${A.n.toLocaleString()} entries — biggest line/PP group: ${pr(A)} (${pc(A.viaPP)} ride a PP unit) · second team's group 2+ ${pc(A.second2)}, 3+ ${pc(A.second3)} · ${A.teams.toFixed(2)} teams · 5+ skaters from one team ${pc(A.team5)} · skaters vs own goalie ${pc(A.vsOwnG)} · shapes ${A.shapes.map(([k, v]) => k + ' ' + pc(v)).join(', ')}.`,
+             `NHL_FIELD_STACK for ${c.games || '?'} games (${F.measured ? 'measured at this size' : `fitted on ${NHL_FIELD_STACK_FIT_GAMES}, scaled ×${(F.scale || 1).toFixed(2)}`}): none ${pc(F.none)} · 2 ${pc(F.two)} · 3 ${pc(F.three)} · 4+ ${pc(F.four)} (5 of those ${pc(F.fiveOfFour || 0)}) · second ${pc(F.second)} (3-man ${pc(F.secondThree || 0)}) · extra teammate ${pc(F.extraMate || 0)} — the draw rates, not realized rates (ownership fill adds incidental stacks).`];
+  if(T) L.push(`Top 1% (${T.n}): biggest group ${pr(T)} · second 2+ ${pc(T.second2)} · ${T.teams.toFixed(2)} teams · vs own goalie ${pc(T.vsOwnG)}. One night is one draw of which team hit — a row, not a verdict.`);
+  return L;
+}
 function nflIngestStandings(slate, text, fileName, parsed){
   // ck80: showdown is admitted. Everything downstream that is classic-only (the
   // Own Model and therefore the β refit) is gated on `SD` individually rather
@@ -4278,10 +4340,15 @@ function nflIngestStandings(slate, text, fileName, parsed){
   // object) — are each switched off individually and SAID so in the report.
   // ck130: NASCAR is admitted on the same terms as UFC — a flat six-driver
   // roster with no QB, team or game; every UFC gate below is a flat-roster gate.
-  if(!slate || !(isNfl(slate) || slate.sport === 'ufc' || slate.sport === 'nascar'))
-    return { ok: false, error: 'Standings ingest is NFL, UFC and NASCAR only.' };
+  // ck140: NHL is admitted. The Own Model (an NFL-classic softmax) is gated
+  // off exactly as on UFC; the stack block is NHL's own (line / PP-unit
+  // stacks, team shapes — nhlStandingsStacks) against NHL_FIELD_STACK; the
+  // per-player PIT reads the NHL sim's distributions like the NFL one.
+  if(!slate || !(isNfl(slate) || slate.sport === 'ufc' || slate.sport === 'nascar' || slate.sport === 'nhl'))
+    return { ok: false, error: 'Standings ingest is NFL, NHL, UFC and NASCAR only.' };
   const SD = isNfl(slate) && isShowdown(slate);
   const UFC = slate.sport === 'ufc' || slate.sport === 'nascar';   // flat roster (ck130: NASCAR too)
+  const NHL = slate.sport === 'nhl';
   const P = parsed && parsed.ok ? parsed : nflParseStandings(text);
   if(!P.ok) return P;
   const match = nflStandingsMatcher(slate);
@@ -4290,9 +4357,9 @@ function nflIngestStandings(slate, text, fileName, parsed){
   // nflOwnRows and nflOwnEnsure both refuse a showdown slate by construction:
   // the roster shape they normalise to is QB/RB/WR/TE/DST budgets summing to
   // 900%, which is neither a showdown roster nor a six-fighter one.)
-  if(!SD && !UFC) nflOwnEnsure(slate);
+  if(!SD && !UFC && !NHL) nflOwnEnsure(slate);
   const rowsByPid = {};
-  const R = (SD || UFC) ? null : nflOwnRows(slate);
+  const R = (SD || UFC || NHL) ? null : nflOwnRows(slate);
   if(R) R.rows.forEach(r => { rowsByPid[r.p.id] = r; });
 
   // ── OWNERSHIP: DK REPORTS CPT AND FLEX SEPARATELY ─────────────────────────
@@ -4372,8 +4439,8 @@ function nflIngestStandings(slate, text, fileName, parsed){
   // rather than reported as zeros — `nflStandingsStacks` would have counted
   // 35,525 entries as "skipped, no QB" and the report would have printed a
   // stack table against NFL_FIELD_STACK, which is an NFL assumption.
-  const stacksAll = UFC ? null : SD ? nflSdStandingsShape(slate, entries, match) : nflStandingsStacks(slate, entries, match);
-  const stacksTop = UFC ? null : SD ? nflSdStandingsShape(slate, ranked.slice(0, topN), match)
+  const stacksAll = UFC ? null : NHL ? nhlStandingsStacks(slate, entries, match) : SD ? nflSdStandingsShape(slate, entries, match) : nflStandingsStacks(slate, entries, match);
+  const stacksTop = UFC ? null : NHL ? nhlStandingsStacks(slate, ranked.slice(0, topN), match) : SD ? nflSdStandingsShape(slate, ranked.slice(0, topN), match)
                                     : nflStandingsStacks(slate, ranked.slice(0, topN), match);
   const dups = nflStandingsDups(entries, 20, SD);
   const users = nflStandingsUsers(entries, 100);
@@ -4430,7 +4497,8 @@ function nflIngestStandings(slate, text, fileName, parsed){
                 unmatched, matched,
                 stacks: { all: stacksAll, top1pct: stacksTop, top1pctN: topN },
                 dupTop20: dups, users, boards, portfolioObs, board, pit,
-                games: (R && R.games) || (SD ? 1 : null) };
+                games: (R && R.games) || (SD ? 1 : null),
+                nhlGames: NHL ? nhlSlateGames(slate) : null };
 
   slate._standings = slate._standings || {};
   slate._standings[key] = rec;
@@ -4493,7 +4561,8 @@ function nflStandingsReport(slate, rec){
   const blend = (ssAny && modelOk) ? nflOwnMae(act, bl) : { n: 0, mae: null };
   const st = rec.stacks && rec.stacks.all;
   const assumed = NFL_FIELD_STACK;
-  const stackCmp = st && st.n ? {
+  const nhlStack = (rec.sport === 'nhl' && st && st.n) ? nhlStandingsCmp(rec, slate) : null;   // ck140
+  const stackCmp = (rec.sport !== 'nhl' && st && st.n) ? {
     n: st.n, skipped: st.skipped,
     double:       { real: st.doubleRate,       assumed: assumed.double },
     triple:       { real: st.tripleRate,       assumed: assumed.triple },
@@ -4540,7 +4609,7 @@ function nflStandingsReport(slate, rec){
     };
   }
   const dd = rec.dupTop20 && rec.dupTop20.dist;
-  return { model, sabersim, blend, ssAny, modelOk, modelCovered: mdAny, modelMatched: mdTot, stackCmp, sd,
+  return { model, sabersim, blend, ssAny, modelOk, modelCovered: mdAny, modelMatched: mdTot, stackCmp, sd, nhlStack,
            showdown: !!rec.showdown,
            // The Own Model is NFL-classic by construction; a showdown ingest
            // never refits it and the card must not imply otherwise.
@@ -4563,7 +4632,7 @@ function nflStandingsReport(slate, rec){
                             byPos: rec.pit.byPos, byTier: rec.pit.byTier,
                             priced: rec.pit.priced, projOnly: rec.pit.projOnly,
                             flags: rec.pit.flags, exitModelOn: rec.pit.exitModelOn } : null,
-           pitPooled: (typeof nflPitPooled === 'function') ? nflPitPooled() : null,
+           pitPooled: (typeof nflPitPooled === 'function') ? nflPitPooled(rec.sport || 'nfl') : null,
            pitRow: rec.pit || null,
            unmatched: (rec.unmatched || []).length };
 }
@@ -4685,7 +4754,7 @@ function nflBacktestLog(slate, key){
   const pc = v => (v == null ? '—' : (100 * v).toFixed(0) + '%');
   const mae = m => (m && m.mae != null) ? m.mae.toFixed(2) + 'pp (n=' + m.n + ')' : 'n/a';
   const out = [];
-  const _sp = rec.sport || 'nfl'; const UFC = _sp === 'ufc' || _sp === 'nascar';
+  const _sp = rec.sport || 'nfl'; const NHLr = _sp === 'nhl'; const UFC = _sp === 'ufc' || _sp === 'nascar' || NHLr;
   out.push(`Backtest ${rec.key}${rec.showdown ? ' [SHOWDOWN]' : ''}${UFC ? ' [' + _sp.toUpperCase() + ']' : ''}: ${rec.fieldSize.toLocaleString()} entries`
          + (rec.unfilled ? ` (${rec.unfilled.toLocaleString()} unfilled — ${(rec.lineups||rec.entries).toLocaleString()} lineups submitted)` : '')
          + ` · winning score ${rec.winningScore != null ? rec.winningScore.toFixed(2) : '—'}`
@@ -4704,15 +4773,16 @@ function nflBacktestLog(slate, key){
     // ck90: the Own Model is NFL classic by construction (per-position softmax
     // budgets summing to 900%). A UFC slate plays the mapped Own% column and
     // that is the only column there is to score, so that is the only MAE.
-    out.push(`   Ownership MAE vs %Drafted — Own% column ${mae(rp.sabersim)} over ${rec.matched} matched fighters`
-           + (rp.unmatched ? ` · ${rp.unmatched} standings fighter row(s) not on this slate, skipped` : '')
-           + `. The Own Model and its β refit are NFL-classic only (their softmax budgets are a classic roster), so neither is scored nor moved here; nothing in the UFC sim is refit from a standings file either.`);
+    out.push(`   Ownership MAE vs %Drafted — Own% column ${mae(rp.sabersim)} over ${rec.matched} matched ${NHLr ? 'players' : 'fighters'}`
+           + (rp.unmatched ? ` · ${rp.unmatched} standings ${NHLr ? 'player' : 'fighter'} row(s) not on this slate, skipped` : '')
+           + `. The Own Model and its β refit are NFL-classic only (their softmax budgets are a classic roster), so neither is scored nor moved here; nothing in the ${NHLr ? 'NHL' : 'UFC'} sim is refit from a standings file either.`);
   } else {
     out.push(`   Ownership MAE vs %Drafted — Own Model ${mae(rp.model)} · SS Own ${mae(rp.sabersim)} · Blend ${mae(rp.blend)}`
            + (rp.unmatched ? ` · ${rp.unmatched} standings player(s) not on this slate, skipped` : ''));
   }
-  if(UFC)
+  if(UFC && !NHLr)
     out.push(`   No stack table: a six-fighter roster has no QB, no team and no game to bring back, so NFL_FIELD_STACK has nothing to be compared against here.`);
+  if(rp.nhlStack) nhlStandingsLines(rp.nhlStack).forEach(l => out.push('   ' + l));
   if(rp.stackCmp){
     const c = rp.stackCmp;
     out.push(`   Realized field stacks over ${c.n.toLocaleString()} entries (assumption in brackets): double ${pc(c.double.real)} [${pc(c.double.assumed)}] · triple+ ${pc(c.triple.real)} [${pc(c.triple.assumed)}] · single-or-none ${pc(c.singleOrNone.real)} [${pc(c.singleOrNone.assumed)}] · bring-back|stacked ${pc(c.bringBack.real)} [${pc(c.bringBack.assumed)}]`
@@ -4826,7 +4896,7 @@ function nflPitLines(pit, pooled){
   const f = a => a ? `mean u ${a.meanU.toFixed(3)} (z ${a.z >= 0 ? '+' : ''}${a.z.toFixed(2)}), bias ${a.meanBiasPts >= 0 ? '+' : ''}${a.meanBiasPts.toFixed(2)} pts, ${a.over99}/${a.n} above p99` : '—';
   out.push(`   PER-PLAYER CALIBRATION (PIT), u = F_sim(realized) over ${pit.sims.toLocaleString()} sims. `
     + `${pit.all.n} players tested${pit.degenerate ? `, ${pit.degenerate} excluded as degenerate (all-zero distribution — nothing to calibrate)` : ''}. `
-    + `In-game exits were ${pit.exitModelOn ? 'ON' : 'OFF'} for this run.`);
+    + (pit.sport === 'nhl' ? `NHL sim — no in-game exit model.` : `In-game exits were ${pit.exitModelOn ? 'ON' : 'OFF'} for this run.`));
   out.push(`   ALL      ${nflPitHist(pit.all.deciles, pit.all.n)}  ${f(pit.all)}`);
   if(pit.unflagged) out.push(`   UNFLAGGED ${nflPitHist(pit.unflagged.deciles, pit.unflagged.n)}  ${f(pit.unflagged)}`);
   if(pit.flagged)   out.push(`   INJURED   ${nflPitHist(pit.flagged.deciles, pit.flagged.n)}  ${f(pit.flagged)}`);
@@ -4891,7 +4961,7 @@ function nflPitCardHtml(pit, pooled){
     ? `<br><span style="color:var(--muted);">Injury-flagged — left the game: <b style="color:#f97316;">${esc(pit.flags.exit.join(', ') || 'none')}</b>; inherited the room: <b style="color:#f97316;">${esc(pit.flags.inherit.join(', ') || 'none')}</b>; ${pit.flags.room} other teammate(s) in an affected room. These are draws from a different distribution than the sim built, so they are shown apart rather than deleted.</span>`
     : '';
   return `<div class="sc-row info" style="flex-wrap:wrap;"><span class="sc-dot"></span><span class="sc-msg" style="flex:1 1 100%;">
-    <b>Per-player calibration (PIT)</b> — u = F_sim(realized), ${pit.sims.toLocaleString()} sims, in-game exits ${pit.exitModelOn ? 'ON' : 'OFF'}.
+    <b>Per-player calibration (PIT)</b> — u = F_sim(realized), ${pit.sims.toLocaleString()} sims${pit.sport === 'nhl' ? ' (NHL sim)' : `, in-game exits ${pit.exitModelOn ? 'ON' : 'OFF'}`}.
     <span style="color:var(--muted);">Flat = calibrated; a hump on the left means the sim ran hot.</span>
     <br><span style="display:inline-flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-top:4px;">
       <span>${nflPitBars(pit.all.deciles, pit.all.n)}<br><span style="font-size:9px;color:var(--muted);">all (${pit.all.n}) · u ${pit.all.meanU.toFixed(3)}</span></span>
@@ -4969,14 +5039,15 @@ function renderNflBacktest(){
   // ck90: UFC slates get it too, for the same reason — the ingest works on them,
   // and a UFC standings export is the only real measurement of a UFC field this
   // app holds. The Own Model section stays NFL-classic.
-  const UFCs = !!s && (s.sport === 'ufc' || s.sport === 'nascar');   // flat roster (ck130: NASCAR too)
+  const NHLs = !!s && s.sport === 'nhl';   // ck140
+  const UFCs = !!s && (s.sport === 'ufc' || s.sport === 'nascar' || NHLs);   // flat-ownership gates (ck130: NASCAR; ck140: NHL)
   const SDs = !UFCs && isShowdown(s);
   if(!s || !(isNfl(s) || UFCs) || !(s.players || []).length){ el.style.display = 'none'; el.innerHTML = ''; return; }
   let stat = null;
   try { stat = (SDs || UFCs) ? null : nflOwnEnsure(s); } catch(e){ stat = null; }
   const keys = Object.keys(s._standings || {}).sort((a, b) => (s._standings[b].loadedAt || 0) - (s._standings[a].loadedAt || 0));
   const open = !!s._backtestOpen;
-  const inp = UFCs ? { ok: true, label: (s.sport === 'nascar' ? 'NASCAR' : 'UFC') + ' — the mapped Own% column' }
+  const inp = UFCs ? { ok: true, label: (s.sport === 'nascar' ? 'NASCAR' : NHLs ? 'NHL' : 'UFC') + ' — the mapped Own% column' }
             : SDs ? { ok: true, label: 'Showdown — CPT/FLEX Own% as published' } : nflOwnInput(s);
   const head = keys.length
     ? `${keys.length} contest${keys.length === 1 ? '' : 's'} ingested · ${esc(inp.ok ? inp.label : 'no ownership source')}`
@@ -5000,11 +5071,12 @@ function renderNflBacktest(){
         ${rec.scoreQ ? `<br><span style="color:var(--muted);">Score curve: max ${qf(rec.scoreQ.max)} · p0.01% ${qf(rec.scoreQ.p001)} · p0.1% ${qf(rec.scoreQ.p01)} · p1% ${qf(rec.scoreQ.p1)} · p10% ${qf(rec.scoreQ.p10)} · med ${qf(rec.scoreQ.p50)}</span>` : ''}
         ${rec.showdown
           ? `<br>MAE vs %Drafted — FLEX (SS Own) <b>${mae(rp.sabersim)}</b> · CPT (SS CPT Own) <b>${mae(rp.sd && rp.sd.cptMae)}</b> <span style="color:var(--muted);">— Own Model is NFL-classic only, not scored or refit on showdown.</span>`
-          : (rec.sport === 'ufc' || rec.sport === 'nascar')
-          ? `<br>MAE vs %Drafted — Own% column <b>${mae(rp.sabersim)}</b> over ${rec.matched} matched fighters <span style="color:var(--muted);">— Own Model is NFL-classic only, not scored or refit on UFC.</span>`
+          : (rec.sport === 'ufc' || rec.sport === 'nascar' || rec.sport === 'nhl')
+          ? `<br>MAE vs %Drafted — Own% column <b>${mae(rp.sabersim)}</b> over ${rec.matched} matched ${rec.sport === 'nhl' ? 'players' : 'fighters'} <span style="color:var(--muted);">— Own Model is NFL-classic only, not scored or refit on ${rec.sport === 'nhl' ? 'NHL' : 'UFC'}.</span>`
           : `<br>MAE vs %Drafted — Own Model ${rp.modelOk ? `<b>${mae(rp.model)}</b>` : `<span style="color:var(--muted);">not built (${rp.modelCovered}/${rp.modelMatched} players carry a modelled %)</span>`} · SS Own ${mae(rp.sabersim)} · Blend ${rp.modelOk ? mae(rp.blend) : '<span style="color:var(--muted);">n/a</span>'}`}
         ${rp.sd ? `<br>Captains: top ${rp.sd.cptTop1.toFixed(1)}% <span style="color:var(--muted);">(field model's fallback prior assumes ~${rp.sd.cptConcentrationAssumed}%)</span> · top-3 ${rp.sd.cptTop3.toFixed(1)}% · ${rp.sd.cptDistinct} distinct · effective ${rp.sd.cptEffective.toFixed(1)}` : ''}
         ${rp.unmatched ? `<br><span style="color:var(--muted);">${rp.unmatched} standings player row(s) not on this slate — skipped.</span>` : ''}
+        ${rp.nhlStack ? nhlStandingsLines(rp.nhlStack).map(l => `<br><span style="color:var(--muted);">${esc(l)}</span>`).join('') : ''}
         ${c ? `<br>Field stacks (assumed): double ${pc(c.double.real)} (${pc(c.double.assumed)}) · triple+ ${pc(c.triple.real)} (${pc(c.triple.assumed)}) · single-or-none ${pc(c.singleOrNone.real)} (${pc(c.singleOrNone.assumed)}) · bring-back ${pc(c.bringBack.real)} (${pc(c.bringBack.assumed)})${rec.showdown ? ' <span style="color:var(--muted);">— brackets are the CLASSIC assumption, shown for scale.</span>' : ''}` : ''}
         ${rp.dupDist ? `<br>Duplication: ${rp.dupDist.distinct.toLocaleString()} distinct lineups, ${rp.dupDist.meanCopies.toFixed(2)} copies each, max ${rp.dupDist.maxDup.toLocaleString()}; ${(100*rp.dupDist.entriesGe5Share).toFixed(0)}% of entries sit on a lineup with ≥5 copies.` : ''}
         ${rp.users ? `<br>Portfolios: ${rp.users.users.toLocaleString()} users, ${rp.users.bigUsers.toLocaleString()} with ≥${rp.users.bigMin} entries holding ${(100*rp.users.bigEntryShare).toFixed(1)}% of the field${rp.boards && rp.boards.n ? ` · their boards are ${(100*rp.boards.meanDistinctShare).toFixed(0)}% distinct lineups, top exposure ${rp.boards.meanMaxExp.toFixed(0)}%` : ''}. <span style="color:var(--muted);">The field model draws entries independently.</span>` : ''}
@@ -6982,7 +7054,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck139d/2026-09-29';
+const BUILD_ID = '2.0/ck140/2026-09-30';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -15478,6 +15550,16 @@ const FIELD_PORTFOLIO_BY_SPORT = {
   ufc:    { share: 0.652, boardSize: 144, topExposure: 0.575, smallBoardSize: 7.4 },
   pga:    {},   // carried from NFL
   nascar: {},   // carried from NFL
+  // ── NHL: MEASURED, n = 1 (ck140) ────────────────────────────────────────
+  // DK 195958011, NHL opening night 9/29/2026 (4 games), 11,764 entries,
+  // 2,796 users, measured by this build's standings ingest:
+  //   entries in boards of ≥100 ....... 0.443   (36 users)
+  //   mean entries per big board ...... 144.6
+  //   within-board top exposure ....... 0.471   (NFL showdown 0.807, UFC 0.575)
+  //   mean entries per small user ..... 2.4
+  // Within-board distinctness 0.996. As with UFC, topExposure re-solves the
+  // tilt width on its own. An opening-night 4-game slate — refit as more land.
+  nhl:    { share: 0.443, boardSize: 145, topExposure: 0.471, smallBoardSize: 2.4 },
 };
 // ── THE FIELD IS OPTIMIZER OUTPUT UNDER A NOISY PROJECTION (checkpoint 83) ──
 // Checkpoint 82 made the field a mixture of BOARDS and reproduced every
@@ -15957,10 +16039,46 @@ function fieldBoardTilts(base, sigma, B, rnd, frac){
   });
 }
 
-// ck138: NHL field stack shapes (P(no forced stack) / primary 2 / 3 / 4, and
-// P(a second team's pair)). ASSUMED from common NHL MME construction — the
-// line trio is the modal build — pending an NHL standings measurement.
-const NHL_FIELD_STACK = { none: 0.10, two: 0.25, three: 0.50, four: 0.15, second: 0.55, minTeams: 3 };
+// NHL field stack shapes — the DRAW rates the sampler uses (primary group of
+// 2 / 3 / 4+ off a line or PP unit, P(a second team's group), …). ck138 had
+// them assumed; ck140 FITTED them to the first NHL standings (DK 195958011,
+// opening night 9/29/2026, 11,753 lineups), where the realized field was:
+// biggest line/PP group ≤1 1% · 2 19% · 3 52% · 4 23% · 5 5% (92% of those
+// ride a PP unit), second team's group 2+ 75% / 3+ 21%, 3.65 teams, 4-3-1 the
+// modal shape (29%), 5+ from one team 19%. The draw rates below reproduce the
+// first two lines within ~3 pts once ownership fill adds its incidental
+// stacks (sampler measured: 0/17/54/29 · second 2+ 80%); the sampler still
+// spreads a little wider than the real field (3.9 teams vs 3.65, 5+ from one
+// team 13% vs 19%). One contest — refit as NHL standings accumulate.
+const NHL_FIELD_STACK = { none: 0.01, two: 0.30, three: 0.39, four: 0.30, fiveOfFour: 0.15, second: 0.70, secondThree: 0.45, extraMate: 0.35, minTeams: 3 };
+// ck140 — SLATE SIZE. Matt: "this was only a 4 game slate … stacks get more
+// concentrated on these small slates … on a full slate with 10 games, the
+// field and top lineups will likely have a more spread concentration /
+// smaller stacks". The row above is a 4-GAME measurement. With fewer teams
+// every entrant is drawing from the same few PP units, so the big-stack
+// share rises; with 10+ games it falls. The team count itself spreads on its
+// own (the sampler only sees the teams on the slate); what is scaled here is
+// the SIZE of the forced stacks: the 4+/5 share, 3-man secondaries and the
+// extra teammate move by (4 / games)^NHL_FIELD_STACK_GAMES_EXP (3 games ×1.11,
+// 6 × 0.87, 10 × 0.73), the difference going to 2- and 3-man primaries.
+// ASSUMED shape (one measured slate size) — NHL_FIELD_STACK_BY_GAMES holds
+// measured rows keyed by game count and wins outright when one exists; the
+// ingest prints each contest's row with its game count to fill it.
+const NHL_FIELD_STACK_FIT_GAMES = 4, NHL_FIELD_STACK_GAMES_EXP = 0.35;
+const NHL_FIELD_STACK_BY_GAMES = { 4: NHL_FIELD_STACK };
+function nhlSlateGames(slate){
+  const t = new Set(); for(const p of (slate && slate.players || [])) if((p.salary || 0) > 0 && p.team) t.add(String(p.team).toUpperCase());
+  return Math.max(1, Math.round(t.size / 2));
+}
+function nhlFieldStackFor(slate){
+  const g = nhlSlateGames(slate);
+  if(NHL_FIELD_STACK_BY_GAMES[g]) return Object.assign({}, NHL_FIELD_STACK_BY_GAMES[g], { games: g, measured: true });
+  const F = NHL_FIELD_STACK, k = Math.pow(NHL_FIELD_STACK_FIT_GAMES / g, NHL_FIELD_STACK_GAMES_EXP);
+  const four = Math.min(0.45, F.four * k), rest = 1 - F.none - four, base = F.two + F.three;
+  return Object.assign({}, F, { four, two: rest * F.two / base, three: rest * F.three / base,
+    fiveOfFour: Math.min(0.4, F.fiveOfFour * k), secondThree: Math.min(0.7, F.secondThree * k), extraMate: Math.min(0.7, F.extraMate * k),
+    games: g, measured: false, scale: k });
+}
 const NFL_FIELD_STACK = {
   double: 0.31,          // measured  (FTN 2024, losing lineups)
   triple: 0.15,          // residual of the two measured buckets
@@ -16316,7 +16434,7 @@ function sampleUfcField(pool, N, ownArr, opts){
       const L = String(p.nhlLine||'').toUpperCase(), U = String(p.nhlPP||'').toUpperCase(), t = nsTeamOf[i];
       if(/^F[1-3]$/.test(L)) (byKey[t+'|'+L] = byKey[t+'|'+L] || []).push(i);
       if(U === 'PP1') (byKey[t+'|PP1'] = byKey[t+'|PP1'] || []).push(i); });
-    nsUnits = Object.keys(byKey).map(k => ({ team: k.split('|')[0], ids: byKey[k] })).filter(u => u.ids.length >= 2);
+    nsUnits = Object.keys(byKey).map(k => ({ team: k.split('|')[0], pp: /\|PP1$/.test(k), ids: byKey[k] })).filter(u => u.ids.length >= 2);
     if(!nsUnits.length) nsUnits = null;
   }
   const shapeP = SM ? {
@@ -16446,16 +16564,28 @@ function sampleUfcField(pool, N, ownArr, opts){
       }
       if(NS && nsUnits){
         const r0 = Math.random();
-        const nPri = r0 < NS.none ? 0 : r0 < NS.none + NS.two ? 2 : r0 < NS.none + NS.two + NS.three ? 3 : 4;
+        let nPri = r0 < NS.none ? 0 : r0 < NS.none + NS.two ? 2 : r0 < NS.none + NS.two + NS.three ? 3 : 4;
+        if(nPri === 4 && Math.random() < (NS.fiveOfFour || 0)) nPri = 5;
         if(nPri > 0){
-          const uw = nsUnits.map(u => { let t = 0; for(const i of u.ids) t += pw ? pw[i] : Math.pow(wq[i], gamma); return t; });
+          // ck140: a 4- or 5-man primary is built off a PP1 unit (92% of the
+          // real field's biggest stacks share a PP unit) when one is that big
+          const bigUnits = nPri >= 4 ? nsUnits.filter(u => u.pp && u.ids.length >= nPri) : null;
+          const UU = bigUnits && bigUnits.length ? bigUnits : nsUnits;
+          const uw = UU.map(u => { let t = 0; for(const i of u.ids) t += pw ? pw[i] : Math.pow(wq[i], gamma); return t; });
           let tu = 0; for(const x of uw) tu += x;
-          let r = Math.random() * tu, ui = nsUnits.length - 1;
+          let r = Math.random() * tu, ui = UU.length - 1;
           for(let k = 0; k < uw.length; k++){ r -= uw[k]; if(r <= 0){ ui = k; break; } }
-          const U = nsUnits[ui], seen = new Set(), pri = [];
+          const U = UU[ui], seen = new Set(), pri = [];
           for(let c = 0; c < Math.min(nPri, U.ids.length); c++){ const m = pickWeighted(U.ids, seen, gamma, pw, wq); if(m < 0) break; seen.add(m); pri.push(m); }
           // a 4-man stack is the unit plus one more skater from the same team
-          if(nPri === 4 && pri.length === 3){
+          // (a line of three when the team has no PP1 that big)
+          if(nPri >= 4 && pri.length < nPri){
+            const mates = []; for(let i = 0; i < pool.length; i++) if(!nsGoalie[i] && nsTeamOf[i] === U.team && !seen.has(i)) mates.push(i);
+            while(pri.length < nPri){ const m = pickWeighted(mates, seen, gamma, pw, wq); if(m < 0) break; seen.add(m); pri.push(m); }
+          }
+          // ck140: the real field often adds one more skater from the stacked
+          // team off another unit (5-2-1 / 5-3 builds: 19% of entries have 5+)
+          if(pri.length >= 3 && Math.random() < (NS.extraMate || 0)){
             const mates = []; for(let i = 0; i < pool.length; i++) if(!nsGoalie[i] && nsTeamOf[i] === U.team && !seen.has(i)) mates.push(i);
             const m = pickWeighted(mates, seen, gamma, pw, wq); if(m >= 0){ seen.add(m); pri.push(m); }
           }
@@ -16466,7 +16596,8 @@ function sampleUfcField(pool, N, ownArr, opts){
               const ow = others.map(u => { let t = 0; for(const i of u.ids) t += pw ? pw[i] : Math.pow(wq[i], gamma); return t; });
               let to = 0; for(const x of ow) to += x; let r2 = Math.random() * to, oi = others.length - 1;
               for(let k = 0; k < ow.length; k++){ r2 -= ow[k]; if(r2 <= 0){ oi = k; break; } }
-              for(let c = 0; c < 2; c++){ const m = pickWeighted(others[oi].ids, seen, gamma, pw, wq); if(m < 0) break; seen.add(m); forced.push(m); }
+              const n2 = Math.random() < (NS.secondThree || 0) ? 3 : 2;   // ck140: 4-3-1 is the modal real build
+              for(let c = 0; c < n2; c++){ const m = pickWeighted(others[oi].ids, seen, gamma, pw, wq); if(m < 0) break; seen.add(m); forced.push(m); }
             }
           }
         }
@@ -19379,7 +19510,7 @@ function evFieldOptsFor(slate, SD, cap){
     ? { sport: SPORT, mme: MME,   // ck138
         slots: SPORT_CFG.nhl.slots, flexOk: SPORT_CFG.nhl.flex, posOf: nhlPosOf,
         cap: CAP, floor: Math.round((CAP) * 0.94), portfolio: PF, fieldOpt: FO,
-        nhlStack: Object.assign({}, NHL_FIELD_STACK, slate._nhlFieldStack||{}) }
+        nhlStack: Object.assign({}, nhlFieldStackFor(slate), slate._nhlFieldStack||{}) }
     : (slate.sport === 'nfl')
     ? { sport: SPORT, mme: MME,
         slots: SPORT_CFG.nfl.slots, flexOk: SPORT_CFG.nfl.flex, posOf: nflPosOf,
