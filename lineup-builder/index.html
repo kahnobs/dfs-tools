@@ -206,6 +206,29 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .ngt-sub b{color:var(--text);font-weight:500;}
 .ngt-note{font-size:10px;color:var(--muted);align-self:center;padding:0 4px;}
 .ngt-clear{align-self:center;font-size:10px;color:var(--accent);background:none;border:1px solid rgba(245,197,24,.4);border-radius:5px;padding:3px 8px;cursor:pointer;font-family:'DM Sans',sans-serif;}
+/* ck141: NHL game tiles — two team columns (colour badge, abbreviation,
+   implied goals, confirmed-goalie check, hide / only-this-team icons) around
+   the start time and O/U. */
+.nht{display:flex;align-items:stretch;gap:8px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface2,rgba(255,255,255,.03));cursor:pointer;user-select:none;transition:border-color .12s,background .12s;}
+.nht:hover{border-color:var(--muted);}
+.nht.on{border-color:var(--accent);background:rgba(245,197,24,.07);}
+.nht-side{display:flex;align-items:center;gap:6px;}
+.nht-side.hid{opacity:.4;}
+.nht-txt{display:flex;flex-direction:column;align-items:center;font-family:'DM Mono',monospace;line-height:1.15;}
+.nht-abbr{font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--text);}
+.nht-abbr.fav{color:var(--accent);}
+.nht-imp{font-size:12.5px;font-weight:600;color:var(--green);}
+.nht-badge{position:relative;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:700 10px 'DM Mono',monospace;color:#0b0d12;flex-shrink:0;}
+.nht-chk{position:absolute;top:-5px;right:-6px;width:14px;height:14px;border-radius:50%;background:#22c55e;color:#fff;font-size:9px;line-height:14px;text-align:center;box-shadow:0 0 0 2px var(--surface,#12151c);}
+.nht-mid{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:58px;font-family:'DM Mono',monospace;}
+.nht-time{font-size:10.5px;color:var(--text);opacity:.9;white-space:nowrap;}
+.nht-ou{font-size:9.5px;color:var(--muted);white-space:nowrap;}
+.nht-ou b{color:var(--text);font-weight:500;}
+.nht-icons{display:flex;gap:2px;margin-top:2px;}
+.nht-ic{font-size:11px;line-height:1;padding:1px 3px;border-radius:3px;color:var(--muted);cursor:pointer;}
+.nht-ic:hover{background:rgba(255,255,255,.08);color:var(--text);}
+.nht-ic.on{background:var(--accent);color:#000;}
+.nht-ic.off{color:#f87171;}
 @media (max-width:760px){ .nfl-game-tiles{padding:6px 8px;gap:5px;} .ngt{min-width:0;flex:1 1 140px;padding:5px 8px;} .ngt-imp{font-size:12px;} }
 /* A tile whose environment the Sim dashboard has moved: the number the sim will
    actually use is gold and the Vegas number it replaced stays visible (greyed)
@@ -6073,6 +6096,13 @@ function applyNhlStats(p, row, headers){
   setNum('oppTot', /^opp ?tot$/i);
   setNum('oddsProj', /^odds ?proj$/i);
   setStr('oddsSrc', /^odds ?src$/i);
+  // ck141: start time for the game tiles — DK's "Game Info" ("PIT@PHI
+  // 09/30/2026 07:30PM ET", away@home) or a plain Time / Start column.
+  { const gi = get(/^(game\s*info|game\s*time|start(\s*time)?|time|puck\s*drop)$/i);
+    if(gi){ p.game_info = gi; const k = nflParseKickoff(gi); if(k){ p.kick_mins = k.mins; p.kick_label = k.label; p.kick_date = k.date || null; }
+      const m = gi.match(/^\s*([A-Z]{2,4})@([A-Z]{2,4})\b/i);
+      if(m){ const away = m[1].toUpperCase(), home = m[2].toUpperCase(), t = String(p.team || '').toUpperCase();
+        if(t === home){ p.home = true; if(!p.opp) p.opp = away; } else if(t === away){ p.home = false; if(!p.opp) p.opp = home; } } } }
   if(p.nhlLine) p.nhlLine = p.nhlLine.toUpperCase();
   if(p.nhlPP) p.nhlPP = p.nhlPP.toUpperCase();
 }
@@ -7054,7 +7084,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck140/2026-09-30';
+const BUILD_ID = '2.0/ck141/2026-09-30';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -7607,6 +7637,13 @@ function slateFieldsBase(slate){
   if(cm.top40!=null)  f.push({key:'top40', label:'Top40', cls:'col-r'});
   // Show sim-derived p50 projection for NASCAR slates after sims have been run
   if(slate.sport==='nascar' && (slate.players||[]).some(p=>p._simP50!=null)){
+    f.push({key:'_simP50', label:'Sim', cls:'col-r'});
+    f.push({key:'simValue', label:'SVal', cls:'col-r', computed:true});
+  }
+  // ck141: NHL — Matt: "I just ran simulations and it does not show sim
+  // scores / sim values in the player pool". The NHL sim has always written
+  // _simP50; no column ever read it.
+  if(slate.sport==='nhl' && (slate.players||[]).some(p=>p._simP50!=null)){
     f.push({key:'_simP50', label:'Sim', cls:'col-r'});
     f.push({key:'simValue', label:'SVal', cls:'col-r', computed:true});
   }
@@ -8270,7 +8307,7 @@ function renderPosFilterBar(slate){
   // ck84: on showdown the counts follow the pool you are in — the Captain view
   // must not count men you have hidden as captains.
   const hidden=poolHiddenIds(slate);
-  const base=(slate.players||[]).filter(p=>p.name.toLowerCase().includes(q) && (!gf||gf.has(nflTeamOf(p))) && !hidden.includes(p.id));
+  const base=(slate.players||[]).filter(p=>p.name.toLowerCase().includes(q) && (!gf||gf.has(tileTeamOf(slate,p))) && !hidden.includes(p.id));
   const hasK=!isNhl(slate) && base.some(p=>nflPosOf(p)==='K');
   const tabs=isNhl(slate) ? [['ALL','All'],['C','C'],['W','W'],['D','D'],['UTIL','UTIL'],['G','G']]   // ck138
     : [['ALL','All'],['QB','QB'],['RB','RB'],['WR','WR'],['TE','TE'],['FLEX','FLEX'],['DST','DST']];
@@ -8285,10 +8322,10 @@ function getSortedPlayers(){
   const slate=activeSlate();if(!slate)return[];
   const q=document.getElementById('searchInput').value.toLowerCase();
   const ec=expCounts(slate);
-  const gf=slate.sport==='nfl' ? gameFilterTeams(slate) : null;
+  const gf=(slate.sport==='nfl' || slate.sport==='nhl') ? gameFilterTeams(slate) : null;
   return [...(slate.players||[])]
     .filter(p=>p.name.toLowerCase().includes(q))
-    .filter(p=>!gf || gf.has(nflTeamOf(p)))
+    .filter(p=>!gf || gf.has(tileTeamOf(slate,p)))
     .filter(p=>(slate.sport!=='nfl' && slate.sport!=='nhl') || posMatchFor(slate, slate._posFilter, p))
     // ck122: on the FLEX tab a FLEX-only hide behaves like a hide (Show Hidden reveals him).
     .filter(p=>!(slate.sport==='nfl' && slate._posFilter==='FLEX' && !showHidden && nflFlexHidden(slate, p.id)))
@@ -8386,8 +8423,101 @@ function nflGameEnvs(slate){
   }
   return [...games.values()];
 }
+// ── NHL game tiles (ck141) ─────────────────────────────────────────────────
+// Matt: "add the game cards for the slate info at the top of the NHL builder
+// similar to what we have for NFL". One tile per game: each team as a colour
+// badge (the same per-slate team colour the hand builder's stack tags use —
+// no team logos are drawn) with its abbreviation and implied goals (Tm Tot),
+// a green check when that team's goalie is Confirmed on the sheet, and two
+// icons — ⊘ hides / un-hides the whole team, ▽ shows only that team. The
+// middle carries the start time (a Game Info / Time column, when the sheet
+// has one) and the game O/U. Click the tile to show only that game.
+function nhlGameEnvs(slate){
+  const teams = new Map();
+  for(const p of (slate.players || [])){
+    if(!((p.salary || 0) > 0)) continue;
+    const t = tileTeamOf(slate, p); if(!t) continue;
+    if(!teams.has(t)) teams.set(t, { team: t, opp: null, implied: null, oppImplied: null, total: null, kickMins: null, kickLabel: null, kickDate: null, home: null, goalies: [] });
+    const ti = teams.get(t);
+    if(!ti.opp && p.opp) ti.opp = String(p.opp).toUpperCase();
+    if(ti.implied == null && Number.isFinite(p.tmTot)) ti.implied = p.tmTot;
+    if(ti.oppImplied == null && Number.isFinite(p.oppTot)) ti.oppImplied = p.oppTot;
+    if(ti.total == null && Number.isFinite(p.gameTotal)) ti.total = p.gameTotal;
+    if(ti.kickMins == null && Number.isFinite(p.kick_mins)){ ti.kickMins = p.kick_mins; ti.kickLabel = p.kick_label; ti.kickDate = p.kick_date || null; }
+    if(ti.home == null && typeof p.home === 'boolean') ti.home = p.home;
+    if(nhlPosOf(p) === 'G') ti.goalies.push(p);
+  }
+  for(const ti of teams.values()){
+    // the starter the sim uses: Confirmed, else the G1 row, else the projection
+    const sc = g => (/^confirmed$/i.test(String(g.status || '').trim()) ? 4 : 0) + (String(g.nhlLine || '').toUpperCase() === 'G1' ? 2 : 0) + ((parseFloat(g.proj) || 0) > 0 ? 1 : 0) - (/^o$/i.test(String(g.status || '').trim()) ? 10 : 0);
+    ti.goalies.sort((a, b) => sc(b) - sc(a) || (parseFloat(b.proj) || 0) - (parseFloat(a.proj) || 0));
+    ti.goalie = ti.goalies[0] || null;
+    ti.gConfirmed = !!(ti.goalie && /^confirmed$/i.test(String(ti.goalie.status || '').trim()));
+  }
+  const games = new Map();
+  for(const ti of teams.values()){
+    const key = ti.opp ? [ti.team, ti.opp].sort().join('@') : ti.team;
+    if(!games.has(key)) games.set(key, { key, teams: [], kickMins: null, kickLabel: null, kickDate: null, total: null });
+    const g = games.get(key); g.teams.push(ti);
+    if(g.kickMins == null && ti.kickMins != null){ g.kickMins = ti.kickMins; g.kickLabel = ti.kickLabel; g.kickDate = ti.kickDate; }
+    if(g.total == null && ti.total != null) g.total = ti.total;
+  }
+  for(const g of games.values()){
+    if(g.teams.length === 1){ const a = g.teams[0]; g.teams.push({ team: a.opp || '?', ghost: true, implied: a.oppImplied, goalie: null, gConfirmed: false }); }
+    // away on the left when Game Info says who is home; else the lower total left
+    g.teams.sort((a, b) => (a.home === true) - (b.home === true) || (a.implied ?? 0) - (b.implied ?? 0));
+    if(g.total == null && g.teams.every(t => t.implied != null)) g.total = g.teams[0].implied + g.teams[1].implied;
+  }
+  return [...games.values()];
+}
+function nhlTeamHidden(slate, team){
+  const hid = new Set(slate.hiddenIds || []);
+  const ps = (slate.players || []).filter(p => (p.salary || 0) > 0 && tileTeamOf(slate, p) === team);
+  return ps.length > 0 && ps.every(p => hid.has(p.id));
+}
+function nhlToggleTeamHidden(team){
+  const slate = activeSlate(); if(!slate) return;
+  const ids = (slate.players || []).filter(p => (p.salary || 0) > 0 && tileTeamOf(slate, p) === team).map(p => p.id);
+  if(!ids.length) return;
+  const was = nhlTeamHidden(slate, team);
+  const set = new Set(slate.hiddenIds || []);
+  if(was) ids.forEach(id => set.delete(id));
+  else { ids.forEach(id => set.add(id)); slate.currentLineup = (slate.currentLineup || []).filter(x => !ids.includes(x)); if(slate._teamFilter === team) slate._teamFilter = null; }
+  slate.hiddenIds = [...set];
+  if(typeof refreshHiddenBadge === 'function') refreshHiddenBadge();
+  save(); renderAll();
+  showToast(was ? `${team} is back in the pool (${ids.length} players).` : `Hid all ${ids.length} ${team} players.`, 'ok');
+}
+function renderNhlGameTiles(slate, el){
+  const games = nhlGameEnvs(slate);
+  if(!games.length){ el.style.display = 'none'; el.innerHTML = ''; return; }
+  const f2 = v => v == null ? '—' : (Math.round(v * 10) / 10).toFixed(1);
+  const activeKey = slate._gameFilter || null, activeTeam = slate._teamFilter || null;
+  const anyKick = games.some(g => g.kickMins != null);
+  const tiles = games.slice().sort((a, b) => (anyKick ? ((a.kickMins ?? 1e9) - (b.kickMins ?? 1e9)) : 0) || (b.total ?? 0) - (a.total ?? 0)).map(g => {
+    const [A, B] = g.teams;
+    const fav = (A.implied != null && B.implied != null && A.implied !== B.implied) ? (A.implied > B.implied ? A.team : B.team) : null;
+    const side = (T, right) => {
+      const col = T.ghost ? 'var(--muted)' : nhlTeamColor(slate, T.team), hidden = !T.ghost && nhlTeamHidden(slate, T.team);
+      const gTip = T.goalie ? `${T.goalie.name}${T.gConfirmed ? ' — confirmed' : ' — not confirmed on the sheet'}` : 'no goalie on the sheet';
+      const badge = `<span class="nht-badge" style="background:${col};" title="${esc(T.team + ' · goalie: ' + gTip)}">${esc(T.team)}${T.gConfirmed ? '<span class="nht-chk">✓</span>' : ''}</span>`;
+      const icons = T.ghost ? '' : `<span class="nht-icons">
+          <span class="nht-ic${hidden ? ' off' : ''}" onclick="event.stopPropagation();nhlToggleTeamHidden('${T.team}')" title="${hidden ? 'Un-hide every ' + T.team + ' player' : 'Hide every ' + T.team + ' player'}">⊘</span>
+          <span class="nht-ic${activeTeam === T.team ? ' on' : ''}" onclick="event.stopPropagation();toggleTeamFilter('${T.team}')" title="Show only ${T.team} players">▽</span></span>`;
+      const txt = `<span class="nht-txt"><span class="nht-abbr${fav === T.team ? ' fav' : ''}">${esc(T.team)}</span><span class="nht-imp" title="Implied team goals (Tm Tot)">${f2(T.implied)}</span>${icons}</span>`;
+      return `<span class="nht-side${hidden ? ' hid' : ''}">${right ? badge + txt : txt + badge}</span>`;
+    };
+    const time = g.kickLabel ? `<span class="nht-time" title="Start${g.kickDate ? ' ' + g.kickDate : ''}">${esc(g.kickLabel)}</span>` : '';
+    const tip = `${A.team} vs ${B.team}${g.kickLabel ? ' · ' + g.kickLabel : ''} — goalies: ${A.goalie ? A.goalie.name + (A.gConfirmed ? ' ✓' : '') : '?'} / ${B.goalie ? B.goalie.name + (B.gConfirmed ? ' ✓' : '') : '?'}. Click to show only this game.`;
+    return `<div class="nht${activeKey === g.key ? ' on' : ''}" data-gkey="${g.key}" onclick="toggleGameFilter('${g.key}')" title="${esc(tip)}">
+      ${side(A, false)}<span class="nht-mid">${time}<span class="nht-ou">O/U <b>${f2(g.total)}</b></span></span>${side(B, true)}</div>`;
+  }).join('');
+  el.innerHTML = tiles + ((activeKey || activeTeam) ? `<button class="ngt-clear" onclick="toggleGameFilter(null)" title="Show every player">✕ ${activeTeam ? activeTeam + ' only' : 'All games'}</button>` : '');
+  el.style.display = 'flex';
+}
 function renderNflGameTiles(slate){
   const el=document.getElementById('nflGameTiles'); if(!el) return;
+  if(slate && slate.sport==='nhl') return renderNhlGameTiles(slate, el);   // ck141
   if(!slate || slate.sport!=='nfl'){ el.style.display='none'; el.innerHTML=''; return; }
   const games=nflGameEnvs(slate);
   if(!games.length){ el.style.display='none'; el.innerHTML=''; return; }
@@ -8586,8 +8716,17 @@ function toggleTeamFilter(team){
   slate._gameFilter = null;
   save(); renderPool();
 }
+// ck141: the tile filters key teams by the sheet's own abbreviation on NHL —
+// nflTeamNorm is an NFL map (LA → LAR, WSH → WAS) and would rename the Kings.
+function tileTeamOf(slate, p){ return (slate && slate.sport === 'nhl') ? String(p && p.team || '').toUpperCase() : nflTeamOf(p); }
 function gameFilterTeams(slate){
   if(!slate) return null;
+  if(slate.sport === 'nhl'){
+    if(slate._teamFilter){ if(!(slate.players||[]).some(p => tileTeamOf(slate, p) === slate._teamFilter)){ slate._teamFilter = null; return null; } return new Set([slate._teamFilter]); }
+    const k = slate._gameFilter; if(!k) return null;
+    const g = nhlGameEnvs(slate).find(x => x.key === k); if(!g){ slate._gameFilter = null; return null; }
+    return new Set(g.teams.map(t => t.team));
+  }
   if(slate._teamFilter){
     // Same self-heal the game filter below already has: a team key that no
     // longer matches anybody (the pool was replaced by Update Pool or a sheet
@@ -8759,7 +8898,7 @@ function renderPool(){
   // point scales paint nearly every fighter green (UFC SVal runs ~2-11), so
   // UFC colors on the slate's own min→max via the shared odds gradient.
   let _svalRange=null;
-  if(slate.sport==='ufc'){
+  if(slate.sport==='ufc' || slate.sport==='nhl'){   // ck141: NHL SVal runs ~1-3 — the NASCAR thresholds would paint it all grey
     const _svs=(slate.players||[])
       .filter(p=>p._simP50!=null&&(p.salary||0)>0&&(parseFloat(p._simP50)||0)>0)
       .map(p=>(parseFloat(p._simP50)||0)/((p.salary||1)/1000));
