@@ -4307,7 +4307,7 @@ function nflPitPooled(sport){
 // ("secondary"), whether the primary rides a PP unit, the skaters-per-team
 // shape (4-3-1 …), how many teams, and skaters facing the entry's own goalie.
 function nhlStandingsStacks(slate, entries, match){
-  const out = { n: 0, skipped: 0, pri: [0, 0, 0, 0, 0, 0], sec2: 0, sec3: 0, viaPP: 0, teamsSum: 0, team5: 0, vsOwnG: 0, shapes: {} };
+  const out = { n: 0, skipped: 0, pri: [0, 0, 0, 0, 0, 0], sec2: 0, sec3: 0, viaPP: 0, teamsSum: 0, team5: 0, team6: 0, vsOwnG: 0, shapes: {} };
   for(const e of (entries || [])){
     const slots = e.slots || nflParseLineupString(e.lineup);
     const ps = slots.map(x => match(x.name)).filter(Boolean);
@@ -4323,14 +4323,14 @@ function nhlStandingsStacks(slate, entries, match){
     out.n++; out.pri[Math.min(5, big)]++;
     if(sec >= 2) out.sec2++; if(sec >= 3) out.sec3++;
     if(ks.some(k => m[k] === big && /\|PP\d$/.test(k))) out.viaPP++;
-    const tv = Object.values(tc).sort((a, b) => b - a); out.teamsSum += tv.length; if(tv[0] >= 5) out.team5++;
+    const tv = Object.values(tc).sort((a, b) => b - a); out.teamsSum += tv.length; if(tv[0] >= 5) out.team5++; if(tv[0] >= 6) out.team6++;
     const sh = tv.join('-'); out.shapes[sh] = (out.shapes[sh] || 0) + 1;
     if(g){ const opp = String(g.opp || '').toUpperCase(); if(opp && sk.some(p => String(p.team || '').toUpperCase() === opp)) out.vsOwnG++; }
   }
   const n = Math.max(1, out.n), r = v => v / n;
   return { n: out.n, skipped: out.skipped,
            primary: { le1: r(out.pri[0] + out.pri[1]), two: r(out.pri[2]), three: r(out.pri[3]), four: r(out.pri[4]), five: r(out.pri[5]) },
-           second2: r(out.sec2), second3: r(out.sec3), viaPP: r(out.viaPP), teams: out.teamsSum / n, team5: r(out.team5), vsOwnG: r(out.vsOwnG),
+           second2: r(out.sec2), second3: r(out.sec3), viaPP: r(out.viaPP), teams: out.teamsSum / n, team5: r(out.team5), team6: r(out.team6), vsOwnG: r(out.vsOwnG),
            shapes: Object.entries(out.shapes).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => [k, v / n]) };
 }
 function nhlStandingsCmp(rec, slate){
@@ -4341,9 +4341,9 @@ function nhlStandingsLines(c){
   const pc = v => v == null ? '—' : (100 * v).toFixed(0) + '%';
   const pr = x => `≤1 ${pc(x.primary.le1)} · 2 ${pc(x.primary.two)} · 3 ${pc(x.primary.three)} · 4 ${pc(x.primary.four)} · 5 ${pc(x.primary.five)}`;
   const A = c.all, T = c.top, F = c.assumed;
-  const L = [`NHL field stacks over ${A.n.toLocaleString()} entries — biggest line/PP group: ${pr(A)} (${pc(A.viaPP)} ride a PP unit) · second team's group 2+ ${pc(A.second2)}, 3+ ${pc(A.second3)} · ${A.teams.toFixed(2)} teams · 5+ skaters from one team ${pc(A.team5)} · skaters vs own goalie ${pc(A.vsOwnG)} · shapes ${A.shapes.map(([k, v]) => k + ' ' + pc(v)).join(', ')}.`,
+  const L = [`NHL field stacks over ${A.n.toLocaleString()} entries — biggest line/PP group: ${pr(A)} (${pc(A.viaPP)} ride a PP unit) · second team's group 2+ ${pc(A.second2)}, 3+ ${pc(A.second3)} · ${A.teams.toFixed(2)} teams · 5+ skaters from one team ${pc(A.team5)} (6: ${pc(A.team6)}) · skaters vs own goalie ${pc(A.vsOwnG)} · shapes ${A.shapes.map(([k, v]) => k + ' ' + pc(v)).join(', ')}.`,
              `NHL_FIELD_STACK for ${c.games || '?'} games (${F.measured ? 'measured at this size' : `fitted on ${NHL_FIELD_STACK_FIT_GAMES}, scaled ×${(F.scale || 1).toFixed(2)}`}): none ${pc(F.none)} · 2 ${pc(F.two)} · 3 ${pc(F.three)} · 4+ ${pc(F.four)} (5 of those ${pc(F.fiveOfFour || 0)}) · second ${pc(F.second)} (3-man ${pc(F.secondThree || 0)}) · extra teammate ${pc(F.extraMate || 0)} — the draw rates, not realized rates (ownership fill adds incidental stacks).`];
-  if(T) L.push(`Top 1% (${T.n}): biggest group ${pr(T)} · second 2+ ${pc(T.second2)} · ${T.teams.toFixed(2)} teams · vs own goalie ${pc(T.vsOwnG)}. One night is one draw of which team hit — a row, not a verdict.`);
+  if(T) L.push(`Top 1% (${T.n}): biggest group ${pr(T)} · second 2+ ${pc(T.second2)} · 5+ from one team ${pc(T.team5)} (6: ${pc(T.team6)}) · ${T.teams.toFixed(2)} teams · vs own goalie ${pc(T.vsOwnG)}. One night is one draw of which team hit — a row, not a verdict.`);
   return L;
 }
 function nflIngestStandings(slate, text, fileName, parsed){
@@ -7084,7 +7084,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck141/2026-09-30';
+const BUILD_ID = '2.0/ck142/2026-10-01';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -15697,8 +15697,10 @@ const FIELD_PORTFOLIO_BY_SPORT = {
   //   within-board top exposure ....... 0.471   (NFL showdown 0.807, UFC 0.575)
   //   mean entries per small user ..... 2.4
   // Within-board distinctness 0.996. As with UFC, topExposure re-solves the
-  // tilt width on its own. An opening-night 4-game slate — refit as more land.
-  nhl:    { share: 0.443, boardSize: 145, topExposure: 0.471, smallBoardSize: 2.4 },
+  // tilt width on its own. ck142 pools the second file (DK 196216842, 9/30,
+  // 3 games, 7,602 entries: share .511 · board 143.6 · topExp .543 · small
+  // 2.4) entry-weighted: n = 2.
+  nhl:    { share: 0.470, boardSize: 144, topExposure: 0.50, smallBoardSize: 2.4 },
 };
 // ── THE FIELD IS OPTIMIZER OUTPUT UNDER A NOISY PROJECTION (checkpoint 83) ──
 // Checkpoint 82 made the field a mixture of BOARDS and reproduced every
@@ -16189,7 +16191,16 @@ function fieldBoardTilts(base, sigma, B, rnd, frac){
 // stacks (sampler measured: 0/17/54/29 · second 2+ 80%); the sampler still
 // spreads a little wider than the real field (3.9 teams vs 3.65, 5+ from one
 // team 13% vs 19%). One contest — refit as NHL standings accumulate.
-const NHL_FIELD_STACK = { none: 0.01, two: 0.30, three: 0.39, four: 0.30, fiveOfFour: 0.15, second: 0.70, secondThree: 0.45, extraMate: 0.35, minTeams: 3 };
+// ck142 — second file, DK 196216842 (9/30, 3 games: COL 8-4 LAK, PIT 7-0
+// PHI, TOR 2-1 NYI; 7,582 lineups): biggest group 2 14% · 3 56% · 4 24% ·
+// 5 6%; second 2+ 76%; 3.40 teams; 5+ from one team 27%, 6-1-1 9% (4-game:
+// 19% / 4%). The 3-game draw rates the slate-size scaling gives landed
+// within ~4 pts on the unit stacks (4+ 33% drawn → 34% realized vs 30%).
+// Both fields concentrate on whole TEAMS more than the sampler did, so
+// extraMate .35 → .55 and a second extra teammate (extraMate2 .30) were
+// added: sampler 5+/6 now 16%/2% (4 g, real 19/4) and 23%/4% (3 g, real
+// 27/9) — still a little light, as is 4-3-1 (the fill spreads to a 4th team).
+const NHL_FIELD_STACK = { none: 0.01, two: 0.30, three: 0.39, four: 0.30, fiveOfFour: 0.15, second: 0.70, secondThree: 0.45, extraMate: 0.55, extraMate2: 0.30, minTeams: 3 };
 // ck140 — SLATE SIZE. Matt: "this was only a 4 game slate … stacks get more
 // concentrated on these small slates … on a full slate with 10 games, the
 // field and top lineups will likely have a more spread concentration /
@@ -16215,7 +16226,7 @@ function nhlFieldStackFor(slate){
   const F = NHL_FIELD_STACK, k = Math.pow(NHL_FIELD_STACK_FIT_GAMES / g, NHL_FIELD_STACK_GAMES_EXP);
   const four = Math.min(0.45, F.four * k), rest = 1 - F.none - four, base = F.two + F.three;
   return Object.assign({}, F, { four, two: rest * F.two / base, three: rest * F.three / base,
-    fiveOfFour: Math.min(0.4, F.fiveOfFour * k), secondThree: Math.min(0.7, F.secondThree * k), extraMate: Math.min(0.7, F.extraMate * k),
+    fiveOfFour: Math.min(0.4, F.fiveOfFour * k), secondThree: Math.min(0.7, F.secondThree * k), extraMate: Math.min(0.9, F.extraMate * k), extraMate2: Math.min(0.9, (F.extraMate2 || 0) * k),
     games: g, measured: false, scale: k });
 }
 const NFL_FIELD_STACK = {
@@ -16727,6 +16738,9 @@ function sampleUfcField(pool, N, ownArr, opts){
           if(pri.length >= 3 && Math.random() < (NS.extraMate || 0)){
             const mates = []; for(let i = 0; i < pool.length; i++) if(!nsGoalie[i] && nsTeamOf[i] === U.team && !seen.has(i)) mates.push(i);
             const m = pickWeighted(mates, seen, gamma, pw, wq); if(m >= 0){ seen.add(m); pri.push(m); }
+            // ck142: …and sometimes a second (the 6-1-1 "whole team" build —
+            // 4% of the 4-game field, 9% of the 3-game one)
+            if(m >= 0 && Math.random() < (NS.extraMate2 || 0)){ const m2 = pickWeighted(mates, seen, gamma, pw, wq); if(m2 >= 0){ seen.add(m2); pri.push(m2); } }
           }
           forced = pri;
           if(Math.random() < NS.second){
