@@ -1687,6 +1687,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
       <!-- Showdown only: Players / Captain segmented control (filled by renderPool). -->
       <button class="show-hidden-btn" id="showHiddenBtn" onclick="toggleShowHidden()">👁 Hidden</button>
       <button class="show-hidden-btn" id="unhideAllBtn" onclick="unhideAll()" style="display:none;">✕ Unhide All</button>
+      <button class="show-hidden-btn" id="lockToggleBtn" onclick="toggleUnlockStarted()" style="display:none;">🔒 Started locked</button>
       <button class="show-hidden-btn" id="hideOutBtn" onclick="hideAllOut()" style="display:none;" title="Hide every player DraftKings lists as OUT / IR / suspended (⛔) from the pool — one click instead of one ✕ per row. OUT players never reach a generated lineup anyway; this just clears them off the list.">⛔ Hide OUT</button>
       <!-- ck121: bulk-hide by a projection / sim floor — ONE control: a sentence
            with two blanks and one button, inside one border. -->
@@ -4342,7 +4343,7 @@ function nhlStandingsLines(c){
   const pr = x => `≤1 ${pc(x.primary.le1)} · 2 ${pc(x.primary.two)} · 3 ${pc(x.primary.three)} · 4 ${pc(x.primary.four)} · 5 ${pc(x.primary.five)}`;
   const A = c.all, T = c.top, F = c.assumed;
   const L = [`NHL field stacks over ${A.n.toLocaleString()} entries — biggest line/PP group: ${pr(A)} (${pc(A.viaPP)} ride a PP unit) · second team's group 2+ ${pc(A.second2)}, 3+ ${pc(A.second3)} · ${A.teams.toFixed(2)} teams · 5+ skaters from one team ${pc(A.team5)} (6: ${pc(A.team6)}) · skaters vs own goalie ${pc(A.vsOwnG)} · shapes ${A.shapes.map(([k, v]) => k + ' ' + pc(v)).join(', ')}.`,
-             `NHL_FIELD_STACK for ${c.games || '?'} games (${F.measured ? 'measured at this size' : `fitted on ${NHL_FIELD_STACK_FIT_GAMES}, scaled ×${(F.scale || 1).toFixed(2)}`}): none ${pc(F.none)} · 2 ${pc(F.two)} · 3 ${pc(F.three)} · 4+ ${pc(F.four)} (5 of those ${pc(F.fiveOfFour || 0)}) · second ${pc(F.second)} (3-man ${pc(F.secondThree || 0)}) · extra teammate ${pc(F.extraMate || 0)} — the draw rates, not realized rates (ownership fill adds incidental stacks).`];
+             `NHL_FIELD_STACK for ${c.games || '?'} games (${F.measured ? 'checked against a real field this size' : (NHL_FIELD_STACK_GAMES_EXP ? `fitted on ${NHL_FIELD_STACK_FIT_GAMES}, scaled ×${(F.scale || 1).toFixed(2)}` : 'one row for every slate size — fits the 3-, 4- and 8-game fields')}): none ${pc(F.none)} · 2 ${pc(F.two)} · 3 ${pc(F.three)} · 4+ ${pc(F.four)} (5 of those ${pc(F.fiveOfFour || 0)}) · second ${pc(F.second)} (3-man ${pc(F.secondThree || 0)}) · extra teammate ${pc(F.extraMate || 0)} — the draw rates, not realized rates (ownership fill adds incidental stacks).`];
   if(T) L.push(`Top 1% (${T.n}): biggest group ${pr(T)} · second 2+ ${pc(T.second2)} · 5+ from one team ${pc(T.team5)} (6: ${pc(T.team6)}) · ${T.teams.toFixed(2)} teams · vs own goalie ${pc(T.vsOwnG)}. One night is one draw of which team hit — a row, not a verdict.`);
   return L;
 }
@@ -5948,7 +5949,69 @@ function lateNowIsSimulated(slate){
 // Has this player's game kicked off? Unknown kickoff → never locked: refusing to
 // swap a player because we could not read his game time would be worse than the
 // occasional illegal swap DK itself rejects.
+// ck144 — Matt: "there is no late swap for showdown there is no need to be
+// locking players". Locking exists ONLY to model late swap, which needs a
+// slate with games still to start. So nothing locks (1) on a showdown — one
+// game, everyone starts together, DK freezes the whole entry at once — and
+// (2) once EVERY game on the slate has started: nothing is left to swap into,
+// and a finished slate is a backtest, where every player must be movable.
+function playerKickKey(p, N){
+  if(!p || !Number.isFinite(p.kick_mins)) return null;
+  const kd = nflKickDateParts(p.kick_date);
+  if(!kd) return N.mins < 300 ? -Infinity : p.kick_mins;   // clock-only kickoff (see below)
+  return nflEtKey(kd.y, kd.m, kd.d, p.kick_mins);
+}
+// …and (3) when the user switches locking off for the slate (Matt: "the
+// ability to unlock started games for testing purposes would be good,
+// completely restricting the user is not great") — slate._unlockStarted, the
+// 🔓 button in the pool toolbar. DK itself will still refuse a real change to
+// a started player; the button says so.
+function slateLateSwapLive(slate, now){
+  if(!slate || slate._unlockStarted) return false;
+  return slateLateSwapLiveRaw(slate, now);
+}
+function toggleUnlockStarted(){
+  const slate = activeSlate(); if(!slate) return;
+  slate._unlockStarted = !slate._unlockStarted; _lateLiveMemo.k = null;
+  save(); renderAll();
+  showToast(slate._unlockStarted ? '🔓 Started games unlocked on this slate — for testing. DK will still reject real changes to players whose game has started.' : '🔒 Started games are locked again (late swap).', 'ok');
+}
+function refreshLockToggleBtn(){
+  const b = document.getElementById('lockToggleBtn'); if(!b) return;
+  const slate = (typeof activeSlate === 'function') ? activeSlate() : null;
+  const show = !!slate && slateLateSwapLiveRaw(slate);
+  b.style.display = show ? '' : 'none';
+  if(!show) return;
+  const off = !!slate._unlockStarted;
+  b.textContent = off ? '🔓 Locks off' : '🔒 Started locked';
+  b.style.color = off ? 'var(--accent)' : '';
+  b.title = off ? 'Started games are UNLOCKED on this slate (testing). Click to lock them again for late swap.' : 'Players whose game has started are locked (late swap). Click to unlock them for testing.';
+}
+let _lateLiveMemo = { k: null, v: false };
+function slateLateSwapLiveRaw(slate, now){
+  if(!slate) return false;
+  if(typeof isShowdown === 'function' && isShowdown(slate)) return false;
+  const d = now || lateNowDate(slate), N = nflEtParts(d);
+  const nowKey = (p) => (p && nflKickDateParts(p.kick_date)) ? nflEtKey(N.y, N.m, N.d, N.mins) : N.mins;
+  const memoK = slate.id + '|' + (slate.players || []).length + '|' + nflEtKey(N.y, N.m, N.d, N.mins);
+  if(_lateLiveMemo.k === memoK) return _lateLiveMemo.v;
+  let started = 0, pending = 0;
+  for(const p of (slate.players || [])){
+    const k = playerKickKey(p, N); if(k == null) continue;
+    if(k <= nowKey(p)) started++; else pending++;
+  }
+  const v = started > 0 && pending > 0;   // some games under way, some still to come
+  _lateLiveMemo = { k: memoK, v };
+  return v;
+}
 function playerLocked(slate, p, now){
+  if(!slateLateSwapLive(slate, now)) return false;   // ck144: showdown, nothing left to swap, or unlocked
+  return playerLockedDk(slate, p, now);
+}
+// What DK itself enforces — the DK Entries late-swap PLANNER uses this one,
+// never the relaxed builder lock above: an upload that edits a started
+// player is rejected whatever the builder allows.
+function playerLockedDk(slate, p, now){
   if(!p || !slate) return false;
   if(!Number.isFinite(p.kick_mins)) return false;
   const N = nflEtParts(now || lateNowDate(slate));
@@ -7084,7 +7147,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck142/2026-10-01';
+const BUILD_ID = '2.0/ck144/2026-10-02';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -8744,6 +8807,7 @@ function gameFilterTeams(slate){
 
 function renderPool(){
   renderNflGameTiles(activeSlate());
+  try { refreshLockToggleBtn(); } catch(e){}
   // The Slate check rides the same repaint as the tiles, so it is re-run on
   // slate load, on Refresh from sheet, after a DK CSV ingestion and after every
   // hide / OUT / merge — every path that can change what the audit would say.
@@ -11074,7 +11138,7 @@ function nflLateSwapPlan(slate){
   if(pool.length < RS){ res.error = 'nosim'; return res; }
   const idxById = new Map(pool.map((p,i) => [p.id, i]));
   const outS = nflOutSet(slate), hiddenS = new Set(slate.hiddenIds||[]);
-  const lockedArr = pool.map(p => playerLocked(slate, p, now));
+  const lockedArr = pool.map(p => playerLockedDk(slate, p, now));   // ck144: DK's real locks
   // Who may fill an OPEN slot: game not started, not scratched, not hidden.
   // ck84 showdown: hidden is per pool, so the gate is "in at least one pool" and
   // WHICH slot he may fill is decided by cptOk / flexOk below.
@@ -11161,7 +11225,7 @@ function nflLateSwapPlan(slate){
                    locked:0, open:0, changed:false, reason:null, changes:[], existingIds:cur.map(p=>p.id)};
       if(cur.length !== RS){ row.reason = cur.length ? 'partial' : 'empty'; res.noExisting++; res.rows.push(row); continue; }
       const curCpt = SD ? (lsPlayerByDkId(slate, cells[st.slots.findIndex(s=>String(s).toUpperCase()==='CPT')])||{}).id || null : null;
-      const lockedIds = cur.filter(p => playerLocked(slate, p, now)).map(p => p.id);
+      const lockedIds = cur.filter(p => playerLockedDk(slate, p, now)).map(p => p.id);
       row.locked = lockedIds.length;
       row.open = RS - lockedIds.length;
       row.lockedIds = lockedIds;
@@ -15699,8 +15763,9 @@ const FIELD_PORTFOLIO_BY_SPORT = {
   // Within-board distinctness 0.996. As with UFC, topExposure re-solves the
   // tilt width on its own. ck142 pools the second file (DK 196216842, 9/30,
   // 3 games, 7,602 entries: share .511 · board 143.6 · topExp .543 · small
-  // 2.4) entry-weighted: n = 2.
-  nhl:    { share: 0.470, boardSize: 144, topExposure: 0.50, smallBoardSize: 2.4 },
+  // 2.4) entry-weighted: n = 2. ck143 adds DK 196253859 (10/1, 8 games,
+  // 5,490 entries: .540 · 141.0 · .385 · 2.6) — entry-weighted n = 3.
+  nhl:    { share: 0.485, boardSize: 143, topExposure: 0.474, smallBoardSize: 2.4 },
 };
 // ── THE FIELD IS OPTIMIZER OUTPUT UNDER A NOISY PROJECTION (checkpoint 83) ──
 // Checkpoint 82 made the field a mixture of BOARDS and reproduced every
@@ -16214,8 +16279,17 @@ const NHL_FIELD_STACK = { none: 0.01, two: 0.30, three: 0.39, four: 0.30, fiveOf
 // ASSUMED shape (one measured slate size) — NHL_FIELD_STACK_BY_GAMES holds
 // measured rows keyed by game count and wins outright when one exists; the
 // ingest prints each contest's row with its game count to fill it.
-const NHL_FIELD_STACK_FIT_GAMES = 4, NHL_FIELD_STACK_GAMES_EXP = 0.35;
-const NHL_FIELD_STACK_BY_GAMES = { 4: NHL_FIELD_STACK };
+// ck143 — MEASURED: the scaling is OFF (exponent 0). Three fields now — 3, 4
+// and 8 games (DK 196216842 / 195958011 / 196253859) — and ONE set of draw
+// rates reproduces all three: realized biggest unit group 2/3/4+ =
+// 15/53/32 (3 g; real 14/56/30), 18/54/28 (4 g; real 19/52/28), 12/49/39
+// (8 g; real 12/48/39). The 8-game field stacked BIGGER, not smaller (4+ in
+// 39% of lineups) — the assumed (4/g)^0.35 would have drawn 24% there. What
+// changes with slate size comes through the pool (fewer teams → more
+// incidental team concentration) and ownership, which the sampler already
+// sees. The scaling hook stays for a future measured trend.
+const NHL_FIELD_STACK_FIT_GAMES = 4, NHL_FIELD_STACK_GAMES_EXP = 0;
+const NHL_FIELD_STACK_BY_GAMES = { 3: NHL_FIELD_STACK, 4: NHL_FIELD_STACK, 8: NHL_FIELD_STACK };
 function nhlSlateGames(slate){
   const t = new Set(); for(const p of (slate && slate.players || [])) if((p.salary || 0) > 0 && p.team) t.add(String(p.team).toUpperCase());
   return Math.max(1, Math.round(t.size / 2));
