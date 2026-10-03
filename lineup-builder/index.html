@@ -718,6 +718,16 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
    shape reads identically here and on a saved lineup card. */
 #gppCard{display:none;border:1px solid var(--border);border-radius:6px;padding:7px 8px;margin-bottom:6px;background:var(--surface2);}
 .gpp-card-hd{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px;}
+/* ck145: the run card is collapsed by default (Matt: "takes up a lot of space
+   and isn't really valuable … hidden in a drop down that the user can expand") */
+#gppCard details > summary{list-style:none;cursor:pointer;user-select:none;}
+#gppCard details > summary::-webkit-details-marker{display:none;}
+#gppCard details > summary .gpp-card-hd{margin-bottom:0;}
+#gppCard details[open] > summary .gpp-card-hd{margin-bottom:5px;}
+.gpp-caret{font-size:10px;color:var(--muted);width:10px;display:inline-block;}
+.gpp-sum{font-family:'DM Mono',monospace;font-size:10.5px;color:var(--muted);}
+.gpp-sum b{color:var(--green);font-weight:600;}
+.gpp-sum b.neg{color:var(--accent2);}
 .gpp-card-ttl{font-size:11px;font-weight:600;color:var(--text);}
 .gpp-card-sub{font-family:'DM Mono',monospace;font-size:9.5px;color:var(--muted);}
 /* ck88: the EV block — two figures, always together, and never the headline. */
@@ -7147,7 +7157,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck144/2026-10-02';
+const BUILD_ID = '2.0/ck146/2026-10-03';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -13740,6 +13750,13 @@ function winBonus(round){
 // Scores a fighter given the fight outcome. Volume is sampled from odds-derived
 // CDFs, capped by fight duration. This enforces the key insight: early finish
 // = win bonus + low volume; decision = no finish bonus + high volume opportunity.
+// ck146: exponents on each category's winner/loser volume ratio, by outcome
+// type (see drawScoreOdds). {dec:1, fin:1} reproduces the pre-ck146 split.
+const UFC_SPLIT = { dec: 1, fin: 1 };
+const UFC_CTRL_PER_TD = 0.06;
+const UFC_DEC_GRAPPLE = 1, UFC_DEC_GRAPPLE_TD = 1.5;
+const UFC_DEC_TAIL = { t: 50, k: 0.45 };
+const UFC_FRONT_B = 0.7;
 function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // 5-round detection: explicit user toggle (tagged onto the fighter as
   // _is5Round before the sim run) wins; otherwise infer from R4/R5 finish odds.
@@ -13834,7 +13851,12 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   const durScale = (function(){
     if(!(fighter._expFightMin > 0)) return 1;
     const raw = _elapsedMin / fighter._expFightMin;
-    const adj = raw > 1 ? Math.pow(raw, FATIGUE_A) : raw;
+    // ck146: below expected minutes, volume is FRONT-LOADED (the same 154
+    // fighter-fights: 4.74 sig/min early vs 3.55 late) — raw^UFC_FRONT_B, not
+    // linear. Finishes were under-scored on both sides (+3.5 loser, +3.6..9
+    // winner given the real method and round).
+    const _fb = (typeof window !== 'undefined' && window.__ufcFrontB != null) ? window.__ufcFrontB : UFC_FRONT_B;
+    const adj = raw > 1 ? Math.pow(raw, FATIGUE_A) : Math.pow(raw, _fb);
     return Math.max(0.05, Math.min(3, adj));
   })();
 
@@ -13854,7 +13876,34 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // p*win + (1-p)*loss = 1 exactly and each marginal still re-averages to its
   // own ladder.
   const _pW = fighter._simWinProb != null ? fighter._simWinProb : 0.5;
-  const _mult = r => { const d = _pW*r + (1-_pW); return won ? r/d : 1/d; };
+  // ck146 — THE SPLIT DEPENDS ON HOW THE FIGHT ENDS. Measured on 65 fights
+  // (5 cards with real results, 7/25–9/26), regressing each side's DK score
+  // on the market's P(finish | win):
+  //                       loser   winner          sim (before)
+  //   decision            34.1    78.6            25.0   81.6
+  //   finish               4.6   118.3            11.6  105.5
+  // The fight's total was about right in both; the SHARE was not — a finish
+  // is a beat-down (the winner takes nearly all of the volume), a decision is
+  // closer than the one decision-fitted ratio said. Same mass-conserving
+  // algebra as before, now over four outcomes: winner/loser volume ratio
+  // R = r^UFC_SPLIT.dec in decisions and r^UFC_SPLIT.fin in finishes (r = the
+  // category's measured base ratio), ρ = ±√R, normalised by
+  // D = Σ P(outcome)·ρ so every fighter still re-averages to his own ladder.
+  // With both exponents 1 this is exactly the old r/(p·r+1−p) split.
+  const _SP = (typeof window !== 'undefined' && window.__ufcSplit) || UFC_SPLIT;
+  const _fW = fighter._finishRate != null ? fighter._finishRate : 0.55;
+  const _fL = fighter._oppFinRate != null ? fighter._oppFinRate : 0.55;
+  const _isFin = round !== 'dec';
+  // Conserved WITHIN each outcome type (decisions among themselves, finishes
+  // among themselves), so a steeper finish split moves volume from the
+  // finished fighter to the finisher — never out of anyone's decisions.
+  const _mult = r => {
+    const R = Math.pow(r, _isFin ? _SP.fin : _SP.dec), w = Math.sqrt(R);
+    const pw = _isFin ? _pW*_fW : _pW*(1-_fW), pl = _isFin ? (1-_pW)*_fL : (1-_pW)*(1-_fL);
+    const t = pw + pl; if(!(t > 0)) return 1;
+    const D = (pw*w + pl/w) / t;
+    return (won ? w : 1/w) / D;
+  };
   const _mSS = _mult(1.33), _mTD = _mult(3.33);   // control uses its own ratio below
 
   let ss = 0;
@@ -13941,9 +13990,9 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // Zero inflation is what the previous multiplier-plus-clamp structure could
   // not express, and it is why the loss branch had a floor of 4-6 DK points
   // when 43% of real losers score nothing at all in these categories.
-  const CTRL_POS_BASE = 0.18, CTRL_PER_TD = 0.06, CTRL_WIN_RATIO = 5.5;
-  const _mCTv = (()=>{ const d = _pW*CTRL_WIN_RATIO + (1-_pW);
-                       return won ? CTRL_WIN_RATIO/d : 1/d; })();
+  const CTRL_POS_BASE = 0.18, CTRL_WIN_RATIO = 5.5;
+  const CTRL_PER_TD = (typeof window !== 'undefined' && window.__ufcCtrlPerTd != null) ? window.__ufcCtrlPerTd : UFC_CTRL_PER_TD;
+  const _mCTv = _mult(CTRL_WIN_RATIO);   // ck146: outcome-dependent split (was r/(p·r+1−p))
   const _pZero = _tdBase >= 1 ? 0.02 : (won ? 0.10 : 0.55);
   let ctrlSecs = 0;
   if(Math.random() >= _pZero){
@@ -13994,6 +14043,29 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // ~0.0533 DK pts per control-second combined.
   let nsig = Math.round((ctrlSecs / 60) * 7.0 * (0.6 + Math.random() * 0.8));
   nsig = Math.max(0, Math.min(nsig, Math.round(_elapsedMin * 14)));
+  // ck146 — DECISION-WIN GRAPPLING. Given the actual outcome (method + round
+  // for 50 fights, 4 cards 7/25–9/26), every outcome type scored within ~5
+  // pts of the sim EXCEPT decision wins by takedown-heavy fighters (TD O/U ≥
+  // 1.5): real 78.4 vs sim 92.1 (n 6; low-TD decision winners on target).
+  // The takedown / control / ground-strike volume a wrestler is credited in a
+  // 15-minute decision is more than he actually banks — and a decision win is
+  // the outcome that does least for a GPP. Scale those three categories in
+  // decision WINS only; finishes, losses and striking are untouched.
+  // the group is defined the way it was measured: the posted TD O/U line
+  // (ladder mean only when no line is posted)
+  const _tdOu = fighter.td_ou ? parseFloat(fighter.td_ou) : NaN;
+  const _tdLine = !isNaN(_tdOu) ? _tdOu : ((tdCDF && tdCDF.mean != null) ? tdCDF.mean : 0);
+  if(won && round === 'dec' && _tdLine >= UFC_DEC_GRAPPLE_TD){
+    const _g = (typeof window !== 'undefined' && window.__ufcDecGrapple != null) ? window.__ufcDecGrapple : UFC_DEC_GRAPPLE;
+    if(_g !== 1){
+      // the takedowns themselves, and the share of control (and the ground
+      // strikes riding on it) that comes FROM takedowns — positional /
+      // clinch control (CTRL_POS_BASE) is not a wrestling credit and stays
+      const _cBase = CTRL_POS_BASE + CTRL_PER_TD * _tdBase;
+      const _cK = _cBase > 0 ? (CTRL_POS_BASE + CTRL_PER_TD * _tdBase * _g) / _cBase : 1;
+      td = Math.round(td * _g); ctrlSecs *= _cK; nsig = Math.round(nsig * _cK);
+    }
+  }
 
   // DK scoring: sig strikes 0.4 (strike 0.2 + significant 0.2), non-sig 0.2,
   // TD 5, control 0.03/s, KD 10.
@@ -14072,6 +14144,16 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // The flat UFC_WIN_VOL_RATIO=1.2 on the summed total is gone — replaced by the
   // per-category multipliers above, which are applied to the draws themselves.
 
+  // ck146 — DECISION-WIN CEILING. A GPP is won on 100+ scores. Measured on
+  // 44 wins with known method (4 cards): decision wins reached 100+ 1 time in
+  // 14 (7%) against a simulated 27%; finish wins 24 of 30 (80%) against 62%.
+  // The decision branch's upper tail is a volume draw no real decision winner
+  // banks. Volume above UFC_DEC_TAIL.t in a decision WIN keeps only k of the
+  // excess (the median decision is untouched; the tail is compressed).
+  if(won && round === 'dec'){
+    const _T = (typeof window !== 'undefined' && window.__ufcDecTail) || UFC_DEC_TAIL;
+    if(_T.k < 1 && total > _T.t) total = _T.t + _T.k * (total - _T.t);
+  }
   if(won){
     total += winBonus(round);
     // DK Quick Win Bonus: +25 for a first-round win in 60 seconds or less.
@@ -14537,6 +14619,10 @@ async function runUFCSimsNew(fullPool, visiblePool, numSims, salaryCap, groups, 
       }
     });
   });
+
+  // ck146: each fighter's opponent finish rate, for the outcome-dependent
+  // volume split in drawScoreOdds (P(lose by finish) = (1−pW)·oppFinRate).
+  pairs.forEach(({a,b})=>{ if(a && b){ a._oppFinRate = b._finishRate; b._oppFinRate = a._finishRate; } });
 
   // ── Data-coverage visibility ────────────────────────────────────────────
   // Say out loud which fighters are running on fallback shapes — an inverted
@@ -34800,11 +34886,18 @@ function renderGppCard(model){
         `<span class="gpp-chip">${esc(b.label)}<span class="n">${esc(b.amt)}</span><span class="ev">${b.pct}%</span></span>`).join('')}</div>` : ''}
       <div class="gpp-ev-split">${esc(ev.splitLine || '')}</div>
     </div>` : '';
-  el.innerHTML = `<div class="gpp-card-hd">
+  // ck145: collapsed by default for every sport — one summary line (title,
+  // board edge, calibrated EV) and a caret; the rest on demand. The open /
+  // closed choice is remembered for this viewer (gppCardOpen in localStorage).
+  let _open = false; try { _open = localStorage.getItem('gppCardOpen') === '1'; } catch(e){}
+  const sum = ev ? `<span class="gpp-sum">${ev.edge != null ? `edge <b class="${ev.edge < 1 ? 'neg' : ''}">${evEdgeFmt(ev.edge)}</b> · ` : ''}calibrated <b class="${ev.calNet < 0 ? 'neg' : ''}">${esc(String(ev.calibrated || '').split(' · ')[0])}</b></span>` : '';
+  el.innerHTML = `<details${_open ? ' open' : ''} ontoggle="try{localStorage.setItem('gppCardOpen',this.open?'1':'0')}catch(e){}"><summary><div class="gpp-card-hd">
+      <span class="gpp-caret">${_open ? '▾' : '▸'}</span>
       <span class="gpp-card-ttl">${esc(model.title)}</span>
-      <span class="gpp-card-sub">${esc(model.sub)}</span>
-      ${badges}
-    </div>
+      ${sum}
+      <span class="gpp-sum" style="margin-left:auto;">${_open ? 'hide' : 'details'}</span>
+    </div></summary>
+    <div class="gpp-card-hd"><span class="gpp-card-sub">${esc(model.sub)}</span>${badges}</div>
     ${evBlock}
     ${sec('Builds (chosen, not imposed) — avg held-out EV', (model.shapes || []).map(x =>
         chip(x.label, x.n, x.ev, x.naked ? ' naked' : '')).join(''))}
@@ -34812,7 +34905,8 @@ function renderGppCard(model){
         `<span class="gpp-chip">${esc(x.name)}<span class="n">${x.pct}%</span></span>`).join(''))}
     ${sec('Most duplicated in the modeled field', (model.dups || []).length
         ? model.dups.map(x => `<span class="gpp-chip">#${x.rank}<span class="stack-tag${x.naked ? ' naked' : ''}">${esc(x.label)}</span><span class="n">${x.dups}×</span></span>`).join('')
-        : `<span class="gpp-chip">every lineup under 0.01×<span class="n">fully off-consensus</span></span>`)}`;
+        : `<span class="gpp-chip">every lineup under 0.01×<span class="n">fully off-consensus</span></span>`)}</details>`;
+  const _d = el.querySelector('details'); if(_d) _d.addEventListener('toggle', () => { const c = _d.querySelector('.gpp-caret'); if(c) c.textContent = _d.open ? '▾' : '▸'; const l = _d.querySelector('summary .gpp-sum[style]'); if(l) l.textContent = _d.open ? 'hide' : 'details'; });
 }
 
 // ── The hot kernel ──────────────────────────────────────────────────────────
