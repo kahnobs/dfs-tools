@@ -7157,7 +7157,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck146/2026-10-03';
+const BUILD_ID = '2.0/ck147/2026-10-03';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -13757,6 +13757,8 @@ const UFC_CTRL_PER_TD = 0.06;
 const UFC_DEC_GRAPPLE = 1, UFC_DEC_GRAPPLE_TD = 1.5;
 const UFC_DEC_TAIL = { t: 50, k: 0.45 };
 const UFC_FRONT_B = 0.7;
+const UFC_FIN_FLURRY = { ss: [6, 14], ns: [5, 25] };
+const UFC_LOSS_GAMMA = 0.6;
 function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // 5-round detection: explicit user toggle (tagged onto the fighter as
   // _is5Round before the sim run) wins; otherwise infer from R4/R5 finish odds.
@@ -14144,6 +14146,33 @@ function drawScoreOdds(fighter, won, round, ssCDF, tdCDF, frac){
   // The flat UFC_WIN_VOL_RATIO=1.2 on the summed total is gone — replaced by the
   // per-category multipliers above, which are applied to the draws themselves.
 
+  // ck147 — HOW A LOSER LOSES depends on who he is. Five cards, 132 fighters:
+  //   ITD < 15% (long dogs)      losers score 10.7 real vs 16.8 simulated
+  //   ITD 15–30%                 19.1 vs 19.4
+  //   ITD 30%+ (favourites)      25.3 vs 17.1
+  // A long dog who loses is usually dominated; a favourite who loses has
+  // usually been in a fight. The mass-conserving split gave a dog his whole
+  // ladder when losing (his losses ARE his ladder) — and the ladder overstates
+  // a dog's realised volume (long dogs were over-projected ~13 pts overall).
+  // Losing volume × clamp((pW/0.35)^UFC_LOSS_GAMMA, 0.5, 1.6).
+  if(!won){
+    const _gm = (typeof window !== 'undefined' && window.__ufcLossGamma != null) ? window.__ufcLossGamma : UFC_LOSS_GAMMA;
+    if(_gm) total *= Math.max(0.5, Math.min(1.6, Math.pow(Math.max(0.01, _pW) / 0.35, _gm)));
+  }
+  // ck147 — THE FINISHING SEQUENCE. Real P(score ≥ 100) tracks the ITD
+  // price almost one-for-one (ITD <12%: 0/18 · 12–18%: 17% · 18–25%: 26% ·
+  // 25–40%: 32% · 40%+: 59%) because a finish win is nearly always 100+ (24
+  // of 30) — the sim had finish wins at ~62% and so priced a 55% ITD fighter
+  // at 37%. The full-fight SS ladder, scaled down to a short fight, misses
+  // the burst that ends it: the flurry before a KO/TKO, the ground strikes
+  // and control that set up a submission. Added to finish WINS only.
+  if(won && round !== 'dec'){
+    const _F = (typeof window !== 'undefined' && window.__ufcFlurry) || UFC_FIN_FLURRY;
+    if(_F && (_F.ss || _F.ns)){
+      const _u = (lo, hi) => lo + Math.random() * (hi - lo);
+      total += 0.4 * Math.round(_u(_F.ss[0], _F.ss[1])) + 0.2 * Math.round(_u(_F.ns[0], _F.ns[1]));
+    }
+  }
   // ck146 — DECISION-WIN CEILING. A GPP is won on 100+ scores. Measured on
   // 44 wins with known method (4 cards): decision wins reached 100+ 1 time in
   // 14 (7%) against a simulated 27%; finish wins 24 of 30 (80%) against 62%.
