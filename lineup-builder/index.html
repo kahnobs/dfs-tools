@@ -7157,7 +7157,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck147/2026-10-03';
+const BUILD_ID = '2.0/ck149/2026-10-04';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -27407,6 +27407,9 @@ function nflMedianToMean(cv, extraSig){
 
 // Build the per-player sim inputs once (parsing props is expensive vs the loop).
 // Returns { teams, games, entries } where entries[i] aligns with pool[i].
+// ck148: under this SS Proj, with no yardage / reception / passing line, a
+// player has no role and scores 0 (see buildNflSimInputs).
+const NFL_NO_ROLE_PROJ = 0.5;
 function buildNflSimInputs(pool, opts){
   // `opts.skipDstCal` — the DST points-line calibration is 4,000 draws of the
   // whole game model, and the render surfaces (game tiles, the dashboard's
@@ -27537,6 +27540,34 @@ function buildNflSimInputs(pool, opts){
       idx.sort((a, b) => { const A = key(a), B = key(b); return (B[0] - A[0]) || (B[1] - A[1]) || (B[2] - A[2]); });
       for(const i of idx.slice(1)){ entries[i].kBackup = pool[idx[0]].name; entries[i].fallbackMean = 0; }
     }
+  }
+  // ── ck148: NO ROLE, NO PRODUCTION ────────────────────────────────────────
+  // Matt: "the Shedeur Sanders backup QB getting assigned production … guys
+  // that have no or very limited roles end up getting allocated production".
+  // PIT@CLE 10/1: Sanders (SS Proj 0, no yardage line, an ATD price of +817)
+  // drew 13 rushing yards — the generic QB scramble floor fires for ANY QB
+  // whose only "prop" is an anytime-TD price — plus 11% TD equity. Week 3
+  // main had 11 more: SS Proj 0, an ATD price at most, and baseline/leftover
+  // slices of their team's rushing and receiving (Kendre Miller 12.7 rush
+  // yards, Ja'Tavion Sanders 6.8 rec yards, Lan Larison 4.1 …).
+  // An ATD price is not a role: books post one for every name on the depth
+  // chart. A player is NO-ROLE when the sheet projects him under
+  // NFL_NO_ROLE_PROJ AND the market gives him no yardage, reception or passing
+  // line. He scores 0 (exactly like an OUT player), drops out of the team's TD
+  // pie, and never absorbs a baseline, leftover or scratched teammate's share —
+  // that production stays with the players who have a role. A real line (Zay
+  // Flowers, SS Proj 0 with a 75-yard receiving line) or a typed Proj keeps
+  // him in. Only when the slate carries projections at all.
+  {
+    const _projN = pool.filter(p => (parseFloat(p.proj) || 0) > 0).length;
+    if(_projN >= 10) pool.forEach((p, i) => {
+      const e = entries[i]; if(!e || e.pos === 'K' || e.pos === 'DST' || e.out) return;
+      const pj = parseFloat(p.proj); if(!(Number.isFinite(pj) && pj < NFL_NO_ROLE_PROJ)) return;
+      const m = e.mkt || {};
+      if(m.passYds || m.rushYds || m.recYds || m.rec) return;
+      e.noRole = true; e.hasProps = false; e.unpriced = true; e.fallbackMean = 0;
+      e.passYds = e.passTD = e.rushYds = e.recYds = e.rec = e.rushRec = null; e.atd = null;
+    });
   }
   // ── THE ROLE-UNCERTAINTY HALF OF THE MEDIAN→MEAN CONVERSION ──────────────
   // nflPropEntry applied each stat's own CV. A player whose room just lost
@@ -27795,8 +27826,8 @@ function nflFillFromBaseline(pool, entries, teamInfo, model){
   // A quarterback who is not his team's starter is never inferred into
   // production. He keeps his own market lines; he takes no baseline slice and no
   // leftover slice, of any stat.
-  const qbBlocked = (p, e) => e && e.pos === 'QB' && starterQb.has(teamOfP(p))
-                              && starterQb.get(teamOfP(p)) !== p.id;
+  const qbBlocked = (p, e) => !!(e && e.noRole) || (e && e.pos === 'QB' && starterQb.has(teamOfP(p))
+                              && starterQb.get(teamOfP(p)) !== p.id);   // ck148: a no-role player is blocked the same way
   // Candidates come off the SLATE, so a hidden player still holds his end.
   const absorbers = new Map();
   for(const p of slate.players){
@@ -28079,7 +28110,9 @@ function nflPropEntry(p, t, gameKey){
       }
       if(pos === 'QB'){
         if(e.passTD == null && e.passYds != null) e.passTD = e.passYds / 125;
-        if(e.rushYds == null) e.rushYds = 12;                   // generic QB scramble floor
+        // generic QB scramble floor — for the STARTER only (ck148): a backup
+        // whose only price is an ATD is not scrambling for 12 yards
+        if(e.rushYds == null && e.passYds != null) e.rushYds = 12;
       }
     }
     // ── A MARKET LINE IS A MEDIAN, NOT A MEAN ────────────────────────────────
@@ -28567,6 +28600,7 @@ const NFL_TD_PER_PT = 0.74 / 7;     // the same assumption nflDrawTeamPie's coun
 // end of the receiving pie).
 function nflShareModel(slate, pool, entries, teamInfo){
   const teams = {};
+  const _outSl = slate || ((typeof activeSlate === 'function') ? activeSlate() : null);
   const TM = e => e.team;
   const tiOf = t => teamInfo ? (teamInfo.get ? teamInfo.get(t) : teamInfo[t]) : null;
   pool.forEach((p, i) => {
@@ -28580,7 +28614,7 @@ function nflShareModel(slate, pool, entries, teamInfo){
       td: nflTdLam(e.atd), passYds: e.pos==='QB' ? (e.passYds||0) : 0,
     };
     if(e.pos==='K' || e.pos==='DST'){ T.players.push({p, i, e, m, share:{}, skip:true}); return; }
-    T.players.push({p, i, e, m, share:{}});
+    T.players.push({p, i, e, m, share:{}, isOut: !!(e.out || (_outSl && typeof nflIsOut === 'function' && nflIsOut(_outSl, p.id)))});
     T.base.recYds += m.recYds; T.base.rec += m.rec; T.base.rushYds += m.rushYds; T.base.td += m.td;
     T.base.passYds += m.passYds;                          // SUM, not max: two priced QBs share one pie
   });
@@ -28598,6 +28632,36 @@ function nflShareModel(slate, pool, entries, teamInfo){
     T.lineSum = { recYds: T.base.recYds, rec: T.base.rec, rushYds: T.base.rushYds, td: T.base.td, passYds: T.base.passYds };
     T.offPool = off;
     if(off){ T.base.recYds += off.recYds; T.base.rec += off.rec; T.base.rushYds += off.rushYds; T.base.td += off.td; }
+    // ── ck149 STALE RECEIVING LINE ON A SCRATCHED PLAYER ─────────────────────
+    // A player who is OUT can only own the receiving volume his team's passing
+    // line still has ROOM for once his teammates' own lines are counted. Before
+    // the news (ck125's case) the survivors' lines plus his make an ordinary
+    // team and the room is his whole line, so nothing changes. After the news
+    // the survivors' lines were written knowing he is out and already fill the
+    // team: Week 4 NE, A.J. Brown O with a stale 77.5 while the survivors' own
+    // lines were 87% of Maye's 241. Left in, his line sized NE's receiving pie
+    // at 297 yds (1.23x the pass line; every other team 0.93-0.96) and the OUT
+    // redistribution handed all of it to Hollins/Doubs/Henry/Douglas, 1.6x their
+    // lines. Shrinking HIS m here (every pass of the model sees it, so the
+    // shares stored by nflRedistributeOut and read by the sim agree) hands down
+    // only the room. Receptions ride the yards. Rushing is NOT gated: its
+    // anchor is a floor that half a slate's teams' lines exceed.
+    if(qbLine > 0){
+      const outPl = T.players.filter(pl => !pl.skip && pl.isOut && pl.m.recYds > 0);
+      const outY = outPl.reduce((a, pl) => a + pl.m.recYds, 0);
+      if(outY > 0){
+        const room = Math.max(0, qbLine * NFL_COV_FILL_TARGET - (T.base.recYds - outY));
+        if(room < outY){
+          const k = room / outY;
+          for(const pl of outPl){
+            const dY = pl.m.recYds * (1 - k), dR = pl.m.rec * (1 - k);
+            pl.m.recYds -= dY; pl.m.rec -= dR; pl.staleK = k;
+            T.base.recYds -= dY; T.base.rec -= dR; T.lineSum.recYds -= dY; T.lineSum.rec -= dR;
+          }
+          T.staleRec = { k, cutYds: outY - room, names: outPl.map(pl => pl.p.name) };
+        }
+      }
+    }
     // A stat the baseline fill already ran on is PINNED: the anchor holds no
     // matter what the coverage now reads. Filling a 49%-uncovered team up to
     // 89% otherwise walks it back over NFL_COV_MIN, the guardrail stands down,
@@ -29813,6 +29877,7 @@ function nflRedistributeOut(slate){
         // exactly as before — that case is what the successor rule below is for.
         const _qb1 = nflStarterQbId(mates.map(m => ({ p: m.p, e: m.e })));
         grp = grp.filter(m => m.e.pos !== 'QB' || _qb1 == null || m.p.id === _qb1);
+        grp = grp.filter(m => !(m.e && m.e.noRole));   // ck148: no role, no inherited share
         if(!grp.length) continue;
         const unpriced = grp.filter(m => !isMkt(m));
         const repriced = nflOutRepriced(slate, pl.p.id);
