@@ -5599,9 +5599,14 @@ function nhlStackMax(players){
 }
 // Pool-row tags: position, line / pair, PP unit, and the sheet status. The
 // line and PP unit are what an NHL stack is built from, so they sit on the row.
-function nhlRowTags(p){
+function nhlRowTags(p, slate){
   const pos = nhlPosOf(p) || '?';
   const bits = [];   // ck139b: position is the row's left column now
+  // ck151: the team sits beside the name (Matt: "move the team column over
+  // beside the player names"), in its game-card colour so a stack reads as one
+  // colour down the pool, with the opponent faint. Replaces the Team column.
+  if(p.team){ const col = slate ? nhlTeamColor(slate, p.team) : 'var(--muted)';
+    bits.push(`<span class="nhl-tag nhl-team" style="color:${col};border-color:${col};" title="${esc(String(p.team).toUpperCase())}${p.opp ? ' vs ' + esc(String(p.opp).toUpperCase()) : ''}">${esc(String(p.team).toUpperCase())}${p.opp ? `<span style="opacity:.55;"> v ${esc(String(p.opp).toUpperCase())}</span>` : ''}</span>`); }
   if(p.nhlLine) bits.push(`<span class="nhl-tag nhl-line" title="${pos==='G' ? (p.nhlLine==='G1' ? 'Projected starter' : 'Backup') : (/^D/.test(p.nhlLine) ? 'Defence pair ' : 'Forward line ') + p.nhlLine.slice(1)}">${esc(p.nhlLine)}</span>`);
   if(p.nhlPP) bits.push(`<span class="nhl-tag nhl-pp" title="Power-play unit ${p.nhlPP.slice(2)}">${esc(p.nhlPP)}</span>`);
   const st = String(p.status||'').trim();
@@ -7157,7 +7162,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck150/2026-10-06';
+const BUILD_ID = '2.0/ck151/2026-10-06';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -7701,7 +7706,8 @@ function slateFieldsBase(slate){
     f.push({key:'practice', label:'Prac', cls:'col-r'});
   }
   // NFL shows the team under the position badge — a Team column is noise there.
-  if(cm.team!=null && slate.sport!=='nfl')   f.push({key:'team',  label:'Team', cls:''});
+  // NHL (ck151) shows it as a coloured tag beside the name instead.
+  if(cm.team!=null && slate.sport!=='nfl' && slate.sport!=='nhl')   f.push({key:'team',  label:'Team', cls:''});
   if(cm.ml!=null)     f.push({key:'ml',    label:'ML',    cls:'col-r'});
   if(cm.itd!=null)    f.push({key:'itd',   label:'ITD',   cls:'col-r'});
   if(cm.win!=null)    f.push({key:'win',   label:'Win',   cls:'col-r'});
@@ -9252,7 +9258,7 @@ function renderPool(){
     const nameHtml = (isOut ? `<span class="out-name">${nameHtml0}</span> <span class="out-badge" title="Marked OUT — scores 0 and his market share was handed to his teammates">OUT</span>` : nameHtml0 + qBadge)
       + sdHidBadge + flexHidBadge
       + (isLocked ? ` <span class="lock-badge" title="Locked — ${esc(nflKickText(p)||'his game has started')}">🔒</span>` : '')
-      + (isNhl(slate) ? nhlRowTags(p) : '');   // ck138
+      + (isNhl(slate) ? nhlRowTags(p, slate) : '');   // ck138
 
     return `<div class="${rowClass}" style="grid-template-columns:${gt}${isHidden&&!showHidden?';display:none':''}${isGroupEdit?';cursor:pointer':''}" data-pid="${p.id}" onclick="${rowClick}">
       ${isGroupEdit ? `<div class="col-c" style="font-size:13px;color:${inGroup?'var(--purple)':'var(--muted)'};">${inGroup?'☑':'☐'}</div>` : ''}
