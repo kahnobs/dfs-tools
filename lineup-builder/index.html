@@ -5462,7 +5462,7 @@ function sdDedupePlayers(slate){
     g.playerIds = rmList(g.playerIds||[]);
     (g.condGroups||[]).forEach(c => { c.playerIds = rmList(c.playerIds||[]); });
   });
-  ['playerExpOverrides','playerMinOverrides'].forEach(k => {
+  ['playerExpOverrides','playerMinOverrides','sdCptMinOverrides','sdCptMaxOverrides'].forEach(k => {
     const o = slate[k]; if(!o) return;
     Object.keys(o).forEach(id => { if(remap.has(id)){ if(o[remap.get(id)]==null) o[remap.get(id)] = o[id]; delete o[id]; } });
   });
@@ -7157,7 +7157,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck149/2026-10-04';
+const BUILD_ID = '2.0/ck150/2026-10-06';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -7220,6 +7220,9 @@ function buildRunStamp(slate, o){
       : (slate && slate.hiddenIds || []).length),
     'minPct=' + Object.keys(minOv).filter(k => minOv[k] > 0).length,
     'maxPct=' + Object.keys(maxOv).filter(k => maxOv[k] < 100).length,
+    // ck150: showdown captain Min% / Max% counts
+    'cptMin=' + Object.keys((slate && slate.sdCptMinOverrides) || {}).length,
+    'cptMax=' + Object.keys((slate && slate.sdCptMaxOverrides) || {}).length,
     'groups=' + ((slate && slate.groups || []).length),
     'pool=' + ((slate && slate.players || []).filter(p => p && p.salary > 0).length),
     'overrideKeys=' + (cnt(minOv) + cnt(maxOv)),
@@ -8077,10 +8080,10 @@ function toggleShowHidden(){showHidden=!showHidden;document.getElementById('show
 // effect of a "reset max" button would silently change build intent.
 function resetMaxExposures(){
   const slate=activeSlate();if(!slate)return;
-  const n=Object.keys(slate.playerExpOverrides||{}).length;
+  const n=Object.keys(slate.playerExpOverrides||{}).length+Object.keys(slate.sdCptMaxOverrides||{}).length;
   if(!n) return;
   if(!confirm(`Reset MAX% back to 100 for ${n} player${n>1?'s':''}?`))return;
-  slate.playerExpOverrides={};
+  slate.playerExpOverrides={}; delete slate.sdCptMaxOverrides;
   save();
   refreshResetMaxBtn();
   renderPool();
@@ -8093,7 +8096,9 @@ function refreshResetMaxBtn(){
   const btn=document.getElementById('resetMaxExpBtn');
   if(!btn) return;
   const slate=activeSlate();
-  const n=slate?Object.keys(slate.playerExpOverrides||{}).length:0;
+  // ck150: player Max% and captain Max% (showdown) — both are Max% cells.
+  const k=o=>Object.keys(o||{}).length;
+  const n=slate?k(slate.playerExpOverrides)+k(slate.sdCptMaxOverrides):0;
   btn.style.display=n>0?'':'none';
   btn.textContent=`↺ Reset Max (${n})`;
 }
@@ -9147,14 +9152,20 @@ function renderPool(){
          // ck127: in the CAPTAIN list the Min% cell is "at least this share of
          // the board with him as captain" (sdCptMinOverrides), not the player floor.
          const cptMin = isMin && SDm && mode==='cpt';
-         const expOverrides = cptMin ? (slate.sdCptMinOverrides||{}) : isMin ? (slate.playerMinOverrides||{}) : (slate.playerExpOverrides||{});
+         // ck150: the Captain list's Max% is the CAPTAIN cap, not the player cap.
+         const cptMax = !isMin && SDm && mode==='cpt';
+         const expOverrides = cptMin ? (slate.sdCptMinOverrides||{}) : cptMax ? (slate.sdCptMaxOverrides||{}) : isMin ? (slate.playerMinOverrides||{}) : (slate.playerExpOverrides||{});
          const expVal = expOverrides[p.id]!=null ? String(expOverrides[p.id]) : '';
          const expColor = isMin ? 'var(--green)' : 'var(--accent)';
          const hasVal = expVal !== '';
-         const fnName = cptMin ? 'stepSdCptMin' : isMin ? 'stepMinExp' : 'stepMaxExp';
-         const saveFn = cptMin ? 'setSdCptMinOverride' : isMin ? 'setPlayerMinOverride' : 'setPlayerExpOverride';
+         const fnName = cptMin ? 'stepSdCptMin' : cptMax ? 'stepSdCptMax' : isMin ? 'stepMinExp' : 'stepMaxExp';
+         const saveFn = cptMin ? 'setSdCptMinOverride' : cptMax ? 'setSdCptMaxOverride' : isMin ? 'setPlayerMinOverride' : 'setPlayerExpOverride';
+         const expTitle = cptMin ? 'Captain Min%: at least this % of the board has him at CAPTAIN (captain slot only)'
+                        : cptMax ? 'Captain Max%: at most this % of the board has him at CAPTAIN (captain slot only — his flex slots are not limited here)'
+                        : SDm ? (isMin ? 'Min% of the board holding him in ANY slot (captain or flex). Captain-only limits are on the Captain list.' : 'Max% of the board holding him in ANY slot (captain or flex). Captain-only limits are on the Captain list.')
+                        : (isMin ? 'Min% of the board holding him (Contest EV mode)' : 'Max% of the board holding him');
          return `<div class="exp-cell-wrap" onclick="event.stopPropagation()">
-           <input type="text" inputmode="numeric" placeholder="—" value="${expVal}" title="${cptMin?'Captain conviction: at least this % of the board captains him (Contest EV mode)':isMin?'Min% of the board holding him (Contest EV mode)':'Max% of the board holding him'}"
+           <input type="text" inputmode="numeric" placeholder="—" value="${expVal}" title="${expTitle}"
              style="flex:1;min-width:0;background:${hasVal?'rgba(255,255,255,.04)':'none'};border:1px solid ${hasVal?expColor:'transparent'};color:${hasVal?expColor:'var(--muted)'};padding:2px 4px;border-radius:3px;font-size:11px;font-family:'DM Mono',monospace;outline:none;text-align:right;box-sizing:border-box;"
              onfocus="this.style.borderColor='${expColor}';this.style.background='rgba(255,255,255,.06)';this.select();event.stopPropagation();"
              onblur="event.stopPropagation();${saveFn}('${p.id}',this.value);renderPool();"
@@ -13148,10 +13159,33 @@ function stepSdCptMin(pid, d){
   const slate=activeSlate(); if(!slate) return;
   setSdCptMinOverride(pid, String(Math.min(100,Math.max(0,sdCptMinOf(slate,pid)+d))));
 }
+// ck150: CAPTAIN Max% (showdown). The Captain list's Max% cell used to write
+// the PLAYER cap (playerExpOverrides), so "Max 10% as captain" also capped his
+// flex slots — reported by a user as "the captain exposures apply to flex".
+// Now the Captain list owns both of its cells: Min% and Max% of the board that
+// CAPTAINS him. The Flex list keeps the whole-player Min%/Max% (any slot).
+// null = no captain cap.
+function sdCptMaxOf(slate, id){ const m = slate && slate.sdCptMaxOverrides; const v = m && m[id]; return Number.isFinite(v) ? v : null; }
+function setSdCptMaxOverride(pid, val){
+  const slate=activeSlate(); if(!slate) return;
+  slate.sdCptMaxOverrides=slate.sdCptMaxOverrides||{};
+  const n=parseFloat(val);
+  if(isNaN(n)||val===''||n>=100) delete slate.sdCptMaxOverrides[pid];
+  else slate.sdCptMaxOverrides[pid]=Math.min(100,Math.max(0,n));
+  if(!Object.keys(slate.sdCptMaxOverrides).length) delete slate.sdCptMaxOverrides;
+  save(); if(typeof refreshResetMaxBtn==='function') refreshResetMaxBtn();
+}
+function stepSdCptMax(pid, d){
+  const slate=activeSlate(); if(!slate) return;
+  const cur = sdCptMaxOf(slate,pid); setSdCptMaxOverride(pid, String(Math.min(100,Math.max(0,(cur==null?100:cur)+d))));
+}
+// Captain counts in board slots: floor want, cap (Infinity = none).
+function sdCptMinSlots(slate, id, n){ const v = sdCptMinOf(slate, id); return v > 0 ? Math.ceil(Math.min(100, v) / 100 * n - 1e-9) : 0; }
+function sdCptCapSlots(slate, id, n){ const v = sdCptMaxOf(slate, id); return v == null ? Infinity : Math.max(0, Math.floor(Math.max(0, v) / 100 * n + 1e-9)); }
 
 function resetPlayerExposures(){
   const slate=activeSlate();if(!slate)return;
-  slate.playerExpOverrides={};slate.playerMinOverrides={};delete slate.sdCptMinOverrides;save();renderPool();refreshResetMaxBtn();
+  slate.playerExpOverrides={};slate.playerMinOverrides={};delete slate.sdCptMinOverrides;delete slate.sdCptMaxOverrides;save();renderPool();refreshResetMaxBtn();
 }
 
 
@@ -37084,6 +37118,9 @@ function gppKernelFactory(){
     let inPort = new Uint8Array(M);
     const cptMin = P.cptMin || null, cptMinOn = !!(cptMin && cptMin.length === nP), wantN = P.want || P.N;
     const cptCount = new Int32Array(nP);
+    // ck150: captain caps — a candidate whose captain is at his cap is not playable.
+    const cptCap = (P.cptCap && P.cptCap.length === nP) ? P.cptCap : null;
+    const cptCapHit = function(m){ if(!cptCap || SHAPE !== 'sd') return false; const c = menu[m].ids[0]; return cptCap[c] >= 0 && cptCount[c] + 1 > cptCap[c]; };
     let stalled = 0, gPeak = -Infinity, peakN = 0;
     const nakedPicks = [];
     // ck127: STALL RECOVERY. On a two-team showdown (or any small pool) every
@@ -37166,7 +37203,7 @@ function gppKernelFactory(){
           if(pace > worst){ worst = pace; mustCpt = i; } }
         if(mustCpt >= 0){
           let any = false;
-          for(let m = 0; m < M && !any; m++){ if(inPort[m] || menu[m].ids[0] !== mustCpt) continue;
+          for(let m = 0; m < M && !any; m++){ if(inPort[m] || menu[m].ids[0] !== mustCpt || cptCapHit(m)) continue;
             let bl = false; for(const i of menu[m].ids) if(expCount[i] + 1 > capOf(i)){ bl = true; break; }
             if(!bl && fightOk(menu[m].ids)) any = true; }
           if(!any) mustCpt = -1;
@@ -37177,13 +37214,14 @@ function gppKernelFactory(){
       const blendB = (FP.topOn && P.objective && P.objective.blend > 0) ? P.objective.blend : 0;
       let covArr = null, grwArr = null, covMax = -Infinity, covMin = Infinity, grwMax = -Infinity, grwMin = Infinity;
       if(blendB > 0){ covArr = new Float64Array(M); grwArr = new Float64Array(M);
-        for(let m = 0; m < M; m++){ if(inPort[m]) continue; if(mustCpt >= 0 && menu[m].ids[0] !== mustCpt) continue;
+        for(let m = 0; m < M; m++){ if(inPort[m]) continue; if(mustCpt >= 0 && menu[m].ids[0] !== mustCpt) continue; if(cptCapHit(m)) continue;
           let bl = false; for(const i of menu[m].ids) if(expCount[i] + 1 > capOf(i)){ bl = true; break; } if(bl || !fightOk(menu[m].ids)) continue;
           const c = FP.covGain(m), gg = FP.growthWith(m, n1, stake1); covArr[m] = c; grwArr[m] = gg;
           if(c > covMax) covMax = c; if(c < covMin) covMin = c; if(gg > grwMax) grwMax = gg; if(gg < grwMin) grwMin = gg; } }
       for(let m = 0; m < M; m++){
         if(inPort[m]) continue;
         if(mustCpt >= 0 && menu[m].ids[0] !== mustCpt) continue;
+        if(cptCapHit(m)) continue;
         // Hard caps: Max% exposure and per-player overrides, plus the house
         // rule (no duplicate lineups — the menu is distinct by construction).
         let blocked = false;
@@ -37949,6 +37987,12 @@ async function runNflGppEngine(ctx){
     cptMinSlots = new Int32Array(nP);
     fieldPool.forEach((p, i) => { const v = sdCptMinOf(slate, p.id); if(v > 0 && sel[i] && (!cptOkMask || cptOkMask[i])) cptMinSlots[i] = Math.ceil(Math.min(100, v) / 100 * capN - 1e-9); });
   }
+  // ck150: captain CAPS (showdown), same units; -1 = no cap.
+  let cptCapSlots = null;
+  if(SD && slate.sdCptMaxOverrides && Object.keys(slate.sdCptMaxOverrides).length){
+    cptCapSlots = new Int32Array(nP).fill(-1);
+    fieldPool.forEach((p, i) => { const c = sdCptCapSlots(slate, p.id, capN); if(c !== Infinity) cptCapSlots[i] = c; });
+  }
   const capSlots = new Int32Array(nP);
   fieldPool.forEach((p, i) => {
     const pct = (overrides && overrides[p.id] != null) ? overrides[p.id] : maxExpPct;
@@ -38014,7 +38058,7 @@ async function runNflGppEngine(ctx){
     calShrink: {s1: _calFx.s1, s23: _calFx.s23, capTop10: !!evCalCap(slate.sport || 'nfl').capTop10, on: _calFx.on},
     // ck118: bootstrap-resampled search seeds + Bayesian-bootstrap greedy steps (slate._gppRobust === false turns both off).
     robust: slate._gppRobust !== false,
-    maxSal, minSal, N: target, want: capN, B, capSlots, cptMin: cptMinSlots, fightPairs, fightSlack: UFC_FIGHT_SLACK, fightViable: UFC_FIGHT_VIABLE,
+    maxSal, minSal, N: target, want: capN, B, capSlots, cptMin: cptMinSlots, cptCap: cptCapSlots, fightPairs, fightSlack: UFC_FIGHT_SLACK, fightViable: UFC_FIGHT_VIABLE,
     objective: { mode: gppObjectiveOf(slate).mode, cutoff: gppObjectiveCutoff(slate, F), blend: gppObjectiveBlend() },   // ck134/ck136
     // ck74: the partner definition the LABEL uses, so the kernel's naked-pick
     // explanation and `nflStackShape` cannot disagree about what "naked" means.
@@ -38547,11 +38591,12 @@ async function runNflGppBoard(ctx){
       const _cm = (SDb && slate.sdCptMinOverrides) || {};
       const _cptMinIds = Object.keys(_cm).filter(id => (_cm[id]||0) > 0).map(id => 'CPT:' + id);
       const _floorIds = i => out[i].map(p => p.id).concat(SDb && out[i]._sdCaptain ? ['CPT:' + out[i]._sdCaptain] : []);
-      const _capSlotsF = id => /^CPT:/.test(String(id)) ? Infinity : _capSlots(id);
+      // ck150: a captain pseudo id answers to the captain Max% (Infinity when unset).
+      const _capSlotsF = id => /^CPT:/.test(String(id)) ? (SDb ? sdCptCapSlots(slate, String(id).slice(4), target) : Infinity) : _capSlots(id);
       const _topMode = gppObjectiveOf(slate).mode === 'top';   // ck134: no EV floors — the greedy's coverage order is the board
       const _scr = evScreenBoard(slate, _pr0, target, log,
         {cfg: _topMode ? Object.assign({}, evEdgeScreenCfg(slate), {floor: 0, ex1Floor: 0}) : null,
-         caps: {ids: i => out[i].map(p => p.id), cap: _capSlotsF}, extraOk: _fbRule,
+         caps: {ids: _floorIds, cap: _capSlotsF}, extraOk: _fbRule,
          floors: (_minIds.length || _cptMinIds.length) ? {list:_minIds.concat(_cptMinIds), ids: _floorIds,
                                    min: id => /^CPT:/.test(String(id)) ? Math.ceil(Math.max(0, Math.min(100, _cm[String(id).slice(4)]||0))/100*target)
                                                                        : Math.ceil(Math.max(0, Math.min(100, _mo[id]||0))/100*target)} : null});
@@ -40115,7 +40160,9 @@ async function runNflSimGenInner(){
   // ck137: the legacy pipelines (Contest EV off, or the engine pinned to
   // legacy) never read captain Min% — only the GPP kernel paced it. Enforce
   // it here as a re-captain pass over the built board (see the function).
-  if(SD && out && out.length && _eng.engine !== 'gpp') sdApplyCptFloorsLegacy(slate, out, maxSal, minSal, log);
+  // ck150: captain Min% AND Max% on every pipeline's finished board (the GPP
+  // kernel already builds toward both; there this is a check that is normally a no-op).
+  if(SD && out && out.length) out = sdEnforceCptExposure(slate, out, {maxSal, minSal, log, ranked, simScoresById, simsDone, overrides, maxExpPct});
   // Showdown: carry the sim's preferred captain onto each saved lineup so the
   // export puts the right player in the CPT slot at his captain id.
   if(SD && out && out.length){
@@ -40175,50 +40222,156 @@ async function runNflSimGenInner(){
 // captain-eligible, the old one flex-eligible, must not push another floored
 // captain below his own target, and must not duplicate a lineup already on the
 // board. What cannot be met is reported, not forced.
-function sdApplyCptFloorsLegacy(slate, out, maxSal, minSal, log){
-  const floors = slate && slate.sdCptMinOverrides; if(!floors) return out;
-  const ids = Object.keys(floors).filter(id => sdCptMinOf(slate, id) > 0); if(!ids.length) return out;
-  const L = out.length, cap = (maxSal > 0 ? maxSal : SALARY_CAP), lo = (minSal > 0 ? minSal : 0);
-  const want = {}, have = {};
-  ids.forEach(id => { want[id] = Math.ceil(Math.min(100, sdCptMinOf(slate, id)) / 100 * L - 1e-9); });
-  const cptOf = l => l._sdCaptain || sdCaptainId(slate, l.map(p => p.id), true);
-  out.forEach(l => { const c = cptOf(l); have[c] = (have[c] || 0) + 1; });
-  const keyOf = (l, c) => l.map(p => p.id).sort().join(',') + '|' + c;
-  const keys = new Set(out.map(l => keyOf(l, cptOf(l))));
-  const moved = [], short = [];
-  const order = ids.slice().sort((a, b) => (want[b] - (have[b] || 0)) - (want[a] - (have[a] || 0)));
-  for(const X of order){
-    let need = want[X] - (have[X] || 0); if(need <= 0) continue;
-    if(!sdCptEligible(slate, X)){ short.push({ X, why: 'he is hidden from the captain pool', hidden: true }); continue; }
-    const cands = [];
-    out.forEach((l, i) => {
-      const O = cptOf(l); if(O === X || !l.some(p => p.id === X)) return;
-      if(want[O] != null && (have[O] || 0) <= want[O]) return;          // would break O's own floor
-      if(!sdFlexEligible(slate, O)) return;
-      const sal = sdSalary(slate, l.map(p => p.id), X);
-      if(sal > cap || sal < lo) return;
-      if(keys.has(keyOf(l, X))) return;
-      cands.push({ i, O });
-    });
-    cands.sort((a, b) => (have[b.O] || 0) - (have[a.O] || 0));
-    let did = 0;
-    for(const c of cands){
-      if(need <= 0) break;
-      const l = out[c.i]; const O = cptOf(l);
-      if(O !== c.O || (want[O] != null && (have[O] || 0) <= want[O])) continue;
-      keys.delete(keyOf(l, O)); l._sdCaptain = X; keys.add(keyOf(l, X));
-      have[O]--; have[X] = (have[X] || 0) + 1; need--; did++;
-    }
-    if(did) moved.push({ X, did });
-    if(need > 0){ const on = out.filter(l => l.some(p => p.id === X)).length;
-      short.push({ X, why: `he is on ${on} of ${L} lineups and only ${have[X] || 0} of those could take him at captain under the cap / other floors` }); }
-  }
+function sdApplyCptFloorsLegacy(slate, out, maxSal, minSal, log){ return sdEnforceCptExposure(slate, out, {maxSal, minSal, log}); }
+// ── ck150: CAPTAIN EXPOSURE, every showdown pipeline ─────────────────────────
+// A user's friend: "if you set a min for the captain it applies to flex, not
+// specifically the captain exposure". Two defects, both real:
+//   · the Captain list's Max% wrote the PLAYER cap, so a captain cap also
+//     capped his flex slots (fixed in the cell — sdCptMaxOverrides);
+//   · captain Min% was only BUILT toward by the GPP kernel. The legacy
+//     pipelines (Contest EV with the engine on legacy, and Contest EV off) ran
+//     a re-captain pass that could only promote him in lineups that already
+//     rostered him — measured on DET@CAR, LaPorta CPT Min 40% of 20: 6/8 and
+//     5/8, because he was on 6 and 5 lineups.
+// This pass runs on the finished board of EVERY pipeline (a no-op when the
+// board already complies, which the GPP kernel's boards normally do):
+//   CAPS   — a captain over his Max% is moved to another of the same six
+//            (cheapest score loss first); if no re-captain fits, the lineup is
+//            replaced by the best candidate whose captain has room.
+//   FLOORS — a captain under his Min% is promoted where he is already rostered
+//            (cheapest score loss first), then candidate lineups with him at
+//            captain (the run's own candidates, plus re-captained candidates
+//            holding him) replace the weakest lineups that can spare it.
+// Every move keeps salary inside [minSal, maxSal], the captain/flex pool
+// toggles, player Max% and Min%, the other captains' floors and caps, and
+// the no-duplicate rule. What cannot be met is reported, not forced.
+function sdEnforceCptExposure(slate, out, o){
+  o = o || {};
+  const log = typeof o.log === 'function' ? o.log : null;
+  if(!slate || !out || !out.length) return out;
+  const minIds = Object.keys(slate.sdCptMinOverrides || {}).filter(id => sdCptMinOf(slate, id) > 0);
+  const maxIds = Object.keys(slate.sdCptMaxOverrides || {}).filter(id => sdCptMaxOf(slate, id) != null);
+  if(!minIds.length && !maxIds.length) return out;
+  const N = out.length, cap = (o.maxSal > 0 ? o.maxSal : SALARY_CAP), lo = (o.minSal > 0 ? o.minSal : 0);
   const nm = id => ((playerById(slate, id) || {}).name || id);
-  if(typeof log === 'function'){
-    log(`Captain Min% (legacy pipeline, ck137): ` + ids.map(id => `CPT ${nm(id)} ${have[id] || 0}/${want[id]}`).join(' · ')
-      + (moved.length ? ` — re-captained ${moved.map(m => `${m.did} for ${nm(m.X)}`).join(', ')} (same six players, captain slot moved).` : '.'));
-    short.forEach(s => log(`  ⚠ CPT ${nm(s.X)} is short of his Min%: ${s.why}.` + (s.hidden ? ' Un-hide him from the captain pool, or clear the Min%.' : ' Raise his overall exposure, or run with Contest EV on (the GPP engine builds toward captain floors).')));
+  const want = {}, capC = {};
+  minIds.forEach(id => { want[id] = sdCptMinSlots(slate, id, N); });
+  maxIds.forEach(id => { capC[id] = sdCptCapSlots(slate, id, N); });
+  const clash = [];
+  minIds.forEach(id => { if(capC[id] != null && want[id] > capC[id]){ clash.push(id); want[id] = capC[id]; } });
+  const capOfC = id => capC[id] != null ? capC[id] : Infinity;
+  const wantOf = id => want[id] || 0;
+  // player caps / floors (whole player, any slot), in board slots
+  const ovr = o.overrides || slate.playerExpOverrides || {}, maxPct = o.maxExpPct != null ? o.maxExpPct : 100;
+  const capP = id => { const pct = ovr[id] != null ? ovr[id] : maxPct; return pct >= 100 ? Infinity : Math.max(0, Math.ceil(Math.max(0, pct) / 100 * N - 1e-9)); };
+  const minOv = slate.playerMinOverrides || {};
+  const minP = id => (minOv[id] > 0) ? Math.ceil(Math.min(100, minOv[id]) / 100 * N - 1e-9) : 0;
+  // scoring: mean over a stride of sims, captain 1.5x
+  const S = o.simScoresById || null, nSims = o.simsDone || 0;
+  const simIdx = []; if(S && nSims > 0){ const k = Math.min(600, nSims), st = nSims / k; for(let t = 0; t < k; t++) simIdx.push(Math.floor(t * st)); }
+  const meanOf = new Map();
+  const pMean = id => { if(meanOf.has(id)) return meanOf.get(id); let v = 0;
+    const a = S && S[id]; if(a && simIdx.length){ for(const t of simIdx) v += a[t] || 0; v /= simIdx.length; }
+    else { const p = playerById(slate, id); v = p ? (parseFloat(p._simP50 != null ? p._simP50 : p.proj) || 0) : 0; }
+    meanOf.set(id, v); return v; };
+  const scoreOf = (ids, c) => ids.reduce((a, id) => a + pMean(id) * (id === c ? CPT_MULT : 1), 0);
+  const idsOf = l => l.map(p => p.id);
+  const cptOf = l => l._sdCaptain || sdCaptainId(slate, idsOf(l), true);
+  const salOk = (ids, c) => { const sl = sdSalary(slate, ids, c); return sl <= cap && sl >= lo; };
+  const slotOk = (ids, c) => sdCptEligible(slate, c) && ids.every(id => id === c || sdFlexEligible(slate, id));
+  const keyOf = (ids, c) => ids.slice().sort().join(',') + '|' + c;
+  const have = {}, cnt = {}; const keys = new Set();
+  out.forEach(l => { const c = cptOf(l); have[c] = (have[c] || 0) + 1; idsOf(l).forEach(id => { cnt[id] = (cnt[id] || 0) + 1; }); keys.add(keyOf(idsOf(l), c)); });
+  const restamp = l => { delete l._priced; delete l._pricedHO; };
+  const recaptain = (l, Y) => { const O = cptOf(l), ids = idsOf(l);
+    keys.delete(keyOf(ids, O)); l._sdCaptain = Y; keys.add(keyOf(ids, Y)); have[O]--; have[Y] = (have[Y] || 0) + 1; restamp(l); };
+  // candidate pool: the run's candidates (+ re-captained variants made on demand)
+  const cands = [];
+  { const seen = new Set();
+    for(const e of (o.ranked || [])){ const l = e && (e.lineup || e); if(!l || !l.length) continue;
+      const ids = l.map(p => p.id || p); if(ids.length !== 6) continue;
+      const c = l._sdCaptain || sdCaptainId(slate, ids, true); const k = keyOf(ids, c); if(seen.has(k)) continue; seen.add(k);
+      cands.push({ids, c}); if(cands.length >= 6000) break; } }
+  const variantsWith = X => { const r = [], seen = new Set();
+    for(const cd of cands){ if(!cd.ids.includes(X)) continue; const k = keyOf(cd.ids, X); if(seen.has(k)) continue; seen.add(k);
+      if(salOk(cd.ids, X) && slotOk(cd.ids, X)) r.push({ids: cd.ids, c: X}); }
+    return r; };
+  // replace out[vi] by candidate {ids,c}: checks every constraint
+  const canReplace = (vi, cd) => {
+    const l = out[vi], vIds = idsOf(l), vC = cptOf(l);
+    if(keys.has(keyOf(cd.ids, cd.c))) return false;
+    if(!salOk(cd.ids, cd.c) || !slotOk(cd.ids, cd.c)) return false;
+    if(vC !== cd.c){ if((have[vC] || 0) - 1 < wantOf(vC)) return false; if((have[cd.c] || 0) + 1 > capOfC(cd.c)) return false; }
+    const inS = new Set(cd.ids), outS = new Set(vIds);
+    for(const id of vIds) if(!inS.has(id) && (cnt[id] || 0) - 1 < minP(id)) return false;
+    for(const id of cd.ids) if(!outS.has(id) && (cnt[id] || 0) + 1 > capP(id)) return false;
+    return true; };
+  const doReplace = (vi, cd) => {
+    const l = out[vi], vIds = idsOf(l), vC = cptOf(l);
+    keys.delete(keyOf(vIds, vC)); have[vC]--; vIds.forEach(id => { cnt[id]--; });
+    const nl = cd.ids.map(id => playerById(slate, id)); nl._sdCaptain = cd.c;
+    out[vi] = nl; keys.add(keyOf(cd.ids, cd.c)); have[cd.c] = (have[cd.c] || 0) + 1; cd.ids.forEach(id => { cnt[id] = (cnt[id] || 0) + 1; }); };
+  const rep = { recapCap: 0, replCap: 0, recapMin: 0, replMin: 0 };
+  // ── CAPS ──
+  for(const X of maxIds){
+    let over = (have[X] || 0) - capOfC(X); if(over <= 0) continue;
+    const opts = [];
+    out.forEach((l, i) => { if(cptOf(l) !== X) return; const ids = idsOf(l); const base = scoreOf(ids, X); let best = null;
+      for(const Y of ids){ if(Y === X) continue;
+        if((have[Y] || 0) + 1 > capOfC(Y) || !sdCptEligible(slate, Y) || !sdFlexEligible(slate, X)) continue;
+        if(!salOk(ids, Y) || keys.has(keyOf(ids, Y))) continue;
+        const loss = base - scoreOf(ids, Y); if(!best || loss < best.loss) best = {i, Y, loss}; }
+      if(best) opts.push(best); });
+    opts.sort((a, b) => a.loss - b.loss);
+    for(const op of opts){ if(over <= 0) break; const l = out[op.i]; if(cptOf(l) !== X) continue;
+      if((have[op.Y] || 0) + 1 > capOfC(op.Y) || keys.has(keyOf(idsOf(l), op.Y))) continue;
+      recaptain(l, op.Y); over--; rep.recapCap++; }
+    if(over > 0 && cands.length){
+      const pool = cands.filter(cd => cd.c !== X).map(cd => ({cd, sc: scoreOf(cd.ids, cd.c)})).sort((a, b) => b.sc - a.sc);
+      const victims = () => out.map((l, i) => ({i, sc: scoreOf(idsOf(l), cptOf(l))})).filter(v => cptOf(out[v.i]) === X).sort((a, b) => a.sc - b.sc);
+      for(const v of victims()){ if(over <= 0) break;
+        const hit = pool.find(x => canReplace(v.i, x.cd)); if(!hit) continue;
+        doReplace(v.i, hit.cd); over--; rep.replCap++; }
+    }
   }
+  // ── FLOORS ──
+  const order = minIds.slice().sort((a, b) => (wantOf(b) - (have[b] || 0)) - (wantOf(a) - (have[a] || 0)));
+  const short = [];
+  for(const X of order){
+    let need = wantOf(X) - (have[X] || 0); if(need <= 0) continue;
+    if(!sdCptEligible(slate, X)){ short.push({X, why: 'he is out of the captain pool', hidden: true}); continue; }
+    // 1) promote him where he is already rostered
+    const opts = [];
+    out.forEach((l, i) => { const O = cptOf(l), ids = idsOf(l); if(O === X || !ids.includes(X)) return;
+      if((have[O] || 0) - 1 < wantOf(O) || !sdFlexEligible(slate, O)) return;
+      if(!salOk(ids, X) || keys.has(keyOf(ids, X))) return;
+      opts.push({i, loss: scoreOf(ids, O) - scoreOf(ids, X)}); });
+    opts.sort((a, b) => a.loss - b.loss);
+    for(const op of opts){ if(need <= 0 || (have[X] || 0) + 1 > capOfC(X)) break; const l = out[op.i], O = cptOf(l);
+      if(O === X || (have[O] || 0) - 1 < wantOf(O) || keys.has(keyOf(idsOf(l), X))) continue;
+      recaptain(l, X); need--; rep.recapMin++; }
+    // 2) insert candidates with him at captain over the weakest spare lineups
+    if(need > 0){
+      const pool = variantsWith(X).map(cd => ({cd, sc: scoreOf(cd.ids, cd.c)})).sort((a, b) => b.sc - a.sc);
+      for(const x of pool){ if(need <= 0) break;
+        const vs = out.map((l, i) => ({i, sc: scoreOf(idsOf(l), cptOf(l))})).filter(v => cptOf(out[v.i]) !== X).sort((a, b) => a.sc - b.sc);
+        const v = vs.find(v => canReplace(v.i, x.cd)); if(!v) continue;
+        doReplace(v.i, x.cd); need--; rep.replMin++; }
+    }
+    if(need > 0) short.push({X, why: `only ${have[X] || 0} of ${wantOf(X)} could be met without breaking a salary limit, a Max% or another floor`});
+  }
+  if(log){
+    const parts = [];
+    minIds.forEach(id => parts.push(`CPT ${nm(id)} ≥${wantOf(id)}: ${have[id] || 0}`));
+    maxIds.forEach(id => parts.push(`CPT ${nm(id)} ≤${capOfC(id)}: ${have[id] || 0}`));
+    const moves = [rep.recapCap && `${rep.recapCap} re-captained for caps`, rep.replCap && `${rep.replCap} replaced for caps`,
+                   rep.recapMin && `${rep.recapMin} re-captained for floors`, rep.replMin && `${rep.replMin} replaced for floors`].filter(Boolean);
+    log(`Captain exposure (ck150, of ${N}): ${parts.join(' · ')}` + (moves.length ? ` — ${moves.join(', ')}.` : ' — already met.'));
+    clash.forEach(id => log(`  ⚠ CPT ${nm(id)}: captain Min% is above his captain Max% — the Max% wins (${capOfC(id)}).`));
+    maxIds.forEach(id => { if((have[id] || 0) > capOfC(id)) log(`  ⚠ CPT ${nm(id)} is over his captain Max% (${have[id]} > ${capOfC(id)}): no re-captain or replacement fit the other limits.`); });
+    short.forEach(s => log(`  ⚠ CPT ${nm(s.X)} is short of his captain Min%: ${s.why}.` + (s.hidden ? ' Put him back in the captain pool, or clear the Min%.' : ' Loosen a Max% or the salary range, or lower the floor.')));
+  }
+  o.report = Object.assign(rep, {have: Object.assign({}, have)});
   return out;
 }
 
