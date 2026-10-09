@@ -85,6 +85,26 @@ a:focus-visible,[tabindex]:focus-visible{outline:none;box-shadow:var(--focus);}
 .nhl-slot-tags{white-space:nowrap;margin-left:4px;}
 .nhl-stack-sum{font-size:11px;padding:6px 10px;border:1px dashed var(--border);border-radius:6px;color:var(--text);margin-top:2px;}
 .nhl-stack-sum.warn{border-color:rgba(239,68,68,.5);}
+/* ck152: NHL team stacks tab */
+.nhl-stacks-panel{display:flex;flex-direction:column;height:100%;overflow:hidden;}
+.nhl-stacks-panel .stk-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:10px 12px 6px;flex-shrink:0;}
+.nhl-stacks-panel .stk-sub{font-size:10px;color:var(--muted);}
+.nhl-stacks-panel .stk-ctl{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);white-space:nowrap;}
+.nhl-stacks-panel .stk-ctl select{width:auto;padding:3px 6px;font-size:11px;margin-left:4px;}
+.nhl-stacks-panel .stk-note{font-size:10px;color:var(--muted);padding:0 12px 6px;flex-shrink:0;line-height:1.4;}
+.nhl-stacks-panel .stk-warn{font-size:10px;color:var(--red);padding:2px 12px;flex-shrink:0;}
+.nhl-stacks-panel .stk-tbl{overflow-y:auto;flex:1;padding:0 8px 10px;}
+.stk-tbl-row{display:grid;grid-template-columns:minmax(92px,1fr) 34px 26px 36px 36px 36px 36px 44px 44px;align-items:center;gap:4px;padding:4px 4px;border-bottom:1px solid var(--border);font-family:'DM Mono',monospace;font-size:10px;text-align:right;}
+.stk-tbl-row > span:first-child{text-align:left;}
+.stk-tbl-head{position:sticky;top:0;background:var(--panel, var(--surface));z-index:1;color:var(--muted);font-size:9px;}
+.stk-tbl-row .stk-tm{display:flex;align-items:center;gap:4px;min-width:0;overflow:hidden;white-space:nowrap;}
+.stk-tbl-row .stk-opp{color:var(--muted);font-size:9px;}
+.stk-tbl-row .stk-on{color:var(--accent);}
+.stk-tbl-row .stk-off{color:var(--red);font-weight:600;}
+.stk-tbl-row .stk-dim{color:var(--muted);opacity:.6;}
+.stk-tbl-row.stk-hidden{opacity:.45;}
+.stk-tbl-row .stk-inp{width:38px;padding:2px 4px;font-family:'DM Mono',monospace;font-size:10px;text-align:right;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);}
+.stk-tbl-row .stk-inp:not(:placeholder-shown){border-color:var(--accent);color:var(--accent);}
 .slot-pos-tag{font-family:'DM Mono',monospace;font-size:9px;font-weight:700;color:var(--muted);width:32px;display:inline-block;}
 .pos-badge{font-family:'DM Mono',monospace;font-size:10px;font-weight:700;padding:1px 4px;border-radius:3px;background:rgba(168,85,247,.15);color:#c084fc;}
 .del-tab{color:var(--muted);font-size:12px;opacity:0;transition:opacity .1s;}
@@ -308,6 +328,68 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 .sdash-lock{background:none;border:none;cursor:pointer;font-size:11px;opacity:.35;padding:0;}
 .sdash-lock.on{opacity:1;}
 .sdash-add{padding:3px 0 4px;}
+/* ck153: the team share table */
+.sdt-switch{display:flex;gap:6px;margin:8px 0 6px;}
+.sdt-tbtn{display:flex;align-items:center;gap:6px;background:none;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:5px 12px;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;cursor:pointer;}
+.sdt-tbtn span{font-weight:400;font-size:10px;color:var(--green);}
+.sdt-tbtn i{font-style:normal;font-size:10px;color:var(--accent);}
+.sdt-tbtn.on{border-color:var(--accent);color:var(--text);background:rgba(245,197,24,.08);}
+.sdt-tbtn.adj:not(.on){border-color:rgba(245,197,24,.35);}
+.sdt-team{border-top:1px solid var(--border);padding-top:6px;}
+.sdt-thdr{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px;}
+.sdt-tname{font-family:'DM Mono',monospace;font-size:13px;font-weight:700;}
+.sdt-tmeta{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);}
+.sdt-sp{flex:1;}
+.sdt-lean{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted);white-space:nowrap;}
+.sdt-lean input{width:42px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;font-family:'DM Mono',monospace;font-size:10.5px;padding:2px 4px;text-align:right;}
+.sdt-lean input.hot{border-color:var(--blue);color:var(--blue);}
+.sdt-auto{font-size:10px;color:var(--muted);opacity:.75;cursor:help;}
+.sdt-dst{display:flex;align-items:center;gap:8px;font-size:10.5px;padding:3px 0 6px;}
+.sdt-dst .muted{color:var(--muted);font-size:9.5px;font-family:'DM Mono',monospace;}
+.sdt-dpts{font-family:'DM Mono',monospace;color:var(--green);}
+.sdt-wrap{overflow-x:auto;}
+table.sdt{width:100%;border-collapse:collapse;font-size:11px;}
+table.sdt th{font-weight:600;color:var(--muted);font-size:10px;text-align:right;padding:4px 6px;border-bottom:1px solid var(--border);vertical-align:bottom;white-space:nowrap;position:sticky;top:0;background:var(--surface);z-index:1;}
+table.sdt th.sdt-pl,table.sdt td.sdt-pl{text-align:left;}
+.sdt-h{color:var(--text);}
+.sdt-ht{font-family:'DM Mono',monospace;color:var(--green);font-weight:400;}
+.sdt-ht i,.sdt-m i{font-style:normal;color:var(--muted);font-size:8.5px;margin-left:4px;opacity:.8;}
+.sdt-ht i::before{content:'was ';}
+.sdt-m i::before{content:'mkt ';}
+table.sdt td{padding:3px 6px;border-bottom:1px solid rgba(255,255,255,.04);text-align:right;vertical-align:middle;white-space:nowrap;}
+table.sdt tbody tr:hover td{background:rgba(255,255,255,.025);}
+td.sdt-pl{max-width:190px;overflow:hidden;text-overflow:ellipsis;}
+.sdt-nm{font-weight:600;}
+tr.ov .sdt-nm{color:var(--accent);}
+tr.lock .sdt-nm{color:var(--blue);}
+tr.isout .sdt-nm{color:var(--red);text-decoration:line-through;}
+tr.isout td.sdt-c{opacity:.45;}
+.sdt-in{width:46px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;font-family:'DM Mono',monospace;font-size:11px;padding:2px 4px;text-align:right;}
+.sdt-in:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
+.sdt-pc{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);margin-left:1px;}
+td.sdt-c.ov .sdt-in{border-color:var(--accent);color:var(--accent);font-weight:600;}
+td.sdt-c.auto .sdt-in{border-color:rgba(239,68,68,.55);border-style:dashed;}
+td.sdt-c.moved .sdt-in{color:#d8c27a;}
+.sdt-m{font-family:'DM Mono',monospace;font-size:9.5px;color:var(--green);margin-top:1px;}
+td.sdt-na{color:var(--muted);opacity:.4;text-align:center;}
+td.sdt-act{text-align:left;}
+table.sdt tfoot td{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);border-bottom:none;padding-top:5px;}
+table.sdt tfoot td.sdt-over{color:var(--red);}
+.sdt-help{font-size:10px;color:var(--muted);margin:6px 0 2px;line-height:1.45;}
+/* ck154 */
+th.sdt-pts{text-align:right;}
+td.sdt-pts{font-family:'DM Mono',monospace;font-size:11px;color:var(--text);font-weight:600;border-left:1px solid rgba(255,255,255,.04);}
+td.sdt-pts.up{color:var(--green);}
+td.sdt-pts.dn{color:var(--red);}
+td.sdt-proj{color:var(--muted);font-weight:400;border-left:none;}
+.sdt-link{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted);white-space:nowrap;cursor:pointer;}
+.sdt-link input{accent-color:var(--accent);margin:0;}
+.sdt-changes{display:flex;align-items:center;flex-wrap:wrap;gap:5px;margin:6px 0 2px;}
+.sdt-chl{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:2px;}
+.sdt-chip{display:inline-flex;align-items:center;gap:4px;font-family:'DM Mono',monospace;font-size:10px;color:var(--accent);border:1px solid rgba(245,197,24,.4);background:rgba(245,197,24,.06);border-radius:4px;padding:1px 2px 1px 6px;}
+.sdt-chip button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px;padding:0 3px;}
+.sdt-chip button:hover{color:var(--red);}
+.sdt-chnone{font-size:10px;color:var(--muted);font-style:italic;}
 .sdash-add select{background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:3px 6px;border-radius:5px;font-size:10px;font-family:'DM Sans',sans-serif;outline:none;max-width:100%;}
 /* ── Showdown: Captain / Flex pool views ─────────────────────────────────── */
 /* One list at a time. The segmented control in the pool header swaps which of
@@ -523,7 +605,8 @@ input.skill-slider::-moz-range-progress{height:5px;border-radius:3px;background:
 /* 1000px, not 760: below that a 55/45 split leaves the editor's 118px-label
    slider rows too little room, and replacing the grid reads better. */
 @container sdash (min-width:1000px){
-  .sdash-split.open .sdash-gridcol{flex:0 0 55%;max-width:55%;}
+  /* ck153: the editor is a 5-column share table now, so it gets the larger half */
+  .sdash-split.open .sdash-gridcol{flex:0 0 36%;max-width:36%;}
   /* One rule holds the two halves apart — without it the grid's last column and
      the editor's first label read as one run of text. */
   .sdash-split.open .sdash-detail{border-left:1px solid var(--border);padding-left:14px;}
@@ -1811,6 +1894,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
       <div class="tab active" onclick="switchTab('builder',this)">Builder</div>
       <div class="tab" onclick="switchTab('exposure',this)">Exposure</div>
       <div class="tab" onclick="switchTab('groups',this)">Groups</div>
+      <div class="tab" id="tab-btn-stacks" style="display:none;" onclick="switchTab('stacks',this)" title="NHL team stacks: exposure and Min% / Max% per team">Stacks</div>
       <div class="tab" onclick="switchTab('history',this)">History</div>
       <div class="tab" onclick="switchTab('autogen',this)">Auto-Gen</div>
       <div class="tab" id="tab-btn-siminputs" style="display:none;" onclick="switchTab('siminputs',this)">Odds</div>
@@ -1907,6 +1991,11 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
         </div>
         <div style="overflow-y:auto;flex:1;padding:8px 10px;" id="historyList"></div>
       </div>
+    </div>
+
+    <!-- STACKS (NHL, ck152) -->
+    <div class="tab-content" id="tab-stacks">
+      <div class="nhl-stacks-panel" id="nhlStacksPanel"></div>
     </div>
 
     <!-- EXPOSURE -->
@@ -5597,6 +5686,124 @@ function nhlStackMax(players){
   for(const p of players){ if(!p || nhlPosOf(p) === 'G') continue; for(const k of nhlUnitKeys(p)){ c[k] = (c[k] || 0) + 1; if(c[k] > m) m = c[k]; } }
   return m;
 }
+// ── NHL TEAM STACKS (ck152) ────────────────────────────────────────────────
+// Matt: "the team stacks are really what matters, right now we only have
+// visibility for individual player exposure. Being able to see stack exposure
+// and set min/maxes at a team stack level would probably be a good feature".
+// A lineup STACKS a team when it holds K+ of that team's skaters (the goalie is
+// not counted; K = 2, 3 or 4, default 3, set once per slate). A team's stack
+// exposure is the share of lineups that stack it. Min% / Max% per team bound
+// that share on every NHL pipeline: the GPP kernel paces them while it builds,
+// the edge screen holds them on the kept board, and nhlEnforceStackExposure
+// is the final pass on every board (Sim Score, legacy EV, Optimize, GPP).
+// State: slate.nhlStacks = { k: 3, teams: { TOR: {min: 20, max: 40} } }.
+const NHL_STACK_K_DEFAULT = 3;
+function nhlStackKOf(slate){ const v = slate && slate.nhlStacks && slate.nhlStacks.k; return (v === 2 || v === 3 || v === 4) ? v : NHL_STACK_K_DEFAULT; }
+function nhlTeamKey(t){ return String(t || '').toUpperCase().replace(/[^A-Z]/g, ''); }
+// {TEAM: skaters} for one lineup (players or ids resolved by the caller)
+function nhlTeamSkaters(players){
+  const c = {}; for(const p of players){ if(!p || nhlPosOf(p) === 'G') continue; const t = nhlTeamKey(p.team); if(t) c[t] = (c[t] || 0) + 1; } return c;
+}
+// teams this lineup stacks at K+
+function nhlStackTeams(players, k){ const c = nhlTeamSkaters(players); return Object.keys(c).filter(t => c[t] >= k); }
+// the user's rules, cleaned: [{team, min, max}] with min/max as % or null
+function nhlStackRules(slate){
+  const T = (slate && slate.nhlStacks && slate.nhlStacks.teams) || {};
+  return Object.keys(T).map(t => { const r = T[t] || {};
+    const mn = Number.isFinite(r.min) && r.min > 0 ? Math.min(100, r.min) : null;
+    const mx = Number.isFinite(r.max) && r.max < 100 ? Math.max(0, r.max) : null;
+    return { team: t, min: mn, max: mx }; }).filter(r => r.min != null || r.max != null);
+}
+function nhlStackRuleOf(slate, team){ const r = ((slate && slate.nhlStacks && slate.nhlStacks.teams) || {})[nhlTeamKey(team)] || {};
+  return { min: Number.isFinite(r.min) && r.min > 0 ? r.min : null, max: Number.isFinite(r.max) && r.max < 100 ? r.max : null }; }
+// slots on an N-lineup board: a floor rounds UP, a cap rounds DOWN (a 30% cap
+// on 20 is 6; on 15 it is 4 — never above the percentage typed)
+function nhlStackMinSlots(pct, N){ return pct > 0 ? Math.ceil(Math.min(100, pct) / 100 * N - 1e-9) : 0; }
+function nhlStackCapSlots(pct, N){ return pct == null ? Infinity : Math.max(0, Math.floor(Math.max(0, pct) / 100 * N + 1e-9)); }
+// how many teams one legal lineup can stack at K+ (8 skaters, 3+ teams)
+function nhlMaxStackedTeams(k){ return k <= 2 ? 3 : k === 3 ? 2 : 1; }
+// exposure over a board: { TEAM: {n2, n3, n4, nK, prim} } and N
+function nhlStackExposure(slate, lineups){
+  const k = nhlStackKOf(slate), out = {}; let N = 0;
+  const row = t => out[t] || (out[t] = { n2: 0, n3: 0, n4: 0, nK: 0, prim: 0 });
+  for(const l of (lineups || [])){
+    const ps = (l || []).map(x => (x && typeof x === 'object') ? x : playerById(slate, x)).filter(Boolean);
+    if(!ps.length) continue; N++;
+    const c = nhlTeamSkaters(ps); let top = null, topN = 0, tie = false;
+    for(const t in c){ const n = c[t], r = row(t);
+      if(n >= 2) r.n2++; if(n >= 3) r.n3++; if(n >= 4) r.n4++; if(n >= k) r.nK++;
+      if(n > topN){ topN = n; top = t; tie = false; } else if(n === topN) tie = true; }
+    if(top && !tie && topN >= 2) row(top).prim++;
+  }
+  return { N, k, teams: out };
+}
+function setNhlStackK(v){
+  const slate = activeSlate(); if(!slate) return;
+  const k = parseInt(v); slate.nhlStacks = Object.assign({ teams: {} }, slate.nhlStacks || {}, { k: (k === 2 || k === 3 || k === 4) ? k : NHL_STACK_K_DEFAULT });
+  save(); renderNhlStacks(); if(typeof renderPreviewExposure === 'function' && previewModalOpen()) renderPreviewExposure();
+}
+function setNhlStackRule(team, kind, val){
+  const slate = activeSlate(); if(!slate) return;
+  const t = nhlTeamKey(team); if(!t || (kind !== 'min' && kind !== 'max')) return;
+  slate.nhlStacks = Object.assign({ k: nhlStackKOf(slate), teams: {} }, slate.nhlStacks || {});
+  slate.nhlStacks.teams = Object.assign({}, slate.nhlStacks.teams || {});
+  const r = Object.assign({}, slate.nhlStacks.teams[t] || {});
+  const s = String(val == null ? '' : val).trim().replace('%', ''); const n = parseFloat(s);
+  if(s === '' || !Number.isFinite(n) || (kind === 'min' && n <= 0) || (kind === 'max' && n >= 100)) delete r[kind];
+  else r[kind] = Math.round(Math.max(0, Math.min(100, n)));
+  if(r.min == null && r.max == null) delete slate.nhlStacks.teams[t]; else slate.nhlStacks.teams[t] = r;
+  save(); renderNhlStacks();
+}
+function resetNhlStackRules(){
+  const slate = activeSlate(); if(!slate || !slate.nhlStacks) return;
+  slate.nhlStacks = { k: nhlStackKOf(slate), teams: {} }; save(); renderNhlStacks();
+}
+function previewModalOpen(){ const m = document.getElementById('previewModal'); return !!m && !m.classList.contains('hidden'); }
+// The Stacks tab (NHL only): one row per team — implied goals, skaters in
+// the pool, stack exposure over the SAVED board at 2+ / 3+ / 4+, and the
+// Min% / Max% the generator holds the team's K+ stacks to.
+function renderNhlStacks(){
+  const btn = document.getElementById('tab-btn-stacks');
+  const slate = activeSlate(), on = !!(slate && isNhl(slate));
+  if(btn) btn.style.display = on ? '' : 'none';
+  const el = document.getElementById('nhlStacksPanel'); if(!el) return;
+  if(!on){ el.innerHTML = ''; if(btn && btn.classList.contains('active')) switchTab('builder', document.querySelector('.tabs .tab')); return; }
+  const k = nhlStackKOf(slate), saved = slate.savedLineups || [];
+  const ex = nhlStackExposure(slate, saved.map(l => (l && l.players) ? l.players : l));
+  const hid = new Set(slate.hiddenIds || []), outS = new Set(slate._outIds || []);
+  const games = (typeof nhlGameEnvs === 'function') ? nhlGameEnvs(slate) : [];
+  const info = {}; games.forEach(g => g.teams.forEach(ti => { if(!ti.ghost) info[ti.team] = { opp: ti.opp, imp: ti.implied, kick: g.kickMins, kickLabel: g.kickLabel }; }));
+  const teams = [...new Set((slate.players || []).filter(p => p.salary > 0 && p.team).map(p => nhlTeamKey(p.team)))];
+  const live = t => (slate.players || []).filter(p => p.salary > 0 && nhlTeamKey(p.team) === t && nhlPosOf(p) && nhlPosOf(p) !== 'G' && !hid.has(p.id) && !outS.has(p.id) && !/^o$/i.test(String(p.status || '').trim())).length;
+  teams.sort((a, b) => ((info[b] || {}).imp ?? -1) - ((info[a] || {}).imp ?? -1) || a.localeCompare(b));
+  const N = ex.N, pc = n => N ? Math.round(100 * n / N) + '%' : '—';
+  const rules = nhlStackRules(slate);
+  const sumMin = rules.reduce((a, r) => a + (r.min || 0), 0), maxTeams = nhlMaxStackedTeams(k);
+  const warns = [];
+  if(sumMin > 100 * maxTeams + 1e-9) warns.push(`The Min%s add up to ${sumMin}% — a lineup can stack at most ${maxTeams} team${maxTeams === 1 ? '' : 's'} at ${k}+ (8 skaters from 3+ teams), so at most ${100 * maxTeams}% in total can be met.`);
+  rules.forEach(r => { if(r.min != null && r.max != null && r.min > r.max) warns.push(`${r.team}: Min% ${r.min} is above Max% ${r.max} — the Max% wins.`);
+    if(r.min != null && live(r.team) < k) warns.push(`${r.team}: Min% ${r.min} but only ${live(r.team)} ${r.team} skater${live(r.team) === 1 ? '' : 's'} in the pool — unhide at least ${k}.`); });
+  const inp = (t, kind, v) => `<input class="stk-inp" type="text" inputmode="numeric" value="${v == null ? '' : v}" placeholder="—" title="${kind === 'min' ? 'Min' : 'Max'}% of lineups that stack ${t} at ${k}+ skaters"
+      onchange="setNhlStackRule('${t}','${kind}',this.value)" onkeydown="if(event.key==='Enter')this.blur()">`;
+  const head = `<div class="stk-tbl-row stk-tbl-head"><span class="stk-tm">Team</span><span title="Implied goals (Tm Tot)">Imp</span><span title="Skaters in the pool (not hidden / out)">Sk</span><span title="Lineups with 2+ of this team's skaters">2+</span><span title="Lineups with 3+">3+</span><span title="Lineups with 4+">4+</span><span title="Lineups where this team is the biggest stack">Prim</span><span title="Min% of lineups stacking this team at ${k}+">Min%</span><span title="Max% of lineups stacking this team at ${k}+">Max%</span></div>`;
+  const rows = teams.map(t => { const e = ex.teams[t] || { n2: 0, n3: 0, n4: 0, nK: 0, prim: 0 }, i = info[t] || {}, r = nhlStackRuleOf(slate, t);
+    const col = nhlTeamColor(slate, t), sk = live(t);
+    const kCell = n => { const v = N ? 100 * n / N : 0; const bad = (r.min != null && v + 1e-9 < r.min) || (r.max != null && v - 1e-9 > r.max);
+      return `<span class="${bad ? 'stk-off' : (n ? 'stk-on' : '')}">${pc(n)}</span>`; };
+    const cells = [2, 3, 4].map(s => s === k ? kCell(s === 2 ? e.n2 : s === 3 ? e.n3 : e.n4) : `<span class="${(s === 2 ? e.n2 : s === 3 ? e.n3 : e.n4) ? '' : 'stk-dim'}">${pc(s === 2 ? e.n2 : s === 3 ? e.n3 : e.n4)}</span>`).join('');
+    return `<div class="stk-tbl-row${sk ? '' : ' stk-hidden'}"><span class="stk-tm"><span class="nhl-tag nhl-team" style="color:${col};border-color:${col};">${esc(t)}</span>${i.opp ? `<span class="stk-opp">v ${esc(i.opp)}</span>` : ''}${i.kickLabel ? `<span class="stk-opp">${esc(i.kickLabel)}</span>` : ''}</span>`
+      + `<span>${i.imp != null ? (+i.imp).toFixed(1) : '—'}</span><span class="${sk < k ? 'stk-off' : ''}">${sk}</span>${cells}<span>${pc(e.prim)}</span>`
+      + `<span>${inp(t, 'min', r.min)}</span><span>${inp(t, 'max', r.max)}</span></div>`; }).join('');
+  el.innerHTML = `<div class="stk-top">
+      <div><div class="section-title" style="margin-bottom:2px;">Team Stacks</div>
+      <div class="stk-sub">${N ? `Exposure over the ${N} saved lineup${N === 1 ? '' : 's'}.` : 'Save lineups to see stack exposure.'} Min% / Max% apply to every NHL build.</div></div>
+      <div class="stk-ctl"><label>Stack =
+        <select class="form-input" onchange="setNhlStackK(this.value)">${[2, 3, 4].map(v => `<option value="${v}"${v === k ? ' selected' : ''}>${v}+ skaters</option>`).join('')}</select></label>
+        <button class="btn btn-sm" onclick="resetNhlStackRules()" ${rules.length ? '' : 'disabled'} title="Clear every team's Min% / Max%">Reset</button></div></div>
+    <div class="stk-note">A lineup stacks a team when it holds ${k}+ of that team's skaters (goalie not counted). Min% / Max% are shares of lineups stacking the team at ${k}+; the ${k}+ column is the one they bound.</div>
+    ${warns.map(w => `<div class="stk-warn">⚠ ${esc(w)}</div>`).join('')}
+    <div class="stk-tbl">${head}${rows || '<div class="no-data">No teams on this slate.</div>'}</div>`;
+}
 // Pool-row tags: position, line / pair, PP unit, and the sheet status. The
 // line and PP unit are what an NHL stack is built from, so they sit on the row.
 function nhlRowTags(p, slate){
@@ -7162,7 +7369,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck151/2026-10-06';
+const BUILD_ID = '2.0/ck155/2026-10-09';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -7228,6 +7435,8 @@ function buildRunStamp(slate, o){
     // ck150: showdown captain Min% / Max% counts
     'cptMin=' + Object.keys((slate && slate.sdCptMinOverrides) || {}).length,
     'cptMax=' + Object.keys((slate && slate.sdCptMaxOverrides) || {}).length,
+    // ck152: NHL team-stack rules (K, then TEAM min-max per rule)
+    'nhlStk=' + ((slate && typeof isNhl === 'function' && isNhl(slate)) ? (nhlStackKOf(slate) + ':' + nhlStackRules(slate).map(r => r.team + (r.min != null ? r.min : '') + '-' + (r.max != null ? r.max : '')).join(',')) : ''),
     'groups=' + ((slate && slate.groups || []).length),
     'pool=' + ((slate && slate.players || []).filter(p => p && p.salary > 0).length),
     'overrideKeys=' + (cnt(minOv) + cnt(maxOv)),
@@ -8024,7 +8233,7 @@ function renderSlate(){
     if(fb){ fb._on=false; fb.style.borderColor='var(--border)'; fb.style.color='var(--muted)'; }
     _savedEntriesCache=[]; _savedAvailCache=new Set(); }
   renderArchetypeLegend();
-  renderPool(); renderLineup(); renderSaved(); renderExposure(); renderGroups(); renderGroupRulesSummary(); refreshSimInputsTab(); refreshSimDashTab();
+  renderPool(); renderLineup(); renderSaved(); renderExposure(); renderGroups(); renderGroupRulesSummary(); refreshSimInputsTab(); refreshSimDashTab(); if(typeof renderNhlStacks === 'function') renderNhlStacks();
 
   // Restore persisted NASCAR track type and laps after render
   if(slate.sport==='nascar' && slate._nascarTrackType){
@@ -12018,6 +12227,7 @@ function exportSimCSV(){
 // EXPOSURE
 // ═══════════════════════════════════════════════════════════
 function renderExposure(){
+  if(typeof renderNhlStacks==='function') try { renderNhlStacks(); } catch(e){ console.error(e); }   // ck152: the Stacks tab reads the same saved board
   const panel=document.getElementById('exposurePanel');
   const slate=activeSlate();if(!slate){panel.innerHTML='';return;}
   const total=(slate.savedLineups||[]).length;
@@ -22400,6 +22610,7 @@ async function runUFCContestEV(ctx){
       if(mn/finalLineups.length>=0.30){ const c=pr[k]/mn; if(c>bc){bc=c; bd=`${nm[a]}+${nm[b]}`;} } }
     if(bd) log(`Co-exposure check: tightest pair ${bd} shares ${Math.round(100*bc)}% (capped at 85% — skill correlation kept, degenerate coupling prevented).`); }
 
+  boardFinalize(slate, finalLineups, ctx);   // ck152: captain / team-stack exposure before the set is saved
   const now=new Date();
   addToHistory(slate.id, `${finalLineups.length} lineups (EV) @ ${now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`, finalLineups);
   openPreviewModal(finalLineups, 'proj');
@@ -23434,6 +23645,7 @@ async function runPgaSimScoreSelect(ctx){
   }
   const minOv=slate.playerMinOverrides||{};
   if(Object.keys(minOv).some(id=>minOv[id]>0)) log('Note: Min% overrides are not enforced in Sim Score mode (use Contest EV or Optimize for forced exposure).');
+  boardFinalize(slate, chosen, ctx);   // ck152: captain / team-stack exposure before the set is saved
   addToHistory(slate.id, `${chosen.length} lineups (sim score) @ ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`, chosen);
   openPreviewModal(chosen, 'proj');
   return chosen;
@@ -29735,9 +29947,22 @@ function nflAdjShares(T, statKey, adj){
   const out = {}; let fixed = 0, restBase = 0; let over = false;
   const ov = id => { const a = adj && adj.players && adj.players[id]; return a && Number.isFinite(a[statKey]) ? a[statKey] : null; };
   const locked = id => { const a = adj && adj.players && adj.players[id]; return !!(a && a.lock); };
+  // ck153: once the user has set a share in this column, the shares the OUT
+  // redistribution wrote stop being fixed and rebalance with everyone else he
+  // has not set — from the redistributed value, not the market one. Without it
+  // a typed share on a team with a scratch had nobody to take room from (every
+  // pass catcher held an auto entry) and the column ran past 100%. With no
+  // hand-set share in the column nothing here changes.
+  const isAuto = id => { const a = adj && adj.players && adj.players[id]; return !!(a && a.auto === 'out'); };
+  const manualIn = !!(adj && adj.players) && T.players.some(pl => { if(pl.skip) return false; const a = adj.players[pl.p.id];
+    return !!(a && a.auto !== 'out' && Number.isFinite(a[statKey])); });
+  const freeBase = {};
   for(const pl of T.players){
     if(pl.skip) continue;
     const id = pl.p.id, o = ov(id);
+    if(o != null && manualIn && isAuto(id) && !locked(id) && !(adj.players[id] && adj.players[id].resid)){
+      freeBase[id] = o; restBase += o; continue;
+    }
     // THE OUT RESIDUAL IS A SUBSTITUTE, NOT AN ADDITION. When the fill caps
     // refuse part of a scratched starter's share, nflRedistributeOut pins the
     // refused part back on HIM, so the fixed block still sums to the share that
@@ -29784,7 +30009,7 @@ function nflAdjShares(T, statKey, adj){
   for(const pl of T.players){
     if(pl.skip) continue;
     const id = pl.p.id;
-    if(out[id] == null) out[id] = pl.share[statKey] * k;
+    if(out[id] == null) out[id] = (freeBase[id] != null ? freeBase[id] : pl.share[statKey]) * k;
   }
   return { shares: out, over, fixed, restBase };
 }
@@ -30296,8 +30521,53 @@ function nflImpliedCapped(adjTeam){
   if(v <= NFL_IMPLIED_MIN) return 'min';
   return null;
 }
+// ── ck154: UNDO for the sim inputs ─────────────────────────────────────────
+// Every edit made on this board (a share, a lock, a lean, a total / spread, a
+// reset, a preset) snapshots the adjustment set first; Ctrl/⌘+Z or the ↶
+// button puts the last one back. Kept in memory per slate (not saved) and
+// capped. OUT marks are not part of it — they change the slate's player list,
+// and the ⛔ toggle is its own undo.
+const SIM_UNDO_MAX = 60;
+const _simUndo = {};
+function simUndoPush(slate){
+  if(!slate) return;
+  const st = _simUndo[slate.id] || (_simUndo[slate.id] = []);
+  st.push(slate._simAdj ? nflAdjClone(slate._simAdj) : null);
+  if(st.length > SIM_UNDO_MAX) st.shift();
+}
+function simUndoCount(slate){ return slate && _simUndo[slate.id] ? _simUndo[slate.id].length : 0; }
+function simDashUndo(){
+  const slate = activeSlate(); if(!slate) return;
+  const st = _simUndo[slate.id]; if(!st || !st.length) return;
+  const snap = st.pop();
+  if(snap) slate._simAdj = snap; else delete slate._simAdj;
+  // the OUT redistribution's own entries are rebuilt for the slate as it is now
+  if(typeof nflOutIds === 'function' && nflOutIds(slate).length) nflRedistributeOut(slate);
+  simDashCommit();
+}
+if(typeof document !== 'undefined') document.addEventListener('keydown', function(ev){
+  if(!(ev.ctrlKey || ev.metaKey) || ev.shiftKey || String(ev.key).toLowerCase() !== 'z') return;
+  if(typeof simInputsModalOpen !== 'function' || !simInputsModalOpen()) return;
+  const a = document.activeElement;
+  // a cell being typed in keeps the browser's own text undo
+  if(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && a.type !== 'range' && a.value !== a.defaultValue) return;
+  ev.preventDefault(); simDashUndo();
+});
+// Several overrides as ONE edit (one undo step, one re-render) — the linked
+// receiving stats write two or three cells for a single typed number.
+function simDashSetMany(list){
+  const slate = activeSlate(); if(!slate || !list || !list.length) return;
+  simUndoPush(slate);
+  for(const [path, val] of list) simDashApply(slate, path, val);
+  simDashCommit();
+}
 function simDashSet(path, val){
   const slate = activeSlate(); if(!slate) return;
+  simUndoPush(slate);
+  simDashApply(slate, path, val);
+  simDashCommit();
+}
+function simDashApply(slate, path, val){
   const adj = nflSimAdj(slate, true);
   const [kind, key, stat] = path.split('/');
   if(kind === 'team'){
@@ -30320,11 +30590,11 @@ function simDashSet(path, val){
     }
     if(!Object.keys(adj.players[key]).length || (Object.keys(adj.players[key]).length === 1 && adj.players[key].auto)) delete adj.players[key];
   }
-  simDashCommit();
 }
 // Total / Spread sliders move both teams' implied points together.
 function simDashSetGame(a, b, which, val){
   const slate = activeSlate(); if(!slate) return;
+  simUndoPush(slate);
   const adj = nflSimAdj(slate, true);
   const cur = simDashGameState(slate, a, b);
   const v = parseFloat(val); if(!Number.isFinite(v)) return;
@@ -30400,6 +30670,7 @@ function simDashApplyPreset(nameArg, force){
   // Applying REPLACES the board, so warn before throwing live work away.
   const n = nflSimAdjCount(slate);
   if(n && !force && !confirm(`Apply "${nm}"? The ${n} adjustment${n>1?'s':''} currently on the board will be replaced.`)) return;
+  simUndoPush(slate);
   slate._simAdj = nflAdjClone(pre.adj);
   // A preset is a snapshot of the USER's board, but the OUT list is a fact about
   // the slate that outlives it — so the automatic entries are rebuilt (and any
@@ -30422,6 +30693,7 @@ function simDashDeletePreset(nameArg, force){
 }
 function simDashReset(scope, key){
   const slate = activeSlate(); if(!slate || !slate._simAdj) return;
+  simUndoPush(slate);
   const adj = slate._simAdj;
   if(scope === 'all'){ delete slate._simAdj; }
   else if(scope === 'game'){ key.split('@').forEach(t => { delete adj.teams[t]; }); }
@@ -30883,133 +31155,168 @@ function simDashGameHtml(ctx, g){
         <div class="sdash-val">${gs.margin>0?A:gs.margin<0?B:'PK'} ${gs.margin?(-Math.abs(gs.margin)).toFixed(1):''}${Math.abs(gs.margin-gs.baseMargin)>=0.05?`<i>${gs.baseMargin>0?A:B} ${(-Math.abs(gs.baseMargin)).toFixed(1)}</i>`:''}</div>
       </div>`;
     }
-    // Teams
-    for(const t of [A, B].filter(Boolean)){
-      const T = model[t]; if(!T) continue;
+    // ck153: ONE TEAM AT A TIME, AS A TABLE. Matt: "a bunch of separate
+    // sliders for every player and stat category … very manual and time
+    // consuming … better in a table format, where you select the team and can
+    // see … every player … all of their stat share in one table". The two
+    // teams are a switch; the chosen team's players are rows and its five
+    // share stats are columns; every cell is a typed share. A typed share is
+    // the same override a slider used to write (simDashSet → adj.players), so
+    // the untouched teammates in that column still rebalance around it
+    // (nflAdjShares) and the team totals do not move.
+    const teams = [A, B].filter(Boolean);
+    const PREV = nflPreviewMeans(slate, ctx, g);
+    // ck154: every change on this game, each removable on its own
+    {
+      const chips = [];
+      const f1 = v => (Math.round(v * 10) / 10).toString();
+      for(const x of teams){
+        const ta = adj.teams[x] || {}, ti = cur.teamInfo.get(x);
+        if(Number.isFinite(ta.implied) && ti) chips.push({ txt: `${x} ${f1(ti.baseImplied)} → ${f1(ta.implied)} pts`, kind: 'implied', a: x });
+        if(ta.lean) chips.push({ txt: `${x} pass lean ${ta.lean > 0 ? '+' : ''}${Math.round(ta.lean * 100)}%`, kind: 'lean', a: x });
+        const T = model[x]; if(!T) continue;
+        for(const pl of T.players){ if(pl.skip) continue; const a = adj.players[pl.p.id]; if(!a) continue;
+          if(a.lock) chips.push({ txt: `${surnameOf(pl.p.name)} 🔒`, kind: 'lock', a: pl.p.id });
+          if(a.auto === 'out') continue;
+          for(const st of NFL_SHARE_STATS){ if(!Number.isFinite(a[st.key])) continue;
+            chips.push({ txt: `${surnameOf(pl.p.name)} ${st.label.replace(' yds', ' Yds')} ${pct(pl.share[st.key] || 0)} → ${pct(a[st.key])}%`, kind: 'share', a: pl.p.id, b: st.key }); } }
+      }
+      const nU = simUndoCount(slate);
+      html += `<div class="sdt-changes"><span class="sdt-chl">Changes</span>`
+        + (chips.length ? chips.map(c => `<span class="sdt-chip">${esc(c.txt)}<button title="Undo just this change" onclick="simDashDropChange('${c.kind}','${c.a}'${c.b ? `,'${c.b}'` : ''})">✕</button></span>`).join('')
+                        : `<span class="sdt-chnone">none on this game — it is at the market</span>`)
+        + `<span class="sdt-sp"></span><button class="sdash-btn" onclick="simDashUndo()" ${nU ? '' : 'disabled'} title="Undo the last edit (Ctrl/⌘+Z)">↶ Undo${nU ? ` (${nU})` : ''}</button></div>`;
+    }
+    const pickMap = slate._simDashTeam || {};
+    const t = teams.indexOf(pickMap[g.key]) >= 0 ? pickMap[g.key] : teams[0];
+    html += `<div class="sdt-switch">` + teams.map(x => {
+      const ti = cur.teamInfo.get(x);
+      const xAdj = (adj.teams[x] && (Number.isFinite(adj.teams[x].implied) || adj.teams[x].lean))
+        || (model[x] && model[x].players.some(pl => adj.players[pl.p.id] && adj.players[pl.p.id].auto !== 'out' && NFL_SHARE_STATS.some(st => Number.isFinite(adj.players[pl.p.id][st.key]))));
+      return `<button class="sdt-tbtn${x === t ? ' on' : ''}${xAdj ? ' adj' : ''}" onclick="simDashPickTeam('${esc(g.key)}','${x}')">${x}<span>${ti ? fmt1(ti.implied) : ''}</span>${xAdj ? '<i>⚙</i>' : ''}</button>`;
+    }).join('') + `</div>`;
+    {
+      const T = model[t];
       const ti = cur.teamInfo.get(t);
+      if(T && ti){
       const tot = nflAdjTeamTotals(T, ti, adj, cur.teamInfo);
       const lean = Math.round((adj.teams[t]?.lean || 0) * 100);
       const autoLeanPct = Math.round(tot.autoLean * 1000) / 10;
       const teamPlayersAdj = T.players.some(pl => adj.players[pl.p.id] && NFL_SHARE_STATS.some(st => Number.isFinite(adj.players[pl.p.id][st.key])));
-      const tid = `sdTeam_${t}`;
-      const isOpen = open[tid] !== false;
-      html += `<div class="sdash-team${teamPlayersAdj||lean?' adj':''}">
-        <div class="sdash-team-hdr" onclick="simDashToggle('${tid}')">
-          <span class="sdash-caret">${isOpen?'▾':'▸'}</span>
-          <span class="sdash-team-name">${t}</span>
-          <span class="sdash-team-meta">${fmt1(tot.imp)} pts · pass ${Math.round(tot.passYds)} · rush ${Math.round(tot.rushYds)} · ${tot.td.toFixed(1)} TD${tot.f!==1?` · <b style="color:var(--accent)">×${tot.f.toFixed(2)}</b>`:''}</span>
-          ${teamPlayersAdj?`<button class="sdash-mini" onclick="event.stopPropagation();simDashReset('teamPlayers','${t}')" title="Reset every ${t} player share">↺ shares</button>`:''}
-        </div>
-        <div id="${tid}" style="${isOpen?'':'display:none'}">`;
-      // PROP COVERAGE. When this team's sheet is short enough that the guardrail
-      // engaged, say so here — the share numbers below add up to less than 100%
-      // and the user is owed the reason in the place where he is reading them.
+      html += `<div class="sdt-team">
+        <div class="sdt-thdr">
+          <span class="sdt-tname">${t}</span>
+          <span class="sdt-tmeta">${fmt1(tot.imp)} pts · pass ${Math.round(tot.passYds)} · rush ${Math.round(tot.rushYds)} · ${tot.td.toFixed(1)} TD${tot.f!==1?` · <b style="color:var(--accent)">×${tot.f.toFixed(2)}</b>`:''}</span>
+          <label class="sdt-lean" title="Tilt ${t}'s production toward the pass (+) or the run (−), on top of the spread's own game script. −30 to +30.">Pass lean
+            <input type="number" min="-30" max="30" step="1" value="${lean}" class="${lean ? 'hot' : ''}" onchange="simDashSet('team/${t}/lean',Math.max(-30,Math.min(30,parseFloat(this.value)||0)))" onkeydown="if(event.key==='Enter')this.blur()">%</label>
+          ${autoLeanPct && Math.abs(autoLeanPct) >= 0.1 ? `<span class="sdt-auto" title="Game script from the adjusted spread: ${t}'s expected margin is ${tot.scriptD>0?'+':''}${(Math.round(tot.scriptD*10)/10)} points off the market baseline, which tilts pass production ×${tot.autoPassF.toFixed(3)} and rush ×${tot.autoRushF.toFixed(3)}. The lean is an offset on top of this.">auto ${autoLeanPct>0?'+':''}${autoLeanPct}% pass (spread)</span>` : ''}
+          <label class="sdt-link" title="On: editing Receptions or Receiving Yds moves the other by the same ratio (1:1 in 12 seasons of data). His TD share moves with the extra catches at a blend of his own TD rate (40%) and ${t}'s pass-catcher average (60%) — the calibrated finding that added volume brings roughly average red-zone usage, so a red-zone TE gains less than proportionally and a low-TD possession receiver a little more, from a small base. Editing Rushing Yds moves his TD share by the rushing-weighted ratio (proportional for backs). Off: each cell edits alone."><input type="checkbox" ${simDashLinkOn(slate) ? 'checked' : ''} onchange="simDashToggleLink()"> 🔗 Link volume → yds / TD</label>
+          <span class="sdt-sp"></span>
+          ${teamPlayersAdj ? `<button class="sdash-btn warn" onclick="simDashReset('teamPlayers','${t}')" title="Every ${t} share back to the market (OUT redistribution is rebuilt)">↺ Reset ${t} shares</button>` : ''}
+        </div>`;
       html += nflCoverageNoteHtml(ti, t);
       html += nflBaseFillNoteHtml(ti, t);
-      // The team defense has no shares to split, but its inputs still belong on
-      // this panel: one read-only line saying what the sim thinks it will do.
-      // Sliders can come later — right now the point is that a DST quoting 12
-      // points is visible before it turns up as a captain.
-      html += `<div class="sdash-row">
-            <div class="sdash-lbl" title="Tilt production toward the pass (right) or the run (left)">Run ◂ lean ▸ Pass</div>
-            ${rng('sdL_'+t, lean, -30, 30, 1, `simDashSet('team/${t}/lean',this.value)`, 'lean', '%')}
-            <div class="sdash-val ${lean?'hot':''}">${lean>0?'+':''}${lean}%</div>
-          </div>`;
-      // The spread's own script response, stated out loud. It is NOT part of the
-      // slider (which stays a pure manual offset) — it is what the adjusted
-      // margin already did to this team's pass/rush split before the slider ran.
-      if(Math.abs(autoLeanPct) >= 0.1){
-        html += `<div class="sdash-autolean muted" id="sdAuto_${t}" title="Game script from the adjusted spread: ${t}'s expected margin is ${tot.scriptD>0?'+':''}${(Math.round(tot.scriptD*10)/10)} points off the market baseline, which tilts pass production ×${tot.autoPassF.toFixed(3)} and rush ×${tot.autoRushF.toFixed(3)}. The lean slider above is an offset on top of this.">auto ${autoLeanPct>0?'+':''}${autoLeanPct}% pass (spread)</div>`;
-      }
+      // the defense: read-only, with its OUT toggle (no share of the pie)
       {
         const di = cur.entries.findIndex(en => en.pos === 'DST' && en.team === t);
         if(di >= 0){
-          const de = cur.entries[di];
-          // A DST has no share row, so before this it was the one rostered
-          // position that could never be marked OUT — and a defense does get
-          // ruled out (a team resting starters, a slate-level scratch). Same
-          // toggleOut path as the skill rows; the redistribution is a no-op for
-          // him because he owns no share of the offensive pie.
-          const dp = pool[di];
-          const dOut = dp && _dashOut.has(dp.id);
-          const oppT = [A, B].find(x => x && x !== t);
-          const oppImp = oppT && cur.teamInfo.get(oppT) ? cur.teamInfo.get(oppT).implied
-                       : (cur.teamInfo.get(t) ? cur.teamInfo.get(t).oppImplied : null);
+          const de = cur.entries[di], dp = pool[di], dOut = dp && _dashOut.has(dp.id);
+          const oppT = teams.find(x => x !== t);
+          const oppImp = oppT && cur.teamInfo.get(oppT) ? cur.teamInfo.get(oppT).implied : (ti ? ti.oppImplied : null);
           const x = nflDstExpect(de, oppImp);
           const src = (de.dstProps && de.dstProps.length) ? de.dstProps.join(' + ') : 'league avg';
-          // Laid out like a stat row (name · number · detail), not in the
-          // slider grid — the grid's 118px label column left a gap and pushed
-          // the detail off the right edge.
-          html += `<div class="sdash-stat sdash-dst" title="Team defense: expected sacks / interceptions / fumble recoveries and the resulting mean DK score against ${oppT||'the opponent'}'s ${oppImp!=null?fmt1(oppImp):'?'}-point implied total. Source: ${src}.">
-            <div class="sdash-stat-hdr" style="cursor:default;">
-              <span class="sdash-caret" style="visibility:hidden">▸</span>
-              <span class="sdash-stat-name">Defense${dOut?' <span class="out-badge">OUT</span>':''}</span>
-              <span class="sdash-stat-tot">${dOut?'0.0':x.pts.toFixed(1)} DK</span>
-              <span class="sdash-stat-top">${x.sacks.toFixed(1)} sk · ${x.ints.toFixed(1)} int · ${x.fumRec.toFixed(1)} fr · ${src}</span>
-              ${dp?`<button class="sdash-outbtn${dOut?' on':''}" title="${dOut?'Undo OUT — put this defense back in the sim':'Mark this defense OUT: it scores 0 and drops out of every lineup'}" onclick="event.stopPropagation();toggleOut('${dp.id}',event)">⛔</button>`:''}
-            </div>
+          html += `<div class="sdt-dst" title="Team defense: expected sacks / interceptions / fumble recoveries and the resulting mean DK score against ${oppT||'the opponent'}'s ${oppImp!=null?fmt1(oppImp):'?'}-point implied total. Source: ${src}.">
+            <b>Defense</b>${dOut?' <span class="out-badge">OUT</span>':''} <span class="sdt-dpts">${dOut?'0.0':x.pts.toFixed(1)} DK</span>
+            <span class="muted">${x.sacks.toFixed(1)} sk · ${x.ints.toFixed(1)} int · ${x.fumRec.toFixed(1)} fr · ${src}</span>
+            ${dp?`<button class="sdash-outbtn${dOut?' on':''}" title="${dOut?'Undo OUT — put this defense back in the sim':'Mark this defense OUT: it scores 0 and drops out of every lineup'}" onclick="toggleOut('${dp.id}',event)">⛔</button>`:''}
           </div>`;
         }
       }
-      for(const st of NFL_SHARE_STATS){
-        const teamTot = tot[st.key], baseTot = T.base[st.key];
-        if(!(baseTot > 0)) continue;
-        const res = nflAdjShares(T, st.key, adj);
-        // ck123: hiding a man from the LINEUP pool does not take him off the
-        // field — he still runs his routes and keeps his share, so he stays on
-        // this board (tagged). Only OUT removes a share.
-        const rows = T.players.filter(pl => !pl.skip)
-          .map(pl => ({pl, share: res.shares[pl.p.id]||0, base: pl.share[st.key]||0}))
-          .filter(r => r.base > 0 || r.share > 0 || (adj.players[r.pl.p.id] && Number.isFinite(adj.players[r.pl.p.id][st.key])))
-          .sort((x,y) => y.share - x.share);
-        const sid = `sdStat_${t}_${st.key}`;
-        const sOpen = !!open[sid];
-        const statAdj = rows.some(r => adj.players[r.pl.p.id] && Number.isFinite(adj.players[r.pl.p.id][st.key]));
-        // Unpriced teammates the user can hand a share to.
-        const extras = T.players.filter(pl => !pl.skip && !rows.some(r => r.pl === pl) && (st.key !== 'passYds' || pl.e.pos === 'QB'));
-        html += `<div class="sdash-stat${statAdj?' adj':''}">
-          <div class="sdash-stat-hdr" onclick="simDashToggle('${sid}')">
-            <span class="sdash-caret">${sOpen?'▾':'▸'}</span>
-            <span class="sdash-stat-name">${st.label}</span>
-            <span class="sdash-stat-tot">${st.fmt(teamTot)} ${st.unit}${Math.abs(teamTot-baseTot)>=0.05?`<i>${st.fmt(baseTot)}</i>`:''}</span>
-            <span class="sdash-stat-top">${rows.slice(0,3).map(r => `${surnameOf(r.pl.p.name)} ${pct(r.share)}%`).join(' · ')}</span>
-            ${res.over?`<span class="sdash-over" title="Locked/overridden shares exceed 100% — the rest of the team is at zero">over 100%</span>`:''}
-            ${statAdj?`<button class="sdash-mini" onclick="event.stopPropagation();simDashReset('stat','${t}/${st.key}')" title="Reset ${st.label} shares">↺</button>`:''}
-          </div>
-          <div id="${sid}" style="${sOpen?'':'display:none'}">`;
-        for(const r of rows){
-          const id = r.pl.p.id, a = adj.players[id] || {};
-          const isOv = Number.isFinite(a[st.key]);
-          // An entry the OUT redistribution wrote says so on the row, and names
-          // whose absence produced it — a share that moved on its own with no
-          // visible cause is exactly the kind of number nobody trusts.
-          const isAuto = isOv && a.auto === 'out';
-          const isOutRow = _dashOut.has(id);
-          const autoWhy = isAuto ? (_outMoveFor.get(id + '|' + st.key) || '') : '';
-          const mean = teamTot * r.share, baseMean = baseTot * r.base;
-          const isHidRow = hidden.has(id) && !isOutRow;
-          html += `<div class="sdash-prow${isOv?' ov':''}${a.lock?' lock':''}${isOutRow?' isout':''}">
-            <div class="sdash-pname" title="${esc(r.pl.p.name)}${isHidRow?' — hidden from your lineup pool; still playing, still simmed with this share':''}"><span class="pos-badge" style="font-size:8px;margin-right:4px;">${r.pl.e.pos||'?'}</span>${esc(r.pl.p.name)}${isHidRow?`<span class="sdash-hid-tag" title="Hidden from YOUR lineup pool only. He is still playing, so the sim keeps his share of the offense — mark him OUT (⛔) if he is not playing.">hidden from pool</span>`:''}${isAuto?`<span class="sdash-auto-tag" title="Written automatically when ${esc(autoWhy||'a teammate')} was marked OUT. Drag the slider to take it over by hand.">auto — ${esc(autoWhy||'out')} out</span>`:''}</div>
-            ${rng('sdP_'+id+'_'+st.key, pct(r.share), 0, 100, 0.5, `simDashSet('player/${id}/${st.key}',this.value)`, '', '%')}
-            <div class="sdash-pshare${isOv?' hot':''}">${pct(r.share)}%${Math.abs(r.share-r.base)>=0.0005?`<i>${pct(r.base)}%</i>`:''}</div>
-            <div class="sdash-pmean">${st.fmt(mean)}${Math.abs(mean-baseMean)>=0.05?`<i>${st.fmt(baseMean)}</i>`:''}</div>
-            <button class="sdash-lock${a.lock?' on':''}" title="${a.lock?'Unlock — let renormalization move him':'Lock his share so other sliders never move him'}" onclick="simDashSet('player/${id}/lock')">${a.lock?'🔒':'🔓'}</button>
-            <button class="sdash-mini" style="visibility:${isOv?'visible':'hidden'}" title="Back to market share" onclick="simDashSet('player/${id}/${st.key}','')">↺</button>
-            <button class="sdash-outbtn${isOutRow?' on':''}" title="${isOutRow?'Undo OUT — put his market share back':'Mark OUT: he scores 0 and this share goes to his teammates'}" onclick="toggleOut('${id}',event)">⛔</button>
-            ${isOutRow?`<button class="sdash-outbtn sdash-prenews-btn${nflOutRepriced(slate,id)?' on':''}" title="${nflOutRepriced(slate,id)
-              ? 'Books REPRICED: this sheet was pulled after the news, so only teammates with no line of their own inherit his share. Click for the default (by role).'
-              : 'By role (default): every teammate in his room inherits his share in proportion to the role he already has; unpriced men get a small slice. Click if this sheet was pulled AFTER the announcement (the books have repriced).'}" onclick="event.stopPropagation();nflOutSetRepriced('${id}', ${nflOutRepriced(slate,id)?'false':'true'})">📰</button>`:''}
-          </div>`;
+      // columns: the team's five pies, passing first (the QB row reads left to right)
+      const COLS = ['passYds', 'rec', 'recYds', 'rushYds', 'td'].map(k => NFL_SHARE_STATS.find(s => s.key === k)).filter(Boolean)
+        .filter(st => T.base[st.key] > 0);
+      const RES = {}, TOT = {};
+      COLS.forEach(st => { RES[st.key] = nflAdjShares(T, st.key, adj); TOT[st.key] = tot[st.key]; });
+      const ovOf = (id, k) => { const a = adj.players[id]; return !!(a && Number.isFinite(a[k])); };
+      const shown = new Set(((slate._simDashShow || {})[t]) || []);
+      const POS_ORD = { QB: 0, RB: 1, WR: 2, TE: 3 };
+      const rows = T.players.filter(pl => !pl.skip).filter(pl => shown.has(pl.p.id)
+          || COLS.some(st => (pl.share[st.key] || 0) > 0 || (RES[st.key].shares[pl.p.id] || 0) > 0 || ovOf(pl.p.id, st.key)))
+        // ordered by MARKET shares, so a row never jumps when its cells are edited
+        .map(pl => ({ pl, w: COLS.reduce((a, st) => a + (st.key === 'td' ? 0 : (pl.share[st.key] || 0)), 0) }))
+        .sort((x, y) => (POS_ORD[x.pl.e.pos] ?? 9) - (POS_ORD[y.pl.e.pos] ?? 9) || y.w - x.w);
+      // a pass-yards cell only for a QB (or a man someone already gave pass yards)
+      // and no receiving cells on a QB unless he already has a receiving share
+      const has = (pl, k) => (pl.share[k] || 0) > 0 || (RES[k] && (RES[k].shares[pl.p.id] || 0) > 0) || ovOf(pl.p.id, k);
+      const applies = (pl, st) => st.key === 'passYds' ? (pl.e.pos === 'QB' || has(pl, 'passYds'))
+        : (st.key === 'rec' || st.key === 'recYds') ? (pl.e.pos !== 'QB' || has(pl, st.key)) : true;
+      html += `<div class="sdt-wrap"><table class="sdt" id="sdtTable"><thead><tr><th class="sdt-pl">Player</th>`;
+      COLS.forEach(st => {
+        const anyOv = rows.some(r => ovOf(r.pl.p.id, st.key));
+        const teamTot = TOT[st.key], baseTot = T.base[st.key];
+        html += `<th title="${esc(st.label)} — team total ${st.fmt(teamTot)} ${st.unit}. Each cell is that player's share of it.">
+          <div class="sdt-h">${esc(st.label.replace(' yds', ' Yds'))}${anyOv ? ` <button class="sdash-mini" onclick="simDashReset('stat','${t}/${st.key}')" title="Every ${t} ${esc(st.label)} share back to the market">↺</button>` : ''}</div>
+          <div class="sdt-ht">${st.fmt(teamTot)} ${st.unit}${Math.abs(teamTot - baseTot) >= 0.05 ? `<i>${st.fmt(baseTot)}</i>` : ''}</div></th>`;
+      });
+      html += `<th class="sdt-pts" title="Mean DK points under the board as it stands — the sim run on this game (${NFL_PREVIEW_SIMS.toLocaleString()} worlds, fixed seed), so every edit shows its points effect here.">Sim<div class="sdt-ht">DK pts</div></th>
+        <th class="sdt-pts" title="The sheet's projection (SS Proj, or your edited Proj)">Proj<div class="sdt-ht">sheet</div></th>`;
+      html += `<th class="sdt-act"></th></tr></thead><tbody>`;
+      rows.forEach((r, ri) => {
+        const pl = r.pl, id = pl.p.id, a = adj.players[id] || {};
+        const isOutRow = _dashOut.has(id), isHidRow = hidden.has(id) && !isOutRow;
+        const anyOv = COLS.some(st => ovOf(id, st.key));
+        const isAutoRow = anyOv && a.auto === 'out';
+        const autoWhy = isAutoRow ? (COLS.map(st => _outMoveFor.get(id + '|' + st.key)).find(Boolean) || '') : '';
+        html += `<tr data-pos="${esc(pl.e.pos || '')}" class="${isOutRow ? 'isout' : ''}${a.lock ? ' lock' : ''}${anyOv && !isAutoRow ? ' ov' : ''}">
+          <td class="sdt-pl"><span class="pos-badge" style="font-size:8px;margin-right:4px;">${pl.e.pos || '?'}</span><span class="sdt-nm" title="${esc(pl.p.name)}">${esc(pl.p.name)}</span>${isHidRow ? `<span class="sdash-hid-tag" title="Hidden from YOUR lineup pool only. He is still playing, so the sim keeps his share — mark him OUT (⛔) if he is not playing.">hidden</span>` : ''}${isAutoRow ? `<span class="sdash-auto-tag" title="Written automatically when ${esc(autoWhy || 'a teammate')} was marked OUT. Type over any cell to take it over by hand.">auto — ${esc(autoWhy || 'out')} out</span>` : ''}</td>`;
+        COLS.forEach((st, ci) => {
+          if(!applies(pl, st)){ html += `<td class="sdt-na">—</td>`; return; }
+          const share = RES[st.key].shares[id] || 0, base = pl.share[st.key] || 0;
+          const ov = ovOf(id, st.key), auto = ov && a.auto === 'out';
+          const mean = TOT[st.key] * share, baseMean = T.base[st.key] * base;
+          const moved = Math.abs(share - base) >= 0.0005;
+          const tip = `${pl.p.name} — ${st.label}: ${pct(share)}% of ${t}'s ${st.fmt(TOT[st.key])} = ${st.fmt(mean)} ${st.unit}`
+            + (moved ? ` (market ${pct(base)}% = ${st.fmt(baseMean)})` : ' (market)')
+            + (ov ? (auto ? ' · set automatically by the OUT redistribution' : ' · set by you — teammates rebalance around it') : (a.lock ? ' · locked' : ' · rebalances when a teammate is set'))
+            + '. Type a share and press Enter; clear the cell for the market share.';
+          html += `<td class="sdt-c${ov ? (auto ? ' auto' : ' ov') : ''}${moved && !ov ? ' moved' : ''}" title="${esc(tip)}">
+            <input class="sdt-in" inputmode="decimal" data-r="${ri}" data-c="${ci}" data-k="${st.key}" data-mean="${mean}" value="${pct(share)}" ${isOutRow ? 'disabled' : ''}
+              onfocus="_sdashNextCell=null;this.select()" onkeydown="simDashCellKey(event,this)" onchange="simDashCell(this,'${id}','${st.key}')"><span class="sdt-pc">%</span>
+            <div class="sdt-m">${st.fmt(mean)}${moved ? `<i>${pct(base)}%</i>` : ''}</div></td>`;
+        });
+        {
+          const sm = PREV ? PREV[id] : null, pj = parseFloat(pl.p.proj);
+          const d = (sm != null && Number.isFinite(pj)) ? sm - pj : null;
+          const hot = d != null && Math.abs(d) >= Math.max(2, 0.15 * Math.max(pj, 1));
+          html += `<td class="sdt-pts${hot ? (d > 0 ? ' up' : ' dn') : ''}" title="${sm != null ? `Sim ${sm.toFixed(1)} DK${Number.isFinite(pj) ? ` vs Proj ${pj.toFixed(1)} (${d >= 0 ? '+' : ''}${d.toFixed(1)})` : ''}` : 'no sim preview'}">${sm != null ? sm.toFixed(1) : '—'}</td>
+            <td class="sdt-pts sdt-proj">${Number.isFinite(pj) ? pj.toFixed(1) : '—'}</td>`;
         }
-        if(extras.length){
-          html += `<div class="sdash-add"><select onchange="if(this.value){simDashSet('player/'+this.value+'/${st.key}',3);}">
-            <option value="">+ give an unpriced player a share…</option>
-            ${extras.map(pl => `<option value="${pl.p.id}">${esc(pl.p.name)} (${pl.e.pos||'?'})</option>`).join('')}
-          </select></div>`;
-        }
-        html += `</div></div>`;
+        html += `<td class="sdt-act">
+            <button class="sdash-lock${a.lock ? ' on' : ''}" title="${a.lock ? 'Unlock — let rebalancing move his shares' : 'Lock every share of his so rebalancing never moves him'}" onclick="simDashSet('player/${id}/lock')">${a.lock ? '🔒' : '🔓'}</button>
+            <button class="sdash-mini" style="visibility:${anyOv ? 'visible' : 'hidden'}" title="All of his shares back to the market" onclick="simDashReset('player','${id}')">↺</button>
+            <button class="sdash-outbtn${isOutRow ? ' on' : ''}" title="${isOutRow ? 'Undo OUT — put his market share back' : 'Mark OUT: he scores 0 and his shares go to his teammates'}" onclick="toggleOut('${id}',event)">⛔</button>
+            ${isOutRow ? `<button class="sdash-outbtn sdash-prenews-btn${nflOutRepriced(slate, id) ? ' on' : ''}" title="${nflOutRepriced(slate, id)
+              ? 'Books REPRICED: only teammates with no line of their own inherit his share. Click for the default (by role).'
+              : 'By role (default): his room inherits his share in proportion to the roles they have. Click if the sheet was pulled AFTER the announcement.'}" onclick="event.stopPropagation();nflOutSetRepriced('${id}', ${nflOutRepriced(slate, id) ? 'false' : 'true'})">📰</button>` : ''}
+          </td></tr>`;
+      });
+      // footer: what the column adds up to (less than 100 when part of the team's
+      // production sits with men who are not on the slate — see the notes above)
+      html += `</tbody><tfoot><tr><td class="sdt-pl muted">Σ share</td>`;
+      COLS.forEach(st => { const res = RES[st.key]; let s = 0; for(const r of rows) s += res.shares[r.pl.p.id] || 0;
+        html += `<td class="${res.over ? 'sdt-over' : ''}" title="${res.over ? 'The shares you set add up to more than the team has — everyone you did not set is at zero' : 'Sum of the shares shown'}">${pct(s)}%${res.over ? ' ⚠' : ''}</td>`; });
+      html += `<td></td><td></td><td></td></tr></tfoot></table></div>`;
+      // unpriced teammates the user can add as a row
+      const extras = T.players.filter(pl => !pl.skip && !rows.some(r => r.pl === pl));
+      if(extras.length){
+        html += `<div class="sdash-add"><select onchange="if(this.value) simDashShowPlayer('${t}', this.value)">
+          <option value="">+ add a ${t} player with no share yet…</option>
+          ${extras.map(pl => `<option value="${pl.p.id}">${esc(pl.p.name)} (${pl.e.pos || '?'})</option>`).join('')}
+        </select></div>`;
       }
-      html += `</div></div>`;
+      html += `<div class="sdt-help">Type a share and press Enter (↑ ↓ and Tab move between cells). The teammates you have not set in that column rebalance so ${t}'s total stays the same; 🔒 holds a player where he is. Clear a cell to go back to the market share. Sim is each player's mean DK score with your changes, from a quick sim of this game; Ctrl/⌘+Z undoes the last edit.</div>`;
+      html += `</div>`;
+      }
     }
     html += `</div>`;
   return html;
@@ -31049,6 +31356,168 @@ function simDashOrderedGames(slate, games){
 let _sdashOrder = [];          // grid order of game keys, for ‹ / › and the arrows
 let _sdashFocus = false;       // focus the panel after THIS render only
 let _sdashScroll = { key: null, panel: 0, grid: 0 };
+// ── ck154: PREVIEW POINTS ──────────────────────────────────────────────────
+// Each player's mean DK score under the board AS IT STANDS, from the real sim
+// machinery (simNflGames → team pie → simNflPlayer, in-game exits included)
+// run on the open game only, so it answers in a blink instead of a full-slate
+// sim. A fixed seed means an edit moves only what it actually changes, not
+// every row by its sampling noise. Cached per game + board, so switching teams
+// or re-rendering costs nothing.
+const NFL_PREVIEW_SIMS = 3000;
+const _nflPreviewCache = new Map();
+function nflPreviewMeans(slate, ctx, g){
+  const { cur, pool } = ctx;
+  const key = slate.id + '|' + g.key + '|' + JSON.stringify(slate._simAdj || null) + '|' + (typeof nflOutIds === 'function' ? nflOutIds(slate).join(',') : '')
+    + '|' + pool.length + '|' + pool.reduce((a, p) => a + (parseFloat(p.proj) || 0), 0).toFixed(2);
+  if(_nflPreviewCache.has(key)) return _nflPreviewCache.get(key);
+  const game = cur.games.find(x => x.key === g.key); if(!game) return null;
+  const names = Object.keys(game.teams);
+  const idx = []; cur.entries.forEach((e, i) => { if(e && names.includes(e.team)) idx.push(i); });
+  const sums = new Float64Array(idx.length);
+  const _rnd = Math.random; Math.random = mulberry32(0x5eed154);
+  try {
+    const gauss = nflGaussFactory();
+    for(const [t, ti] of Object.entries(game.teams)){ const o = names.find(x => x !== t); ti.oppImplied = o ? game.teams[o].implied : (game.total - ti.implied); }
+    const exitModel = (typeof nflBuildExitModel === 'function') ? nflBuildExitModel(pool, cur.entries, cur.shareSim, slate) : null;
+    for(let s = 0; s < NFL_PREVIEW_SIMS; s++){
+      const env = simNflGames([game], gauss);
+      for(const t in env){
+        env[t].oppImplied = game.teams[t] ? game.teams[t].oppImplied : 22;
+        const EX = exitModel && exitModel.teams[t]; if(EX){ nflDrawTeamExits(EX, gauss); env[t].exit = EX; }
+        const TS = cur.shareSim && cur.shareSim.teams[t]; if(TS) env[t].pie = nflDrawTeamPie(TS, env[t], gauss);
+      }
+      for(let j = 0; j < idx.length; j++){ const e = cur.entries[idx[j]]; sums[j] += simNflPlayer(e, env[e.team] || null, gauss); }
+    }
+  } catch(e){ console.error(e); Math.random = _rnd; return null; }
+  finally { Math.random = _rnd; }
+  const out = {}; idx.forEach((i, j) => { if(pool[i]) out[pool[i].id] = sums[j] / NFL_PREVIEW_SIMS; });
+  _nflPreviewCache.set(key, out);
+  if(_nflPreviewCache.size > 40) _nflPreviewCache.delete(_nflPreviewCache.keys().next().value);
+  return out;
+}
+// ── ck154: LINKED RECEIVING STATS ──────────────────────────────────────────
+// Matt: one belief ("he gets more targets") should be one edit. With the link
+// on (default), changing a player's Receptions or Receiving Yds share moves the
+// other by the same ratio, and changes his TD share as below; changing Rushing
+// Yds moves his TD share by the rushing-weighted ratio. Touchdowns and Passing
+// Yds edit alone. Off: every cell edits alone, as in ck153.
+//
+// ck155 — CALIBRATED ON 12 SEASONS (nflverse play-by-play 2014–2025, regular
+// season; ~2,000 WR/TE player-seasons, ~17,000 player-games in which a
+// teammate with a 15%+ target share (or a 35%+ carry share) missed the game —
+// the natural experiment for "this player gets more volume"). The volume change
+// is instrumented by group means over ex-ante cells (position × depth rank ×
+// size of the vacated share), so a game where he happened to catch a TD — a
+// reception — cannot inflate the answer. Results (90% team-season bootstrap):
+//   · receiving yds share vs reception share: ×1.00 [0.91, 1.09] — 1:1, with no
+//     dependence on his yards-per-catch profile we could detect (λ ≈ 0.9–1.0);
+//   · receptions vs targets ×0.98 [0.92, 1.04];
+//   · TD share vs reception share: on average a little under 1:1 (0.8–1.0
+//     across estimators), and it depends on his TD ROLE, not his depth of
+//     target: the extra catches carry roughly a pass-catcher-AVERAGE TD rate,
+//     not his own. Best fit: marginal TD per catch = λ·(his) + (1−λ)·(the
+//     team's WR/TE average), λ = 0.4 [≈ −0.5, 1.3 — proportional (λ = 1) is
+//     not ruled out]. So a red-zone tight end with 1.6× the average TD rate
+//     gains ~0.78× proportional; a possession receiver at 0.6× gains ~1.4×
+//     proportional — from a small base, so a small absolute change;
+//   · RB: TD share vs carry share ×0.91 (se 0.20), λ ≈ 1 → rushing stays
+//     proportional.
+const NFL_LINK_TD_LAMBDA = 0.4;
+function simDashLinkOn(slate){ return !(slate && slate._simDashLink === false); }
+function simDashToggleLink(){ const slate = activeSlate(); if(!slate) return; slate._simDashLink = !simDashLinkOn(slate); save(); renderSimDash(); }
+function simDashLinkedEdits(el, id, stat, v){
+  const slate = activeSlate();
+  const out = [['player/' + id + '/' + stat, String(v)]];
+  if(!simDashLinkOn(slate) || !['rec', 'recYds', 'rushYds'].includes(stat)) return out;
+  const old = parseFloat(el.defaultValue); if(!(old > 0)) return out;
+  const r = v / old; if(!Number.isFinite(r) || Math.abs(r - 1) < 1e-9) return out;
+  const row = el.closest('tr'); if(!row) return out;
+  const cell = k => row.querySelector(`input.sdt-in[data-k="${k}"]`);
+  const val = k => { const c = cell(k); return c ? parseFloat(c.defaultValue) : null; };
+  const mean = k => { const c = cell(k); return c ? (parseFloat(c.dataset.mean) || 0) : 0; };
+  const put = (k, x) => { if(x == null || !Number.isFinite(x)) return; out.push(['player/' + id + '/' + k, String(Math.max(0, Math.min(100, Math.round(x * 100) / 100)))]); };
+  const recY = mean('recYds'), rushY = mean('rushYds'), yTot = recY + rushY;
+  if(stat === 'rec' || stat === 'recYds'){
+    const partner = stat === 'rec' ? 'recYds' : 'rec';
+    if(val(partner) > 0) put(partner, val(partner) * r);
+    const td = val('td'), recOld = val('rec');
+    if(td != null && recOld > 0){
+      const recNew = recOld * r;
+      // the team's pass-catcher average TD per reception share, off this table
+      let sTd = 0, sRec = 0;
+      const tbl = row.closest('table');
+      if(tbl) tbl.querySelectorAll('tbody tr[data-pos="WR"], tbody tr[data-pos="TE"]').forEach(tr => {
+        const a = tr.querySelector('input.sdt-in[data-k="td"]:not([disabled])'), b = tr.querySelector('input.sdt-in[data-k="rec"]:not([disabled])');
+        if(a && b){ sTd += parseFloat(a.defaultValue) || 0; sRec += parseFloat(b.defaultValue) || 0; } });
+      const avg = sRec > 0 ? sTd / sRec : (td / recOld);
+      const pos = row.dataset.pos || '';
+      // WR / TE: blend his own rate with the average; RB / QB: his TD share is
+      // mostly rushing, so his receiving rate is not his — the average stands in
+      const m = (pos === 'WR' || pos === 'TE') ? NFL_LINK_TD_LAMBDA * (td / recOld) + (1 - NFL_LINK_TD_LAMBDA) * avg : avg;
+      put('td', Math.max(0, td + (recNew - recOld) * m));
+    }
+  } else if(stat === 'rushYds'){
+    const w = yTot > 0 ? rushY / yTot : 1;
+    if(val('td') > 0) put('td', val('td') * (1 + (r - 1) * w));
+  }
+  return out;
+}
+// One removable change, for the change list (ck154).
+function simDashDropChange(kind, a, b){
+  if(kind === 'implied') return simDashSet('team/' + a + '/implied', '');
+  if(kind === 'lean') return simDashSet('team/' + a + '/lean', '0');
+  if(kind === 'share') return simDashSet('player/' + a + '/' + b, '');
+  if(kind === 'lock') return simDashSet('player/' + a + '/lock');
+}
+// ── ck153: the share table's controls ──────────────────────────────────────
+let _sdashNextCell = null;   // {r, c}: the cell to focus after the re-render a commit causes
+function simDashPickTeam(gkey, t){
+  const slate = activeSlate(); if(!slate) return;
+  slate._simDashTeam = Object.assign({}, slate._simDashTeam || {}, { [gkey]: t });
+  save(); renderSimDash();
+}
+function simDashShowPlayer(t, id){
+  const slate = activeSlate(); if(!slate || !id) return;
+  const m = Object.assign({}, slate._simDashShow || {}); const a = (m[t] || []).slice();
+  if(!a.includes(id)) a.push(id); m[t] = a; slate._simDashShow = m;
+  save(); renderSimDash();
+}
+// A typed share. Blank = back to the market share for that stat; anything
+// else is a percent, clamped to 0–100, written as the same override the
+// sliders wrote (so OUT bookkeeping, presets and the run stamp are unchanged).
+function simDashCell(el, id, stat){
+  const raw = String(el.value == null ? '' : el.value).trim().replace('%', '');
+  if(raw === ''){ simDashSet('player/' + id + '/' + stat, ''); return; }
+  const v = parseFloat(raw);
+  if(!Number.isFinite(v)){ renderSimDash(); return; }
+  const vv = Math.max(0, Math.min(100, v));
+  const edits = simDashLinkedEdits(el, id, stat, vv);
+  if(edits.length > 1) simDashSetMany(edits); else simDashSet('player/' + id + '/' + stat, String(vv));
+}
+// Spreadsheet keys: Enter / ↓ next row, Shift+Enter / ↑ previous row, Tab /
+// Shift+Tab across; Esc puts the cell back. The target is remembered so the
+// re-render a commit causes lands the cursor on it.
+function simDashCellKey(ev, el){
+  const r = +el.dataset.r, c = +el.dataset.c;
+  let to = null;
+  if(ev.key === 'Enter') to = { r: r + (ev.shiftKey ? -1 : 1), c };
+  else if(ev.key === 'ArrowDown') to = { r: r + 1, c };
+  else if(ev.key === 'ArrowUp') to = { r: r - 1, c };
+  else if(ev.key === 'Tab') to = { r, c: c + (ev.shiftKey ? -1 : 1), tab: true };
+  else if(ev.key === 'Escape'){ ev.stopPropagation(); el.value = el.defaultValue; el.blur(); return; }
+  if(!to) return;
+  const tbl = el.closest('table');
+  let tgt = tbl && tbl.querySelector(`input.sdt-in[data-r="${to.r}"][data-c="${to.c}"]:not([disabled])`);
+  if(!tgt && !to.tab && tbl){ // skip a "—" cell or an OUT row in the same column
+    const step = to.r > r ? 1 : -1;
+    for(let k = to.r; k >= 0 && k < 200 && !tgt; k += step) tgt = tbl.querySelector(`input.sdt-in[data-r="${k}"][data-c="${to.c}"]:not([disabled])`);
+    if(tgt) to.r = +tgt.dataset.r;
+  }
+  if(to.tab) { _sdashNextCell = tgt ? { r: +tgt.dataset.r, c: +tgt.dataset.c } : null; return; }   // the browser moves focus
+  ev.preventDefault();
+  _sdashNextCell = tgt ? { r: to.r, c: to.c } : null;
+  if(tgt) tgt.focus(); else el.blur();
+}
 function simDashOpenGame(key){
   const slate = activeSlate(); if(!slate) return;
   slate._simDashGame = key; _sdashFocus = true;
@@ -31122,7 +31591,7 @@ function renderSimDash(){
   let html = `<div class="sdash-top">
     <div>
       <div class="sdash-title">Simulation Inputs</div>
-      <div class="sdash-sub">Vegas is the baseline. Drag a game to re-scale every player on both sides; drag a player to move his share and rebalance his teammates.${nAdj?` <b style="color:var(--accent)">${nAdj} adjustment${nAdj>1?'s':''} active</b> — re-run the sim to apply.`:''}</div>
+      <div class="sdash-sub">Vegas is the baseline. Total / Spread re-scale every player on both sides; pick a team and type any player's share — his untouched teammates rebalance so the team total holds.${nAdj?` <b style="color:var(--accent)">${nAdj} adjustment${nAdj>1?'s':''} active</b> — re-run the sim to apply.`:''}</div>
     </div>
     <div class="sdash-actions">
       <button class="sdash-btn${nAdj?' warn':''}" onclick="simDashReset('all')" ${nAdj?'':'disabled'}>↺ Reset all to Vegas</button>
@@ -31195,6 +31664,7 @@ function renderSimDash(){
   if(ord.games.length < 2){
     for(const g of ord.games) html += simDashGameHtml(ctx, g);
     el.innerHTML = html;
+    simDashRestoreCell();
     return;
   }
   const openKey = _sdashOrder.indexOf(slate._simDashGame) >= 0 ? slate._simDashGame : null;
@@ -31262,6 +31732,13 @@ function renderSimDash(){
   if(_dp && _sdashScroll.key === openKey && _sdashScroll.panel) _dp.scrollTop = _sdashScroll.panel;
   if(_dp && _sdashFocus){ try { _dp.focus({preventScroll:true}); } catch(e){ _dp.focus(); } }
   _sdashFocus = false;
+  simDashRestoreCell();
+}
+function simDashRestoreCell(){
+  if(!_sdashNextCell) return;
+  const want = _sdashNextCell;
+  setTimeout(() => { const el = document.querySelector(`#sdtTable input.sdt-in[data-r="${want.r}"][data-c="${want.c}"]`);
+    if(el){ try { el.focus({ preventScroll: true }); } catch(e){ el.focus(); } el.select(); } }, 0);
 }
 
 // One sim of every game → { [team]: {score, oppScore, implied, yardF, passF, rushF} }
@@ -37127,6 +37604,19 @@ function gppKernelFactory(){
     // ck150: captain caps — a candidate whose captain is at his cap is not playable.
     const cptCap = (P.cptCap && P.cptCap.length === nP) ? P.cptCap : null;
     const cptCapHit = function(m){ if(!cptCap || SHAPE !== 'sd') return false; const c = menu[m].ids[0]; return cptCap[c] >= 0 && cptCount[c] + 1 > cptCap[c]; };
+    // ck152: NHL team stacks — a menu row stacks team t when it holds stkK+ of
+    // t's skaters. Caps block a row whose stacked team is at its cap; floors
+    // pace like captain floors: the team furthest behind ceil(min·n/want) is
+    // the only stack eligible at this step while one of its rows is playable.
+    const stkK = P.stkK | 0, stkCapA = P.stkCap || null, stkMinA = P.stkMin || null;
+    const stkOn = SHAPE === 'nhl' && stkK > 0 && !!(stkCapA || stkMinA);
+    const stkCount = stkOn ? new Int32Array((stkCapA || stkMinA).length) : null;
+    const stkMemo = [];
+    const stkOfM = function(m){ let r = stkMemo[m]; if(r) return r; const c = {}; r = [];
+      for(const i of menu[m].ids){ if(pos[i] === 0) continue; const t = team[i]; c[t] = (c[t] || 0) + 1; if(c[t] === stkK) r.push(t); }
+      stkMemo[m] = r; return r; };
+    const stkCapHit = function(m){ if(!stkOn || !stkCapA) return false; const r = stkOfM(m);
+      for(let j = 0; j < r.length; j++){ const t = r[j]; if(t < stkCapA.length && stkCapA[t] >= 0 && stkCount[t] + 1 > stkCapA[t]) return true; } return false; };
     let stalled = 0, gPeak = -Infinity, peakN = 0;
     const nakedPicks = [];
     // ck127: STALL RECOVERY. On a two-team showdown (or any small pool) every
@@ -37215,12 +37705,28 @@ function gppKernelFactory(){
           if(!any) mustCpt = -1;
         }
       }
+      // ck152: the team stack furthest behind its floor's pace
+      let mustStk = -1;
+      if(stkOn && stkMinA){
+        let worst = 0;
+        for(let t = 0; t < stkMinA.length; t++){ if(!(stkMinA[t] > 0)) continue;
+          const pace = Math.ceil(stkMinA[t] * n1 / Math.max(1, wantN) - 1e-9) - stkCount[t];
+          if(pace > worst){ worst = pace; mustStk = t; } }
+        if(mustStk >= 0){
+          let any = false;
+          for(let m = 0; m < M && !any; m++){ if(inPort[m] || stkCapHit(m) || cptCapHit(m) || stkOfM(m).indexOf(mustStk) < 0) continue;
+            let bl = false; for(const i of menu[m].ids) if(expCount[i] + 1 > capOf(i)){ bl = true; break; }
+            if(!bl && fightOk(menu[m].ids)) any = true; }
+          if(!any) mustStk = -1;
+        }
+      }
       // ck136 harness knob: β > 0 mixes the EV growth into the coverage pick
       // (each normalised to [0,1] over this step's playable candidates).
       const blendB = (FP.topOn && P.objective && P.objective.blend > 0) ? P.objective.blend : 0;
       let covArr = null, grwArr = null, covMax = -Infinity, covMin = Infinity, grwMax = -Infinity, grwMin = Infinity;
       if(blendB > 0){ covArr = new Float64Array(M); grwArr = new Float64Array(M);
         for(let m = 0; m < M; m++){ if(inPort[m]) continue; if(mustCpt >= 0 && menu[m].ids[0] !== mustCpt) continue; if(cptCapHit(m)) continue;
+          if(stkCapHit(m) || (mustStk >= 0 && stkOfM(m).indexOf(mustStk) < 0)) continue;
           let bl = false; for(const i of menu[m].ids) if(expCount[i] + 1 > capOf(i)){ bl = true; break; } if(bl || !fightOk(menu[m].ids)) continue;
           const c = FP.covGain(m), gg = FP.growthWith(m, n1, stake1); covArr[m] = c; grwArr[m] = gg;
           if(c > covMax) covMax = c; if(c < covMin) covMin = c; if(gg > grwMax) grwMax = gg; if(gg < grwMin) grwMin = gg; } }
@@ -37228,6 +37734,7 @@ function gppKernelFactory(){
         if(inPort[m]) continue;
         if(mustCpt >= 0 && menu[m].ids[0] !== mustCpt) continue;
         if(cptCapHit(m)) continue;
+        if(stkCapHit(m) || (mustStk >= 0 && stkOfM(m).indexOf(mustStk) < 0)) continue;   // ck152
         // Hard caps: Max% exposure and per-player overrides, plus the house
         // rule (no duplicate lineups — the menu is distinct by construction).
         let blocked = false;
@@ -37257,6 +37764,7 @@ function gppKernelFactory(){
       inPort[bestM] = 1;
       for(const i of menu[bestM].ids) expCount[i]++;
       if(SHAPE === 'sd') cptCount[menu[bestM].ids[0]]++;
+      if(stkOn){ const r = stkOfM(bestM); for(let j = 0; j < r.length; j++) if(r[j] < stkCount.length) stkCount[r[j]]++; }   // ck152
       FP.add(bestM);
       if((FP.chosen.length & 7) === 0) say({phase:'portfolio', n:FP.chosen.length, of:N});
     }
@@ -37999,6 +38507,24 @@ async function runNflGppEngine(ctx){
     cptCapSlots = new Int32Array(nP).fill(-1);
     fieldPool.forEach((p, i) => { const c = sdCptCapSlots(slate, p.id, capN); if(c !== Infinity) cptCapSlots[i] = c; });
   }
+  // ck152: NHL team-stack caps / floors, per kernel team code, in wanted-board
+  // slots (same units as the captain caps above); -1 = no cap.
+  let stkK = 0, stkCap = null, stkMin = null;
+  if(SHAPE === 'nhl'){
+    const _rules = nhlStackRules(slate);
+    if(_rules.length){
+      stkK = nhlStackKOf(slate);
+      let _mx = 0; for(let i = 0; i < nP; i++) if(team[i] > _mx) _mx = team[i];
+      stkCap = new Int32Array(_mx + 2).fill(-1); stkMin = new Int32Array(_mx + 2);
+      const _code = {}; fieldPool.forEach((p, i) => { const t = nhlTeamKey(p.team); if(t && team[i] > 0) _code[t] = team[i]; });
+      const _named = [];
+      _rules.forEach(r => { const c = _code[r.team]; if(!c) return;
+        if(r.max != null) stkCap[c] = nhlStackCapSlots(r.max, capN);
+        if(r.min != null) stkMin[c] = Math.min(nhlStackMinSlots(r.min, capN), stkCap[c] >= 0 ? stkCap[c] : 1e9);
+        _named.push(`${r.team}${r.min != null ? ' ≥' + stkMin[c] : ''}${r.max != null ? ' ≤' + stkCap[c] : ''}`); });
+      if(_named.length) log(`Team stacks (ck152): the search paces ${stkK}+-skater stacks per team, in lineups of ${capN} — ${_named.join(', ')}.`);
+    }
+  }
   const capSlots = new Int32Array(nP);
   fieldPool.forEach((p, i) => {
     const pct = (overrides && overrides[p.id] != null) ? overrides[p.id] : maxExpPct;
@@ -38064,7 +38590,7 @@ async function runNflGppEngine(ctx){
     calShrink: {s1: _calFx.s1, s23: _calFx.s23, capTop10: !!evCalCap(slate.sport || 'nfl').capTop10, on: _calFx.on},
     // ck118: bootstrap-resampled search seeds + Bayesian-bootstrap greedy steps (slate._gppRobust === false turns both off).
     robust: slate._gppRobust !== false,
-    maxSal, minSal, N: target, want: capN, B, capSlots, cptMin: cptMinSlots, cptCap: cptCapSlots, fightPairs, fightSlack: UFC_FIGHT_SLACK, fightViable: UFC_FIGHT_VIABLE,
+    maxSal, minSal, N: target, want: capN, B, capSlots, cptMin: cptMinSlots, cptCap: cptCapSlots, stkK, stkCap, stkMin, fightPairs, fightSlack: UFC_FIGHT_SLACK, fightViable: UFC_FIGHT_VIABLE,
     objective: { mode: gppObjectiveOf(slate).mode, cutoff: gppObjectiveCutoff(slate, F), blend: gppObjectiveBlend() },   // ck134/ck136
     // ck74: the partner definition the LABEL uses, so the kernel's naked-pick
     // explanation and `nflStackShape` cannot disagree about what "naked" means.
@@ -38596,18 +39122,41 @@ async function runNflGppBoard(ctx){
       // against caps and the other floors exactly like a player floor.
       const _cm = (SDb && slate.sdCptMinOverrides) || {};
       const _cptMinIds = Object.keys(_cm).filter(id => (_cm[id]||0) > 0).map(id => 'CPT:' + id);
-      const _floorIds = i => out[i].map(p => p.id).concat(SDb && out[i]._sdCaptain ? ['CPT:' + out[i]._sdCaptain] : []);
+      // ck152: NHL team stacks ride the same caps / floors under 'STK:<TEAM>'
+      // pseudo ids — one per team the lineup stacks at K+ skaters.
+      const _stkRules = isNhl(slate) ? nhlStackRules(slate) : [], _stkK = nhlStackKOf(slate);
+      const _stkRule = {}; _stkRules.forEach(r => { _stkRule[r.team] = r; });
+      const _stkIds = l => _stkRules.length ? nhlStackTeams(l, _stkK).filter(t => _stkRule[t]).map(t => 'STK:' + t) : [];
+      const _floorIds = i => out[i].map(p => p.id).concat(SDb && out[i]._sdCaptain ? ['CPT:' + out[i]._sdCaptain] : []).concat(_stkIds(out[i]));
       // ck150: a captain pseudo id answers to the captain Max% (Infinity when unset).
-      const _capSlotsF = id => /^CPT:/.test(String(id)) ? (SDb ? sdCptCapSlots(slate, String(id).slice(4), target) : Infinity) : _capSlots(id);
+      const _capSlotsF = id => /^CPT:/.test(String(id)) ? (SDb ? sdCptCapSlots(slate, String(id).slice(4), target) : Infinity)
+        : /^STK:/.test(String(id)) ? nhlStackCapSlots((_stkRule[String(id).slice(4)] || {}).max, target) : _capSlots(id);
+      const _stkMinIds = _stkRules.filter(r => r.min != null).map(r => 'STK:' + r.team);
       const _topMode = gppObjectiveOf(slate).mode === 'top';   // ck134: no EV floors — the greedy's coverage order is the board
       const _scr = evScreenBoard(slate, _pr0, target, log,
         {cfg: _topMode ? Object.assign({}, evEdgeScreenCfg(slate), {floor: 0, ex1Floor: 0}) : null,
          caps: {ids: _floorIds, cap: _capSlotsF}, extraOk: _fbRule,
-         floors: (_minIds.length || _cptMinIds.length) ? {list:_minIds.concat(_cptMinIds), ids: _floorIds,
+         floors: (_minIds.length || _cptMinIds.length || _stkMinIds.length) ? {list:_minIds.concat(_cptMinIds, _stkMinIds), ids: _floorIds,
                                    min: id => /^CPT:/.test(String(id)) ? Math.ceil(Math.max(0, Math.min(100, _cm[String(id).slice(4)]||0))/100*target)
+                                            : /^STK:/.test(String(id)) ? Math.min(nhlStackMinSlots((_stkRule[String(id).slice(4)] || {}).min || 0, target), nhlStackCapSlots((_stkRule[String(id).slice(4)] || {}).max, target))
                                                                        : Math.ceil(Math.max(0, Math.min(100, _mo[id]||0))/100*target)} : null});
       const _pr = _scr.keep.map(i => _pr0[i]);
       out = _scr.keep.map(i => out[i]);
+      // ck152: the finishing pass (captain Min% / Max%, NHL team stacks) on the
+      // kept board, BEFORE the aggregate below — a lineup it changes is priced
+      // again here so the card and the saved rows describe the board that ships.
+      { const _sig = l => l.map(p => p.id).join(',') + '|' + (l._sdCaptain || '');
+        const _was = out.map(_sig);
+        boardFinalize(slate, out, { log, ranked: ctx.ranked, simScoresById, simsDone, overrides: _effOverrides, maxExpPct: _capPct,
+          maxSal: ctx.maxSal, minSal: ctx.minSal, pool });
+        const _chg = []; out.forEach((l, i) => { if(_sig(l) !== _was[i]) _chg.push(i); });
+        if(_chg.length){
+          const _rp = priceBoardHeldOut(_chg.map(i => ({players:[...out[i]], cptId: SDb ? out[i]._sdCaptain : null})), {slate});
+          _chg.forEach((i, j) => { _pr[i] = _rp ? _rp[j] : null; const l = out[i];
+            const lc = lineupSimComposite(l, simScoresById, oosIdx, SDb ? l._sdCaptain : null);
+            let m = 0; for(const p of l){ const a = simScoresById[p.id]; if(!a) continue; let s = 0; for(const si of oosIdx) s += a[si]||0; m += s/Math.max(1,oosIdx.length); }
+            l._simWinAvg = (lc != null ? lc : m).toFixed(1); l._simAvg = m.toFixed(1); if(l._simWinRate == null) l._simWinRate = '—'; });
+        } }
       let nOk=0, gross=0, calGross=0, winS=0, cashS=0, top1S=0, top10S=0, favS=0, favN=0;
       const bandSum=[0,0,0,0];
       out.forEach((l,i) => {
@@ -39571,6 +40120,7 @@ async function runNhlOptimize(slate){
     if(out.length < target) log(`  Built ${out.length} of ${target}: ${randomness === 0 ? 'with Randomness 0 every attempt returns the same best lineup — raise it for variety' : 'the rest collided with lineups already built or with the exposure caps'} (${dupSkips} duplicates, ${capSkips} dead ends).`);
     const top = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([id, c]) => `${surnameOf(playerById(slate, id).name)} ${Math.round(100 * c / out.length)}%`);
     log(`Done — ${out.length} lineups by projection. Top exposure: ${top.join(', ')}.`);
+    boardFinalize(slate, out, { log, pool, overrides, maxExpPct, maxSal, minSal });   // ck152: team-stack Min% / Max%
     addToHistory(slate.id, `${out.length} lineups (projection) @ ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, out);
     openPreviewModal(out, 'proj');
     return out;
@@ -40168,7 +40718,8 @@ async function runNflSimGenInner(){
   // it here as a re-captain pass over the built board (see the function).
   // ck150: captain Min% AND Max% on every pipeline's finished board (the GPP
   // kernel already builds toward both; there this is a check that is normally a no-op).
-  if(SD && out && out.length) out = sdEnforceCptExposure(slate, out, {maxSal, minSal, log, ranked, simScoresById, simsDone, overrides, maxExpPct});
+  // ck152: that pass now runs inside every pipeline (boardFinalize), before
+  // the board is saved to history and drawn in the preview.
   // Showdown: carry the sim's preferred captain onto each saved lineup so the
   // export puts the right player in the CPT slot at his captain id.
   if(SD && out && out.length){
@@ -40378,6 +40929,224 @@ function sdEnforceCptExposure(slate, out, o){
     short.forEach(s => log(`  ⚠ CPT ${nm(s.X)} is short of his captain Min%: ${s.why}.` + (s.hidden ? ' Put him back in the captain pool, or clear the Min%.' : ' Loosen a Max% or the salary range, or lower the floor.')));
   }
   o.report = Object.assign(rep, {have: Object.assign({}, have)});
+  return out;
+}
+
+// ── ck152: the one finishing pass every generator runs before it saves ──────
+// Exposure rules that are about a lineup's SHAPE rather than one player —
+// showdown captain Min% / Max% (ck150) and NHL team-stack Min% / Max% —
+// are settled here, on the finished board, BEFORE the board is written to
+// history and opened in the preview. (ck150 ran the captain pass after the
+// pipeline returned, by which point the set was already saved and the preview
+// drawn from the board as it was before the pass.) Each pass mutates `out` in
+// place and is a no-op when the board already complies.
+function boardFinalize(slate, out, o){
+  if(!slate || !out || !out.length) return out;
+  o = Object.assign({}, o || {});
+  if(o.simsDone == null && o.totalSims != null) o.simsDone = o.totalSims;
+  if(o.log == null && typeof log === 'function') o.log = log;
+  if(o.maxSal == null){ const e = typeof document !== 'undefined' && document.getElementById('genMaxSal'); o.maxSal = Math.min(SALARY_CAP, (e && parseInt(e.value)) || SALARY_CAP); }
+  if(o.minSal == null){ const e = typeof document !== 'undefined' && document.getElementById('genMinSal'); o.minSal = (e && parseInt(e.value)) || 0; }
+  try {
+    if(typeof isShowdown === 'function' && isShowdown(slate)) sdEnforceCptExposure(slate, out, o);
+    if(isNhl(slate)){ nhlEnforceStackExposure(slate, out, o); if(typeof window !== 'undefined') window._lastStackReport = o.report || null; }
+  } catch(e){ console.error(e); if(o.log) o.log('⚠ Exposure finishing pass failed: ' + (e && e.message || e)); }
+  return out;
+}
+
+// ── ck152: NHL TEAM-STACK EXPOSURE, every NHL pipeline ──────────────────────
+// Holds each team's share of K+-skater stacks inside the Min% / Max% set on
+// the Stacks tab. Works like the captain pass (ck150):
+//   CAPS   — the weakest lineups stacking a team over its Max% are replaced by
+//            the best candidates that do not stack it;
+//   FLOORS — the best candidates stacking a team under its Min% replace the
+//            weakest lineups that do not stack it.
+// Candidates are the run's own per-world optimals, topped up on demand by
+// solving simulated worlds (or projection draws, on Optimize) with the team's
+// stack fixed — or with a capped team held under K. Every swap keeps the
+// roster legal (slots, 3 skater teams, the line/PP stack minimum), salary in
+// [minSal, maxSal], player Max% / Min%, every other team's floor and cap, and
+// no duplicates. Strength = the lineup's joint sim composite (0.6·p80 + 0.4·
+// mean on held-out worlds), or summed projection without a sim. What cannot
+// be met is reported, not forced.
+function nhlStackCandGen(slate, o, K, genIdx, cap, lo, needLine){
+  const hid = new Set(slate.hiddenIds || []), outS = new Set(slate._outIds || []);
+  const pool = (o.pool && o.pool.length) ? o.pool
+    : (slate.players || []).filter(p => p.salary > 0 && !hid.has(p.id) && !outS.has(p.id) && !/^o$/i.test(String(p.status || '').trim()));
+  const S = o.simScoresById || null, useSim = !!(S && genIdx && genIdx.length);
+  const base = pool.map(p => ({ p, pos: nhlPosOf(p), sal: p.salary || 0, team: nhlTeamKey(p.team), keys: nhlUnitKeys(p),
+    arr: S ? S[p.id] : null, proj: parseFloat(p.proj) || 0, score: 0 }))
+    .filter(c => c.pos && c.sal > 0 && (useSim ? !!c.arr : c.proj > 0));
+  const gauss = () => { let u = 0, v = 0; while(u === 0) u = Math.random(); while(v === 0) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  let wi = Math.floor(Math.random() * Math.max(1, genIdx ? genIdx.length : 1));
+  const setWorld = () => {
+    if(useSim){ const w = genIdx[wi++ % genIdx.length]; for(const c of base) c.score = c.arr[w] || 0; return; }
+    const uz = {};
+    for(const c of base){ let sh = 0; for(const k of c.keys){ if(uz[k] == null) uz[k] = gauss(); sh += uz[k]; }
+      c.score = c.proj * Math.max(0.05, 1 + 0.35 * (0.7 * gauss() + 0.7 * (c.keys.length ? sh / c.keys.length : gauss()))); }
+  };
+  const tot = l => l.reduce((t, c) => t + c.score, 0);
+  const lineStack = l => { const m = {}; let x = 0; for(const c of l){ if(c.pos === 'G') continue; for(const k of c.keys){ m[k] = (m[k] || 0) + 1; if(m[k] > x) x = m[k]; } } return x; };
+  // n lineups; T: a team to stack at K+ (or null); ban: teams to keep under K
+  return function(n, T, ban){
+    const res = []; let tries = 0;
+    while(res.length < n && tries++ < n * 6){
+      setWorld();
+      let cands = base.filter(c => c.score > 0 || c.pos === 'G');
+      if(ban && ban.size){
+        const keep = new Set();
+        for(const t of ban){ if(t === T) continue; cands.filter(c => c.team === t && c.pos !== 'G').sort((a, b) => b.score - a.score).slice(0, K - 1).forEach(c => keep.add(c)); }
+        cands = cands.filter(c => c.pos === 'G' || c.team === T || !ban.has(c.team) || keep.has(c));
+      }
+      let fixedSets = [null];
+      if(T){
+        const tm = cands.filter(c => c.team === T && c.pos !== 'G').sort((a, b) => b.score - a.score);
+        if(tm.length < K) continue;
+        fixedSets = [tm.slice(0, K)];
+        const units = {}; tm.forEach(c => c.keys.forEach(k => (units[k] = units[k] || []).push(c)));
+        const best = Object.values(units).filter(a => a.length >= Math.min(K, 2)).map(a => {
+          // the unit's top members, filled to K from the rest of the team
+          const top = a.slice(0, K); for(const c of tm){ if(top.length >= K) break; if(!top.includes(c)) top.push(c); } return top; })
+          .sort((a, b) => tot(b) - tot(a))[0];
+        if(best) fixedSets.push(best);
+      }
+      let pick = null;
+      for(const fx of fixedSets){
+        const l = fx ? nhlOptimalForSim(cands, cap, lo, fx) : nhlSolveWithStack(cands, needLine, cap, lo);
+        if(!l || l.length !== 9) continue;
+        if(needLine && lineStack(l) < needLine) continue;
+        if(!pick || tot(l) > tot(pick)) pick = l;
+      }
+      if(pick) res.push(pick.map(c => c.p));
+    }
+    return res;
+  };
+}
+function nhlEnforceStackExposure(slate, out, o){
+  o = o || {};
+  const log = typeof o.log === 'function' ? o.log : null;
+  if(!slate || !isNhl(slate) || !out || !out.length) return out;
+  const rules = nhlStackRules(slate); if(!rules.length) return out;
+  const K = nhlStackKOf(slate), N = out.length;
+  const cap = (o.maxSal > 0 ? Math.min(SALARY_CAP, o.maxSal) : SALARY_CAP), lo = (o.minSal > 0 ? o.minSal : 0);
+  const want = {}, capT = {}, clash = [];
+  rules.forEach(r => {
+    if(r.min != null) want[r.team] = nhlStackMinSlots(r.min, N);
+    if(r.max != null) capT[r.team] = nhlStackCapSlots(r.max, N);
+    if(want[r.team] != null && capT[r.team] != null && want[r.team] > capT[r.team]){ clash.push(r.team); want[r.team] = capT[r.team]; }
+  });
+  const wantOf = t => want[t] || 0, capOf = t => capT[t] != null ? capT[t] : Infinity;
+  const ovr = o.overrides || slate.playerExpOverrides || {}, maxPct = o.maxExpPct != null ? o.maxExpPct : 100;
+  const capP = id => { const pct = ovr[id] != null ? ovr[id] : maxPct; return pct >= 100 ? Infinity : pct <= 0 ? 0 : Math.max(1, Math.ceil(pct / 100 * N - 1e-9)); };
+  const minOv = slate.playerMinOverrides || {};
+  const minP = id => (minOv[id] > 0) ? Math.ceil(Math.min(100, minOv[id]) / 100 * N - 1e-9) : 0;
+  const needLine = nhlMinStackOf(slate);
+  // held-out worlds score, generation worlds build (the engines' split)
+  const S = o.simScoresById || null, nS = o.simsDone || o.totalSims || 0;
+  const hoIdx = [], genIdx = [];
+  if(S && nS > 1){
+    const odd = [], even = []; for(let t = 1; t < nS; t += 2) odd.push(t); for(let t = 0; t < nS; t += 2) even.push(t);
+    const thin = (a, k) => { const m = Math.min(k, a.length), st = a.length / Math.max(1, m), r = []; for(let j = 0; j < m; j++) r.push(a[Math.floor(j * st)]); return r; };
+    hoIdx.push(...thin(odd, 500)); genIdx.push(...thin(even, 400));
+  }
+  const keyOf = ps => ps.map(p => p.id).sort().join(',');
+  const memo = new Map();
+  const scoreOf = ps => { const k = keyOf(ps); if(memo.has(k)) return memo.get(k);
+    let v = (S && hoIdx.length) ? lineupSimComposite(ps, S, hoIdx, null) : null;
+    if(v == null) v = ps.reduce((a, p) => a + (parseFloat(p.proj) || 0), 0);
+    memo.set(k, v); return v; };
+  const salOf = ps => ps.reduce((a, p) => a + (p.salary || 0), 0);
+  const elig = new Set((o.pool || []).map(p => p.id));
+  const legal = ps => {
+    if(!ps || ps.length !== 9 || ps.some(p => !p)) return false;
+    if(elig.size && ps.some(p => !elig.has(p.id))) return false;
+    const s = salOf(ps); if(s > cap || s < lo) return false;
+    const c = { G: 0, C: 0, W: 0, D: 0 }; for(const p of ps){ const q = nhlPosOf(p); if(!q) return false; c[q]++; }
+    if(c.G !== 1 || c.C < 2 || c.W < 3 || c.D < 2) return false;
+    if(Object.keys(nhlTeamSkaters(ps)).length < NHL_MIN_SKATER_TEAMS) return false;
+    if(needLine && nhlStackMax(ps) < needLine) return false;
+    return true;
+  };
+  const stkOf = ps => nhlStackTeams(ps, K);
+  const keys = new Set(), have = {}, cnt = {};
+  out.forEach(l => { keys.add(keyOf(l)); stkOf(l).forEach(t => { have[t] = (have[t] || 0) + 1; }); l.forEach(p => { cnt[p.id] = (cnt[p.id] || 0) + 1; }); });
+  const before = {}; rules.forEach(r => { before[r.team] = have[r.team] || 0; });
+  const cands = [], seen = new Set();
+  const addCand = ps => { if(!ps || !ps.length) return null; const k = keyOf(ps); if(seen.has(k)) return null; seen.add(k);
+    if(!legal(ps)) return null; const c = { ps, k, stk: stkOf(ps), sc: null }; cands.push(c); return c; };
+  out.forEach(l => seen.add(keyOf(l)));
+  for(const e of (o.ranked || [])){
+    const l = e && (e.lineup || e); if(!l || !l.length) continue;
+    addCand(l.map(x => (x && typeof x === 'object') ? x : playerById(slate, x)));
+    if(cands.length >= 6000) break;
+  }
+  const sc = c => (c.sc != null ? c.sc : (c.sc = scoreOf(c.ps)));
+  const gen = nhlStackCandGen(slate, o, K, genIdx, cap, lo, needLine);
+  const canReplace = (vi, c) => {
+    const v = out[vi]; if(keys.has(c.k)) return false;
+    const vS = new Set(stkOf(v)), cS = new Set(c.stk);
+    for(const t of vS) if(!cS.has(t) && (have[t] || 0) - 1 < wantOf(t)) return false;
+    for(const t of cS) if(!vS.has(t) && (have[t] || 0) + 1 > capOf(t)) return false;
+    const inS = new Set(c.ps.map(p => p.id)), outS = new Set(v.map(p => p.id));
+    for(const id of outS) if(!inS.has(id) && (cnt[id] || 0) - 1 < minP(id)) return false;
+    for(const id of inS) if(!outS.has(id) && (cnt[id] || 0) + 1 > capP(id)) return false;
+    return true;
+  };
+  const replaced = new Set();
+  const doReplace = (vi, c) => {
+    const v = out[vi];
+    keys.delete(keyOf(v)); stkOf(v).forEach(t => { have[t]--; }); v.forEach(p => { cnt[p.id]--; });
+    const nl = c.ps.slice(); nl._stackSwap = true;
+    out[vi] = nl; keys.add(c.k); c.stk.forEach(t => { have[t] = (have[t] || 0) + 1; }); nl.forEach(p => { cnt[p.id] = (cnt[p.id] || 0) + 1; });
+    replaced.add(vi);
+  };
+  const atCap = except => new Set(Object.keys(capT).filter(t => t !== except && (have[t] || 0) >= capOf(t)));
+  const rep = { capRepl: 0, minRepl: 0, gen: 0 };
+  // ── CAPS ──
+  for(const r of rules){
+    const T = r.team; if(capT[T] == null) continue;
+    let over = (have[T] || 0) - capOf(T), rounds = 0;
+    while(over > 0 && rounds++ < 4){
+      let moved = false;
+      const victims = out.map((l, i) => ({ i, s: scoreOf(l) })).filter(v => stkOf(out[v.i]).includes(T)).sort((a, b) => a.s - b.s);
+      for(const v of victims){ if(over <= 0) break; if(!stkOf(out[v.i]).includes(T)) continue;
+        let best = null; for(const c of cands){ if(c.stk.includes(T) || !canReplace(v.i, c)) continue; if(!best || sc(c) > sc(best)) best = c; }
+        if(!best) continue; doReplace(v.i, best); over--; rep.capRepl++; moved = true; }
+      if(over <= 0) break;
+      const ban = atCap(null); ban.add(T);
+      const add = gen(Math.max(16, over * 5), null, ban).map(addCand).filter(Boolean); rep.gen += add.length;
+      if(!add.length && !moved) break;
+    }
+  }
+  // ── FLOORS ──
+  const short = [];
+  const order = rules.filter(r => r.min != null).map(r => r.team).sort((a, b) => (wantOf(b) - (have[b] || 0)) - (wantOf(a) - (have[a] || 0)));
+  for(const T of order){
+    let need = wantOf(T) - (have[T] || 0), rounds = 0;
+    while(need > 0 && rounds++ < 4){
+      let pool = cands.filter(c => c.stk.includes(T) && !keys.has(c.k));
+      if(pool.length < need * 4){ const add = gen(Math.max(16, need * 6), T, atCap(T)).map(addCand).filter(Boolean); rep.gen += add.length;
+        pool = cands.filter(c => c.stk.includes(T) && !keys.has(c.k)); }
+      pool.sort((a, b) => sc(b) - sc(a));
+      let moved = false;
+      for(const c of pool){ if(need <= 0) break; if(keys.has(c.k)) continue;
+        const vs = out.map((l, i) => ({ i, s: scoreOf(l) })).filter(v => !stkOf(out[v.i]).includes(T)).sort((a, b) => a.s - b.s);
+        const v = vs.find(v => canReplace(v.i, c)); if(!v) continue;
+        doReplace(v.i, c); need--; rep.minRepl++; moved = true; }
+      if(!moved) break;
+    }
+    if(need > 0) short.push(T);
+  }
+  if(log){
+    const parts = rules.map(r => `${r.team} ${have[r.team] || 0}` + (r.min != null ? ` (≥${wantOf(r.team)})` : '') + (r.max != null ? ` (≤${capOf(r.team)})` : '')
+      + ((have[r.team] || 0) !== before[r.team] ? ` was ${before[r.team]}` : ''));
+    const moves = [rep.capRepl && `${rep.capRepl} replaced for caps`, rep.minRepl && `${rep.minRepl} replaced for floors`].filter(Boolean);
+    log(`Team stacks (ck152, ${K}+ skaters, of ${N}): ${parts.join(' · ')}` + (moves.length ? ` — ${moves.join(', ')}${rep.gen ? ` (${rep.gen} extra candidates solved)` : ''}.` : ' — already met.'));
+    clash.forEach(t => log(`  ⚠ ${t}: stack Min% is above its Max% — the Max% wins (${capOf(t)}).`));
+    rules.forEach(r => { if(r.max != null && (have[r.team] || 0) > capOf(r.team)) log(`  ⚠ ${r.team} stacks are over the Max% (${have[r.team]} > ${capOf(r.team)}): no replacement fit the other limits.`); });
+    short.forEach(t => log(`  ⚠ ${t} stacks are short of the Min% (${have[t] || 0} of ${wantOf(t)}): no legal ${t} stack fit without breaking a salary limit, a Max% or another team's rule — loosen one, or unhide ${t} skaters.`));
+  }
+  o.report = { have: Object.assign({}, have), replaced: [...replaced], K, want: Object.assign({}, want), cap: Object.assign({}, capT), ...rep };
   return out;
 }
 
@@ -44057,7 +44826,7 @@ function renderPreviewExposure(){
       </div>`;
   }
 
-  el.innerHTML = statsHTML + headerRow + sorted.map(([id,count])=>{
+  el.innerHTML = statsHTML + previewNhlStacksHtml(slate, selectedLineups) + headerRow + sorted.map(([id,count])=>{
     const p=playerById(slate,id)||previewLineups.flat().find(x=>x.id===id);
     const name=p?.name||id;
     const pct=Math.round((count/total)*100);
@@ -44075,6 +44844,25 @@ function renderPreviewExposure(){
       ${hasOwn&&own>0?`<div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);width:36px;text-align:right;flex-shrink:0;">${own.toFixed(1)}%</div><div style="font-family:'DM Mono',monospace;font-size:10px;color:${levColor};width:42px;text-align:right;flex-shrink:0;padding-right:4px;">${lev>0?'+':''}${lev.toFixed(1)}</div>`:''}
     </div>`;
   }).join('') + cptHTML + notablesHTML;
+}
+// ck152: NHL — team-stack exposure of the selected preview lineups, with the
+// Min% / Max% from the Stacks tab beside each team it bounds.
+function previewNhlStacksHtml(slate, lineups){
+  if(!slate || !isNhl(slate) || !lineups || !lineups.length) return '';
+  const ex = nhlStackExposure(slate, lineups), k = ex.k, N = ex.N;
+  const rows = Object.entries(ex.teams).filter(([, e]) => e.n2 > 0).sort((a, b) => b[1].nK - a[1].nK || b[1].n2 - a[1].n2);
+  if(!rows.length) return '';
+  const H = (t, w, tip) => `<div style="font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;width:${w}px;text-align:right;flex-shrink:0;" title="${tip}">${t}</div>`;
+  return `<div style="margin-bottom:10px;padding:8px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:13px;letter-spacing:1px;color:var(--accent);margin-bottom:6px;">Team Stacks <span style="font-size:10px;color:var(--muted);letter-spacing:.5px;">· stack = ${k}+ skaters</span></div>
+    <div style="display:flex;align-items:center;gap:6px;padding:2px 0;margin-bottom:3px;border-bottom:1px solid var(--border);">
+      <div style="flex:1;font-size:9px;color:var(--muted);font-family:'DM Mono',monospace;">TEAM</div>${H('2+', 30, 'Lineups with 2+ of the team\'s skaters')}${H('3+', 30, 'Lineups with 3+')}${H('4+', 30, 'Lineups with 4+')}${H('RULE', 54, 'Min% / Max% from the Stacks tab (on ' + k + '+ stacks)')}</div>
+    ${rows.map(([t, e]) => { const r = nhlStackRuleOf(slate, t), col = nhlTeamColor(slate, t), pct = n => Math.round(100 * n / N) + '%';
+      const v = 100 * e.nK / N, bad = (r.min != null && v + 1e-9 < r.min) || (r.max != null && v - 1e-9 > r.max);
+      const c = (s, n) => `<div style="font-family:'DM Mono',monospace;font-size:10px;width:30px;text-align:right;flex-shrink:0;color:${s === k ? (bad ? 'var(--red)' : (n ? 'var(--accent)' : 'var(--muted)')) : 'var(--muted)'};${s === k && (n || bad) ? 'font-weight:600;' : ''}">${pct(n)}</div>`;
+      const rule = (r.min != null || r.max != null) ? `${r.min != null ? r.min : 0}–${r.max != null ? r.max : 100}%` : '';
+      return `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;"><div style="flex:1;min-width:0;"><span class="nhl-tag" style="color:${col};border-color:${col};">${esc(t)}</span></div>${c(2, e.n2)}${c(3, e.n3)}${c(4, e.n4)}<div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);width:54px;text-align:right;flex-shrink:0;">${rule}</div></div>`; }).join('')}
+  </div>`;
 }
 
 function closePreviewModal(){
@@ -44256,6 +45044,7 @@ function switchTab(tab,el){
   const _tc=document.getElementById('tab-'+tab); if(!_tc) return;
   if(el) el.classList.add('active'); _tc.classList.add('active');
   if(tab==='exposure')renderExposure();
+  if(tab==='stacks' && typeof renderNhlStacks==='function') renderNhlStacks();
   if(tab==='builder' && typeof renderHbEv==='function') renderHbEv();
   if(tab==='groups')renderGroups();
   if(tab==='autogen'){renderGroupRulesSummary();}
