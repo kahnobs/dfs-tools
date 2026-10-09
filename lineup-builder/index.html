@@ -370,6 +370,10 @@ tr.isout td.sdt-c{opacity:.45;}
 td.sdt-c.ov .sdt-in{border-color:var(--accent);color:var(--accent);font-weight:600;}
 td.sdt-c.auto .sdt-in{border-color:rgba(239,68,68,.55);border-style:dashed;}
 td.sdt-c.moved .sdt-in{color:#d8c27a;}
+.sdt-step{display:inline-flex;flex-direction:column;vertical-align:middle;margin:0 1px 0 2px;gap:1px;}
+.sdt-step button{background:var(--surface2);border:1px solid var(--border);color:var(--muted);font-size:6.5px;line-height:1;width:13px;height:9px;padding:0;border-radius:2px;cursor:pointer;display:flex;align-items:center;justify-content:center;user-select:none;touch-action:none;}
+.sdt-step button:hover{color:var(--accent);border-color:var(--accent);}
+td.sdt-c.stepping .sdt-in{border-color:var(--accent);color:var(--accent);border-style:dashed;}
 .sdt-m{font-family:'DM Mono',monospace;font-size:9.5px;color:var(--green);margin-top:1px;}
 td.sdt-na{color:var(--muted);opacity:.4;text-align:center;}
 td.sdt-act{text-align:left;}
@@ -7369,7 +7373,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck155/2026-10-09';
+const BUILD_ID = '2.0/ck156/2026-10-09';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -31280,8 +31284,8 @@ function simDashGameHtml(ctx, g){
             + (ov ? (auto ? ' · set automatically by the OUT redistribution' : ' · set by you — teammates rebalance around it') : (a.lock ? ' · locked' : ' · rebalances when a teammate is set'))
             + '. Type a share and press Enter; clear the cell for the market share.';
           html += `<td class="sdt-c${ov ? (auto ? ' auto' : ' ov') : ''}${moved && !ov ? ' moved' : ''}" title="${esc(tip)}">
-            <input class="sdt-in" inputmode="decimal" data-r="${ri}" data-c="${ci}" data-k="${st.key}" data-mean="${mean}" value="${pct(share)}" ${isOutRow ? 'disabled' : ''}
-              onfocus="_sdashNextCell=null;this.select()" onkeydown="simDashCellKey(event,this)" onchange="simDashCell(this,'${id}','${st.key}')"><span class="sdt-pc">%</span>
+            <input class="sdt-in" inputmode="decimal" data-r="${ri}" data-c="${ci}" data-k="${st.key}" data-id="${esc(id)}" data-mean="${mean}" value="${pct(share)}" ${isOutRow ? 'disabled' : ''}
+              onfocus="_sdashNextCell=null;this.select()" onkeydown="simDashCellKey(event,this)" onchange="simDashCell(this,'${id}','${st.key}')">${isOutRow ? '' : `<span class="sdt-step"><button tabindex="-1" title="+0.1% (Shift +1%) — hold to repeat" onpointerdown="simDashStepStart(event,this,1)">▲</button><button tabindex="-1" title="−0.1% (Shift −1%) — hold to repeat" onpointerdown="simDashStepStart(event,this,-1)">▼</button></span>`}<span class="sdt-pc">%</span>
             <div class="sdt-m">${st.fmt(mean)}${moved ? `<i>${pct(base)}%</i>` : ''}</div></td>`;
         });
         {
@@ -31461,6 +31465,42 @@ function simDashLinkedEdits(el, id, stat, v){
     if(val('td') > 0) put('td', val('td') * (1 + (r - 1) * w));
   }
   return out;
+}
+// ── ck156: ▲ / ▼ STEPPERS on every share cell ─────────────────────────────
+// Matt: "another way to make small adjustments without having to type in a
+// value". A click moves the cell 0.1 point (Shift: 1 point); holding repeats.
+// Clicks only move the number on screen; the share is committed once the
+// clicking stops (SIM_STEP_SETTLE_MS), so a run of clicks is ONE edit — one
+// re-render, one undo step, one linked adjustment measured from where the cell
+// started — and goes through exactly the path a typed value does.
+const SIM_STEP_SETTLE_MS = 450;
+let _simStep = null;   // {el, timer, rep}
+function simDashStepCommit(){
+  const st = _simStep; if(!st) return; _simStep = null;
+  clearTimeout(st.timer); clearInterval(st.rep); clearTimeout(st.hold);
+  const el = st.el; if(!el || !el.isConnected) return;
+  if(el.value === el.defaultValue) return;
+  simDashCell(el, el.dataset.id, el.dataset.k);
+}
+function simDashStepOnce(el, d){
+  const v = Math.max(0, Math.min(100, Math.round(((parseFloat(el.value) || 0) + d) * 10) / 10));
+  el.value = v.toFixed(1);
+  el.parentElement && el.parentElement.classList.add('stepping');
+}
+function simDashStepStart(ev, btn, dir){
+  ev.preventDefault(); ev.stopPropagation();
+  const el = btn.closest('td') && btn.closest('td').querySelector('input.sdt-in'); if(!el || el.disabled) return;
+  if(_simStep && _simStep.el !== el) simDashStepCommit();   // a different cell: settle the first one now
+  const d = dir * (ev.shiftKey ? 1 : 0.1);
+  simDashStepOnce(el, d);
+  const st = _simStep || (_simStep = { el });
+  clearTimeout(st.timer); clearInterval(st.rep); clearTimeout(st.hold);
+  // hold to repeat: after 350 ms, every 70 ms
+  st.hold = setTimeout(() => { st.rep = setInterval(() => simDashStepOnce(el, d), 70); }, 350);
+  const stop = () => { clearTimeout(st.hold); clearInterval(st.rep); st.rep = null;
+    st.timer = setTimeout(simDashStepCommit, SIM_STEP_SETTLE_MS);
+    document.removeEventListener('pointerup', stop); btn.removeEventListener('pointerleave', stop); };
+  document.addEventListener('pointerup', stop); btn.addEventListener('pointerleave', stop);
 }
 // One removable change, for the change list (ck154).
 function simDashDropChange(kind, a, b){
