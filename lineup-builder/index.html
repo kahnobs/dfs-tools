@@ -7402,7 +7402,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck160/2026-10-10';
+const BUILD_ID = '2.0/ck161/2026-10-10';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -28100,13 +28100,14 @@ function nflStarterQbId(mem){
   return best ? best.p.id : null;
 }
 function nflFillFromBaseline(pool, entries, teamInfo, model){
-  teamInfo.forEach(ti => { ti.baseFill = null; ti._covPin = null; ti.orderCut = null; });
+  teamInfo.forEach(ti => { ti.baseFill = null; ti._covPin = null; ti.orderCut = null; ti.orderRespread = null; });
   if(!model) return false;
   const slate = (typeof activeSlate === 'function') ? activeSlate() : null;
   if(!slate || !Array.isArray(slate.players)) return false;
   // Cheap bail-out for every slate that has no baseline columns at all, so the
   // no-baseline path costs one pass over the roster and nothing else.
-  if(!slate.players.some(nflHasBaseline)) return false;
+  // ck161: no early bail-out — even a sheet with no baseline columns has a
+  // receiving gap to its quarterback that the leftover spread must place.
   const outS = (typeof nflOutSet === 'function') ? nflOutSet(slate) : new Set();
   const idxById = new Map(); pool.forEach((p, i) => idxById.set(p.id, i));
   const teamOfP = p => String(p.team||'').toUpperCase().replace(/[^A-Z]/g,'');
@@ -28164,7 +28165,6 @@ function nflFillFromBaseline(pool, entries, teamInfo, model){
   for(const T of Object.values(model)){
     const ti = teamInfo.get(T.team); if(!ti) continue;
     const all = absorbers.get(T.team) || [];
-    if(!all.length) continue;
     const report = {};
     for(const st of NFL_BASE_COLS){
       const remFrac = T.remainder[st.key] || 0;
@@ -28175,7 +28175,8 @@ function nflFillFromBaseline(pool, entries, teamInfo, model){
       // role he is not going to have, so it must not shrink what the men who
       // are playing receive.
       const cand = all.filter(c => !(mOf(c.e, st.key) > 0) && !qbBlocked(c.p, c.e));
-      if(!cand.length) continue;
+      // ck161: no absorber is no longer a reason to leave the gap unassigned —
+      // the claim step is skipped and the leftover spread below places it.
       // How much of the team these absorbers claim, in the stat's own units:
       // a baseline is a percentage OF THE TEAM, so his amount is that
       // percentage of the (anchored) team total.
@@ -28191,7 +28192,6 @@ function nflFillFromBaseline(pool, entries, teamInfo, model){
         const b = nflBaseShare(c.p, st.cols); const v = (b != null && b > 0) ? b : 0;
         claimPct += v; w.push(c.out ? 0 : v); if(!c.out) wSum += v;
       }
-      if(!(wSum > 0)) continue;
       const claim = claimPct / 100 * (T.base[st.key] || 0);
       // SCALE DOWN, NEVER UP. When the absorbers' baselines add to more than
       // the gap (the usual case on a thin sheet, because a baseline covers the
@@ -28209,7 +28209,7 @@ function nflFillFromBaseline(pool, entries, teamInfo, model){
       // honest answer is that 10% of that offense is still unaccounted for,
       // which is what the Slate check now says out loud, and why the severity
       // drop is gated on how much of the gap actually found an owner.
-      const scale = Math.min(1, claim > 0 ? gap / claim : 0);
+      const scale = (wSum > 0) ? Math.min(1, claim > 0 ? gap / claim : 0) : 0;
       const parts = []; let assigned = 0;
       cand.forEach((c, k) => {
         if(!(w[k] > 0)) return;
@@ -28228,7 +28228,6 @@ function nflFillFromBaseline(pool, entries, teamInfo, model){
         parts.push({ id: p.id, name: p.name || p.id, amount: amt,
                      pct: (T.base[st.key] > 0 ? amt / T.base[st.key] : 0) });
       });
-      if(!parts.length) continue;
       filledAny = true;
       // THE LEFTOVER. When the absorbers' baselines claim less than the gap,
       // the difference used to stay an anonymous remainder — 3–4% of DET's and
@@ -28286,6 +28285,29 @@ function nflFillFromBaseline(pool, entries, teamInfo, model){
           }
           assigned += leftover - pool_;
           leftover = pool_;
+          // ck161: NOTHING STAYS UNASSIGNED. The anchors are the team's real
+          // totals — 2026 weeks 1–4, 124 team-games: rushing anchor 113.1 vs
+          // 110.7 actual, TD budget 2.39 vs 2.45 actual rush+rec TDs, receiving
+          // = the QB's passing mean — and every one of those yards and
+          // touchdowns is scored by somebody on the roster. What the caps could
+          // not place (a no-role back's claim, a thin sheet) is spread pro-rata
+          // by the share each player now holds, past the caps. Matt: "Everything
+          // should sum to 100". The backtest on those weeks had every skill
+          // position's sim mean UNDER its actual DK points before this.
+          if(pool_ > 1e-9){
+            const denomS = holders.reduce((a, h) => a + mOf(h.e, st.key), 0);
+            if(denomS > 0){
+              for(const h of holders){
+                const e = h.e, cur = mOf(e, st.key);
+                const amt = pool_ * cur / denomS; if(!(amt > 0)) continue;
+                if(st.key === 'td'){ e.atd = nflTdProb(nflTdLam(e.atd) + amt); }
+                else { e[st.key] = (e[st.key] || 0) + amt; }
+                (e._leftover || (e._leftover = {}))[st.key] = ((e._leftover || {})[st.key] || 0) + amt;
+                spread.push({ id: h.pl.p.id, name: h.pl.p.name || h.pl.p.id, amount: amt });
+              }
+              assigned += pool_; leftover = 0;
+            }
+          }
         }
       }
       // Pin this stat's anchor for every later nflShareModel pass (see `pin`
@@ -28577,6 +28599,28 @@ const NFL_COV_MIN = 0.85;
 // priced players, where it belongs.
 const NFL_COV_FILL_MIN = 0.95;
 const NFL_COV_FILL_TARGET = 0.95;
+// ── ck161: RECEIVING YARDS ADD UP TO THE QUARTERBACK ─────────────────────────
+// Matt: "shouldn't our total receiving yards = our total passing yards …
+// the QB line is likely the accurate one … there is much more noise in the
+// receiving with multiple receivers than a single QB's passing line."
+// Every passing yard is somebody's receiving yard, so the receiving pie is the
+// starter's passing MEAN, exactly — not 0.95 of it. The 0.95 above rested on
+// "lines are medians, and medians of skewed stats under-add", but both sides
+// are converted to means before this point (Rodgers 224.5 → 233, Metcalf
+// 52.5 → 62), so that argument no longer applies here. 2026 weeks 1–4
+// (125 team-games, the Thu–Mon sheets against nflverse box scores):
+//   · the QB line × 1.038 averaged 230.4 against 232.7 actual (≈ unbiased);
+//   · the listed receivers' line-means summed to 0.845 of the QB mean, while
+//     those same players actually caught 0.875 of the team's yards — they ran
+//     5.9% over their line-means, and the 12.5% they did not catch went to men
+//     with no line;
+//   · as a predictor of the team's receiving yards the QB line beat the summed
+//     receiver lines (bias +5 vs +13 yds, RMSE 65 vs 71).
+// So the gap is filled to the full anchor whenever there is one: baseline
+// claims first, then the leftover pro-rata (priced lines lifted ≤ 6%, which is
+// what the data says they earn). With no baseline the gap is an anonymous
+// remainder that the team still throws. Rushing keeps the 0.95 rule above.
+const NFL_REC_FILL_TARGET = 1.0;
 // How far above his market line a PRICED player's mean may be lifted by the
 // leftover spread (see nflFillFromBaseline). 6% is a touch over the typical
 // mean-over-median skew of a receiving line; beyond it the excess stays a
@@ -28807,6 +28851,27 @@ function nflEnforceMarketOrder(mem0, ti){
       removed += cur - prev;
       if(key === 'td') pr[i].e.atd = nflTdProb(prev); else pr[i].e[key] = prev;
     }
+    // ck161: what came off is RE-SPREAD, not dropped. The anchors are the
+    // team's real totals (see NFL_REC_FILL_TARGET), so trimmed yards are
+    // still somebody's — they go pro-rata to the players who were not trimmed,
+    // by the amount each now holds. A common factor cannot reorder those
+    // players, and the trimmed ones sit at a priced teammate's value, which
+    // this only raises, so the invariant still holds afterwards.
+    if(removed > 1e-9){
+      const cut = new Set(mem.filter(m => (m.e._orderCut && m.e._orderCut[key] > 0)).map(m => m.id));
+      const recv = mem.filter(m => !cut.has(m.id) && mOf(m.e, key) > 0);
+      const tot = recv.reduce((a, m) => a + mOf(m.e, key), 0);
+      if(tot > 0){
+        const f = 1 + removed / tot;
+        for(const m of recv){
+          const v = mOf(m.e, key), add = v * (f - 1);
+          if(key === 'td') m.e.atd = nflTdProb(v * f); else m.e[key] = v * f;
+          (m.e._leftover || (m.e._leftover = {}))[key] = ((m.e._leftover || {})[key] || 0) + add;
+        }
+        if(ti) (ti.orderRespread || (ti.orderRespread = {}))[key] = ((ti.orderRespread || {})[key] || 0) + removed;
+        removed = 0; any = true;
+      }
+    }
     if(removed > 1e-9 && ti){ (ti.orderCut || (ti.orderCut = {}))[key] = ((ti.orderCut || {})[key] || 0) + removed; any = true; }
     else if(removed > 1e-9) any = true;
   }
@@ -28966,7 +29031,7 @@ function nflShareModel(slate, pool, entries, teamInfo){
       const outPl = T.players.filter(pl => !pl.skip && pl.isOut && pl.m.recYds > 0);
       const outY = outPl.reduce((a, pl) => a + pl.m.recYds, 0);
       if(outY > 0){
-        const room = Math.max(0, qbLine * NFL_COV_FILL_TARGET - (T.base.recYds - outY));
+        const room = Math.max(0, qbLine * NFL_REC_FILL_TARGET - (T.base.recYds - outY));
         if(room < outY){
           const k = room / outY;
           for(const pl of outPl){
@@ -28994,11 +29059,14 @@ function nflShareModel(slate, pool, entries, teamInfo){
       if(!(anchor > 0)) return;
       const c = have / anchor;
       T.coverage[key] = c;
-      const floor = hasBase ? NFL_COV_FILL_MIN : NFL_COV_MIN;
+      // ck161: receiving yards always close on the quarterback (see
+      // NFL_REC_FILL_TARGET); every other stat keeps its floor.
+      const isRec = key === 'recYds';
+      const floor = isRec ? NFL_REC_FILL_TARGET : (hasBase ? NFL_COV_FILL_MIN : NFL_COV_MIN);
       if(c >= floor && !(pin && pin[key])) return;   // a normal sheet — nothing changes
       // With a baseline the anchor the pie is built on is 0.95 of the market
       // anchor (see NFL_COV_FILL_TARGET); without one it is the anchor itself.
-      const target = hasBase ? anchor * NFL_COV_FILL_TARGET : anchor;
+      const target = isRec ? anchor * NFL_REC_FILL_TARGET : (hasBase ? anchor * NFL_COV_FILL_TARGET : anchor);
       const cT = have / target;
       // Clamped: a PINNED stat can measure slightly over 1 once the fill has
       // closed the gap, and a -1e-16 remainder would leak out as a coverage of
@@ -29008,6 +29076,17 @@ function nflShareModel(slate, pool, entries, teamInfo){
       T.base[key] = Math.max(have, target);
     };
     denom('recYds', qbLine);
+    // ck161: the other direction. Receivers whose lines add up to MORE than
+    // their quarterback (1 team-game in 125 in weeks 1–4) are scaled down to
+    // him, in proportion, so the pie still equals his passing mean. Catches
+    // ride the same factor.
+    if(qbLine > 0 && T.base.recYds > qbLine * NFL_REC_FILL_TARGET * 1.0005 && !(T.remainder.recYds > 0)){
+      const k = qbLine * NFL_REC_FILL_TARGET / T.base.recYds;
+      for(const pl of T.players){ if(pl.skip) continue; pl.m.recYds *= k; pl.m.rec *= k; }
+      T.base.rec *= k; T.lineSum.recYds *= k; T.lineSum.rec *= k;
+      T.base.recYds = qbLine * NFL_REC_FILL_TARGET;
+      T.recOver = { k };
+    }
     // Receptions ride the receiving-yards coverage: the catches that went with
     // the missing yards are missing too, and inventing a second anchor for them
     // (a league yards-per-catch) would be a guess where this one is a fact.
@@ -29018,7 +29097,7 @@ function nflShareModel(slate, pool, entries, teamInfo){
       // Same target as the yards: with a baseline the receiving pie is built on
       // 0.95 of the anchor, so the catches must be too — dividing by the
       // full-anchor coverage alone paid out 1/0.95 of the listed receptions.
-      T.base.rec = T.base.rec / Math.max(1e-6, c) * (hasBase ? NFL_COV_FILL_TARGET : 1);
+      T.base.rec = T.base.rec / Math.max(1e-6, c) * NFL_REC_FILL_TARGET;
     }
     if(imp != null && imp > 0){
       // Detector vs budget — see the NFL_RUSH_BASE comment. The detector's
@@ -29400,7 +29479,7 @@ function nflSlateAudit(slate){
         const who = r.parts.slice(0, 3).map(x => `${x.name} (${pc(x.pct)})`).join(', ');
         const more = r.parts.length > 3 ? `, +${r.parts.length - 3} more` : '';
         const named = Math.max(0, r.filledFrac - (r.leftoverFrac || 0));
-        const spreadTxt = (r.leftoverFrac || 0) > 0.004 ? `; ${pc(r.leftoverFrac)} spread pro-rata across the roster (priced lines lifted ≤ ${Math.round(NFL_LEFTOVER_CAP * 100)}%)` : '';
+        const spreadTxt = (r.leftoverFrac || 0) > 0.004 ? `; ${pc(r.leftoverFrac)} spread pro-rata across the roster by current share` : '';
         const unTxt = r.unassignedFrac > 0.004 ? `; ${pc(r.unassignedFrac)} unassigned` : '';
         return { note: `; ${pc(named)} filled from baseline: ${who}${more}${spreadTxt}${unTxt}`,
                  drop: r.ofGap >= 0.80 };
