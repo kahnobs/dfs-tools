@@ -509,6 +509,8 @@ td.sdt-proj{color:var(--muted);font-weight:400;border-left:none;}
 .sdash-inact{display:inline-flex;align-items:center;gap:3px;border:1px solid rgba(239,68,68,.4);background:rgba(239,68,68,.08);color:var(--red);border-radius:10px;padding:1px 3px 1px 7px;font-size:10px;font-family:'DM Mono',monospace;}
 .sdash-inact button{background:none;border:none;color:inherit;cursor:pointer;font-size:10px;line-height:1;padding:1px 3px;opacity:.75;border-radius:8px;}
 .sdash-inact button:hover{opacity:1;background:rgba(239,68,68,.18);}
+.sdash-norole{display:inline-flex;align-items:center;gap:4px;border:1px dashed var(--border);color:var(--muted);border-radius:10px;padding:1px 7px;font-size:10px;font-family:'DM Mono',monospace;cursor:help;}
+.sdash-norole b{color:#f59e0b;font-weight:600;}
 .sdash-inact-hint{font-size:9.5px;color:var(--muted);opacity:.85;}
 /* ── Slate check ────────────────────────────────────────────────────────────
    Sits under the game tiles, above the pool. Collapsed it is one badge row, so
@@ -7377,7 +7379,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck158/2026-10-10';
+const BUILD_ID = '2.0/ck159/2026-10-10';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -9294,6 +9296,8 @@ function renderPool(){
        if(mode==='cpt' && f.key==='_simP50'){
          const sv=p._simP50;
          if(sv==null) return `<div class="cell-mono ${f.cls}" style="color:var(--muted)">—</div>`;
+         if(slate.sport==='nfl' && typeof nflIsOut==='function' && nflIsOut(slate, p.id) && sv > 0)
+           return `<div class="cell-mono ${f.cls}" style="color:var(--muted)" title="OUT — scores 0. Re-run the sim so his teammates pick up his share."><s style="opacity:.6">${(sv*CPT_MULT).toFixed(1)}</s> 0.0</div>`;
          const hasDist=p._simDist!=null;
          if(hasDist){ window._simDistMap=window._simDistMap||{}; window._simDistMap[p.id]=p._simDist; }
          return `<div class="cell-mono ${f.cls}" style="color:${sv>0?'var(--accent)':'var(--muted)'};${hasDist?'cursor:default;':''}" title="1.5× sim score as captain"
@@ -9408,6 +9412,10 @@ function renderPool(){
         if(f.key==='_simP50'){
           const sv = p._simP50;
           if(sv==null) return `<div class="cell-mono ${f.cls}" style="color:var(--muted)">—</div>`;
+          // ck159: an OUT man scores 0 whatever the last run said — the number
+          // shown used to be the stale pre-news one (Pittman 5.7 after his O).
+          if(slate.sport==='nfl' && typeof nflIsOut==='function' && nflIsOut(slate, p.id) && sv > 0)
+            return `<div class="cell-mono ${f.cls}" style="color:var(--muted)" title="OUT — scores 0. The last sim run (before he was marked out) had him at ${sv.toFixed(1)}; re-run the sim so his teammates pick up his share."><s style="opacity:.6">${sv.toFixed(1)}</s> 0.0</div>`;
           const hasDist = p._simDist != null;
           if(hasDist){ window._simDistMap = window._simDistMap||{}; window._simDistMap[p.id] = p._simDist; }
           // 0.0 = the sim treated him as not playing (no props, no Proj).
@@ -31093,15 +31101,41 @@ function simDashSides(ctx, g){
 function simDashGameFacts(ctx, names){
   const { cur, pool, adj, dashOut } = ctx;
   const set = new Set(names);
-  const outs = []; let nShare = 0;
+  const outs = [], noRole = []; let nShare = 0;
   for(let i = 0; i < cur.entries.length; i++){
     const e = cur.entries[i]; if(!e || !set.has(e.team)) continue;
     const p = pool[i]; if(!p) continue;
     if(dashOut.has(p.id)) outs.push(p);
+    // ck159: a no-role man (ck148: SS Proj 0, no yardage / catch line) scores
+    // 0 and is left out of every pie, so he has no row in the share table. One
+    // the sheet still flags, or that the baseline / ATD market says has a real
+    // role, is named here so his absence from the table is never a mystery.
+    else if(e.noRole && !e.out){
+      const b = Math.max(+p.base_tgt || 0, +p.base_rush || 0, +p.base_td || 0);
+      const atdP = (p.atd != null && typeof amProb === 'function') ? (amProb(p.atd) || 0) : 0;
+      if(p.status || b >= 3 || atdP >= 0.1) noRole.push(p);
+    }
     const a = adj.players[p.id];
     if(a && a.auto !== 'out' && NFL_SHARE_STATS.some(st => Number.isFinite(a[st.key]))) nShare++;
   }
-  return { outs, nShare };
+  return { outs, noRole, nShare };
+}
+// ck159: the Inactives strip (+ the no-role strip), shared by the grid's
+// detail panel and the single-game (showdown) editor.
+function simDashInactsHtml(facts){
+  // The Inactives strip is the one place the scratches on THIS game are
+  // listed together — the ⛔ toggles are scattered down the accordions, so
+  // undoing one meant hunting for the row that produced it.
+  const inacts = facts.outs.length
+    ? facts.outs.map(p => `<span class="sdash-inact" title="${esc(p.name)} is OUT — his market share went to his teammates">${esc(p.name)}<button onclick="toggleOut('${p.id}',event)" title="Put ${esc(p.name)} back in">✕</button></span>`).join('')
+      + `<span class="sdash-inact-hint">⛔ on any row below marks another one out</span>`
+    : `<span class="sdash-inact-hint">nobody — ⛔ on any row below marks a player out</span>`;
+  const noRoleHtml = facts.noRole.length
+    ? `<div class="sdash-inacts"><span class="sdash-inact-lbl" title="SS Proj 0 and no yardage or reception line: the sim scores these players 0 and leaves them out of the share table, so their share stays with the teammates who have a role.">No role · 0 pts</span>`
+      + facts.noRole.map(p => `<span class="sdash-norole" title="${esc(p.name)}${p.status ? ` (${esc(p.status)} on the sheet)` : ''}: SS Proj 0 and no yardage / reception line, so he scores 0 and is not in the table. Type a Proj for him in the pool to put him back in the sim.">${esc(p.name)}${p.status ? ` <b>${esc(p.status)}</b>` : ''}</span>`).join('')
+      + `</div>`
+    : '';
+  return `<div class="sdash-inacts"><span class="sdash-inact-lbl">Inactives</span>${inacts}</div>${noRoleHtml}`;
 }
 // ── Level 1: one compact game tile ───────────────────────────────────────────
 // Implied totals (favourite in gold, like the pool tiles), the Total and Spread
@@ -31731,7 +31765,7 @@ function renderSimDash(){
   // Showdown (or any single-game slate) has nothing to navigate: render the one
   // editor straight into the tab, exactly as it was before the grid existed.
   if(ord.games.length < 2){
-    for(const g of ord.games) html += simDashGameHtml(ctx, g);
+    for(const g of ord.games) html += simDashInactsHtml(simDashGameFacts(ctx, simDashSides(ctx, g).names)) + simDashGameHtml(ctx, g);
     el.innerHTML = html;
     simDashRestoreCell();
     return;
@@ -31759,13 +31793,7 @@ function renderSimDash(){
     const facts = simDashGameFacts(ctx, names);
     const i = _sdashOrder.indexOf(openKey);
     const anyWork = names.some(t => adj.teams[t]) || facts.nShare > 0;
-    // The Inactives strip is the one place the scratches on THIS game are
-    // listed together — the ⛔ toggles are scattered down the accordions, so
-    // undoing one meant hunting for the row that produced it.
-    const inacts = facts.outs.length
-      ? facts.outs.map(p => `<span class="sdash-inact" title="${esc(p.name)} is OUT — his market share went to his teammates">${esc(p.name)}<button onclick="toggleOut('${p.id}',event)" title="Put ${esc(p.name)} back in">✕</button></span>`).join('')
-        + `<span class="sdash-inact-hint">⛔ on any row below marks another one out</span>`
-      : `<span class="sdash-inact-hint">nobody — ⛔ on any row below marks a player out</span>`;
+    const inactsHtml = simDashInactsHtml(facts);
     detail = `<div class="sdash-detail" id="sdashDetail" data-gkey="${esc(openKey)}" tabindex="0" onkeydown="simDashPanelKey(event)">
       <div class="sdash-dhdr">
         <button class="sdash-back" onclick="simDashCloseGame()" title="Back to every game">← All games</button>
@@ -31776,7 +31804,7 @@ function renderSimDash(){
         <button class="sdash-btn${anyWork?' warn':''}" id="sdashResetGame" onclick="simDashReset('game','${names.join('@')}')"${anyWork?'':' disabled'} title="Put this game's team totals back to Vegas">↺ Reset <span class="sdash-rlong">this </span>game<span class="sdash-rlong"> to Vegas</span></button>
         <button class="sdash-nav" onclick="simDashCloseGame()" title="Close this game">✕</button>
       </div>
-      <div class="sdash-inacts"><span class="sdash-inact-lbl">Inactives</span>${inacts}</div>
+      ${inactsHtml}
       ${simDashGameHtml(ctx, g)}
     </div>`;
   }
@@ -45447,9 +45475,25 @@ async function refreshFromSheet(){
       const merged = sdDedupePlayers(slate);
       if(merged) lateAdds = Math.max(0, lateAdds - merged);
     }
+    // ck159: the Status column is read on every refresh (applyNflStats) but was
+    // only ever TURNED INTO OUT marks at slate creation / Update Pool. A player
+    // ruled out after the slate was built (Pittman, 10/11) refreshed to
+    // status "O" and stayed in the sim, off the Inactives strip, with no badge.
+    let _stMsg = '';
+    if(slate.sport==='nfl' && typeof nflApplyStatus==='function'){
+      const _before = new Set(slate._outIds || []);
+      const _st = nflApplyStatus(slate);
+      if(_st.out || _st.cleared){
+        const nowOut = (slate._outIds||[]).filter(id => !_before.has(id));
+        const nm = id => { const q = slate.players.find(x => x.id === id); return q ? q.name : id; };
+        _stMsg = (nowOut.length ? ` · ⛔ now OUT: ${nowOut.slice(0,4).map(nm).join(', ')}${nowOut.length>4?` +${nowOut.length-4}`:''}` : '')
+               + (_st.cleared ? ` · ${_st.cleared} back in` : '') + ' — re-run the sim';
+      }
+    }
     // A newly-mapped column is worth calling out — it changes what the pool
     // shows, so a silent refresh would look like nothing happened.
-    if(_gained.length) showToast(`↺ Refreshed — new column${_gained.length>1?'s':''}: ${_gained.join(', ')}`,'ok');
+    if(_stMsg) showToast(`↺ Refreshed${_stMsg}`,'ok');
+    else if(_gained.length) showToast(`↺ Refreshed — new column${_gained.length>1?'s':''}: ${_gained.join(', ')}`,'ok');
     else if(lateAdds) showToast(`↺ Refreshed + ${lateAdds} new player${lateAdds>1?'s':''} added`,'ok');
     // The ordinary case — same columns, no late adds — used to say nothing at
     // all beyond a 1.5s colour flash on the button, which reads as "the click
@@ -45459,6 +45503,7 @@ async function refreshFromSheet(){
     imputeMissingRatings(slate);
     save();
     renderSlate();
+    if(_stMsg && typeof renderSimDash === 'function' && document.getElementById('simDashPanel')) renderSimDash();
     if(btn){ btn.textContent='↺ Refresh'; btn.disabled=false; }
     // Brief success flash
     if(btn){ btn.style.color='var(--green)'; setTimeout(()=>{ if(btn)btn.style.color='#34a853'; },1500); }
