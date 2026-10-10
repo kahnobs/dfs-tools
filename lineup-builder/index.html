@@ -6099,21 +6099,43 @@ function nflOutSet(slate){ return new Set(nflOutIds(slate)); }
 // never touched by the sheet.
 const NFL_STATUS_OUT = /^(O|OUT|IR|PUP|SUSP|SUSPENDED|NA|D|DOUBTFUL|NFI|RES)$/i;
 const NFL_STATUS_Q   = /^(Q|QUESTIONABLE|P|PROBABLE)$/i;
-function nflStatusKind(p){
+// ck163: A QUESTIONABLE PLAYER THE PROJECTION HAS ALREADY SAT. Matt: "the
+// ones with 0 projection are expected to be out — the ones with a projection
+// are expected to play." The books often keep a line up on a Q who is going to
+// sit (McConkey 10/11: a 3.5-catch line, SS Proj 0, priced at 12.5 in the
+// sim) and pull the lines of a Q who is going to play (Chase / Higgins). So a
+// Q with no projection on a slate that carries projections is OUT — through
+// the same auto mark as an O, so his share goes to his room by role, he lands
+// on the Inactives strip, and typing him a Proj (or clearing the Q) puts him
+// back. A Q with any projection is simmed as playing, exactly as before.
+function nflQProjOut(p, slate){
+  const s = slate || ((typeof activeSlate === 'function') ? activeSlate() : null);
+  if(!s || !s._nflHasProj) return false;
+  const pj = parseFloat(p && p.proj);
+  return !(Number.isFinite(pj) && pj > 0);
+}
+function nflStatusKind(p, slate){
   const v = String((p && p.status) || '').trim();
   if(!v) return null;
   if(NFL_STATUS_OUT.test(v)) return 'out';
-  if(NFL_STATUS_Q.test(v)) return 'q';
+  if(NFL_STATUS_Q.test(v)) return (/^(Q|QUESTIONABLE)$/i.test(v) && nflQProjOut(p, slate)) ? 'out' : 'q';
   return null;
 }
+function nflStatusSig(p){ return String((p && p.status) || '') + '|' + String((p && p.proj) == null ? '' : p.proj); }
 function nflApplyStatus(slate){
   if(!slate || !isNfl(slate)) return { out: 0, cleared: 0, q: 0 };
   slate._outIds = slate._outIds || [];
+  slate._nflHasProj = (slate.players || []).filter(p => (parseFloat(p.proj) || 0) > 0).length >= 10;
   const auto = new Set(slate._outAuto || []);
   let out = 0, cleared = 0, q = 0;
   for(const p of (slate.players || [])){
-    const k = nflStatusKind(p);
+    const k = nflStatusKind(p, slate);
     const isOut = slate._outIds.includes(p.id);
+    // ck163: a player the user put back in by hand stays in until his status
+    // or projection changes (the override is keyed to both).
+    const _ov = slate._statusKeep && slate._statusKeep[p.id];
+    if(_ov && _ov === nflStatusSig(p)){ if(k === 'q') q++; continue; }
+    if(_ov) delete slate._statusKeep[p.id];
     if(k === 'out'){
       if(!isOut){ slate._outIds.push(p.id); out++; }
       auto.add(p.id);
@@ -6135,7 +6157,17 @@ function toggleOut(id, e){
   const slate = activeSlate(); if(!slate) return;
   slate._outIds = slate._outIds || [];
   const i = slate._outIds.indexOf(id);
-  if(i >= 0){ slate._outIds.splice(i, 1); if(slate._outAuto) slate._outAuto = slate._outAuto.filter(x => x !== id); }
+  if(i >= 0){
+    slate._outIds.splice(i, 1);
+    // ck163: putting back a player the SHEET marked out (O, or Q with no
+    // projection) is remembered, so the automatic status pass does not
+    // immediately re-mark him; a new status or projection lifts it.
+    if(slate._outAuto && slate._outAuto.includes(id)){
+      const p = (slate.players || []).find(x => x.id === id);
+      if(p){ slate._statusKeep = slate._statusKeep || {}; slate._statusKeep[id] = nflStatusSig(p); }
+    }
+    if(slate._outAuto) slate._outAuto = slate._outAuto.filter(x => x !== id);
+  }
   else {
     slate._outIds.push(id);
     // An OUT player cannot sit in the roster you are building, and he cannot be
@@ -7402,7 +7434,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck162/2026-10-10';
+const BUILD_ID = '2.0/ck163/2026-10-10';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -27742,9 +27774,15 @@ function buildNflSimInputs(pool, opts){
   try {
     if(!window._nflOutBypass && !window._nflRedistBusy && typeof nflRedistributeOut === 'function'){
       const _rs = (typeof activeSlate === 'function') ? activeSlate() : null;
-      if(_rs && isNfl(_rs) && nflOutIds(_rs).length && _rs._outRedistKey !== nflOutRedistKey(_rs)){
+      if(_rs && isNfl(_rs) && _rs._outRedistKey !== nflOutRedistKey(_rs)){
         window._nflRedistBusy = true;
-        try { nflRedistributeOut(_rs); } finally { window._nflRedistBusy = false; }
+        try {
+          // ck163: the sheet's Status / projection can mark players out
+          // (Q with Proj 0) — re-applied whenever those inputs change.
+          if(typeof nflApplyStatus === 'function') nflApplyStatus(_rs);
+          if(nflOutIds(_rs).length && _rs._outRedistKey !== nflOutRedistKey(_rs)) nflRedistributeOut(_rs);
+          else if(!nflOutIds(_rs).length) _rs._outRedistKey = nflOutRedistKey(_rs);
+        } finally { window._nflRedistBusy = false; }
       }
     }
   } catch(e){ console.warn('OUT redistribution refresh failed', e); }
@@ -30255,7 +30293,7 @@ function nflOutAbsorbTiers(stat, pos){
 // repriced flags, and every input the market model reads off the players.
 function nflOutRedistKey(slate){
   const parts = [typeof BUILD_ID === 'string' ? BUILD_ID : '', nflOutIds(slate).slice().sort().join(','),
-                 JSON.stringify(slate._outRepriced || null)];
+                 JSON.stringify(slate._outRepriced || null), JSON.stringify(slate._statusKeep || null)];
   let h = 5381;
   const F = ['id','team','proj','salary','status','pass_yds_ou','pass_td_ou','rush_yds_ou','rec_yds_ou','rec_ou','rush_rec_ou','atd','game_ou','spread','tm_tot','opp_tot','base_tgt','base_recyd','base_rush','base_td'];
   for(const p of (slate.players || [])){
