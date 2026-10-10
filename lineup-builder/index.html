@@ -2135,6 +2135,10 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
                 <button onclick="setNascarTrack('short',this)" class="nascar-track-btn" data-laps="500" data-caution="0.30">Short Track</button>
                 <button onclick="setNascarTrack('superspeedway',this)" class="nascar-track-btn" data-laps="188" data-caution="0.28">Superspeedway</button>
               </div>
+              <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:10px;color:var(--muted);cursor:pointer;" title="Tick when qualifying was cancelled (rain, schedule) and the field was set by the rulebook metric / owner points. The starting spots weren't earned on speed, so the sim gives them half the weight (5 seasons of NASCAR results: a set lineup predicts finishes about half as well as a qualified one).">
+                <input type="checkbox" id="nascarStartMetric" style="accent-color:var(--accent2);margin:0;" onchange="(function(){ const s=activeSlate(); if(s){ s._nasStartMetric=this.checked; save(); } }).call(this)">
+                Qualifying cancelled — lineup set by metric
+              </label>
             </div>
             <div style="display:flex;gap:8px;margin-bottom:8px;">
               <div style="flex:1;">
@@ -7373,7 +7377,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck156/2026-10-09';
+const BUILD_ID = '2.0/ck158/2026-10-10';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -8249,6 +8253,7 @@ function renderSlate(){
     const lapsInput = document.getElementById('nascarTotalLaps');
     if(lapsInput && slate._nascarLaps) lapsInput.value = slate._nascarLaps;
   }
+  { const cb = document.getElementById('nascarStartMetric'); if(cb) cb.checked = !!(slate && slate._nasStartMetric); }   // ck158
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -25392,11 +25397,31 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
     const gridSorted = survivorDrawn.slice().sort((a,b)=>(a.p._nGrid||99)-(b.p._nGrid||99));
     const gridRankSurv = {};
     gridSorted.forEach((d,gi)=>{ gridRankSurv[d.p.id] = gi + 1; });
+    // practice rank among survivors (only drivers with a practice score)
+    const pracRankSurv = {};
+    survivorDrawn.filter(d => Number.isFinite(parseFloat(d.p.practice))).sort((a,b)=>parseFloat(b.p.practice)-parseFloat(a.p.practice))
+      .forEach((d,pi)=>{ pracRankSurv[d.p.id] = pi + 1; });
     // Passing difficulty by track: superspeedway position is fluid, street/road
     // courses are processional.
+    // ck157: re-fit on 2026 results (24 slates, 736 finishes — backtest in
+    // AGENT_NOTES): on ovals the charge from behind is 0.20 of the gap (was
+    // 0.35 intermediate / 0.40 short), and a car starting AHEAD of its skill
+    // rank keeps 0.30 of that track position (was 0 — he fell straight back to
+    // his odds rank). Superspeedway / road were not in the backtest: unchanged.
     const CHARGE_FRICTION = trackType==='superspeedway' ? 0.15
-                          : trackType==='intermediate'  ? 0.35
-                          : trackType==='short'         ? 0.40 : 0.45;
+                          : trackType==='intermediate'  ? 0.20
+                          : trackType==='short'         ? 0.20 : 0.45;
+    const HOLD_AHEAD = (trackType==='intermediate' || trackType==='short') ? 0.30 : 0;
+    // ck158: how much the starting order says when it was NOT set by qualifying.
+    // 2022–2026 NASCAR results (472 races, 3 series; cf.nascar.com weekend
+    // feeds), qualified ovals vs ovals with no qualifying speeds, controlling
+    // for driver + team recent form: start-rank weight 0.297±0.012 (258 races)
+    // vs 0.156±0.033 (57 races) → a set lineup carries ~half the information.
+    // Practice backing was NOT what mattered: in qualified races the start
+    // weight is the same whether practice agreed (0.32) or not (0.35).
+    const _as158 = (typeof activeSlate === 'function') ? activeSlate() : null;
+    const START_UNEARNED = (typeof window !== 'undefined' && window.__nasNoQual != null) ? !!window.__nasNoQual : !!(_as158 && _as158._nasStartMetric);
+    const UNEARNED_K = (typeof window !== 'undefined' && window.__nasUK != null) ? window.__nasUK : 0.5;
 
     // ── Winner first, sequentially ────────────────────────────────────────
     // The winner is drawn directly from the de-vigged win probs (renormalized
@@ -25470,9 +25495,12 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
         // entirely, so market-priced upside is untouched.
         const skillAnchor = skillIdx + 1;
         const gRank = gridRankSurv[d.p.id] || skillAnchor;
-        const anchor = gRank > skillAnchor
-          ? skillAnchor + CHARGE_FRICTION * (gRank - skillAnchor)
-          : skillAnchor;
+        const _wA = (typeof window !== 'undefined' && window.__nasWA != null) ? window.__nasWA : HOLD_AHEAD;
+        const _wB = (typeof window !== 'undefined' && window.__nasWB != null) ? window.__nasWB : CHARGE_FRICTION;
+        const _wP = (typeof window !== 'undefined' && window.__nasWP != null) ? window.__nasWP : 0;
+        const pRank = pracRankSurv[d.p.id];
+        const anchor = skillAnchor + (gRank > skillAnchor ? _wB : _wA) * (START_UNEARNED ? UNEARNED_K : 1) * (gRank - skillAnchor)
+          + (pRank != null ? _wP * (pRank - skillAnchor) : 0);
         // Base SD was calibrated on historical FULL-FIELD finish distributions,
         // which already include attrition scatter — but this draw only orders
         // SURVIVORS (attrition is modeled separately by crasher-fill). Using
@@ -25699,6 +25727,7 @@ async function runNascarSims(pool, numSims, totalLaps, trackType, rearStarterSet
       if(d.finishPos === 1) winCount[idx]++;
       if(d.finishPos <= 5)  t5Cnt[idx]++;
       if(d.finishPos <= 10) t10Cnt[idx]++;
+      if(typeof window !== 'undefined' && window.__nasFin) (window.__nasFin[d.p.id] = window.__nasFin[d.p.id] || []).push(d.finishPos);   // harness: finish capture
       if(score > simBestScore){ simBestScore = score; simBestId = d.p.id; }
     });
     // Record top scorer for this sim
