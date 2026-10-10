@@ -7402,7 +7402,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck161/2026-10-10';
+const BUILD_ID = '2.0/ck162/2026-10-10';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -27733,6 +27733,21 @@ function buildNflSimInputs(pool, opts){
   // environments and the shares. Only the paths that actually SIMULATE need
   // e.dstCal to be solved.
   const _skipDstCal = !!(opts && opts.skipDstCal);
+  // ck162: the stored OUT redistribution is only as current as the inputs it
+  // was computed from. It was rebuilt on an OUT toggle or a status change and
+  // nowhere else, so a sheet refresh that changed a LINE (ARI dropping its
+  // backup QB's passing line) or a build that changed the model left every
+  // auto share pinned to numbers measured against a different pie. Any build
+  // that is not the redistribution's own re-checks the fingerprint first.
+  try {
+    if(!window._nflOutBypass && !window._nflRedistBusy && typeof nflRedistributeOut === 'function'){
+      const _rs = (typeof activeSlate === 'function') ? activeSlate() : null;
+      if(_rs && isNfl(_rs) && nflOutIds(_rs).length && _rs._outRedistKey !== nflOutRedistKey(_rs)){
+        window._nflRedistBusy = true;
+        try { nflRedistributeOut(_rs); } finally { window._nflRedistBusy = false; }
+      }
+    }
+  } catch(e){ console.warn('OUT redistribution refresh failed', e); }
   const gamesByKey = new Map();
   const _dash = (typeof activeSlate==='function' && activeSlate()) ? activeSlate()._simAdj : null;
   // Game-stack correlation: 'normal' (the default) shares a pace factor between
@@ -27876,11 +27891,24 @@ function buildNflSimInputs(pool, opts){
   // him in. Only when the slate carries projections at all.
   {
     const _projN = pool.filter(p => (parseFloat(p.proj) || 0) > 0).length;
+    // the playing QB with the highest passing line, per team (ck162)
+    const _qbTop = new Map();
+    pool.forEach((p, i) => { const e = entries[i]; if(!e || e.pos !== 'QB' || e.out || !(e.mkt && e.mkt.passYds)) return;
+      const cur = _qbTop.get(e.team); if(!cur || (e.passYds || 0) > cur.v) _qbTop.set(e.team, { id: p.id, v: e.passYds || 0 }); });
     if(_projN >= 10) pool.forEach((p, i) => {
       const e = entries[i]; if(!e || e.pos === 'K' || e.pos === 'DST' || e.out) return;
       const pj = parseFloat(p.proj); if(!(Number.isFinite(pj) && pj < NFL_NO_ROLE_PROJ)) return;
       const m = e.mkt || {};
-      if(m.passYds || m.rushYds || m.recYds || m.rec) return;
+      // ck162: a BACKUP quarterback's passing line is not a role either. In a
+      // QB-uncertain week the books price both men, each conditional on
+      // starting; the sheet's projection says which one is (ARI 10/11:
+      // Brissett 266.5 / SS 19.8, Minshew 245.5 / SS 0 took 48% of the
+      // passing pie and a 12-point sim). A QB with a projection under the bar
+      // whose team has a higher passing line on another QB who is playing is
+      // no-role like any other depth player.
+      const backupQb = e.pos === 'QB' && m.passYds && _qbTop.get(e.team) != null
+        && _qbTop.get(e.team).id !== p.id && _qbTop.get(e.team).v > (e.passYds || 0);
+      if(!backupQb && (m.passYds || m.rushYds || m.recYds || m.rec)) return;
       e.noRole = true; e.hasProps = false; e.unpriced = true; e.fallbackMean = 0;
       e.passYds = e.passTD = e.rushYds = e.recYds = e.rec = e.rushRec = null; e.atd = null;
     });
@@ -29009,7 +29037,23 @@ function nflShareModel(slate, pool, entries, teamInfo){
     // production (so they hold their share) even though they can never be
     // rostered, so they arrive as pure remainder.
     const off = (ti && ti._offPool) || null;
-    const qbLine = T.base.passYds + (off ? off.passYds : 0);
+    // ck162: the receiving anchor is ONE quarterback's passing line — the
+    // starter's — not the sum of every priced QB. A book that also posts the
+    // backup (a QB-uncertain week) prices each man CONDITIONAL on his starting,
+    // so adding them doubled the team's receiving pie: ARI 10/11 with a
+    // 245.5 Minshew line next to Brissett's 266.5 sized the receiving pie at
+    // 534 yds, every receiver's OUT-redistributed share was stored at half its
+    // value, and Jeremiyah Love inherited the room (28% of the receiving yards,
+    // 39.8 sim). The largest line among the players who are playing is the
+    // starter (nflStarterQbId's own first rule); if every priced QB is OUT the
+    // largest of those still sizes the offense his replacement runs.
+    const qbLine = (() => {
+      let live = 0, any = 0;
+      for(const pl of T.players){ if(pl.skip || pl.e.pos !== 'QB') continue; const v = pl.m.passYds || 0;
+        if(v > any) any = v; if(!pl.isOut && v > live) live = v; }
+      const offQ = off ? (off.passYds || 0) : 0;
+      return Math.max(live || any, offQ);
+    })();
     T.lineSum = { recYds: T.base.recYds, rec: T.base.rec, rushYds: T.base.rushYds, td: T.base.td, passYds: T.base.passYds };
     T.offPool = off;
     if(off){ T.base.recYds += off.recYds; T.base.rec += off.rec; T.base.rushYds += off.rushYds; T.base.td += off.td; }
@@ -30207,8 +30251,24 @@ function nflOutAbsorbTiers(stat, pos){
 // The arithmetic is expressed as explicit shares rather than as a special case
 // inside nflAdjShares so the dashboard SHOWS the result — the redistribution is
 // a claim about the slate the user should be able to see, argue with and edit.
+// ck162: what the redistribution depends on — the build, the OUT list and its
+// repriced flags, and every input the market model reads off the players.
+function nflOutRedistKey(slate){
+  const parts = [typeof BUILD_ID === 'string' ? BUILD_ID : '', nflOutIds(slate).slice().sort().join(','),
+                 JSON.stringify(slate._outRepriced || null)];
+  let h = 5381;
+  const F = ['id','team','proj','salary','status','pass_yds_ou','pass_td_ou','rush_yds_ou','rec_yds_ou','rec_ou','rush_rec_ou','atd','game_ou','spread','tm_tot','opp_tot','base_tgt','base_recyd','base_rush','base_td'];
+  for(const p of (slate.players || [])){
+    for(const k of F){ const v = String(p[k] == null ? '' : p[k]);
+      for(let i = 0; i < v.length; i++) h = ((h << 5) + h + v.charCodeAt(i)) | 0;
+      h = ((h << 5) + h + 124) | 0; }
+  }
+  parts.push(h);
+  return parts.join('|');
+}
 function nflRedistributeOut(slate){
   if(!slate || !isNfl(slate)) return null;
+  try { slate._outRedistKey = nflOutRedistKey(slate); } catch(e){}
   const adj = slate._simAdj;
   if(adj && adj.players){
     for(const id of Object.keys(adj.players)){
@@ -31409,7 +31469,9 @@ function simDashGameHtml(ctx, g){
       const ovOf = (id, k) => { const a = adj.players[id]; return !!(a && Number.isFinite(a[k])); };
       const shown = new Set(((slate._simDashShow || {})[t]) || []);
       const POS_ORD = { QB: 0, RB: 1, WR: 2, TE: 3 };
-      const rows = T.players.filter(pl => !pl.skip).filter(pl => shown.has(pl.p.id)
+      // ck162: OUT players are listed (and restorable) in the Inactives strip
+      // above, so their all-zero rows are left out of the table.
+      const rows = T.players.filter(pl => !pl.skip && !(ctx.dashOut && ctx.dashOut.has(pl.p.id))).filter(pl => shown.has(pl.p.id)
           || COLS.some(st => (pl.share[st.key] || 0) > 0 || (RES[st.key].shares[pl.p.id] || 0) > 0 || ovOf(pl.p.id, st.key)))
         // ordered by MARKET shares, so a row never jumps when its cells are edited
         .map(pl => ({ pl, w: COLS.reduce((a, st) => a + (st.key === 'td' ? 0 : (pl.share[st.key] || 0)), 0) }))
