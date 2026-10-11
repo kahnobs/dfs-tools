@@ -476,12 +476,14 @@ td.sdt-proj{color:var(--muted);font-weight:400;border-left:none;}
 .sdg-imp{font-size:13px;font-weight:600;color:var(--green);font-variant-numeric:tabular-nums;}
 .sdg-imp.adj{color:var(--accent);}
 .sdg-dash{color:var(--muted);font-size:10px;}
+.sdg-time{color:var(--text);opacity:.85;}
+.sdg-home{font-size:9px;color:var(--muted);margin-right:2px;font-weight:400;}
+.sdg-mid{display:flex;align-items:center;gap:4px;}
 .sdg-was{font-style:normal;color:var(--muted);opacity:.75;margin-left:4px;text-decoration:line-through;}
-.sdg-sub{display:flex;align-items:center;gap:10px;font-size:10.5px;color:var(--muted);font-family:'DM Mono',monospace;letter-spacing:.3px;white-space:nowrap;}
+.sdg-sub{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:10.5px;color:var(--muted);font-family:'DM Mono',monospace;letter-spacing:.3px;white-space:nowrap;}
 .sdg-sub b{color:var(--text);font-weight:500;}
-.sdg-chip{margin-left:auto;font-size:8.5px;letter-spacing:.4px;padding:1px 5px;border-radius:8px;background:rgba(245,197,24,.14);color:var(--accent);border:1px solid rgba(245,197,24,.4);white-space:nowrap;}
-.sdg-chip+.sdg-outchip{margin-left:0;}
-.sdg-outchip{margin-left:auto;font-size:8.5px;color:var(--red);border:1px solid rgba(239,68,68,.4);border-radius:8px;padding:0 5px;white-space:nowrap;}
+.sdg-chip{font-size:8.5px;letter-spacing:.4px;padding:1px 5px;border-radius:8px;background:rgba(245,197,24,.14);color:var(--accent);border:1px solid rgba(245,197,24,.4);white-space:nowrap;}
+.sdg-outchip{font-size:8.5px;color:var(--red);border:1px solid rgba(239,68,68,.4);border-radius:8px;padding:0 5px;white-space:nowrap;}
 .sdg-cap{font-size:9px;color:var(--accent);letter-spacing:.2px;white-space:normal;}
 /* Level 2. Given the room the panel sits BESIDE the grid and the two scroll
    independently; when there isn't room it REPLACES the grid and gets a sticky
@@ -7431,7 +7433,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck164/2026-10-11';
+const BUILD_ID = '2.0/ck165/2026-10-11';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -31353,6 +31355,10 @@ function simDashTileHtml(ctx, g, isOpen){
   }
   if(facts.nShare) bits.push(`${facts.nShare} player share${facts.nShare>1?'s':''}`);
   const chipOn = bits.length > 0;
+  // ck165: mirrors the pool's game tiles — ⌂ on the home side, the kickoff
+  // between the spread and the total.
+  const _homeOf = t => (ctx.pool || []).some(p => p && p.team === t && p.home === true);
+  const homeMk = t => _homeOf(t) ? '<span class="sdg-home" title="home">⌂</span>' : '';
   const impOf = (t, v) => `<span class="sdg-imp${adj.teams[t]&&Number.isFinite(adj.teams[t].implied)?' adj':''}">${fmt1(v)}</span>`;
   const fav = gs ? (gs.ia > gs.ib ? A : (gs.ib > gs.ia ? B : null)) : null;
   const sprTxt = gs ? `${gs.margin>0?A:gs.margin<0?B:'PK'}${gs.margin?' '+(-Math.abs(gs.margin)).toFixed(1):''}` : '—';
@@ -31360,17 +31366,17 @@ function simDashTileHtml(ctx, g, isOpen){
   const tip = `${A}${B?' vs '+B:''}${g._kick&&g._kick.label?' · '+g._kick.label:''} — ${chipOn?'adjusted: '+bits.join(', '):'at the market'}. Click to open the game — Total, Spread and every player share are adjusted there.`;
   return `<div class="sdg${isOpen?' on':''}${chipOn?' adj':''}" data-gkey="${esc(g.key)}" onclick="simDashOpenGame('${esc(g.key)}')" title="${esc(tip)}">
     <div class="sdg-hdr">
-      <span class="sdg-side"><span class="sdg-team${fav===A?' fav':''}">${A}</span>${impOf(A, gs?gs.ia:(g.teams[A]?g.teams[A].implied:0))}</span>
-      ${B?`<span class="sdg-dash">–</span><span class="sdg-side">${impOf(B, gs.ib)}<span class="sdg-team${fav===B?' fav':''}">${B}</span></span>`:''}
+      <span class="sdg-side"><span class="sdg-team${fav===A?' fav':''}">${homeMk(A)}${A}</span>${impOf(A, gs?gs.ia:(g.teams[A]?g.teams[A].implied:0))}</span>
+      <span class="sdg-mid">${chipOn?`<span class="sdg-chip" title="Adjusted: ${esc(bits.join(', '))}">⚙</span>`:''}${facts.outs.length?`<span class="sdg-outchip" title="${esc(facts.outs.map(p=>p.name).join(', '))} marked OUT">⛔ ${facts.outs.length}</span>`:''}${!chipOn&&!facts.outs.length&&B?'<span class="sdg-dash">–</span>':''}</span>
+      ${B?`<span class="sdg-side">${impOf(B, gs.ib)}<span class="sdg-team${fav===B?' fav':''}">${homeMk(B)}${B}</span></span>`:''}
     </div>
     <!-- ck164: no sliders on the tile — a click anywhere opens the game, and
          Total / Spread are adjusted in the game's own panel (Matt: the tile
          sliders caught clicks meant for the card). -->
     <div class="sdg-sub">
-      <span>O/U <b>${gs?gs.total.toFixed(1):'—'}</b>${gs&&Math.abs(gs.total-gs.baseTotal)>=0.05?`<i class="sdg-was">${gs.baseTotal.toFixed(1)}</i>`:''}</span>
       <span><b>${sprTxt}</b>${gs&&Math.abs(gs.margin-gs.baseMargin)>=0.05?`<i class="sdg-was">${gs.baseMargin>0?A:B} ${(-Math.abs(gs.baseMargin)).toFixed(1)}</i>`:''}</span>
-      ${chipOn?`<span class="sdg-chip" title="Adjusted: ${esc(bits.join(', '))}">⚙</span>`:''}
-      ${facts.outs.length?`<span class="sdg-outchip" title="${esc(facts.outs.map(p=>p.name).join(', '))} marked OUT">⛔ ${facts.outs.length}</span>`:''}
+      ${g._kick&&g._kick.label?`<span class="sdg-time" title="Kickoff${g._kick.date?' '+esc(g._kick.date):''}">${esc(g._kick.label)}</span>`:''}
+      <span>O/U <b>${gs?gs.total.toFixed(1):'—'}</b>${gs&&Math.abs(gs.total-gs.baseTotal)>=0.05?`<i class="sdg-was">${gs.baseTotal.toFixed(1)}</i>`:''}</span>
     </div>
     ${caps.length?`<div class="sdg-cap">⚠ ${caps.map(x=>`${x.t} capped at ${x.cap==='max'?NFL_IMPLIED_MAX:NFL_IMPLIED_MIN}`).join(' · ')}</div>`:''}
   </div>`;
