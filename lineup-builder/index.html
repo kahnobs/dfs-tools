@@ -476,6 +476,8 @@ td.sdt-proj{color:var(--muted);font-weight:400;border-left:none;}
 .sdg-imp{font-size:13px;font-weight:600;color:var(--green);font-variant-numeric:tabular-nums;}
 .sdg-imp.adj{color:var(--accent);}
 .sdg-dash{color:var(--muted);font-size:10px;}
+.slate-trash-row{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);cursor:pointer;text-align:left;width:100%;}
+.slate-trash-row:hover{border-color:var(--accent);}
 .sdg-time{color:var(--text);opacity:.85;}
 .sdg-home{font-size:9px;color:var(--muted);margin-right:2px;font-weight:400;}
 .sdg-mid{display:flex;align-items:center;gap:4px;}
@@ -1988,6 +1990,8 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
             <button class="btn btn-sm btn-ghost btn-ghost-danger" onclick="clearSavedLineups()" id="clearSavedBtn" style="display:none;">Clear All</button>
             <!-- DK Entries: fill DraftKings' own entries file from these lineups. NFL only. -->
             <button class="btn btn-sm btn-ghost" onclick="openDkEntriesModal()" id="dkEntriesBtn" title="Fill a DraftKings DKEntries.csv from your saved lineups and download it ready to upload" style="display:none;">DK Entries</button>
+            <button class="btn btn-sm btn-ghost" onclick="document.getElementById('importLineupsFile').click()" title="Bring lineups back in from a CSV — this builder's Export CSV, a DKEntries file, or any file of DraftKings player IDs. Players are matched by DK ID against this slate's pool.">Import</button>
+            <input type="file" id="importLineupsFile" accept=".csv,text/csv" style="display:none" onchange="importLineupsCsv(this)">
             <button class="btn-export" id="exportBtn" onclick="exportCSV()" disabled>Export CSV</button>
           </div>
         </div>
@@ -2723,6 +2727,10 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
             <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-top:2px;">Upload a DraftKings player pool CSV</div>
           </div>
         </button>
+        <details id="slateTrashBox" ontoggle="if(this.open) renderSlateTrash()" style="border:1px solid var(--border);border-radius:8px;padding:8px 12px;background:var(--surface2);">
+          <summary style="cursor:pointer;font-size:12px;color:var(--muted);">♻ Restore a deleted slate</summary>
+          <div id="slateTrashList" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;"></div>
+        </details>
       </div>
     </div>
 
@@ -7433,7 +7441,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck165/2026-10-11';
+const BUILD_ID = '2.0/ck166/2026-10-11';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -7609,6 +7617,53 @@ function addToHistory(slateId, label, lineups){
   saveHistory();
 }
 
+// ck166: LINEUP SETS LEFT BEHIND BY A DELETED SLATE. Deleting a slate never
+// cleared its lineup history (keyed by the old slate id), so every board it
+// generated is still in storage. Any such set whose players are (almost all)
+// in THIS slate's pool is offered here and can be pulled into this slate's
+// history — which is how a slate deleted before the Restore list existed gets
+// its boards back once it is recreated from the same sheet.
+function historyOrphanSets(slate){
+  const live = new Set(slates.map(x => x.id));
+  const pool = new Set((slate.players || []).map(p => String(p.id)));
+  const out = [];
+  for(const [sid, list] of Object.entries(lineupHistory || {})){
+    if(live.has(sid) || !Array.isArray(list)) continue;
+    for(const set of list){
+      const ids = (set.lineups || []).flat(); if(!ids.length) continue;
+      const hit = ids.filter(id => pool.has(String(id))).length / ids.length;
+      if(hit >= 0.97) out.push({ sid, set, hit });
+    }
+  }
+  return out.sort((a, b) => (b.set.ts || 0) - (a.set.ts || 0));
+}
+function historyOrphansHtml(slate){
+  const o = historyOrphanSets(slate); if(!o.length) return '';
+  return `<div class="card" style="padding:10px 12px;margin-bottom:10px;border-color:rgba(245,197,24,.45);">
+    <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:6px;">♻ ${o.length} set${o.length>1?'s':''} from a deleted slate match this pool</div>
+    ${o.map(x => `<div style="display:flex;align-items:center;gap:8px;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);padding:3px 0;">
+       <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(x.set.label||'')}">${esc(x.set.label||'Set')} · ${x.set.lineups.length} lineups · ${new Date(x.set.ts).toLocaleString([], {month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'})}</span>
+       <button class="btn btn-sm btn-ghost" onclick="recoverOrphanSet('${x.sid}','${x.set.id}')" title="Copy this set into this slate's history; open it from there to add lineups to Saved">Recover</button>
+     </div>`).join('')}
+  </div>`;
+}
+function recoverOrphanSet(sid, setId){
+  const slate = activeSlate(); if(!slate) return;
+  const set = (lineupHistory[sid] || []).find(s => s.id === setId); if(!set) return;
+  const pool = new Set((slate.players || []).map(p => String(p.id)));
+  const copy = JSON.parse(JSON.stringify(set));
+  copy.id = uid();
+  copy.lineups = set.lineups.filter(l => l.every(id => pool.has(String(id)))).map(l => {
+    const ids = l.slice(); ['_archetypeTag','_waveTag','_bucketId','_bucketName','_bucketIsField'].forEach(k => { ids[k] = l[k] || null; }); return ids; });
+  copy.label = (set.label || 'Set') + ' · recovered';
+  lineupHistory[slate.id] = lineupHistory[slate.id] || [];
+  lineupHistory[slate.id].unshift(copy);
+  // the original is moved, not copied, so the offer does not repeat
+  lineupHistory[sid] = (lineupHistory[sid] || []).filter(s => s.id !== setId);
+  if(!lineupHistory[sid].length) delete lineupHistory[sid];
+  saveHistory(); renderHistory();
+  showToast(`♻ Recovered ${copy.lineups.length} lineups into this slate's history — click the set to review and add them to Saved.`, 'ok');
+}
 function clearLineupHistory(){
   const slate=activeSlate();if(!slate)return;
   if(!confirm('Clear all saved lineup sets for this slate?'))return;
@@ -7620,8 +7675,9 @@ function renderHistory(){
   const slate=activeSlate();if(!slate)return;
   const el=document.getElementById('historyList');if(!el)return;
   const sets=(lineupHistory[slate.id]||[]);
-  if(!sets.length){el.innerHTML='<div class="no-data">No lineup sets saved yet. Generate lineups to start building history.</div>';return;}
-  el.innerHTML=sets.map((set,i)=>{
+  const orphanHtml = historyOrphansHtml(slate);
+  if(!sets.length){el.innerHTML=orphanHtml+'<div class="no-data">No lineup sets saved yet. Generate lineups to start building history.</div>';return;}
+  el.innerHTML=orphanHtml+sets.map((set,i)=>{
     const dt=new Date(set.ts);
     const dtStr=dt.toLocaleDateString()+' '+dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
     const count=set.lineups.length;
@@ -8222,8 +8278,50 @@ function switchSlate(id){
   renderTopBar();
   renderSlate();
 }
+// ck166: RECENTLY DELETED. A deleted slate used to be gone for good (Matt
+// lost a Week 6 main with 20 entered lineups to one misclick). The last
+// SLATE_TRASH_MAX deletions are kept in their own storage key and come back
+// from New Slate → "Restore a deleted slate", with their lineup history.
+const SLATE_TRASH_KEY = 'dfs_slate_trash_v1', SLATE_TRASH_MAX = 5;
+function slateTrashLoad(){ try { const r = localStorage.getItem(SLATE_TRASH_KEY); const a = r ? JSON.parse(r) : []; return Array.isArray(a) ? a : []; } catch(e){ return []; } }
+function slateTrashStore(a){
+  // Oldest first out if the browser's storage quota refuses the write.
+  for(let n = a.length; n >= 0; n--){
+    try { localStorage.setItem(SLATE_TRASH_KEY, JSON.stringify(a.slice(0, n))); return n; } catch(e){}
+  }
+  return 0;
+}
+function slateTrashPush(slate){
+  if(!slate) return;
+  const a = slateTrashLoad().filter(x => x && x.slate && x.slate.id !== slate.id);
+  a.unshift({ ts: Date.now(), slate, history: lineupHistory[slate.id] || null });
+  slateTrashStore(a.slice(0, SLATE_TRASH_MAX));
+}
+function restoreDeletedSlate(i){
+  const a = slateTrashLoad(); const rec = a[i]; if(!rec || !rec.slate) return;
+  const sl = rec.slate;
+  if(slates.some(x => x.id === sl.id)) sl.id = uid();
+  slates.push(sl);
+  if(rec.history && !lineupHistory[sl.id]){ lineupHistory[sl.id] = rec.history; saveHistory(); }
+  a.splice(i, 1); slateTrashStore(a);
+  activeSlateId = sl.id;
+  save(); closeSlateModal(); renderTopBar(); renderSlate();
+  showToast(`♻ Restored "${sl.name}" — ${(sl.savedLineups || []).length} saved lineup${(sl.savedLineups || []).length === 1 ? '' : 's'}`, 'ok');
+}
+function renderSlateTrash(){
+  const el = document.getElementById('slateTrashList'); if(!el) return;
+  const a = slateTrashLoad();
+  el.innerHTML = a.length ? a.map((r, i) => {
+    const sl = r.slate || {}; const n = (sl.savedLineups || []).length;
+    return `<button onclick="restoreDeletedSlate(${i})" class="slate-trash-row" title="Put this slate back exactly as it was when deleted">
+      <span style="font-size:12px;font-weight:600;color:var(--text);">${esc(sl.name || 'Untitled')}</span>
+      <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);">${esc((sl.sport || '').toUpperCase())} · ${n} saved · deleted ${new Date(r.ts).toLocaleString([], { month:'numeric', day:'numeric', hour:'numeric', minute:'2-digit' })}</span>
+    </button>`; }).join('')
+    : '<div style="font-family:\'DM Mono\',monospace;font-size:10px;color:var(--muted);padding:4px 2px;">Nothing deleted since this was added (ck166). Slates deleted before then can only be rebuilt — create the slate again and use Import on its saved lineups, or the lineup-history recovery on the Lineups tab.</div>';
+}
 function deleteSlate(id){
-  if(!confirm('Delete this slate and all its data?'))return;
+  if(!confirm('Delete this slate and all its data?\n\nIt can be restored afterwards from New Slate → Restore a deleted slate.'))return;
+  try { slateTrashPush(slates.find(s => s.id === id)); } catch(e){}
   slates=slates.filter(s=>s.id!==id);
   simCtxForget(id);
   if(activeSlateId===id) activeSlateId=slates[0]?.id||null;
@@ -10070,6 +10168,78 @@ function toggleSavedSortDir(){
   const btn=document.getElementById('savedSortDir');if(!btn)return;
   btn.textContent=btn.textContent==='↓'?'↑':'↓';
   applySavedSort();
+}
+// ck166: IMPORT LINEUPS. Brings saved lineups back from a CSV — this
+// builder's own Export CSV (a header of slot names over rows of DK ids), a
+// DKEntries.csv ("Name (id)" cells under the slot columns, entry/contest
+// columns ignored), or any file laid out the same way. Every id is matched
+// against THIS slate's pool by DK id (a showdown CPT id matches the merged
+// player's captain id and makes him the captain). A row with an id the pool
+// does not have is skipped and counted, never half-imported; a row already
+// saved is skipped as a duplicate.
+const IMPORT_SLOT_RX = /^(QB|RB|WR|TE|FLEX|DST|D\/ST|DEF|K|CPT|CAPTAIN|MVP|UTIL|SUPERFLEX|SF|C|W|D|G|F|PG|SG|PF|P|OF|1B|2B|3B|SS)$/i;
+function importLineupsParse(text){
+  const lines = String(text || '').split(/\r?\n/).filter(l => l.trim() && !/^#/.test(l.trim()));
+  if(!lines.length) return { rows: [], slots: [] };
+  const hdr = parseCsvLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim());
+  const slotIx = hdr.map((h, i) => IMPORT_SLOT_RX.test(h) ? i : -1).filter(i => i >= 0);
+  const idOf = cell => { const c = String(cell || '').replace(/^"|"$/g, '').trim();
+    const m = c.match(/\((\d{5,})(?:\.0+)?\)\s*$/); if(m) return m[1];
+    return /^\d{5,}(\.0+)?$/.test(c) ? c.replace(/\.0+$/, '') : null; };
+  const rows = [];
+  for(const l of lines.slice(slotIx.length ? 1 : 0)){
+    const c = parseCsvLine(l);
+    const cells = slotIx.length ? slotIx.map(i => c[i]) : c;
+    const ids = cells.map(idOf);
+    if(!ids.some(Boolean)) continue;                 // DKEntries' instruction rows, blank rows
+    rows.push({ ids, slots: slotIx.length ? slotIx.map(i => hdr[i]) : null });
+  }
+  return { rows, slots: slotIx.map(i => hdr[i]) };
+}
+function importLineupsApply(slate, text){
+  const { rows } = importLineupsParse(text);
+  const byId = new Map(), byCpt = new Map();
+  const nid = v => String(v).replace(/\.0+$/, '');
+  for(const p of (slate.players || [])){ byId.set(nid(p.id), p); if(p.cptId != null) byCpt.set(nid(p.cptId), p); }
+  const SD = typeof isShowdown === 'function' && isShowdown(slate);
+  slate.savedLineups = slate.savedLineups || [];
+  const have = new Set(slate.savedLineups.map(l => lineupKey(l)));
+  let added = 0, dup = 0, bad = 0; const missing = new Set();
+  for(const r of rows){
+    const ids = [], miss = []; let cpt = null;
+    r.ids.forEach((id, k) => {
+      if(id == null){ miss.push('(blank)'); return; }
+      const isCptSlot = r.slots && /^(CPT|CAPTAIN|MVP)$/i.test(r.slots[k] || '');
+      let p = byId.get(id);
+      if(!p && byCpt.has(id)){ p = byCpt.get(id); if(SD) cpt = p.id; }
+      else if(p && SD && isCptSlot) cpt = p.id;
+      if(!p){ miss.push(id); return; }
+      ids.push(p.id);
+    });
+    if(miss.length || !ids.length){ bad++; miss.forEach(x => missing.add(x)); continue; }
+    const key = lineupKey(ids);
+    if(have.has(key)){ dup++; continue; }
+    have.add(key);
+    slate.savedLineups.push(ids);
+    if(SD && cpt){ slate._lineupMeta = slate._lineupMeta || {}; slate._lineupMeta[key] = Object.assign({}, slate._lineupMeta[key] || {}, { sdCaptain: cpt }); }
+    added++;
+  }
+  return { added, dup, bad, missing: [...missing], rows: rows.length };
+}
+function importLineupsCsv(input){
+  const slate = activeSlate(); const f = input && input.files && input.files[0];
+  if(input) input.value = '';
+  if(!slate || !f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    const r = importLineupsApply(slate, String(rd.result || ''));
+    if(!r.rows){ showToast('No lineups found in that file — it needs slot columns (QB, RB, … or CPT/FLEX) holding DraftKings player IDs.', 'err'); return; }
+    save(); renderSaved(); if(typeof renderExposure === 'function') renderExposure(); if(typeof renderPool === 'function') renderPool();
+    const msg = `⬆ Imported ${r.added} lineup${r.added === 1 ? '' : 's'}` + (r.dup ? ` · ${r.dup} already saved` : '') +
+      (r.bad ? ` · ${r.bad} skipped (player IDs not in this slate${r.missing.length ? ': ' + r.missing.slice(0, 4).join(', ') + (r.missing.length > 4 ? '…' : '') : ''})` : '');
+    showToast(msg, r.added ? 'ok' : 'err');
+  };
+  rd.readAsText(f);
 }
 function renderSaved(){
   const slate=activeSlate();if(!slate)return;
