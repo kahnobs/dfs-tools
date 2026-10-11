@@ -7441,7 +7441,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck166/2026-10-11';
+const BUILD_ID = '2.0/ck167/2026-10-11';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -34071,7 +34071,12 @@ function nflStackShape(slate, ids, cptId){
   const rbOk = p => mktRb && nflRbStackPartnerOk(slate, p).ok;
   const mates = ps.filter(p => p !== qb && nflTeamOf(p) === team &&
                           (skill(p) || (nflPosOf(p) === 'RB' && rbOk(p))));
-  const backs = ps.filter(p => skill(p) && nflTeamOf(p) === opp);
+  // ck167: a BRING-BACK is any opposing skill player — RB included, whatever
+  // the stack-partner box says (that box is about the QB's OWN teammates). The
+  // rule the generator enforces (nflStackOk), the field model and the
+  // contest-stack stats all counted an opposing RB already; only this label
+  // didn't, so "Rodgers + Roman Wilson + Jonathan Taylor" read "no BB".
+  const backs = ps.filter(p => ['RB','WR','TE'].includes(nflPosOf(p)) && nflTeamOf(p) === opp);
   const rbPartners = mates.filter(p => nflPosOf(p) === 'RB');
   const rbMates = partnerPos.indexOf('RB') >= 0 ? []
       : ps.filter(p => p !== qb && nflPosOf(p) === 'RB' && nflTeamOf(p) === team &&
