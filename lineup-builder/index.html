@@ -2238,6 +2238,11 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
                 <option value="0">Off</option>
               </select>
             </div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);cursor:pointer;margin-top:8px;">
+              <input type="checkbox" id="nhlNoVsG" style="accent-color:#22d3ee;"
+                onchange="const _s=activeSlate();if(_s){_s._nhlNoVsG=this.checked;save();}">
+              <span>No skaters against my own goalie <span style="opacity:.65;">(a goal by his skater is a goal against your goalie)</span></span>
+            </label>
           </div>
           <div class="autogen-section" id="nflSection" style="display:none;">
             <div class="autogen-section-title">NFL Simulation</div>
@@ -7441,7 +7446,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck167/2026-10-11';
+const BUILD_ID = '2.0/ck168/2026-10-13';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -13079,6 +13084,7 @@ function renderGroupRulesSummary(){
     const hS = document.getElementById('nhlSimCountSlider'), hL = document.getElementById('nhlSimCountLabel');
     if(hS){ const c = slate._simCount || parseInt(hS.value) || 5000; hS.value = c; if(hL) hL.textContent = c; }
     const hM = document.getElementById('nhlMinStack'); if(hM) hM.value = String(nhlMinStackOf(slate));   // ck139
+    const hG = document.getElementById('nhlNoVsG'); if(hG) hG.checked = !!slate._nhlNoVsG;   // ck168
     restoreContestEvUI(slate);
   }
   const nflSection = document.getElementById('nflSection');
@@ -36596,8 +36602,19 @@ function gppKernelFactory(){
         if(b >= 0){ if(unitStamp[b] !== unitSt){ unitStamp[b] = unitSt; unitCnt[b] = 0; } if(++unitCnt[b] >= minStack) return true; } }
       return false;
     };
+    // ck168: NHL — none of OUR skaters plays against OUR goalie. `opp` is the
+    // per-player opponent team index; the goalie is position code 0.
+    const noVsG = (SHAPE === 'nhl') && !!P.noVsG;
+    const vsGOk = function(ids){
+      let go = 0;
+      for(let j = 0; j < ids.length; j++){ const i = ids[j]; if(pos[i] === 0){ go = opp[i]; break; } }
+      if(!go) return true;
+      for(let j = 0; j < ids.length; j++){ const i = ids[j]; if(pos[i] !== 0 && team[i] === go) return false; }
+      return true;
+    };
     const teamsOk = function(ids){
       if(noFlexOn && !noFlexOk(ids)) return false;
+      if(noVsG && !vsGOk(ids)) return false;
       if(minSkTeams > 0 && !skTeamsOk(ids)) return false;
       if(minStack > 0 && unitA && !stackOkIdx2(ids)) return false;
       if(SHAPE !== 'sd') return true;
@@ -39052,6 +39069,7 @@ async function runNflGppEngine(ctx){
     R, shape: SHAPE, capMul: (typeof CPT_MULT === 'number') ? CPT_MULT : 1.5,
     minSkaterTeams: SHAPE === 'nhl' ? NHL_MIN_SKATER_TEAMS : 0, units: nhlUnits, unitPairs: nhlUnitPairs ? Int32Array.from(nhlUnitPairs) : null,   // ck138
     minStack: SHAPE === 'nhl' ? nhlMinStackOf(slate) : 0, unitA: nhlUnitA, unitB: nhlUnitB,   // ck139
+    noVsG: SHAPE === 'nhl' && !!slate._nhlNoVsG,   // ck168: no skater against our own goalie
     cptOk: cptOkMask, flexOk: flexOkMask, noFlex: noFlexMask,
     // ck126: projection scenarios + counterfactual climbs
     projTau: (typeof window !== 'undefined' && window.__projTau != null) ? +window.__projTau : NFL_GPP_PROJ_TAU, projSd,
@@ -40401,7 +40419,39 @@ function nhlSimSummary(slate, simPool, res){
 // then 1-for-1 upgrades until none helps, with the 3-skater-team rule and the
 // salary floor held throughout.
 // `fixed` (ck139): candidates that must stay in the lineup (a forced stack).
+// ck168: NO SKATERS AGAINST MY OWN GOALIE (slate._nhlNoVsG). Every NHL
+// lineup the builder makes goes through this solver — Optimize mode, the sim's
+// per-world optimals (Sim Score candidates and the Contest-EV search seeds),
+// and the team-stack Min/Max repair — so the rule lives here; the Contest-EV
+// search itself gets the same rule as kernel exclusion pairs. The unrestricted
+// best lineup is kept when it has no conflict (the usual case); otherwise the
+// world is re-solved around each of its best four legal goalies with his
+// opponents' skaters removed, and the best result wins.
+function nhlNoVsGOn(){ const s = (typeof activeSlate === 'function') ? activeSlate() : null; return !!(s && isNhl(s) && s._nhlNoVsG); }
+function nhlVsGConflict(l){
+  const g = (l || []).find(c => c.pos === 'G'); if(!g) return false;
+  const o = nhlTeamKey(g.p ? g.p.opp : g.opp); if(!o) return false;
+  return l.some(c => c.pos !== 'G' && nhlTeamKey(c.p ? c.p.team : c.team) === o);
+}
 function nhlOptimalForSim(cands, cap, minSal, fixed){
+  const l0 = nhlOptimalForSimRaw(cands, cap, minSal, fixed);
+  if(!nhlNoVsGOn() || (l0 && !nhlVsGConflict(l0))) return l0;
+  const oppOf = c => nhlTeamKey(c.p ? c.p.opp : c.opp), teamOf = c => nhlTeamKey(c.p ? c.p.team : c.team);
+  const FX = fixed || [], fxG = FX.find(c => c.pos === 'G');
+  const fxTeams = new Set(FX.filter(c => c.pos !== 'G').map(teamOf));
+  const goalies = (fxG ? [fxG] : cands.filter(c => c.pos === 'G').sort((a, b) => b.score - a.score))
+    .filter(g => !fxTeams.has(oppOf(g))).slice(0, 4);
+  const tot = l => l.reduce((t, c) => t + c.score, 0);
+  let best = null;
+  for(const g of goalies){
+    const o = oppOf(g);
+    const sub = cands.filter(c => c.pos === 'G' ? c === g : teamOf(c) !== o);
+    const l = nhlOptimalForSimRaw(sub, cap, minSal, fxG ? FX : FX.concat([g]));
+    if(l && !nhlVsGConflict(l) && (!best || tot(l) > tot(best))) best = l;
+  }
+  return best;
+}
+function nhlOptimalForSimRaw(cands, cap, minSal, fixed){
   const need = { G: 1, C: 2, W: 3, D: 2 };
   const byPos = { G: [], C: [], W: [], D: [] };
   for(const c of cands) if(byPos[c.pos]) byPos[c.pos].push(c);
