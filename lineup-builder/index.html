@@ -7446,7 +7446,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck168/2026-10-13';
+const BUILD_ID = '2.0/ck169/2026-10-13';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -12494,12 +12494,18 @@ function renderExposure(){
   // stays lineups-based (count / saved lineups) whatever the filter — the
   // filter changes which rows you see, never what a percentage means.
   const isNflSlate=(slate.sport==='nfl');
-  const posF=isNflSlate ? (slate._expPosFilter||'ALL') : 'ALL';
+  // ck169: NHL gets the same chip row — C / W / D / G, plus Skaters.
+  const isNhlSlate=(typeof isNhl==='function') && isNhl(slate);
+  const NHL_EXP_TABS=[['ALL','All'],['C','C'],['W','W'],['D','D'],['G','G'],['SK','Skaters']];
+  const nhlPosMatchExp=(k,p)=>{ if(k==='ALL') return true; const pc=nhlPosOf(p); return k==='SK' ? (pc && pc!=='G') : pc===k; };
+  const _rawPosF=slate._expPosFilter||'ALL';
+  const posF=isNflSlate ? _rawPosF
+    : isNhlSlate ? (NHL_EXP_TABS.some(t=>t[0]===_rawPosF) ? _rawPosF : 'ALL') : 'ALL';
   const everyPlayer=(slate.players||[])
     .filter(p=>SDx ? !poolHiddenEverywhere(slate,p.id) : !hidden.has(p.id))
     .map(p=>({...p,count:ec[p.id]||0,cpt:cc[p.id]||0}))
     .sort((a,b)=>b.count-a.count);
-  const allPlayers=everyPlayer.filter(p=>!isNflSlate || nflPosMatch(posF,p));
+  const allPlayers=everyPlayer.filter(p=>isNflSlate ? nflPosMatch(posF,p) : isNhlSlate ? nhlPosMatchExp(posF,p) : true);
 
   const maxC=allPlayers.find(p=>p.count>0)?.count||1;
   let posBar='';
@@ -12512,6 +12518,13 @@ function renderExposure(){
       +tabs.map(([k,l])=>{
         const used=everyPlayer.filter(p=>p.count>0&&nflPosMatch(k,p)).length;
         return `<button class="pf-btn${posF===k?' active':''}" onclick="setExpPosFilter('${k}')" title="${k==='FLEX'?'RB / WR / TE — everyone who can fill the FLEX slot':k==='ALL'?'Every position':'Only '+l+' exposure'}">${l}<span class="pf-n">${used}</span></button>`;
+      }).join('')+`</div>`;
+  } else if(isNhlSlate){
+    posBar=`<div class="pos-filter-bar" style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:2px 0 8px;">`
+      +`<span class="pf-lbl">POS</span>`
+      +NHL_EXP_TABS.map(([k,l])=>{
+        const used=everyPlayer.filter(p=>p.count>0&&nhlPosMatchExp(k,p)).length;
+        return `<button class="pf-btn${posF===k?' active':''}" onclick="setExpPosFilter('${k}')" title="${k==='ALL'?'Every position':k==='SK'?'Every skater — C / W / D':'Only '+l+' exposure'}">${l}<span class="pf-n">${used}</span></button>`;
       }).join('')+`</div>`;
   }
 
