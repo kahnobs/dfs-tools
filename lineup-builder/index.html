@@ -7446,7 +7446,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck169/2026-10-13';
+const BUILD_ID = '2.0/ck170/2026-10-15';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -12676,6 +12676,19 @@ function updateConditional(gid,cid,field,value){
   c[field]=value;save();renderGroupRulesSummary();
 }
 
+// ck170: the conditional rule's three numbers use the same −/+ stepper as the
+// group's own Use-between row. They were bare 36px number inputs whose native
+// spin arrows covered the whole box, so nothing could be typed (Matt).
+function stepCond(gid,cid,field,d,lo){
+  const slate=activeSlate();if(!slate)return;
+  const g=(slate.groups||[]).find(g=>g.id===gid);if(!g)return;
+  const c=(g.condGroups||[]).find(c=>c.id===cid);if(!c)return;
+  const hi=(typeof rosterSize==='function')?rosterSize(slate):9;
+  const v=Math.max(lo,Math.min(hi,(parseInt(c[field])||lo)+d));
+  c[field]=v; save();
+  const el=document.getElementById(`cond_${field}_${cid}`); if(el) el.textContent=v;
+  renderGroupRulesSummary();
+}
 function removeConditional(gid,cid){
   const slate=activeSlate();if(!slate)return;
   const g=(slate.groups||[]).find(g=>g.id===gid);if(!g)return;
@@ -12725,7 +12738,7 @@ function renderGroups(){
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
           <span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--purple);text-transform:uppercase;letter-spacing:.5px;">Conditional</span>
           <span class="rule-label">If ≥</span>
-          <input type="number" class="rule-num" value="${c.ifMin}" min="1" max="6" style="width:36px" onchange="updateConditional('${g.id}','${c.id}','ifMin',parseInt(this.value)||1)">
+          <div class="rule-stepper"><button onclick="stepCond('${g.id}','${c.id}','ifMin',-1,1)">−</button><span id="cond_ifMin_${c.id}">${c.ifMin||1}</span><button onclick="stepCond('${g.id}','${c.id}','ifMin',1,1)">+</button></div>
           <span class="rule-label">from <span style="color:${g.color};font-weight:600;">${g.name}</span> are used, then:</span>
           <div style="display:flex;border:1px solid var(--border);border-radius:4px;overflow:hidden;margin-left:auto;">
             <button onclick="updateConditional('${g.id}','${c.id}','type','hard');renderGroups();" style="padding:3px 8px;font-size:10px;font-family:'DM Mono',monospace;border:none;cursor:pointer;background:${isHard?'var(--accent)':'var(--surface2)'};color:${isHard?'#000':'var(--muted)'};">Hard Rule</button>
@@ -12736,9 +12749,9 @@ function renderGroups(){
         ${isHard
           ?`<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
               <span class="rule-label">Use</span>
-              <input type="number" class="rule-num" value="${c.thenMin}" min="0" max="6" style="width:36px" onchange="updateConditional('${g.id}','${c.id}','thenMin',parseInt(this.value)||0)">
+              <div class="rule-stepper"><button onclick="stepCond('${g.id}','${c.id}','thenMin',-1,0)">−</button><span id="cond_thenMin_${c.id}">${c.thenMin||0}</span><button onclick="stepCond('${g.id}','${c.id}','thenMin',1,0)">+</button></div>
               <span class="rule-label">–</span>
-              <input type="number" class="rule-num" value="${c.thenMax}" min="0" max="6" style="width:36px" onchange="updateConditional('${g.id}','${c.id}','thenMax',parseInt(this.value)||0)">
+              <div class="rule-stepper"><button onclick="stepCond('${g.id}','${c.id}','thenMax',-1,0)">−</button><span id="cond_thenMax_${c.id}">${c.thenMax||0}</span><button onclick="stepCond('${g.id}','${c.id}','thenMax',1,0)">+</button></div>
               <span class="rule-label">from this sub-group <span style="color:var(--muted);font-size:9px;">(0 = no limit)</span></span>
             </div>`
           :`<div style="display:flex;align-items:center;gap:6px;">
