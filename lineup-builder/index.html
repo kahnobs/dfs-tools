@@ -94,7 +94,7 @@ a:focus-visible,[tabindex]:focus-visible{outline:none;box-shadow:var(--focus);}
 .nhl-stacks-panel .stk-note{font-size:10px;color:var(--muted);padding:0 12px 6px;flex-shrink:0;line-height:1.4;}
 .nhl-stacks-panel .stk-warn{font-size:10px;color:var(--red);padding:2px 12px;flex-shrink:0;}
 .nhl-stacks-panel .stk-tbl{overflow-y:auto;flex:1;padding:0 8px 10px;}
-.stk-tbl-row{display:grid;grid-template-columns:minmax(92px,1fr) 34px 26px 36px 36px 36px 36px 44px 44px;align-items:center;gap:4px;padding:4px 4px;border-bottom:1px solid var(--border);font-family:'DM Mono',monospace;font-size:10px;text-align:right;}
+.stk-tbl-row{display:grid;grid-template-columns:minmax(92px,1fr) 34px 26px 36px 36px 36px 36px 36px 44px 44px;align-items:center;gap:4px;padding:4px 4px;border-bottom:1px solid var(--border);font-family:'DM Mono',monospace;font-size:10px;text-align:right;}
 .stk-tbl-row > span:first-child{text-align:left;}
 .stk-tbl-head{position:sticky;top:0;background:var(--panel, var(--surface));z-index:1;color:var(--muted);font-size:9px;}
 .stk-tbl-row .stk-tm{display:flex;align-items:center;gap:4px;min-width:0;overflow:hidden;white-space:nowrap;}
@@ -5770,10 +5770,13 @@ function nhlMaxStackedTeams(k){ return k <= 2 ? 3 : k === 3 ? 2 : 1; }
 // exposure over a board: { TEAM: {n2, n3, n4, nK, prim} } and N
 function nhlStackExposure(slate, lineups){
   const k = nhlStackKOf(slate), out = {}; let N = 0;
-  const row = t => out[t] || (out[t] = { n2: 0, n3: 0, n4: 0, nK: 0, prim: 0 });
+  const row = t => out[t] || (out[t] = { any: 0, n2: 0, n3: 0, n4: 0, nK: 0, prim: 0 });
   for(const l of (lineups || [])){
     const ps = (l || []).map(x => (x && typeof x === 'object') ? x : playerById(slate, x)).filter(Boolean);
     if(!ps.length) continue; N++;
+    // ck171: overall team exposure — lineups holding ANY player of the team
+    // (goalie included). The Stacks tab sorts on it.
+    new Set(ps.map(p => nhlTeamKey(p.team)).filter(Boolean)).forEach(t => row(t).any++);
     const c = nhlTeamSkaters(ps); let top = null, topN = 0, tie = false;
     for(const t in c){ const n = c[t], r = row(t);
       if(n >= 2) r.n2++; if(n >= 3) r.n3++; if(n >= 4) r.n4++; if(n >= k) r.nK++;
@@ -5820,7 +5823,11 @@ function renderNhlStacks(){
   const info = {}; games.forEach(g => g.teams.forEach(ti => { if(!ti.ghost) info[ti.team] = { opp: ti.opp, imp: ti.implied, kick: g.kickMins, kickLabel: g.kickLabel }; }));
   const teams = [...new Set((slate.players || []).filter(p => p.salary > 0 && p.team).map(p => nhlTeamKey(p.team)))];
   const live = t => (slate.players || []).filter(p => p.salary > 0 && nhlTeamKey(p.team) === t && nhlPosOf(p) && nhlPosOf(p) !== 'G' && !hid.has(p.id) && !outS.has(p.id) && !/^o$/i.test(String(p.status || '').trim())).length;
-  teams.sort((a, b) => ((info[b] || {}).imp ?? -1) - ((info[a] || {}).imp ?? -1) || a.localeCompare(b));
+  // ck171: highest overall team exposure first (Matt), then deeper stacks,
+  // then implied goals — so an empty board still reads by implied total.
+  const exOf = t => ex.teams[t] || {};
+  teams.sort((a, b) => ((exOf(b).any || 0) - (exOf(a).any || 0)) || ((exOf(b).n2 || 0) - (exOf(a).n2 || 0))
+    || ((exOf(b).n3 || 0) - (exOf(a).n3 || 0)) || (((info[b] || {}).imp ?? -1) - ((info[a] || {}).imp ?? -1)) || a.localeCompare(b));
   const N = ex.N, pc = n => N ? Math.round(100 * n / N) + '%' : '—';
   const rules = nhlStackRules(slate);
   const sumMin = rules.reduce((a, r) => a + (r.min || 0), 0), maxTeams = nhlMaxStackedTeams(k);
@@ -5830,14 +5837,14 @@ function renderNhlStacks(){
     if(r.min != null && live(r.team) < k) warns.push(`${r.team}: Min% ${r.min} but only ${live(r.team)} ${r.team} skater${live(r.team) === 1 ? '' : 's'} in the pool — unhide at least ${k}.`); });
   const inp = (t, kind, v) => `<input class="stk-inp" type="text" inputmode="numeric" value="${v == null ? '' : v}" placeholder="—" title="${kind === 'min' ? 'Min' : 'Max'}% of lineups that stack ${t} at ${k}+ skaters"
       onchange="setNhlStackRule('${t}','${kind}',this.value)" onkeydown="if(event.key==='Enter')this.blur()">`;
-  const head = `<div class="stk-tbl-row stk-tbl-head"><span class="stk-tm">Team</span><span title="Implied goals (Tm Tot)">Imp</span><span title="Skaters in the pool (not hidden / out)">Sk</span><span title="Lineups with 2+ of this team's skaters">2+</span><span title="Lineups with 3+">3+</span><span title="Lineups with 4+">4+</span><span title="Lineups where this team is the biggest stack">Prim</span><span title="Min% of lineups stacking this team at ${k}+">Min%</span><span title="Max% of lineups stacking this team at ${k}+">Max%</span></div>`;
-  const rows = teams.map(t => { const e = ex.teams[t] || { n2: 0, n3: 0, n4: 0, nK: 0, prim: 0 }, i = info[t] || {}, r = nhlStackRuleOf(slate, t);
+  const head = `<div class="stk-tbl-row stk-tbl-head"><span class="stk-tm">Team</span><span title="Implied goals (Tm Tot)">Imp</span><span title="Skaters in the pool (not hidden / out)">Sk</span><span title="Overall team exposure: lineups with any player from this team (goalie included). Rows sort on this.">Exp ▾</span><span title="Lineups with 2+ of this team's skaters">2+</span><span title="Lineups with 3+">3+</span><span title="Lineups with 4+">4+</span><span title="Lineups where this team is the biggest stack">Prim</span><span title="Min% of lineups stacking this team at ${k}+">Min%</span><span title="Max% of lineups stacking this team at ${k}+">Max%</span></div>`;
+  const rows = teams.map(t => { const e = ex.teams[t] || { any: 0, n2: 0, n3: 0, n4: 0, nK: 0, prim: 0 }, i = info[t] || {}, r = nhlStackRuleOf(slate, t);
     const col = nhlTeamColor(slate, t), sk = live(t);
     const kCell = n => { const v = N ? 100 * n / N : 0; const bad = (r.min != null && v + 1e-9 < r.min) || (r.max != null && v - 1e-9 > r.max);
       return `<span class="${bad ? 'stk-off' : (n ? 'stk-on' : '')}">${pc(n)}</span>`; };
     const cells = [2, 3, 4].map(s => s === k ? kCell(s === 2 ? e.n2 : s === 3 ? e.n3 : e.n4) : `<span class="${(s === 2 ? e.n2 : s === 3 ? e.n3 : e.n4) ? '' : 'stk-dim'}">${pc(s === 2 ? e.n2 : s === 3 ? e.n3 : e.n4)}</span>`).join('');
     return `<div class="stk-tbl-row${sk ? '' : ' stk-hidden'}"><span class="stk-tm"><span class="nhl-tag nhl-team" style="color:${col};border-color:${col};">${esc(t)}</span>${i.opp ? `<span class="stk-opp">v ${esc(i.opp)}</span>` : ''}${i.kickLabel ? `<span class="stk-opp">${esc(i.kickLabel)}</span>` : ''}</span>`
-      + `<span>${i.imp != null ? (+i.imp).toFixed(1) : '—'}</span><span class="${sk < k ? 'stk-off' : ''}">${sk}</span>${cells}<span>${pc(e.prim)}</span>`
+      + `<span>${i.imp != null ? (+i.imp).toFixed(1) : '—'}</span><span class="${sk < k ? 'stk-off' : ''}">${sk}</span><span class="${e.any ? '' : 'stk-dim'}" style="${e.any ? 'color:var(--text);font-weight:600;' : ''}">${pc(e.any)}</span>${cells}<span>${pc(e.prim)}</span>`
       + `<span>${inp(t, 'min', r.min)}</span><span>${inp(t, 'max', r.max)}</span></div>`; }).join('');
   el.innerHTML = `<div class="stk-top">
       <div><div class="section-title" style="margin-bottom:2px;">Team Stacks</div>
@@ -7446,7 +7453,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck170/2026-10-15';
+const BUILD_ID = '2.0/ck171/2026-10-18';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
