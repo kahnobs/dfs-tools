@@ -7460,7 +7460,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck173/2026-10-25';
+const BUILD_ID = '2.0/ck174/2026-10-25';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -26393,7 +26393,7 @@ async function runNascarSimGen(){
     const _ssb={};
     fullField.forEach((p,i)=>{ if(simScoreArrays[i]) _ssb[p.id]=simScoreArrays[i]; });
     window._lastSimCtx = simCtxRemember({simScoresById:_ssb, simsDone:simTopScorer.length, sport:'nascar', sd:false, slateId:slate.id, ts:Date.now()});
-    evPrewarmKick(slate);   // ck112: draw the pricing field in worker lanes now
+    if(!(slate._ufcEv && slate._ufcEv.on)) evPrewarmKick(slate);   // ck112 (ck174: EV runs kick after the board's sharp slice exists)
   if(typeof renderHbEv==='function') renderHbEv();   // the builder's stats card can now score/price
   }
   // Full sim outcomes are now attached — enable the ⬇ Sim CSV export.
@@ -39684,11 +39684,11 @@ async function runNflGppBoard(ctx){
     const _pw = window._hbPrewarmPromise;
     window._hbPrewarmPromise = null;
     if(_pw) await _pw;
-    else {
-      const _pctx = slateSimCtx(slate), _pcon = pricingContest(slate);
-      if(_pctx && _pcon) await hbFieldPrewarm(slate, _pctx, _pcon,
-        {fold:'report', reuseGenField:false}, 0);
-    }
+    // ck174: always ensure the draw for the key the report pass will ask for —
+    // the kick above can predate the board's sharp candidates (another key).
+    const _pctx = slateSimCtx(slate), _pcon = pricingContest(slate);
+    if(_pctx && _pcon) await hbFieldPrewarm(slate, _pctx, _pcon,
+      {fold:'report', reuseGenField:false}, 0);
   } catch(e){}
   {
     const _t0 = Date.now();
@@ -44273,16 +44273,28 @@ function hbField(slate, ctx, contest, opts){
     // could drift. It records them and stops; nothing is drawn and nothing is
     // cached, so the real call a moment later runs the prologue again (a pool
     // filter and a key string) and finds the prewarmed opponents below.
-    if(window._hbPreDrawRequest && !(window._hbPreDraw && window._hbPreDraw.key===drawKey)){
+    if(window._hbPreDrawRequest && !hbPreDrawHas(drawKey)){
       window._hbPreDrawRequest={key:drawKey, pool, N, KK, SD, seed:_seed,
                                 scenarios, cptScen, opts};
       return null;
     }
     // The prewarmed draw, if it is for exactly this field.
     let _raw=null;
-    { const _pre=window._hbPreDraw;
-      if(_pre && _pre.key===drawKey && _pre.raw && _pre.raw.length===KK){ _raw=_pre.raw; _usedPre=true; }
-      window._hbPreDraw=null; }
+    { const _pre=hbPreDrawTake(drawKey);
+      if(_pre && _pre.length===KK){ _raw=_pre; _usedPre=true; } }
+    // ck174: NEVER draw a big field on the main thread when workers can. A
+    // NASCAR 17,647-entry MME field is 5 × 17,647 optimizer-built opponents —
+    // minutes of frozen page ("Page Unresponsive"). Any synchronous caller
+    // that lands here without a prewarmed draw (the builder's card right
+    // after a sim, a save, a saved card, the board report when the prewarm
+    // was for a stale key) gets null — "not priced yet" — and the draw is
+    // started in worker lanes; when it lands the builder card and the saved
+    // list re-render and price from it. Small fields (and a worker failure
+    // for this exact key) still draw inline, as before.
+    if(!_raw && hbDeferSyncDraw(drawKey, N, KK)){
+      hbFieldEnsureBg(slate, ctx, contest, opts);
+      return null;
+    }
     if(!_raw){
       _raw=[];
       for(let k=0;k<KK;k++){
@@ -44639,25 +44651,77 @@ function _h32n(s){
 // them up. `reserve` holds worker lanes back for a kernel that is searching at
 // the same time. Resolves true when a field was prewarmed. Never throws and
 // never changes an answer: if anything goes wrong the synchronous draw runs.
+// ── ck174: prewarmed field draws, keyed by the EXACT draw key ────────────────
+// Until ck174 there was ONE slot (window._hbPreDraw), cleared by every new
+// prewarm, and the kick that filled it was de-duplicated on (slate, sim ts,
+// contest) only. The generators kick a prewarm the moment the sim finishes,
+// BEFORE the contest-EV board publishes its sharp candidates (ctx.sharpCands)
+// — and the sharp count is part of hbField's draw key. So the board's report
+// pass awaited a prewarm drawn for the wrong key, missed it, and drew the whole
+// pricing field synchronously: measured on a NASCAR superspeedway slate at a
+// 17,647-entry MME field, the main thread was blocked for minutes. Now every
+// draw is stored and de-duplicated on its own drawKey, and awaiting a prewarm
+// always means "the draw for the key hbField will ask for NOW".
+const _hbPreDrawMap = new Map();        // drawKey → raw fields (one per scenario)
+const _hbPreDrawInflight = new Map();   // drawKey → Promise<boolean>
+const _hbPreDrawFailed = new Set();     // drawKeys the workers could not draw
+function hbPreDrawPut(k, raw){
+  _hbPreDrawMap.delete(k); _hbPreDrawMap.set(k, raw);
+  while(_hbPreDrawMap.size > 2) _hbPreDrawMap.delete(_hbPreDrawMap.keys().next().value);
+}
+function hbPreDrawHas(k){ return _hbPreDrawMap.has(k); }
+function hbPreDrawTake(k){ const r = _hbPreDrawMap.get(k) || null; _hbPreDrawMap.delete(k); return r; }
+// Whether hbField must hand a missing draw to the workers instead of drawing
+// it inline. 50,000 opponent rosters (K = 5 scenarios × a 10,000-entry field)
+// is where an inline draw stops being "a beat": NFL main at 20,000 was the
+// 72 s block (ck103), UFC at 20,000 15.5 s, NASCAR's optimizer-built boards at
+// 17,647 minutes. A showdown 8,000-entry field (40,000) still draws inline.
+function hbDeferSyncDraw(drawKey, N, KK){
+  if(window._hbSyncDraw) return false;            // tests / diagnostics may force inline
+  if(!fieldWorkersUsable()) return false;
+  if(_hbPreDrawFailed.has(drawKey)) return false;  // workers failed this key → inline, as before
+  return (N * KK) >= 50000;
+}
+function hbFieldEnsureBg(slate, ctx, contest, opts){
+  // Deferred: we are inside hbField with Math.random swapped for its stream.
+  setTimeout(() => {
+    hbFieldPrewarm(slate, ctx, contest, opts, 0).then(ok => {
+      if(!ok) return;
+      try { if(typeof renderHbEv === 'function') renderHbEv(); } catch(e){}
+      try { if(typeof renderSaved === 'function' && typeof activeSlate === 'function' && activeSlate() === slate) renderSaved(); } catch(e){}
+    });
+  }, 0);
+}
+// Draw the field hbField WILL ask for — right now, for these arguments — in
+// worker lanes. Resolves true when a draw for that exact key is ready (or was
+// already cached / prewarmed), false when there is nothing to draw or the
+// draw failed. Concurrent callers for the same key share one draw.
 async function hbFieldPrewarm(slate, ctx, contest, opts, reserve){
   if(!fieldWorkersUsable()) return false;
   let req=null;
   try {
-    window._hbPreDraw=null;
     window._hbPreDrawRequest={probe:true};
     try { hbField(slate, ctx, contest, opts); } finally {
       req=window._hbPreDrawRequest; window._hbPreDrawRequest=null; }
   } catch(e){ window._hbPreDrawRequest=null; return false; }
-  // No key ⇒ either the field was already cached or the slate cannot build one.
+  // No key ⇒ the field is already cached (or a prewarmed draw for this exact
+  // key was just consumed into it), or the slate cannot build one.
   // ck104: showdown travels too — sampleShowdownField is in the worker now.
-  if(!req || !req.key) return false;
-  try {
-    const drawn=await sampleFieldSet(req.pool, req.N, req.scenarios, req.opts, req.seed, reserve,
-      req.SD ? {sd:true, cptScen:req.cptScen} : null);
-    if(!drawn) return false;
-    window._hbPreDraw={key:req.key, raw:drawn};
-    return true;
-  } catch(e){ window._hbPreDraw=null; return false; }
+  if(!req || !req.key) return true;
+  const key=req.key;
+  if(_hbPreDrawInflight.has(key)) return _hbPreDrawInflight.get(key);
+  const p=(async () => {
+    try {
+      const drawn=await sampleFieldSet(req.pool, req.N, req.scenarios, req.opts, req.seed, reserve,
+        req.SD ? {sd:true, cptScen:req.cptScen} : null);
+      if(!drawn){ _hbPreDrawFailed.add(key); return false; }
+      hbPreDrawPut(key, drawn);
+      return true;
+    } catch(e){ _hbPreDrawFailed.add(key); return false; }
+    finally { _hbPreDrawInflight.delete(key); }
+  })();
+  _hbPreDrawInflight.set(key, p);
+  return p;
 }
 // The ownership column, as one short token. Used BOTH by the price stamp and
 // by `hbField`'s cache key — they must agree or a "re-price" would hand back
@@ -44776,7 +44840,11 @@ function evPrewarmKick(slate){
     if(typeof hbFieldPrewarm!=='function') return null;
     const ctx=slateSimCtx(slate); const c=pricingContest(slate);
     if(!ctx || !c) return null;
-    const key=[slate.id, ctx.ts, c.key].join('|');
+    // ck174: the de-dupe key must change whenever hbField's drawKey would — in
+    // particular when the board publishes its sharp candidates after the early
+    // kick, or the stale draw is handed back and the real one runs inline.
+    const key=[slate.id, ctx.ts, ctx.simsDone, c.key, c.fieldSize, (ctx.sharpCands||[]).length,
+               slate._genMaxSal||'', nflOutIds(slate).slice().sort().join(','), _ownFingerprint(slate)].join('|');
     if(window._hbPrewarmKey===key && window._hbPrewarmPromise) return window._hbPrewarmPromise;
     const _hw=(typeof navigator!=='undefined' && navigator.hardwareConcurrency)||4;
     window._hbPrewarmKey=key;
@@ -44791,7 +44859,9 @@ async function evRunNorm(slate, contest){
     const o={fold:'report', reuseGenField:false};
     const kicked=evPrewarmKick(slate);
     if(kicked) await kicked;
-    else if(typeof hbFieldPrewarm==='function') await hbFieldPrewarm(slate, ctx, c, o, 0);
+    // ck174: the kick may be for another contest/key — ensure THIS one (a
+    // no-op when it is already drawn or cached).
+    if(typeof hbFieldPrewarm==='function') await hbFieldPrewarm(slate, ctx, c, o, 0);
     const F=hbField(slate, ctx, c, o); if(!F) return null;
     const fav=hbFieldAvgGross(F, slate, c, o);
     return fav ? fav.norm : null;
