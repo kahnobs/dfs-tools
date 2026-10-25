@@ -3926,7 +3926,7 @@ function nflStandingsBoardScore(slate, sortedPts, fptsById, SD, fieldSize){
     const ties = tiesAt(pts);
     // ck111: the lineup's OWN stored prediction rides along so the ordering
     // the engine claimed can be scored against the ordering that happened.
-    const m = meta[lineupKey(ids)] || {};
+    const m = meta[savedLineupKey(slate, ids)] || {};
     return { ids: ids.slice(), cpt,
              names: ids.map(id => ((playerById(slate, id) || {}).name) || String(id)),
              points: Math.round(100 * pts) / 100, rank, ties, pctile: rank / N,
@@ -5366,7 +5366,13 @@ function sdCaptainId(slate, ids, mode){
   // highest-salaried captain-eligible man → the highest-salaried man.
   const pinned = (mode === 'builder') && slate && slate.sdCaptain;
   if(pinned && ids.includes(pinned)) return pinned;
-  const meta = slate && slate._lineupMeta && slate._lineupMeta[key];
+  // ck173: a saved lineup is captain-first and its meta lives under the
+  // captain-aware key (savedLineupKey), so look there first; the captain-blind
+  // key is only a pre-migration fallback.
+  const metaAll = (slate && slate._lineupMeta) || {};
+  const metaC = metaAll[key + '|C' + ids[0]];
+  if(metaC && metaC.sdCaptain === ids[0]) return ids[0];
+  const meta = metaAll[key];
   if(meta && meta.sdCaptain && ids.includes(meta.sdCaptain)) return meta.sdCaptain;
   let best = null, bestSal = -1, bestAny = null, bestAnySal = -1;
   for(const id of ids){
@@ -5607,13 +5613,14 @@ function sdDedupePlayers(slate){
   const seen = new Set();
   const outL = [];
   (slate.savedLineups||[]).forEach(l => {
-    const oldKey = lineupKey(l);
-    const nl = rmList(l);
+    const oldKey = savedLineupKey(slate, l);
+    const nl = rmList(l);              // order-preserving: the captain stays in slot 0
     if(nl.length !== l.length) return;
-    const nk = lineupKey(nl);
+    const nk = savedLineupKey(slate, nl);
     if(seen.has(nk)) return;
     seen.add(nk); outL.push(nl);
-    if(meta[oldKey]) newMeta[nk] = meta[oldKey];
+    if(meta[oldKey]) newMeta[nk] = Object.assign({}, meta[oldKey],
+      meta[oldKey].sdCaptain ? { sdCaptain: rm(meta[oldKey].sdCaptain) } : {});
   });
   slate.savedLineups = outL;
   // newMeta already holds every SURVIVING lineup's metadata under its remapped
@@ -7847,6 +7854,11 @@ function imputeMissingRatings(slate){
 function loadFromStorage() {
   try { const r=localStorage.getItem(STORAGE_KEY); if(r){ slates=JSON.parse(r); slates.forEach(imputeMissingRatings);
     for(const sl of slates) for(const pl of (sl.players||[])) if(pl && typeof pl.name==='string' && /[<>\u0000-\u001f]/.test(pl.name)) pl.name=cleanName(pl.name); } } catch(e){ slates=[]; }
+  // ck173: saved showdown lineups → captain-first + captain-aware meta keys.
+  // Runs BEFORE the twin repair, which already keys by savedLineupKey.
+  try { let n=0; slates.forEach(s=>{ if(sdMigrateSavedCaptains(s)) n++; });
+    if(n){ console.log(`[showdown] ck173: captain-aware saved lineups on ${n} slate${n>1?'s':''}`); save(); }
+  } catch(e){ console.warn('showdown captain-key migration skipped', e); }
   // Repair: showdown slates whose sheet refresh re-added the CPT twin rows.
   try {
     let fixed=0;
@@ -8025,6 +8037,48 @@ function getCombos(slate) {
   return {pairs,triples};
 }
 function lineupKey(ids){return [...ids].sort().join('|');}
+// ── ck173: a SAVED lineup's identity ─────────────────────────────────────────
+// Classic: the sorted ids (lineupKey). Showdown: the sorted ids PLUS the
+// captain — the same six with a different CPT is a different DK entry, so it
+// must save, price, store meta and dedupe as its own lineup. Until ck173 every
+// saved-lineup path used the captain-blind lineupKey, which refused to save
+// "same six, new captain" as a duplicate and would have made both variants
+// share one _lineupMeta row (one sdCaptain) even if they had been let in.
+// Saved showdown arrays are stored CAPTAIN-FIRST (slot 0), so a saved array
+// carries its own captain; `cpt` is for arrays that are not (the builder's
+// roster, an import row) and must be given whenever the caller knows it.
+function savedLineupKey(slate, ids, cpt){
+  const base = lineupKey(ids || []);
+  if(!slate || !isShowdown(slate) || !ids || !ids.length) return base;
+  return base + '|C' + (cpt || ids[0]);
+}
+// One-time (idempotent) upgrade of a showdown slate saved before ck173: each
+// saved lineup is reordered captain-first using the captain its old,
+// captain-blind meta row recorded (or the default captain when none was), and
+// its meta moves to the captain-aware key. Rows that belong to no saved lineup
+// are dropped — sdCaptainId falls back to the old key, so an orphan could
+// otherwise re-captain a roster built later. Returns true when it changed
+// anything.
+function sdMigrateSavedCaptains(slate){
+  if(!slate || !isShowdown(slate) || !Array.isArray(slate.savedLineups) || !slate.savedLineups.length) return false;
+  const meta = slate._lineupMeta || {};
+  const out = {};
+  let changed = false;
+  slate.savedLineups = slate.savedLineups.map(l => {
+    if(!Array.isArray(l) || !l.length) return l;
+    const kNew = savedLineupKey(slate, l);
+    if(meta[kNew] && meta[kNew].sdCaptain === l[0]){ out[kNew] = meta[kNew]; return l; }
+    const old = meta[lineupKey(l)];
+    const c = (old && old.sdCaptain && l.includes(old.sdCaptain)) ? old.sdCaptain : sdCaptainId(slate, l, 'saved');
+    const nl = c ? [c, ...l.filter(id => id !== c)] : l.slice();
+    out[savedLineupKey(slate, nl, c)] = Object.assign({}, old || {}, c ? { sdCaptain: c } : {});
+    changed = true;
+    return nl;
+  });
+  if(Object.keys(meta).length !== Object.keys(out).length) changed = true;
+  slate._lineupMeta = out;
+  return changed;
+}
 function expClass(c,t){if(!t||!c)return 'e0';const p=c/t;return p<.25?'eL':p<.5?'eM':'eH';}
 function expColor(p){return p<.25?'var(--green)':p<.5?'var(--accent)':'var(--accent2)';}
 function slateFieldsBase(slate){
@@ -8313,6 +8367,7 @@ function restoreDeletedSlate(i){
   const a = slateTrashLoad(); const rec = a[i]; if(!rec || !rec.slate) return;
   const sl = rec.slate;
   if(slates.some(x => x.id === sl.id)) sl.id = uid();
+  try { sdMigrateSavedCaptains(sl); } catch(e){}
   slates.push(sl);
   if(rec.history && !lineupHistory[sl.id]){ lineupHistory[sl.id] = rec.history; saveHistory(); }
   a.splice(i, 1); slateTrashStore(a);
@@ -9955,11 +10010,16 @@ function saveLineup(){
   if(isShowdown(slate)){ if(!sdComplete(slate,current) || sdSalary(slate,current,null,'builder')>SALARY_CAP) return; }
   else if(isPositional(slate)){ if(!nflComplete(nflCounts(slate,current))) return; }
   else if(current.length!==rosterSize(slate)) return;
-  const key=lineupKey(current);
+  // ck173: showdown identity includes the captain, and the saved array is
+  // stored captain-first — same six with a different CPT is a new lineup.
+  const _SDk=isShowdown(slate);
+  const _cidK=_SDk?sdCaptainId(slate,current,'builder'):null;
+  const stored=_SDk?sdAssignSlots(slate,current,_cidK,'builder'):[...current];
+  const key=savedLineupKey(slate,stored,_cidK);
   slate.savedLineups=slate.savedLineups||[];
-  const dupIdx=slate.savedLineups.findIndex(l=>lineupKey(l)===key);
+  const dupIdx=slate.savedLineups.findIndex(l=>savedLineupKey(slate,l)===key);
   if(dupIdx!==-1){
-    showToast('⚠ Duplicate! Matches Lineup #'+(dupIdx+1),'err');
+    showToast('⚠ Duplicate! Matches Lineup #'+(dupIdx+1)+(_SDk?' (same players, same captain)':''),'err');
     const els=document.querySelectorAll('.saved-lineup');
     if(els[dupIdx]){els[dupIdx].classList.add('dup');els[dupIdx].scrollIntoView({behavior:'smooth',block:'nearest'});setTimeout(()=>els[dupIdx].classList.remove('dup'),1500);}
     return;
@@ -9967,7 +10027,7 @@ function saveLineup(){
   // Showdown: the pinned (or default) captain must travel with the lineup —
   // the pin only applies to the lineup being built, so record it per key.
   if(isShowdown(slate)){
-    const cid=sdCaptainId(slate,current,'builder');
+    const cid=_cidK;
     if(cid){ slate._lineupMeta=slate._lineupMeta||{}; slate._lineupMeta[key]=Object.assign({},slate._lineupMeta[key]||{},{sdCaptain:cid}); }
     slate.sdCaptain=null;
   }
@@ -9995,7 +10055,7 @@ function saveLineup(){
       }, _pm || {});
     }
   }catch(e){}
-  slate.savedLineups.push([...current]);
+  slate.savedLineups.push(stored);
   showToast('✓ Lineup #'+slate.savedLineups.length+' saved!','ok');
   clearLineup();renderSaved();renderExposure();
 }
@@ -10014,7 +10074,7 @@ function loadLineup(idx){
 
 function deleteLineup(idx){
   const slate=activeSlate();if(!slate)return;
-  const lk=lineupKey(slate.savedLineups[idx]||[]);
+  const lk=savedLineupKey(slate,slate.savedLineups[idx]||[]);
   slate.savedLineups.splice(idx,1);
   if(slate._lineupMeta) delete slate._lineupMeta[lk];
   save();renderSaved();renderExposure();renderPool();
@@ -10145,8 +10205,8 @@ function applySavedFilterDelete(){
   const desc=`${SAVED_METRIC_BY_KEY[c.k].label} ${c.op==='lt'?'<':'>'} ${c.v}`;
   const total=_savedEntriesCache.length;
   if(!confirm(`Remove ${hits.length} of ${total} saved lineup${hits.length===1?'':'s'}?\n\n${desc}\n\nThis cannot be undone.`)) return;
-  const kill=new Set(hits.map(h=>lineupKey(h.lineup)));
-  slate.savedLineups=(slate.savedLineups||[]).filter(l=>!kill.has(lineupKey(l)));
+  const kill=new Set(hits.map(h=>savedLineupKey(slate,h.lineup)));
+  slate.savedLineups=(slate.savedLineups||[]).filter(l=>!kill.has(savedLineupKey(slate,l)));
   if(slate._lineupMeta) kill.forEach(k=>{ delete slate._lineupMeta[k]; });
   save(); renderSaved(); renderExposure(); renderPool();
   showToast(`Removed ${hits.length} lineup${hits.length===1?'':'s'}.`,'ok');
@@ -10215,7 +10275,7 @@ function importLineupsApply(slate, text){
   for(const p of (slate.players || [])){ byId.set(nid(p.id), p); if(p.cptId != null) byCpt.set(nid(p.cptId), p); }
   const SD = typeof isShowdown === 'function' && isShowdown(slate);
   slate.savedLineups = slate.savedLineups || [];
-  const have = new Set(slate.savedLineups.map(l => lineupKey(l)));
+  const have = new Set(slate.savedLineups.map(l => savedLineupKey(slate, l)));
   let added = 0, dup = 0, bad = 0; const missing = new Set();
   for(const r of rows){
     const ids = [], miss = []; let cpt = null;
@@ -10229,10 +10289,14 @@ function importLineupsApply(slate, text){
       ids.push(p.id);
     });
     if(miss.length || !ids.length){ bad++; miss.forEach(x => missing.add(x)); continue; }
-    const key = lineupKey(ids);
+    // ck173: showdown rows are stored captain-first under a captain-aware key;
+    // a row with no CPT slot gets the default captain, recorded explicitly.
+    if(SD && !(cpt && ids.includes(cpt))) cpt = sdCaptainId(slate, ids, 'saved');
+    const row = (SD && cpt) ? [cpt, ...ids.filter(id => id !== cpt)] : ids;
+    const key = savedLineupKey(slate, row, cpt);
     if(have.has(key)){ dup++; continue; }
     have.add(key);
-    slate.savedLineups.push(ids);
+    slate.savedLineups.push(row);
     if(SD && cpt){ slate._lineupMeta = slate._lineupMeta || {}; slate._lineupMeta[key] = Object.assign({}, slate._lineupMeta[key] || {}, { sdCaptain: cpt }); }
     added++;
   }
@@ -10286,9 +10350,9 @@ function renderSaved(){
   // this slate has a live sim context to compute the median from (see the
   // liveSim below — a re-run refreshes every card, stored or not).
   const anySim=!!slateSimCtx(slate)
-    || lineups.some(l=>{const v=meta[lineupKey(l)]?.simWinAvg;return v!=null&&v!==''&&!isNaN(parseFloat(v));});
+    || lineups.some(l=>{const v=meta[savedLineupKey(slate,l)]?.simWinAvg;return v!=null&&v!==''&&!isNaN(parseFloat(v));});
   const anyEv=(!!slateSimCtx(slate) && !!pricingContest(slate))
-    || lineups.some(l=>{const v=meta[lineupKey(l)]?.evPct;return v!=null&&!isNaN(parseFloat(v));});
+    || lineups.some(l=>{const v=meta[savedLineupKey(slate,l)]?.evPct;return v!=null&&!isNaN(parseFloat(v));});
   // ck95: the state of the world every stored price is a claim about. A row
   // whose stamp no longer matches is DIMMED and the panel offers one action
   // that re-prices the whole list (`repriceAllSaved`).
@@ -10337,7 +10401,7 @@ function renderSaved(){
     const sal=SDl?sdSalary(slate,lineup,cptId):players.reduce((s,p)=>s+(p.salary||0),0);
     const proj=players.reduce((s,p)=>s+(parseFloat(p.proj)||0)*(SDl&&p.id===cptId?CPT_MULT:1),0);
     const rtg=players.filter(p=>p.rating!=null).reduce((s,p)=>s+(parseFloat(p.rating)||0),0);
-    const lk=lineupKey(lineup);
+    const lk=savedLineupKey(slate,lineup);
     // ONE lineup Sim (see lineupSimMedian). Prefer the LIVE median off the last
     // sim run for this slate, so re-running the sim refreshes every saved card
     // instead of freezing whatever the run that built it happened to store;
@@ -10452,7 +10516,7 @@ function renderSaved(){
     // was better. `data-ev` keeps the calibrated EV% on the element.
     if(evPct!=null){ const _eg=(edge!=null)?edge:null; const _col=_eg==null?'var(--muted)':(_eg>=1?'var(--green)':'var(--red)');
       stats.push(`<span class="saved-stat hb-ev-chip" data-ev="${evPct.toFixed(1)}" data-edge="${_eg!=null?_eg.toFixed(3):''}" style="color:${_col};${_stCss}" title="${esc(evTip||'')}"><span class="saved-stat-lbl" style="color:${_col};opacity:.7;">Edge</span>${_stMark}${_eg!=null?evEdgeFmt(_eg):(evPct>=0?'+':'')+evPct.toFixed(0)+'%'}</span>`); }
-    if(evPct==null && pendingSet.has(lineupKey(lineup))) stats.push(`<span class="saved-stat hb-ev-chip" data-pending="1" style="color:var(--muted);opacity:.6;" title="Pricing this lineup against the modeled field in the background…"><span class="saved-stat-lbl">Edge</span>…</span>`);
+    if(evPct==null && pendingSet.has(savedLineupKey(slate,lineup))) stats.push(`<span class="saved-stat hb-ev-chip" data-pending="1" style="color:var(--muted);opacity:.6;" title="Pricing this lineup against the modeled field in the background…"><span class="saved-stat-lbl">Edge</span>…</span>`);
     // THE win rate: P(rank 1), held out, one decimal in the same units as the
     // hand-builder card. Nothing else on this card may wear this label.
     if(winPct!=null)   stats.push(`<span class="saved-stat saved-win-chip" style="${_stCss}" title="${esc(WINPCT_TIP)}"><span class="saved-stat-lbl">Win%</span>${_stMark}${hbPct(winPct)}%</span>`);
@@ -10910,7 +10974,7 @@ function dkLineupList(slate){
   const RS=rosterSize(slate);
   const meta=slate._lineupMeta||{};
   return (slate.savedLineups||[]).map((l,i)=>{
-    const key=lineupKey(l);
+    const key=savedLineupKey(slate,l);
     const m=meta[key]||{};
     const cptId=SD?sdLineupCaptain(slate,l):null;
     const players=(SD?sdAssignSlots(slate,l,cptId):l).map(id=>playerById(slate,id)).filter(Boolean);
@@ -11186,7 +11250,7 @@ function dkComputeAssign(slate){
   // "Use only lineups matching the Saved filter" reuses the filter panel's own
   // matcher, so the set is exactly the set that panel is counting.
   if(st.useFilter && slate._savedFilter && typeof savedFilterMatches==='function'){
-    const keys=new Set(savedFilterMatches(_savedEntriesCache||[], slate._savedFilter).map(e=>lineupKey(e.lineup)));
+    const keys=new Set(savedFilterMatches(_savedEntriesCache||[], slate._savedFilter).map(e=>savedLineupKey(slate,e.lineup)));
     const cut=pool.filter(l=>keys.has(l.key));
     if(cut.length) pool=cut;
     else warnings.push('The Saved filter matches no usable lineup — using all of them instead.');
@@ -43705,7 +43769,7 @@ function toggleSavedDetails(i, btn){
   // lineup from another slate must not be described by it.
   const ctx=window._lastSimCtx;
   const live=ctx && ctx.slateId===slate.id;
-  d.innerHTML=lineupDetailHtml(players, cptId, {meta:(slate._lineupMeta||{})[lineupKey(ids)]||{}, live:!!live});
+  d.innerHTML=lineupDetailHtml(players, cptId, {meta:(slate._lineupMeta||{})[savedLineupKey(slate,ids)]||{}, live:!!live});
   d.style.display='';
   if(btn) btn.textContent='Hide';
 }
@@ -44814,7 +44878,7 @@ function repriceAllSaved(){
   const entries=lus.map(l=>{
     const cptId=SD?sdLineupCaptain(slate,l):null;
     const players=(SD?sdAssignSlots(slate,l,cptId):l).map(id=>playerById(slate,id)).filter(Boolean);
-    return {key:lineupKey(l), players, cptId};
+    return {key:savedLineupKey(slate,l), players, cptId};
   });
   const priced=priceBoardHeldOut(entries);
   slate._lineupMeta=slate._lineupMeta||{};
@@ -45508,13 +45572,12 @@ function toggleSelectAll(){
 function addSelectedToSaved(){
   const slate=activeSlate();if(!slate)return;
   slate.savedLineups=slate.savedLineups||[];
-  const existingKeys=new Set(slate.savedLineups.map(l=>lineupKey(l)));
+  const existingKeys=new Set(slate.savedLineups.map(l=>savedLineupKey(slate,l)));
   let added=0,skipped=0;
-  // A saved lineup is identified by its PLAYERS only (lineupKey sorts the ids
-  // and carries no captain), so on showdown "the same six with a different C"
-  // reads as a duplicate here even though it is a different DK entry. Count
-  // those separately: "1 skipped" with no explanation looks like a bug.
-  let cptSkipped=0;
+  // ck173: on showdown a saved lineup is identified by its players AND its
+  // captain (savedLineupKey), so "the same six with a different C" is added as
+  // its own entry; only an exact repeat is skipped.
+  const _SDa=isShowdown(slate);
   previewLineups.forEach((lineup,i)=>{
     // Look the checkbox up by its id (pc{originalIndex}) — a positional NodeList
     // walk breaks whenever a sort or filter is active, because the DOM order no
@@ -45522,14 +45585,12 @@ function addSelectedToSaved(){
     // A lineup whose checkbox isn't rendered (filtered out) is treated as
     // unselected, matching what the user can actually see.
     if(!document.getElementById('pc'+i)?.checked)return;
-    const key=lineupKey(lineup.map(p=>p.id));
-    if(existingKeys.has(key)){
-      skipped++;
-      if(isShowdown(slate) && lineup._sdCaptain) cptSkipped++;
-      return;
-    }
+    const _raw = lineup.map(p=>p.id);
+    const _cpt = _SDa ? ((lineup._sdCaptain && _raw.includes(lineup._sdCaptain)) ? lineup._sdCaptain : sdCaptainId(slate, _raw)) : null;
+    const ids = _SDa ? [_cpt, ..._raw.filter(id => id !== _cpt)] : _raw;
+    const key=savedLineupKey(slate, ids, _cpt);
+    if(existingKeys.has(key)){ skipped++; return; }
     existingKeys.add(key);
-    const ids = lineup.map(p=>p.id);
     slate.savedLineups.push(ids);
     // The Sim the saved card will print must be the Sim the preview card just
     // printed: `previewLineupSim` (the median lineup total). `l._simWinAvg` is
@@ -45557,14 +45618,14 @@ function addSelectedToSaved(){
     }
     // Showdown: the sim's captain choice was set on the preview lineup only —
     // persist it, or the export silently re-captains by salary.
-    if(isShowdown(slate) && lineup._sdCaptain && ids.includes(lineup._sdCaptain)){
+    if(_SDa && _cpt){
       slate._lineupMeta=slate._lineupMeta||{};
-      slate._lineupMeta[key]=Object.assign({},slate._lineupMeta[key]||{},{sdCaptain:lineup._sdCaptain});
+      slate._lineupMeta[key]=Object.assign({},slate._lineupMeta[key]||{},{sdCaptain:_cpt});
     }
     added++;
   });
   save();closePreviewModal();renderSaved();renderExposure();renderPool();
-  showToast(`✓ Added ${added} lineups${skipped?` (${skipped} skipped${cptSkipped?` — ${cptSkipped} the same six as a saved lineup with a different captain; saved lineups are identified by their players only`:''})`:''}!`,'ok');
+  showToast(`✓ Added ${added} lineups${skipped?` (${skipped} already saved)`:''}!`,'ok');
   // switch to builder tab
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
