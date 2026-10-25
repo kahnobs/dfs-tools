@@ -7460,7 +7460,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck174/2026-10-25';
+const BUILD_ID = '2.0/ck175/2026-10-25';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -7570,7 +7570,63 @@ let lineupHistory = {}; // keyed by slateId, each value = [{id,label,ts,lineups}
 const HISTORY_KEY = 'dfs_builder_history_v1';
 const MAX_HISTORY = 10;
 
-function saveHistory(){ try { localStorage.setItem(HISTORY_KEY, JSON.stringify(lineupHistory)); } catch(e){} }
+// ── ck175: storage-full is never silent ──────────────────────────────────────
+// Every write used to be `try { setItem } catch(e){}`. When the browser's
+// ~5 MB localStorage quota filled up, saves simply stopped — and a Restore
+// wrote the history first (4 MB on Matt's 10/25 backup, 99% of it boards from
+// slates deleted weeks ago), had no room left for the slates, and then
+// re-read the OLD slates from storage: "Restored 2 slates" with nothing
+// restored. Writes now report failure; on failure the oldest history sets of
+// DELETED slates (kept only for the ♻ recover-from-deleted-slate offer, and
+// the slate trash keeps its own copy) are shed oldest-first to make room, and
+// if that is not enough the user is told plainly that the change is NOT saved.
+function storageSet(key, val){
+  try { localStorage.setItem(key, val); return true; } catch(e){ return false; }
+}
+// Drop the oldest history sets that belong to no live slate, ~`frac` of them
+// at a time. Returns how many sets were dropped (0 = nothing left to shed).
+function historyShedOrphans(frac){
+  const live = new Set((slates||[]).map(x => x.id));
+  const orphans = [];
+  for(const [sid, list] of Object.entries(lineupHistory || {})){
+    if(live.has(sid) || !Array.isArray(list)) continue;
+    list.forEach(set => orphans.push({ sid, id: set && set.id, ts: (set && set.ts) || 0 }));
+  }
+  if(!orphans.length) return 0;
+  orphans.sort((a, b) => a.ts - b.ts);
+  const n = Math.max(1, Math.ceil(orphans.length * (frac || 0.25)));
+  const kill = orphans.slice(0, n);
+  const bySid = new Map();
+  kill.forEach(o => { if(!bySid.has(o.sid)) bySid.set(o.sid, new Set()); bySid.get(o.sid).add(o.id); });
+  for(const [sid, ids] of bySid){
+    const keep = (lineupHistory[sid] || []).filter(set => !ids.has(set && set.id));
+    if(keep.length) lineupHistory[sid] = keep; else delete lineupHistory[sid];
+  }
+  window._histShed = (window._histShed || 0) + kill.length;
+  return kill.length;
+}
+// Write `key` = `val()` (a thunk, so the value is rebuilt after shedding when
+// it IS the history). Sheds deleted-slate history until it fits.
+function storageWriteMakingRoom(key, val){
+  if(storageSet(key, val())) return true;
+  for(let tries = 0; tries < 12; tries++){
+    if(!historyShedOrphans(0.25)) break;
+    storageSet(HISTORY_KEY, JSON.stringify(lineupHistory));   // shrink the history in storage
+    if(storageSet(key, val())) return true;
+  }
+  return false;
+}
+let _storageWarnAt = 0;
+function storageFullWarn(what){
+  const now = Date.now(); if(now - _storageWarnAt < 4000) return; _storageWarnAt = now;
+  const msg = `⚠ Browser storage is full — ${what} NOT saved. Use ⋯ → Backup, then delete old slates (or clear old history) to free space.`;
+  try { if(typeof showToast === 'function') showToast(msg, 'err'); else console.warn(msg); } catch(e){ console.warn(msg); }
+}
+function saveHistory(){
+  const ok = storageWriteMakingRoom(HISTORY_KEY, () => JSON.stringify(lineupHistory));
+  if(!ok) storageFullWarn('lineup history');
+  return ok;
+}
 function loadHistory(){ try { const r=localStorage.getItem(HISTORY_KEY); if(r) lineupHistory=JSON.parse(r); } catch(e){ lineupHistory={}; } }
 
 // Sim-input stamp for the NEXT history entry. runNflSimGen fills it in just
@@ -7799,8 +7855,11 @@ let _tabStale = false;
 // (test_boards, test_ck89_seed) and a draw at load would shift their stream.
 const _tabId = (function(){ try { const a = new Uint32Array(2); crypto.getRandomValues(a); return a[0].toString(36) + a[1].toString(36); } catch(e){ return String(Date.now()) + String(performance.now()).replace('.', ''); } })();
 function save() {
-  if(_tabStale){ tabGuardBar('stale'); return; }
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(slates)); } catch(e){}
+  if(_tabStale){ tabGuardBar('stale'); return false; }
+  // ck175: report failure (see storageSet) instead of swallowing it.
+  const ok = storageWriteMakingRoom(STORAGE_KEY, () => JSON.stringify(slates));
+  if(!ok) storageFullWarn('your slates were');
+  return ok;
 }
 function tabGuardBar(kind){
   if(typeof document === 'undefined' || !document.body) return;
@@ -46655,7 +46714,12 @@ function restorePayload(payload, opts){
       else skipped++;
     } else { slates.push(s); byId.set(s.id, slates.length - 1); added++; }
   });
-  if(payload.history){ Object.assign(lineupHistory, payload.history); saveHistory(); }
+  // ck175: the SLATES are written first — they are the restore. History (which
+  // can be most of the file) goes in after, and sheds deleted-slate boards if
+  // that is what it takes to fit.
+  const slatesSaved = save();
+  let historySaved = true;
+  if(payload.history){ Object.assign(lineupHistory, payload.history); historySaved = saveHistory(); }
   // Stores: the calibration records merge by contest key (a row the backup
   // has and this browser does not is added; a row both have keeps the backup's
   // when replacing, the current one otherwise); presets merge by id; the
@@ -46685,8 +46749,8 @@ function restorePayload(payload, opts){
   slates.forEach(imputeMissingRatings);
   if(payload.activeSlateId && slates.some(s => s.id === payload.activeSlateId) && (opts.replace || !activeSlateId)) activeSlateId = payload.activeSlateId;
   if(slates.length && !activeSlateId) activeSlateId = slates[0].id;
-  save();
-  return { added, replaced, skipped, stores: storesN };
+  const savedAll = save() && slatesSaved;
+  return { added, replaced, skipped, stores: storesN, saved: savedAll, historySaved, shed: window._histShed || 0 };
 }
 
 function restoreData(input){
@@ -46702,10 +46766,19 @@ function restoreData(input){
       if(!confirm(`Restore ${payload.slates.length} slate(s) from the backup dated ${when}?`)) { input.value = ''; return; }
       let replace = false;
       if(dup) replace = confirm(`${dup} of them already exist here.\n\nOK — REPLACE the existing copies with the backup's (player pool, hides, OUT marks, sim inputs, settings and saved lineups all come back exactly as backed up; the current copies are lost).\nCancel — keep the current copies and only add the ${payload.slates.length - dup} new slate(s).`);
+      window._histShed = 0;
       const r = restorePayload(payload, { replace });
-      try { if(typeof loadFromStorage === 'function') loadFromStorage(); } catch(e){}
+      // ck175: re-reading storage runs the load-time migrations — but only when
+      // the write landed. Re-reading after a FAILED write is what used to throw
+      // the restored slates away and put the old ones back.
+      if(r.saved){ try { if(typeof loadFromStorage === 'function') loadFromStorage(); } catch(e){} }
       renderTopBar(); renderSlate();
-      alert(`Restored: ${r.added} slate(s) added, ${r.replaced} replaced, ${r.skipped} kept as they were` + (r.stores ? `; ${r.stores} setting/record store(s) restored.` : '.'));
+      let msg = `Restored: ${r.added} slate(s) added, ${r.replaced} replaced, ${r.skipped} kept as they were` + (r.stores ? `; ${r.stores} setting/record store(s) restored.` : '.');
+      if(r.shed) msg += `\n\nTo make room, ${r.shed} old lineup-history set(s) from DELETED slates were dropped from this browser (they are still in the backup file).`;
+      if(!r.saved && _tabStale) msg += `\n\n⚠ Not saved: the builder was saved in another tab, so saving is paused here (see the red bar).`;
+      else if(!r.saved) msg += `\n\n⚠ BROWSER STORAGE IS FULL — the restored slates are open now but could NOT be saved, and will be lost on reload. Delete some slates (⋯ → slate list) and restore again.`;
+      else if(!r.historySaved) msg += `\n\n⚠ The lineup history did not fit in browser storage; the slates themselves were saved.`;
+      alert(msg);
     } catch(err) {
       alert('Failed to restore: ' + err.message);
     }
