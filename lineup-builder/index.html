@@ -93,6 +93,13 @@ a:focus-visible,[tabindex]:focus-visible{outline:none;box-shadow:var(--focus);}
 .nhl-stacks-panel .stk-ctl select{width:auto;padding:3px 6px;font-size:11px;margin-left:4px;}
 .nhl-stacks-panel .stk-note{font-size:10px;color:var(--muted);padding:0 12px 6px;flex-shrink:0;line-height:1.4;}
 .nhl-stacks-panel .stk-warn{font-size:10px;color:var(--red);padding:2px 12px;flex-shrink:0;}
+.nhl-stacks-panel .shp-box{margin:0 12px 8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;flex-shrink:0;}
+.nhl-stacks-panel .shp-box.on{border-color:rgba(34,211,238,.55);background:rgba(34,211,238,.05);}
+.nhl-stacks-panel .shp-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+.nhl-stacks-panel .shp-ctl{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:6px;align-items:center;}
+.nhl-stacks-panel .shp-ctl label{display:flex;align-items:center;gap:4px;color:var(--muted);font-size:10px;}
+.nhl-stacks-panel .shp-ctl select,.nhl-stacks-panel .shp-ctl input[type=text]{padding:2px 4px;font-size:11px;width:auto;}
+.nhl-stacks-panel .shp-why{font-size:10px;color:var(--muted);margin-top:5px;line-height:1.4;}
 .nhl-stacks-panel .stk-tbl{overflow-y:auto;flex:1;padding:0 8px 10px;}
 .stk-tbl-row{display:grid;grid-template-columns:minmax(92px,1fr) 34px 26px 36px 36px 36px 36px 36px 44px 44px;align-items:center;gap:4px;padding:4px 4px;border-bottom:1px solid var(--border);font-family:'DM Mono',monospace;font-size:10px;text-align:right;}
 .stk-tbl-row > span:first-child{text-align:left;}
@@ -1242,6 +1249,36 @@ select.mapper-select option{background:var(--surface2);}
   #emptyState { height: calc(100vh - 60px); padding: 0 16px; }
 }
 
+/* ── ck176: phone pass ─────────────────────────────────────────────────────
+   The slate switcher shared the logo row and got squeezed to a ~27 px sliver
+   at the right edge (one slate's first letters visible, the rest off-screen).
+   It now gets its own full-width swipeable row. The DK Entries modal becomes a
+   full-screen sheet: its contest table stacks (the plan dropdown was cut off
+   at the right edge) and the Download button stays pinned at the bottom
+   instead of sitting under a 224-entry table. */
+@media (max-width: 768px) {
+  .slate-tabs { order: 10; flex: 1 1 100%; padding-bottom: 3px; -webkit-overflow-scrolling: touch; }
+  .slate-tab { flex-shrink: 0; }
+  /* Hover-revealed ⧉/✕ never reveal on touch but were still tappable while
+     invisible — a tap near a tab's right edge hit an unseen ✕. Show them on
+     the ACTIVE tab only; on the others the whole tab just switches slates. */
+  .slate-tab .del-tab { padding: 4px 6px; }
+  .slate-tab.active .del-tab { opacity: .85; }
+  .slate-tab:not(.active) .del-tab { display: none; }
+  #dkEntriesModal { align-items: stretch !important; }
+  #dkEntriesModal > div { width: 100vw !important; max-height: 100dvh !important; height: 100dvh; border-radius: 0 !important;
+                          padding: 14px 12px 0 !important; box-sizing: border-box; }
+  #dkEntriesModal > div > button[onclick="closeDkEntriesModal()"] { font-size: 24px !important; padding: 4px 10px; top: 6px !important; right: 6px !important; z-index: 3; }
+  #dkEntriesDrop { padding: 14px 10px !important; }
+  #dkEntriesBody table, #dkEntriesBody tbody, #dkEntriesBody tr, #dkEntriesBody td { display: block; width: 100%; box-sizing: border-box; }
+  #dkEntriesBody thead { display: none; }
+  #dkEntriesBody tr { padding: 8px 0; }
+  #dkEntriesBody td { white-space: normal !important; padding: 3px 2px !important; text-align: left !important; }
+  #dkEntriesBody td select { max-width: 100%; }
+  #dkEntriesBody td.dk-fill-n::before { content: 'Filled '; color: var(--muted); }
+  #dkEntriesFooter { position: sticky; bottom: 0; background: var(--panel); z-index: 2; margin-top: 8px !important;
+                     padding: 10px 0 calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
+}
 @media (min-width: 769px) {
   #mobilePanelToggle { display: none; }
 }
@@ -1776,7 +1813,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
     <div class="topbar-dropdown" id="topbarDropdown">
       <div class="topbar-dropdown-label">Data</div>
       <button class="topbar-dropdown-item green" onclick="backupData();closeTopbarMenu()">↓ Backup</button>
-      <label class="topbar-dropdown-item accent">↑ Restore<input type="file" accept=".json" style="display:none" onchange="restoreData(this);closeTopbarMenu()"></label>
+      <label class="topbar-dropdown-item accent">↑ Restore<input type="file" accept=".json,application/json,text/plain" style="display:none" onchange="restoreData(this);closeTopbarMenu()"></label>
       <button class="topbar-dropdown-item danger" onclick="clearAllData();closeTopbarMenu()">⊘ Clear All</button>
       <div class="topbar-dropdown-divider"></div>
       <div class="topbar-dropdown-label">Navigate</div>
@@ -1824,7 +1861,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
       <button class="show-hidden-btn" id="resetMaxExpBtn" onclick="resetMaxExposures()" style="display:none;" title="Clear all MAX% overrides back to default (100)">↺ Reset Max</button>
       <button class="show-hidden-btn" id="updatePoolBtn" onclick="openUpdatePoolModal()" title="Re-upload CSV to refresh projections, ownership, salary, tee times">↺ Update</button>
       <button class="show-hidden-btn" id="dkCsvBtn" onclick="document.getElementById('dkCsvFile').click()" title="Upload a DraftKings DKSalaries.csv or DKEntries.csv: attaches game times, home/away and positions to your players, and loads your contest entries for the DK Entries fill" style="display:none;border-color:rgba(83,180,255,.35);color:#53b4ff;">⬆ DK CSV</button>
-      <input type="file" id="dkCsvFile" accept=".csv" style="display:none" onchange="handleDkCsvFile(this.files[0]);this.value='';">
+      <input type="file" id="dkCsvFile" accept=".csv,text/csv,text/comma-separated-values,application/csv,application/vnd.ms-excel,text/plain" style="display:none" onchange="handleDkCsvFile(this.files[0]);this.value='';">
       <button class="show-hidden-btn" id="refreshSheetBtn" onclick="refreshFromSheet()" title="Re-fetch latest data from Google Sheet" style="display:none;border-color:rgba(52,168,83,0.3);color:#34a853;">↺ Refresh</button>
       <button class="show-hidden-btn" id="simCsvBtn" onclick="exportSimCSV()" title="Export each player's simulated outcome distribution (mean, floor/ceiling, finish rates) to CSV" style="display:none;border-color:rgba(34,197,94,0.35);color:var(--green);">⬇ Sim CSV</button>
     </div>
@@ -1840,7 +1877,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
           ondragleave="this.style.borderColor='var(--border)'"
           ondrop="event.preventDefault();this.style.borderColor='var(--border)';handleUpdatePoolFile(event.dataTransfer.files[0])">
           <div style="font-size:13px;color:var(--muted);">Drop updated CSV here or click to browse</div>
-          <input type="file" id="updatePoolFile" accept=".csv" style="display:none" onchange="handleUpdatePoolFile(this.files[0]);this.value='';">
+          <input type="file" id="updatePoolFile" accept=".csv,text/csv,text/comma-separated-values,application/csv,application/vnd.ms-excel,text/plain" style="display:none" onchange="handleUpdatePoolFile(this.files[0]);this.value='';">
         </div>
         <div id="updatePoolStatus" style="font-size:11px;color:var(--muted);margin-bottom:10px;min-height:16px;"></div>
         <!-- Column re-mapper (shown after file load) -->
@@ -1889,7 +1926,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
           ondragleave="this.style.borderColor='var(--border)'"
           ondrop="event.preventDefault();this.style.borderColor='var(--border)';handleDkEntriesFile(event.dataTransfer.files[0])">
           <div style="font-size:13px;color:var(--muted);">Drop DKEntries.csv here or click to browse</div>
-          <input type="file" id="dkEntriesFile" accept=".csv" style="display:none" onchange="handleDkEntriesFile(this.files[0]);this.value='';">
+          <input type="file" id="dkEntriesFile" accept=".csv,text/csv,text/comma-separated-values,application/csv,application/vnd.ms-excel,text/plain" style="display:none" onchange="handleDkEntriesFile(this.files[0]);this.value='';">
           <div style="margin-top:12px;" onclick="event.stopPropagation()">
             <textarea id="dkEntriesPasteBox" placeholder="…or paste the file's contents here" style="width:100%;height:60px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:11px;font-family:'DM Mono',monospace;outline:none;resize:vertical;"></textarea>
             <button class="btn btn-sm btn-default" onclick="dkEntriesPaste()" style="margin-top:6px;">Use pasted text</button>
@@ -1991,7 +2028,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
             <!-- DK Entries: fill DraftKings' own entries file from these lineups. NFL only. -->
             <button class="btn btn-sm btn-ghost" onclick="openDkEntriesModal()" id="dkEntriesBtn" title="Fill a DraftKings DKEntries.csv from your saved lineups and download it ready to upload" style="display:none;">DK Entries</button>
             <button class="btn btn-sm btn-ghost" onclick="document.getElementById('importLineupsFile').click()" title="Bring lineups back in from a CSV — this builder's Export CSV, a DKEntries file, or any file of DraftKings player IDs. Players are matched by DK ID against this slate's pool.">Import</button>
-            <input type="file" id="importLineupsFile" accept=".csv,text/csv" style="display:none" onchange="importLineupsCsv(this)">
+            <input type="file" id="importLineupsFile" accept=".csv,text/csv,text/comma-separated-values,application/csv,application/vnd.ms-excel,text/plain" style="display:none" onchange="importLineupsCsv(this)">
             <button class="btn-export" id="exportBtn" onclick="exportCSV()" disabled>Export CSV</button>
           </div>
         </div>
@@ -2243,6 +2280,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
                 onchange="const _s=activeSlate();if(_s){_s._nhlNoVsG=this.checked;save();}">
               <span>No skaters against my own goalie <span style="opacity:.65;">(a goal by his skater is a goal against your goalie)</span></span>
             </label>
+            <div id="nhlShapeNote" style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.4;"></div>
           </div>
           <div class="autogen-section" id="nflSection" style="display:none;">
             <div class="autogen-section-title">NFL Simulation</div>
@@ -2777,7 +2815,7 @@ input[type=range]:focus-visible{box-shadow:var(--focus);border-radius:var(--r3);
         <div class="upload-text"><strong>Click to upload</strong> or drag & drop a CSV</div>
         <div id="uploadFileName" style="margin-top:4px;font-size:10px;color:var(--muted);"></div>
       </div>
-      <input type="file" id="fileInput" accept=".csv" onchange="onFileSelected(event)">
+      <input type="file" id="fileInput" accept=".csv,text/csv,text/comma-separated-values,application/csv,application/vnd.ms-excel,text/plain" onchange="onFileSelected(event)">
       <div id="mapperSection" style="display:none;">
         <div class="validation-msg" id="validationMsg"></div>
         <div class="mapper-required-section">
@@ -5147,12 +5185,7 @@ function toggleNflBacktest(){ const s = activeSlate(); if(!s) return; s._backtes
 function nflBacktestDownload(key){
   const s = activeSlate(); if(!s) return;
   const j = nflBacktestJson(s, key); if(!j) return;
-  const blob = new Blob([JSON.stringify(j, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `backtest-nfl-${key}.json`;
-  document.body.appendChild(a); a.click();
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  deliverFiles([{ name: `backtest-nfl-${key}.json`, data: JSON.stringify(j, null, 2), type: 'application/json' }]);
 }
 function nflBacktestForget(key){
   const s = activeSlate(); if(!s || !s._standings) return;
@@ -5269,7 +5302,7 @@ function renderNflBacktest(){
       <span class="slate-check-head">${head}</span>
       <button class="slate-check-recheck" onclick="event.stopPropagation();nflBacktestFileBtn()" title="Drop DraftKings' full contest-standings CSV here">Load DK standings</button>
     </div>
-    <input type="file" id="nflStandingsFile" accept=".csv,text/csv" style="display:none;" onchange="onNflStandingsFile(this)">
+    <input type="file" id="nflStandingsFile" accept=".csv,text/csv,text/comma-separated-values,application/csv,application/vnd.ms-excel,text/plain" style="display:none;" onchange="onNflStandingsFile(this)">
     ${open ? `<div class="slate-check-list">
       <div class="sc-section">Own Model</div>
       <div class="sc-row info"><span class="sc-dot"></span><span class="sc-msg">
@@ -5738,6 +5771,119 @@ function nhlStackMax(players){
   for(const p of players){ if(!p || nhlPosOf(p) === 'G') continue; for(const k of nhlUnitKeys(p)){ c[k] = (c[k] || 0) + 1; if(c[k] > m) m = c[k]; } }
   return m;
 }
+// ── NHL FULL-SLATE STACK SHAPE (ck177) ────────────────────────────────────
+// Matt: "the builder seems to do well on small NHL slates, but on full slates
+// 7+ games we have been getting absolutely smoked". Three full main slates
+// (10/22, 10/27, 10/29 — 40,901 field lineups) said why. Top-1% rate against
+// the base rate, by shape: 4-3 1.35×, 4-2 0.98×, 3-3 0.96×, 3-2 0.66×,
+// 2-2 0.29×; secondary stack 3+ 1.24× vs 0.74×; primary stack holding 3+ of
+// one line / PP unit 1.11× vs 0.49×. Our 120 entries: secondary 3+ in ~21%
+// (top 1%: 56-73%), 4.7 teams per lineup (top 1%: 4.0-4.4), 0 in the top 1%.
+// So on a full slate every lineup is built to the winning shape:
+//   prim  — the primary team's skaters (default 4)
+//   sec   — a second team's skaters (default 3)  → 4-3-1
+//   unit  — the primary team holds this many of one forward line / PP unit (3)
+//   gPrim — the goalie is from the primary team (off; 1.21× in the field, a
+//           thin sample — Matt's toggle)
+//   maxTeams — teams in the lineup, goalie included (4)
+//   cap   — Max% of lineups any one team is the primary stack of (25), the
+//           team-stack Max% default for every team without one of its own
+// slate.nhlShape = { mode: 'auto' | 'on' | 'off', prim, sec, unit, gPrim, cap };
+// auto turns on at NHL_SHAPE_MIN_GAMES+ games. Small slates are unchanged.
+const NHL_SHAPE_MIN_GAMES = 7;
+const NHL_SHAPE_DEFAULT = { mode: 'auto', prim: 4, sec: 3, unit: 3, gPrim: false, maxTeams: 4, cap: 25 };
+function nhlSlateGames(slate){
+  const t = new Set(); for(const p of (slate && slate.players) || []) if((p.salary || 0) > 0 && p.team) t.add(nhlTeamKey(p.team));
+  return Math.ceil(t.size / 2);
+}
+function nhlShapeCfg(slate){
+  const u = (slate && slate.nhlShape) || {}, d = NHL_SHAPE_DEFAULT;
+  const pick = (v, ok, dv) => ok(v) ? v : dv;
+  return { mode: pick(u.mode, v => v === 'auto' || v === 'on' || v === 'off', d.mode),
+    prim: pick(u.prim, v => v === 3 || v === 4 || v === 5, d.prim), sec: pick(u.sec, v => v === 2 || v === 3, d.sec),
+    unit: pick(u.unit, v => v === 0 || v === 2 || v === 3, d.unit), gPrim: typeof u.gPrim === 'boolean' ? u.gPrim : d.gPrim,
+    maxTeams: pick(u.maxTeams, v => v === 3 || v === 4 || v === 5 || v === 9, d.maxTeams),
+    cap: pick(u.cap, v => v === null || (Number.isFinite(v) && v > 0 && v <= 100), d.cap) };
+}
+// the shape in force on this slate, or null
+function nhlShapeOf(slate){
+  if(!slate || !(typeof isNhl === 'function' ? isNhl(slate) : slate.sport === 'nhl')) return null;
+  const c = nhlShapeCfg(slate);
+  if(c.mode === 'off') return null;
+  if(c.mode === 'auto' && nhlSlateGames(slate) < NHL_SHAPE_MIN_GAMES) return null;
+  if(c.prim + c.sec > 7) c.sec = 7 - c.prim;   // 8 skaters from 3+ teams
+  return c;
+}
+// shape test on solver entries {pos, team, keys} (keys: 'TEAM|F1' style)
+function nhlShapeOkC(l, sh){
+  if(!sh) return true;
+  const cnt = {}; let gT = null;
+  for(const c of l){ if(c.pos === 'G'){ gT = c.team; continue; } cnt[c.team] = (cnt[c.team] || 0) + 1; }
+  const teams = new Set(Object.keys(cnt)); if(gT) teams.add(gT);
+  if(teams.size > sh.maxTeams) return false;
+  const uc = {};
+  if(sh.unit > 0) for(const c of l){ if(c.pos === 'G') continue; for(const k of c.keys) uc[k] = (uc[k] || 0) + 1; }
+  for(const T in cnt){
+    if(cnt[T] < sh.prim) continue;
+    if(sh.unit > 0 && !Object.keys(uc).some(k => uc[k] >= sh.unit && k.slice(0, k.indexOf('|')) === T)) continue;
+    if(sh.gPrim && gT !== T) continue;
+    for(const U in cnt) if(U !== T && cnt[U] >= sh.sec) return true;
+  }
+  return false;
+}
+const nhlShapeEntry = p => ({ pos: nhlPosOf(p), team: nhlTeamKey(p.team), keys: nhlUnitKeys(p).map(k => nhlTeamKey(k.split('|')[0]) + '|' + k.split('|')[1]) });
+function nhlShapeOkP(slate, players, sh){ sh = sh === undefined ? nhlShapeOf(slate) : sh; if(!sh) return true; return nhlShapeOkC((players || []).filter(Boolean).map(nhlShapeEntry), sh); }
+// skater slots: C2 W3 D2 + one UTIL — can these skaters all be in one lineup?
+function nhlFixedFeasible(l){
+  let C = 0, W = 0, D = 0, G = 0; for(const c of l){ if(c.pos === 'C') C++; else if(c.pos === 'W') W++; else if(c.pos === 'D') D++; else if(c.pos === 'G') G++; }
+  return G <= 1 && C + W + D <= 8 && Math.max(0, C - 2) + Math.max(0, W - 3) + Math.max(0, D - 2) <= 1;
+}
+// The best lineup of one world that has the shape: the primary unit core
+// (its top `unit` members), filled to `prim` from the team, plus the best
+// `sec` of another team, fixed — the solver fills the rest (goalie, the
+// one-off, the cap). The top few primaries × secondaries by their own score
+// are tried. T0: the primary must be this team; ban: teams that may not be
+// the primary (at their cap). Entries need {pos, team, keys, score, sal}.
+function nhlSolveShape(cands, sh, cap, minSal, T0, ban, need){
+  const tot = l => l.reduce((t, c) => t + c.score, 0);
+  const byT = {}; for(const c of cands){ if(c.pos === 'G') continue; (byT[c.team] = byT[c.team] || []).push(c); }
+  for(const T in byT) byT[T].sort((a, b) => b.score - a.score);
+  const greedy = (list, n, base) => { const out = []; for(const c of list){ if(out.length >= n) break; if(base.includes(c) || out.includes(c)) continue; if(nhlFixedFeasible(base.concat(out, [c]))) out.push(c); } return out.length === n ? out : null; };
+  const prims = [];
+  for(const T in byT){
+    if(T0 && T !== T0) continue; if(ban && ban.has(T)) continue;
+    const tm = byT[T]; if(tm.length < sh.prim) continue;
+    let best = null;
+    if(sh.unit > 0){
+      const units = {}; for(const c of tm) for(const k of c.keys) (units[k] = units[k] || []).push(c);
+      for(const k in units){ if(units[k].length < sh.unit) continue;
+        const core = greedy(units[k], sh.unit, []); if(!core) continue;
+        const fill = greedy(tm, sh.prim - sh.unit, core); if(!fill) continue;
+        const set = core.concat(fill), v = tot(set); if(!best || v > best.v) best = { T, set, v }; }
+    } else { const set = greedy(tm, sh.prim, []); if(set) best = { T, set, v: tot(set) }; }
+    if(best) prims.push(best);
+  }
+  prims.sort((a, b) => b.v - a.v);
+  const combos = [];
+  for(const pr of prims.slice(0, 4)){
+    const secs = [];
+    for(const U in byT){ if(U === pr.T || byT[U].length < sh.sec) continue; const set = greedy(byT[U], sh.sec, pr.set); if(set) secs.push({ U, set, v: tot(set) }); }
+    secs.sort((a, b) => b.v - a.v);
+    for(const se of secs.slice(0, 3)) combos.push({ pr, se, v: pr.v + se.v });
+  }
+  combos.sort((a, b) => b.v - a.v);
+  let best = null;
+  for(const cb of combos.slice(0, 6)){
+    let fx = cb.pr.set.concat(cb.se.set);
+    if(sh.gPrim){ const g = cands.filter(c => c.pos === 'G' && c.team === cb.pr.T).sort((a, b) => b.score - a.score)[0]; if(!g) continue; fx = fx.concat([g]); }
+    const l = nhlOptimalForSim(cands, cap, minSal, fx);
+    if(!l || l.length !== 9 || !nhlShapeOkC(l, sh)) continue;
+    if(need && nhlStackOfC(l) < need) continue;
+    if(!best || tot(l) > tot(best)) best = l;
+  }
+  return best;
+}
+function nhlStackOfC(l){ const m = {}; let x = 0; for(const c of l){ if(c.pos === 'G') continue; for(const k of c.keys){ m[k] = (m[k] || 0) + 1; if(m[k] > x) x = m[k]; } } return x; }
 // ── NHL TEAM STACKS (ck152) ────────────────────────────────────────────────
 // Matt: "the team stacks are really what matters, right now we only have
 // visibility for individual player exposure. Being able to see stack exposure
@@ -5750,7 +5896,9 @@ function nhlStackMax(players){
 // is the final pass on every board (Sim Score, legacy EV, Optimize, GPP).
 // State: slate.nhlStacks = { k: 3, teams: { TOR: {min: 20, max: 40} } }.
 const NHL_STACK_K_DEFAULT = 3;
-function nhlStackKOf(slate){ const v = slate && slate.nhlStacks && slate.nhlStacks.k; return (v === 2 || v === 3 || v === 4) ? v : NHL_STACK_K_DEFAULT; }
+function nhlStackKOf(slate){
+  const sh = nhlShapeOf(slate); if(sh) return Math.min(4, sh.prim);   // ck177: on a full slate the rules bound the PRIMARY stack
+  const v = slate && slate.nhlStacks && slate.nhlStacks.k; return (v === 2 || v === 3 || v === 4) ? v : NHL_STACK_K_DEFAULT; }
 function nhlTeamKey(t){ return String(t || '').toUpperCase().replace(/[^A-Z]/g, ''); }
 // {TEAM: skaters} for one lineup (players or ids resolved by the caller)
 function nhlTeamSkaters(players){
@@ -5761,17 +5909,29 @@ function nhlStackTeams(players, k){ const c = nhlTeamSkaters(players); return Ob
 // the user's rules, cleaned: [{team, min, max}] with min/max as % or null
 function nhlStackRules(slate){
   const T = (slate && slate.nhlStacks && slate.nhlStacks.teams) || {};
-  return Object.keys(T).map(t => { const r = T[t] || {};
+  const out = Object.keys(T).map(t => { const r = T[t] || {};
     const mn = Number.isFinite(r.min) && r.min > 0 ? Math.min(100, r.min) : null;
     const mx = Number.isFinite(r.max) && r.max < 100 ? Math.max(0, r.max) : null;
     return { team: t, min: mn, max: mx }; }).filter(r => r.min != null || r.max != null);
+  // ck177: full-slate shape — every team without a Max% of its own gets the
+  // shape's primary-stack cap (soft: never below one lineup, so a 1-3 lineup
+  // board is not blocked, it just spreads its primaries)
+  const sh = nhlShapeOf(slate);
+  if(sh && sh.cap != null){
+    const have = new Map(out.map(r => [r.team, r]));
+    const teams = new Set(); for(const p of (slate.players || [])) if((p.salary || 0) > 0 && p.team) teams.add(nhlTeamKey(p.team));
+    for(const t of teams){ const r = have.get(t);
+      if(r){ if(r.max == null){ r.max = sh.cap; r.soft = true; } }
+      else out.push({ team: t, min: null, max: sh.cap, soft: true }); }
+  }
+  return out;
 }
 function nhlStackRuleOf(slate, team){ const r = ((slate && slate.nhlStacks && slate.nhlStacks.teams) || {})[nhlTeamKey(team)] || {};
   return { min: Number.isFinite(r.min) && r.min > 0 ? r.min : null, max: Number.isFinite(r.max) && r.max < 100 ? r.max : null }; }
 // slots on an N-lineup board: a floor rounds UP, a cap rounds DOWN (a 30% cap
 // on 20 is 6; on 15 it is 4 — never above the percentage typed)
 function nhlStackMinSlots(pct, N){ return pct > 0 ? Math.ceil(Math.min(100, pct) / 100 * N - 1e-9) : 0; }
-function nhlStackCapSlots(pct, N){ return pct == null ? Infinity : Math.max(0, Math.floor(Math.max(0, pct) / 100 * N + 1e-9)); }
+function nhlStackCapSlots(pct, N, soft){ if(pct == null) return Infinity; const v = Math.max(0, Math.floor(Math.max(0, pct) / 100 * N + 1e-9)); return soft ? Math.max(1, v) : v; }
 // how many teams one legal lineup can stack at K+ (8 skaters, 3+ teams)
 function nhlMaxStackedTeams(k){ return k <= 2 ? 3 : k === 3 ? 2 : 1; }
 // exposure over a board: { TEAM: {n2, n3, n4, nK, prim} } and N
@@ -5813,10 +5973,51 @@ function resetNhlStackRules(){
   const slate = activeSlate(); if(!slate || !slate.nhlStacks) return;
   slate.nhlStacks = { k: nhlStackKOf(slate), teams: {} }; save(); renderNhlStacks();
 }
+// ck177: the full-slate shape controls (Stacks tab)
+function setNhlShape(key, val){
+  const slate = activeSlate(); if(!slate) return;
+  const c = Object.assign({}, slate.nhlShape || {});
+  if(key === 'mode') c.mode = (val === 'on' || val === 'off') ? val : 'auto';
+  else if(key === 'gPrim') c.gPrim = !!val;
+  else if(key === 'cap'){ const v = parseFloat(String(val == null ? '' : val).replace('%', '')); c.cap = (Number.isFinite(v) && v > 0 && v < 100) ? Math.round(v) : null; }
+  else { const v = parseInt(val); if(Number.isFinite(v)) c[key] = v; }
+  slate.nhlShape = c; save(); renderNhlStacks(); if(typeof renderNhlShapeNote === 'function') renderNhlShapeNote();
+}
+function nhlShapeText(sh){
+  return `${sh.prim}-${sh.sec} team stacks${sh.unit ? ` (primary holds ${sh.unit}+ of one line / PP unit)` : ''}, ≤${sh.maxTeams > 8 ? 'any' : sh.maxTeams} teams${sh.gPrim ? ', goalie with the primary' : ''}${sh.cap != null ? `, any team primary in ≤${sh.cap}% of lineups` : ''}`;
+}
+function nhlShapeLogLine(slate, sh){
+  return `Full-slate stack shape (ck177, ${nhlSlateGames(slate)} games): every lineup is ${nhlShapeText(sh)}. Set on the Stacks tab.`;
+}
+// the one-line status under the generator's NHL settings
+function renderNhlShapeNote(){
+  const el = document.getElementById('nhlShapeNote'); if(!el) return;
+  const slate = activeSlate(); if(!slate || !isNhl(slate)){ el.textContent = ''; return; }
+  const sh = nhlShapeOf(slate), g = nhlSlateGames(slate), c = nhlShapeCfg(slate);
+  el.innerHTML = sh ? `<b style="color:#22d3ee;">Full-slate shape ON</b> (${g} games): ${esc(nhlShapeText(sh))}. Change it on the Stacks tab.`
+    : `Full-slate shape off (${g} game${g === 1 ? '' : 's'}${c.mode === 'auto' ? `; turns on at ${NHL_SHAPE_MIN_GAMES}+` : '; turned off on the Stacks tab'}).`;
+}
 function previewModalOpen(){ const m = document.getElementById('previewModal'); return !!m && !m.classList.contains('hidden'); }
 // The Stacks tab (NHL only): one row per team — implied goals, skaters in
 // the pool, stack exposure over the SAVED board at 2+ / 3+ / 4+, and the
 // Min% / Max% the generator holds the team's K+ stacks to.
+function nhlShapeBox(slate){
+  const c = nhlShapeCfg(slate), sh = nhlShapeOf(slate), g = nhlSlateGames(slate);
+  const sel = (key, opts, v) => `<select class="form-input" onchange="setNhlShape('${key}',this.value)">${opts.map(([val, lab]) => `<option value="${val}"${String(val) === String(v) ? ' selected' : ''}>${lab}</option>`).join('')}</select>`;
+  return `<div class="shp-box${sh ? ' on' : ''}">
+    <div class="shp-head"><span><b>Full-slate stack shape</b> — ${sh ? `<span style="color:#22d3ee;">ON</span> (${g} games)` : `off (${g} game${g === 1 ? '' : 's'})`}</span>
+      <label style="font-size:10px;color:var(--muted);display:flex;gap:4px;align-items:center;">Mode ${sel('mode', [['auto', `Auto (${NHL_SHAPE_MIN_GAMES}+ games)`], ['on', 'On'], ['off', 'Off']], c.mode)}</label></div>
+    <div class="shp-ctl">
+      <label>Primary ${sel('prim', [[3, '3+'], [4, '4+'], [5, '5+']], c.prim)}</label>
+      <label>Secondary ${sel('sec', [[2, '2+'], [3, '3+']], c.sec)}</label>
+      <label>Primary unit ${sel('unit', [[3, '3+ of a line / PP'], [2, '2+'], [0, 'any']], c.unit)}</label>
+      <label>Teams ${sel('maxTeams', [[3, '≤3'], [4, '≤4'], [5, '≤5'], [9, 'any']], c.maxTeams)}</label>
+      <label>Primary Max% <input class="stk-inp" type="text" inputmode="numeric" value="${c.cap == null ? '' : c.cap}" placeholder="—" onchange="setNhlShape('cap',this.value)" onkeydown="if(event.key==='Enter')this.blur()"></label>
+      <label style="cursor:pointer;"><input type="checkbox" ${c.gPrim ? 'checked' : ''} onchange="setNhlShape('gPrim',this.checked)" style="accent-color:#22d3ee;"> Goalie with primary</label>
+    </div>
+    <div class="shp-why">Three full main slates (40,901 field lineups): 4-3 shapes reached the top 1% at 1.35× the base rate, a 3+ secondary 1.24× (vs 0.74×), a primary holding a full line / PP unit 1.11× (vs 0.49×), 3-4 teams 1.12-1.24× (5+: 0.53-0.88×). Our builds ran 4.7 teams with a 3+ secondary in ~21%. Small slates are unchanged unless Mode is On.</div>
+  </div>`;
+}
 function renderNhlStacks(){
   const btn = document.getElementById('tab-btn-stacks');
   const slate = activeSlate(), on = !!(slate && isNhl(slate));
@@ -5842,7 +6043,8 @@ function renderNhlStacks(){
   if(sumMin > 100 * maxTeams + 1e-9) warns.push(`The Min%s add up to ${sumMin}% — a lineup can stack at most ${maxTeams} team${maxTeams === 1 ? '' : 's'} at ${k}+ (8 skaters from 3+ teams), so at most ${100 * maxTeams}% in total can be met.`);
   rules.forEach(r => { if(r.min != null && r.max != null && r.min > r.max) warns.push(`${r.team}: Min% ${r.min} is above Max% ${r.max} — the Max% wins.`);
     if(r.min != null && live(r.team) < k) warns.push(`${r.team}: Min% ${r.min} but only ${live(r.team)} ${r.team} skater${live(r.team) === 1 ? '' : 's'} in the pool — unhide at least ${k}.`); });
-  const inp = (t, kind, v) => `<input class="stk-inp" type="text" inputmode="numeric" value="${v == null ? '' : v}" placeholder="—" title="${kind === 'min' ? 'Min' : 'Max'}% of lineups that stack ${t} at ${k}+ skaters"
+  const _shC = nhlShapeOf(slate), _ph = kind => (kind === 'max' && _shC && _shC.cap != null) ? String(_shC.cap) : '—';
+  const inp = (t, kind, v) => `<input class="stk-inp" type="text" inputmode="numeric" value="${v == null ? '' : v}" placeholder="${_ph(kind)}" title="${kind === 'min' ? 'Min' : 'Max'}% of lineups that stack ${t} at ${k}+ skaters"
       onchange="setNhlStackRule('${t}','${kind}',this.value)" onkeydown="if(event.key==='Enter')this.blur()">`;
   const head = `<div class="stk-tbl-row stk-tbl-head"><span class="stk-tm">Team</span><span title="Implied goals (Tm Tot)">Imp</span><span title="Skaters in the pool (not hidden / out)">Sk</span><span title="Overall team exposure: lineups with any player from this team (goalie included). Rows sort on this.">Exp ▾</span><span title="Lineups with 2+ of this team's skaters">2+</span><span title="Lineups with 3+">3+</span><span title="Lineups with 4+">4+</span><span title="Lineups where this team is the biggest stack">Prim</span><span title="Min% of lineups stacking this team at ${k}+">Min%</span><span title="Max% of lineups stacking this team at ${k}+">Max%</span></div>`;
   const rows = teams.map(t => { const e = ex.teams[t] || { any: 0, n2: 0, n3: 0, n4: 0, nK: 0, prim: 0 }, i = info[t] || {}, r = nhlStackRuleOf(slate, t);
@@ -5857,9 +6059,10 @@ function renderNhlStacks(){
       <div><div class="section-title" style="margin-bottom:2px;">Team Stacks</div>
       <div class="stk-sub">${N ? `Exposure over the ${N} saved lineup${N === 1 ? '' : 's'}.` : 'Save lineups to see stack exposure.'} Min% / Max% apply to every NHL build.</div></div>
       <div class="stk-ctl"><label>Stack =
-        <select class="form-input" onchange="setNhlStackK(this.value)">${[2, 3, 4].map(v => `<option value="${v}"${v === k ? ' selected' : ''}>${v}+ skaters</option>`).join('')}</select></label>
-        <button class="btn btn-sm" onclick="resetNhlStackRules()" ${rules.length ? '' : 'disabled'} title="Clear every team's Min% / Max%">Reset</button></div></div>
-    <div class="stk-note">A lineup stacks a team when it holds ${k}+ of that team's skaters (goalie not counted). Min% / Max% are shares of lineups stacking the team at ${k}+; the ${k}+ column is the one they bound.</div>
+        <select class="form-input" onchange="setNhlStackK(this.value)" ${nhlShapeOf(slate) ? 'disabled title="The full-slate shape sets this: rules bound the primary stack"' : ''}>${[2, 3, 4].map(v => `<option value="${v}"${v === k ? ' selected' : ''}>${v}+ skaters</option>`).join('')}</select></label>
+        <button class="btn btn-sm" onclick="resetNhlStackRules()" ${rules.some(r => !r.soft || r.min != null) ? '' : 'disabled'} title="Clear every team's Min% / Max%">Reset</button></div></div>
+    ${nhlShapeBox(slate)}
+    <div class="stk-note">A lineup stacks a team when it holds ${k}+ of that team's skaters (goalie not counted). Min% / Max% are shares of lineups stacking the team at ${k}+; the ${k}+ column is the one they bound.${nhlShapeOf(slate) && nhlShapeOf(slate).cap != null ? ` Teams with no Max% of their own use the shape's ${nhlShapeOf(slate).cap}%.` : ''}</div>
     ${warns.map(w => `<div class="stk-warn">⚠ ${esc(w)}</div>`).join('')}
     <div class="stk-tbl">${head}${rows || '<div class="no-data">No teams on this slate.</div>'}</div>`;
 }
@@ -7460,7 +7663,7 @@ let ufc5RoundFights   = new Set(); // fights marked as 5-rounders by the user
 // that never changes cannot tell you which version you ran.
 // EVERY checkpoint bumps this. It is rendered next to the logo (hover for the
 // full string) so a page loaded before the last deploy is visible at a glance.
-const BUILD_ID = '2.0/ck175/2026-10-25';
+const BUILD_ID = '2.0/ck178/2026-10-30';
 // Paint the build badge as soon as the DOM is up.
 (function(){
   const paint = () => { const el = document.getElementById('logoBuild');
@@ -7528,6 +7731,8 @@ function buildRunStamp(slate, o){
     'cptMax=' + Object.keys((slate && slate.sdCptMaxOverrides) || {}).length,
     // ck152: NHL team-stack rules (K, then TEAM min-max per rule)
     'nhlStk=' + ((slate && typeof isNhl === 'function' && isNhl(slate)) ? (nhlStackKOf(slate) + ':' + nhlStackRules(slate).map(r => r.team + (r.min != null ? r.min : '') + '-' + (r.max != null ? r.max : '')).join(',')) : ''),
+    // ck177: full-slate stack shape
+    'nhlShape=' + ((slate && typeof isNhl === 'function' && isNhl(slate)) ? (s => s ? [s.prim, s.sec, s.unit, s.gPrim ? 1 : 0, s.maxTeams, s.cap].join('/') : 'off')(nhlShapeOf(slate)) : ''),
     'groups=' + ((slate && slate.groups || []).length),
     'pool=' + ((slate && slate.players || []).filter(p => p && p.salary > 0).length),
     'overrideKeys=' + (cnt(minOv) + cnt(maxOv)),
@@ -8376,6 +8581,9 @@ function renderTopBar() {
       <span class="del-tab" onclick="event.stopPropagation();deleteSlate('${s.id}')">✕</span>
     </div>`;
   }).join('');
+  // ck176: on a phone the strip is its own swipeable row — bring the active
+  // slate into view instead of leaving it off-screen to the right.
+  { const _act=tabs.querySelector('.slate-tab.active'); if(_act && tabs.scrollWidth>tabs.clientWidth) tabs.scrollLeft=Math.max(0,_act.offsetLeft-tabs.offsetLeft-8); }
   const has=!!activeSlate();
   document.getElementById('emptyState').style.display=has?'none':'flex';
   document.getElementById('mainLayout').style.display=has?'grid':'none';
@@ -10691,7 +10899,7 @@ function exportCSV(){
     return isPositional(slate)?nflAssignSlots(slate,l):l;
   };
   const csv=[header,...(slate.savedLineups||[]).map(l=>rowIds(l).join(','))].join('\n');
-  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download=slate.name.replace(/\s+/g,'_').toLowerCase()+'_lineups.csv';a.click();
+  deliverFiles([{ name: slate.name.replace(/\s+/g,'_').toLowerCase()+'_lineups.csv', data: csv, type: 'text/csv' }]);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -11650,6 +11858,24 @@ function dkRowIds(slate, l, slots){
     return (pairs[i]||{}).id||'';
   });
 }
+// ck176: when a phone browser can neither share nor download (in-app browsers
+// opened from a chat link), the filled CSV is still one tap from the clipboard.
+function dkShowCsvFallback(csv, fname){
+  if(!isTouchDevice()) return;
+  const host=document.getElementById('dkEntriesFooter'); if(!host) return;
+  let box=document.getElementById('dkEntriesCopy');
+  if(!box){ box=document.createElement('details'); box.id='dkEntriesCopy'; box.style.cssText='margin-top:8px;font-size:12px;color:var(--muted);'; host.appendChild(box); }
+  box.innerHTML=`<summary style="cursor:pointer;padding:4px 0;">No file showed up? Copy the CSV instead</summary>
+    <div style="margin:6px 0;line-height:1.45;">In-app browsers (a link opened from Messages, Discord, Instagram…) often block files — open the builder in Safari or Chrome, or copy this into a file named <b>${esc(fname)}</b>.</div>
+    <textarea readonly style="width:100%;height:110px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;font-family:'DM Mono',monospace;font-size:11px;box-sizing:border-box;">${esc(csv)}</textarea>
+    <button class="btn btn-sm btn-default" style="margin-top:6px;" onclick="dkCopyCsv(this)">Copy CSV</button>`;
+}
+function dkCopyCsv(btn){
+  const ta=btn.parentElement.querySelector('textarea'); if(!ta) return;
+  const done=()=>showToast('CSV copied — paste it into a file and upload it to DraftKings.','ok');
+  const legacy=()=>{ ta.focus(); ta.select(); try{ document.execCommand('copy'); done(); }catch(e){ showToast('Select the text and copy it manually.','err'); } };
+  if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(done, legacy); else legacy();
+}
 function exportDkEntriesCsv(){
   const slate=activeSlate(); const st=dkEntriesState(slate);
   if(!slate||!st){ showToast('Load a DKEntries.csv first.','err'); return; }
@@ -11676,11 +11902,11 @@ function exportDkEntriesCsv(){
     return [a.entryId, c.name, c.contestId, c.fee, ...ids].map(dkCsvCell).join(',');
   });
   const csv=[header,...rows].join('\n');
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-  a.download='DKEntries_'+String(slate.name||'slate').replace(/[^\w]+/g,'_').replace(/^_|_$/g,'')
+  const fname='DKEntries_'+String(slate.name||'slate').replace(/[^\w]+/g,'_').replace(/^_|_$/g,'')
     +(res.mode==='lateswap'?'_lateswap.csv':'_filled.csv');
-  a.click();
+  // ck176: share sheet on phones (see deliverFiles), plus a copy-the-text
+  // fallback for browsers that can do neither.
+  deliverFiles([{ name: fname, data: csv, type: 'text/csv' }]).then(how => { if(how !== 'cancelled') dkShowCsvFallback(csv, fname); });
   showToast(res.mode==='lateswap'
     ? `Wrote ${rows.length} swapped entr${rows.length===1?'y':'ies'} (unchanged entries omitted).`
     : `Wrote ${rows.length} filled entr${rows.length===1?'y':'ies'}.`,'ok');
@@ -11920,6 +12146,8 @@ function sdLateSalary(slate, ids, cptId){
 function openDkEntriesModal(){
   const m=document.getElementById('dkEntriesModal'); if(!m) return;
   m.style.display='flex';
+  if(isTouchDevice()){ const t=document.querySelector('#dkEntriesDrop > div'); if(t) t.textContent='Tap to choose your DKEntries.csv'; }
+  { const old=document.getElementById('dkEntriesCopy'); if(old) old.remove(); }
   renderDkEntriesModal();
 }
 function closeDkEntriesModal(){
@@ -12576,10 +12804,9 @@ function exportSimCSV(){
     }
   } catch(e){ /* the export must never be able to fail on a decoration */ }
   const csv=lines.join('\n');
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-  a.download=(slate.name||'slate').replace(/\s+/g,'_').toLowerCase()+'_sim_distributions.csv';
-  a.click();
+  // ck176: both files go out in ONE delivery (a phone's share sheet takes one
+  // gesture; a second share call would be refused).
+  const _simFiles=[{ name: (slate.name||'slate').replace(/\s+/g,'_').toLowerCase()+'_sim_distributions.csv', data: csv, type: 'text/csv' }];
   // Styled twin of the CSV — same rows, formatted for humans. Which columns
   // get the red→green scale is the sport's decision set (matches the hand-
   // formatted sheets: UFC scales OptRate%+LevYield, leaves FightOptRate% flat).
@@ -12589,14 +12816,13 @@ function exportSimCSV(){
                     : nfl ? ['Usable1.5x%','BoomTopN%']
                     :       ['SimWin%','SimTop5%','SimTop10%','SimTop20%','MadeCut%'];
     const parts=buildStyledXlsx(header,xlsxRows,scaleCols,'# run: '+(_lastRunStamp||''));
-    const b=document.createElement('a');
-    b.href=URL.createObjectURL(new Blob(parts,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
-    b.download=(slate.name||'slate').replace(/\s+/g,'_').toLowerCase()+'_sim_distributions.xlsx';
-    b.click();
+    _simFiles.push({ name: (slate.name||'slate').replace(/\s+/g,'_').toLowerCase()+'_sim_distributions.xlsx', data: parts,
+                     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     showToast(`Exported ${rows.length} ${nas?'drivers':ufc?'fighters':nfl?'players':'golfers'}' sim distributions (CSV + formatted XLSX).`,'ok');
   }catch(e){
     showToast('CSV exported; styled XLSX failed: '+e.message,'err');
   }
+  deliverFiles(_simFiles);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -13241,6 +13467,7 @@ function renderGroupRulesSummary(){
     if(hS){ const c = slate._simCount || parseInt(hS.value) || 5000; hS.value = c; if(hL) hL.textContent = c; }
     const hM = document.getElementById('nhlMinStack'); if(hM) hM.value = String(nhlMinStackOf(slate));   // ck139
     const hG = document.getElementById('nhlNoVsG'); if(hG) hG.checked = !!slate._nhlNoVsG;   // ck168
+    renderNhlShapeNote();   // ck177
     restoreContestEvUI(slate);
   }
   const nflSection = document.getElementById('nflSection');
@@ -20396,7 +20623,24 @@ const EV_SCEN_SIGMA = 0.55;   // budget-preserving lognormal ownership error
 const EV_ROBUST_RHO = 0.5;    // weight on the worst scenario in the blend
 // Duplication multiplier on the analytic Π(own) floor, refitted per sport from
 // real contest dupform studies. NFL keeps 4.
-function evDupK(sport){ return sport==='ufc' ? 1.9 : sport==='nascar' ? 1.5 : 4; }
+// ck178: REFIT on real standings. NASCAR, enumerating every salary-legal
+// lineup on four completed contests (7/26 Indy, 9/26 + 9/27 Kansas, 10/9
+// Charlotte trucks; SS Own as the input): realized copies / (F·Π own) ran
+// 0.03-0.05 for ordinary builds and 0.14-0.4 at the chalkiest — so the old 1.5
+// floor priced every build at 7-50× its real duplication. UFC (three contests)
+// and PGA (four): the floor ran 6× and ~3× over the realized copies of the
+// builds that were actually entered (an upper bound on the true ratio).
+function evDupK(sport){ return sport==='ufc' ? 0.3 : sport==='nascar' ? 0.05 : sport==='pga' ? 1.3 : 4; }
+// ck178: the PAIRWISE (θ) duplication channel was fitted on NFL classic — nine
+// slots of 5-25% players — and was handed to every sport. On six-slot rosters
+// of 20-50% players F·Π^0.555 is enormous: measured against real standings it
+// priced NASCAR builds at a mean 74 copies (realized 1.8), UFC 175-235
+// (realized 3-5), PGA 15-53 (realized 1.1-1.2), so nearly every candidate sat at
+// the 0.5%-of-field cap and the engine's EV could not tell chalk from leverage.
+// Those sports price duplication off the sampled field (whose duplication was
+// checked against the 9/26 Kansas contest: 59% unique / 7.4 copies per entry
+// modelled vs 61% / 9.6 real) plus the refit floor; the θ channel is off (0).
+function evDupTheta(sport){ return (sport === 'nascar' || sport === 'ufc' || sport === 'pga') ? 0 : NFL_GPP_DUP_THETA; }
 // EXPECTED DUPLICATES OF ONE LINEUP, one definition (hoisted 2026-09-08 for the
 // GPP engine — spec §5/§6 must price against the same duplication model the
 // Contest EV path always has, and two copies of this arithmetic would drift).
@@ -26342,6 +26586,34 @@ function bucketSimsByDriver(pool, simTopScorer, simScoreArrays, target, leverage
   }).filter(b => b.allocatedLineups > 0);
 }
 
+// ck178: NASCAR OWNERSHIP FALLBACK. The 10/9 Charlotte trucks sheet had no SS
+// Proj / SS Own, so Contest EV could not run (it needs a field model) and the
+// board came from the ownership-blind pipeline — 96% Ruggiero at 63% real
+// ownership. When a slate has no Own% at all, this fills one from what every
+// sheet carries: ln(own) = 5.214 + 0.730·ln p(win) + 2.453·(start / field)
+// − 0.1203·salary$k − 0.0152·ln p(win)·salary$k, renormalized to 600% (70% ceiling). Fitted
+// on 147 driver-rows of real ownership from four contests (7/26, 9/26, 9/27,
+// 10/9); left-one-contest-out it tracked real ownership at r 0.83-0.92 (SS Own:
+// 0.88-0.94). Only ever fills a slate with NO ownership; any mapped Own% wins.
+function nascarOwnModel(players){
+  const ps = (players || []).filter(p => (p.salary || 0) > 0); if(ps.length < 6) return 0;
+  const raw = ps.map(p => nascarMlToProb(p.win)); const tot = raw.reduce((a, v) => a + (v || 0), 0) || 1;
+  const n = ps.length;
+  const w = ps.map((p, i) => { const lp = Math.log((raw[i] || 0.0005) / tot), st = (parseInt(p.start) || n) / n, sk = (p.salary || 0) / 1000;
+    return Math.exp(5.2138 + 0.73 * lp + 2.4532 * st - 0.1203 * sk - 0.0152 * lp * sk); });
+  // renormalize to 600% with a 70% ceiling (the highest real NASCAR ownership
+  // in the fit was 66%); the excess goes to the uncapped drivers
+  let o = w.slice(), capped = new Array(n).fill(false);
+  for(let it = 0; it < 6; it++){
+    const fixedSum = o.reduce((a, v, i) => a + (capped[i] ? 70 : 0), 0), free = o.reduce((a, v, i) => a + (capped[i] ? 0 : v), 0) || 1;
+    let again = false;
+    o = o.map((v, i) => capped[i] ? 70 : v * (600 - fixedSum) / free);
+    o.forEach((v, i) => { if(!capped[i] && v > 70){ capped[i] = true; again = true; } });
+    if(!again) break;
+  }
+  ps.forEach((p, i) => { p.own = Math.round(Math.min(70, o[i]) * 10) / 10; p._ownModeled = true; });
+  return ps.length;
+}
 async function runNascarSimGen(){
   window._fieldWCache = new Map();   // ck112: warm starts are per run
   const slate     = activeSlate(); if(!slate) return;
@@ -26370,10 +26642,13 @@ async function runNascarSimGen(){
     alert('NASCAR Simulation Mode requires at least WIN odds to be mapped.');
     return;
   }
+  // ck178: no Own% anywhere on the slate → the modelled ownership (see nascarOwnModel)
+  const _ownFilled = (!fullField.some(p => (parseFloat(p.own) || 0) > 0) || fullField.every(p => p._ownModeled)) ? nascarOwnModel(fullField) : 0;
 
   document.getElementById('genBtn').disabled = true;
   const el = document.getElementById('genLog');
   el.textContent = `Running ${numSims.toLocaleString()} race sims (${trackType}, ${totalLaps} laps)...`;
+  if(_ownFilled) log(`⚠ No Own% on this slate — ownership MODELLED for ${_ownFilled} drivers from win odds, start spot and salary (ck178; r≈0.85-0.9 with real ownership on four contests). Map SS Own when you have it.`);
   window._genCancelled = false;
 
   let cancelBtn = document.getElementById('genCancelBtn');
@@ -36502,7 +36777,7 @@ function gppKernelFactory(){
     }
     return {nP:nP, K:K, own:own, keyCounts:keyCounts, lifts:lifts,
             sampleN:Ns, F:F, dupK:dupK,
-            theta:(theta > 0 ? theta : 1), maxDup:F * (maxFrac > 0 ? maxFrac : 1)};
+            theta:(theta > 0 ? theta : 0), maxDup:F * (maxFrac > 0 ? maxFrac : 1)};   // ck178: 0 = pairwise channel off
   }
   // The pairwise dependence correction for a whole lineup, as the AVERAGE
   // pairwise lift compounded once per player rather than once per pair.
@@ -36552,6 +36827,7 @@ function gppKernelFactory(){
                                 dm.keyCounts[k].get(key) || 0, dm.sampleN, dm.F, dm.dupK);
       let prod = 1;
       for(const i of idxs) prod *= Math.max(0.0005, dm.own[base + i]/100);
+      if(!(dm.theta > 0)){ out[k] = indep; continue; }   // ck178
       let modelled = dm.F * Math.pow(prod, dm.theta) * liftOf(dm, k, idxs);
       if(modelled > dm.maxDup) modelled = dm.maxDup;
       out[k] = modelled > indep ? modelled : indep;
@@ -36564,6 +36840,8 @@ function gppKernelFactory(){
   // the full recompute instead of drifting away from it as chalk accumulates.
   function dupSwapRatio(dm, k, cur, a, b){
     const base = k * dm.nP, lift = dm.lifts[k], nP = dm.nP;
+    // ck178: pairwise channel off — the floor channel is linear in Π(own)
+    if(!(dm.theta > 0)) return Math.max(0.0005, dm.own[base + b]/100) / Math.max(0.0005, dm.own[base + a]/100);
     // (own_b/own_a)^THETA — the dependence exponent applies to the whole product,
     // so a single slot's contribution is its ownership ratio raised to it — times
     // the ratio of his measured pair lifts against the eight players that stay.
@@ -36768,9 +37046,37 @@ function gppKernelFactory(){
       for(let j = 0; j < ids.length; j++){ const i = ids[j]; if(pos[i] !== 0 && team[i] === go) return false; }
       return true;
     };
+    // ck177: NHL full-slate shape — a primary team with P.nhlShape.prim+
+    // skaters holding .unit+ of one line / PP unit (and the goalie, with
+    // .gPrim), a second team with .sec+, at most .maxTeams teams in all.
+    const shp = (SHAPE === 'nhl' && P.nhlShape) ? P.nhlShape : null;
+    const shCnt = new Int32Array(skTeamSeen.length), shSt = new Int32Array(skTeamSeen.length); let shStamp = 0;
+    const shTeams = new Int32Array(16);
+    const shapeOk = function(ids){
+      shStamp++; let nT = 0, gT = -1;
+      for(let j = 0; j < ids.length; j++){ const i = ids[j]; const t = team[i] + 1;
+        if(pos[i] === 0){ gT = t; continue; }
+        if(shSt[t] !== shStamp){ shSt[t] = shStamp; shCnt[t] = 0; if(nT < 16) shTeams[nT++] = t; } shCnt[t]++; }
+      let all = nT; if(gT > 0 && shSt[gT] !== shStamp) all++;
+      if(all > shp.maxTeams) return false;
+      // primary candidates: teams at prim+, holding the unit
+      for(let a = 0; a < nT; a++){ const T = shTeams[a]; if(shCnt[T] < shp.prim) continue;
+        if(shp.gPrim && gT !== T) continue;
+        if(shp.unit > 0 && unitA){
+          unitSt++; let hit = false;
+          for(let j = 0; j < ids.length && !hit; j++){ const i = ids[j]; if(pos[i] === 0 || team[i] + 1 !== T) continue;
+            const ua = unitA[i], ub = unitB[i];
+            if(ua >= 0){ if(unitStamp[ua] !== unitSt){ unitStamp[ua] = unitSt; unitCnt[ua] = 0; } if(++unitCnt[ua] >= shp.unit) hit = true; }
+            if(ub >= 0){ if(unitStamp[ub] !== unitSt){ unitStamp[ub] = unitSt; unitCnt[ub] = 0; } if(++unitCnt[ub] >= shp.unit) hit = true; } }
+          if(!hit) continue; }
+        for(let b = 0; b < nT; b++) if(b !== a && shCnt[shTeams[b]] >= shp.sec) return true;
+      }
+      return false;
+    };
     const teamsOk = function(ids){
       if(noFlexOn && !noFlexOk(ids)) return false;
       if(noVsG && !vsGOk(ids)) return false;
+      if(shp && !shapeOk(ids)) return false;
       if(minSkTeams > 0 && !skTeamsOk(ids)) return false;
       if(minStack > 0 && unitA && !stackOkIdx2(ids)) return false;
       if(SHAPE !== 'sd') return true;
@@ -38929,6 +39235,10 @@ async function runNflGppEngine(ctx){
                 solved:!!(fieldOpts.fieldOpt||{}).solveTemp} : null)};
         _dup0 = fieldDupProfile(field, l => { const a=l.slice(); a.sort((x,y)=>x-y); return a.join(','); });
       }
+      // ck178: diagnostics hook — a harness can keep one drawn field (the
+      // report fold, scenario 0) to check it against a real contest's lineups.
+      if(k === 0 && typeof window !== 'undefined' && window.__keepField && label === window.__keepField)
+        window.__keptField = { label, ids: fieldPool.map(p => p.id), field: field.map(l => l.slice()) };
       const base = k * NF * R;
       for(let f = 0; f < NF; f++){
         const l = field[f % field.length];
@@ -39171,7 +39481,7 @@ async function runNflGppEngine(ctx){
       const _code = {}; fieldPool.forEach((p, i) => { const t = nhlTeamKey(p.team); if(t && team[i] > 0) _code[t] = team[i]; });
       const _named = [];
       _rules.forEach(r => { const c = _code[r.team]; if(!c) return;
-        if(r.max != null) stkCap[c] = nhlStackCapSlots(r.max, capN);
+        if(r.max != null) stkCap[c] = nhlStackCapSlots(r.max, capN, r.soft);
         if(r.min != null) stkMin[c] = Math.min(nhlStackMinSlots(r.min, capN), stkCap[c] >= 0 ? stkCap[c] : 1e9);
         _named.push(`${r.team}${r.min != null ? ' ≥' + stkMin[c] : ''}${r.max != null ? ' ≤' + stkCap[c] : ''}`); });
       if(_named.length) log(`Team stacks (ck152): the search paces ${stkK}+-skater stacks per team, in lineups of ${capN} — ${_named.join(', ')}.`);
@@ -39226,6 +39536,7 @@ async function runNflGppEngine(ctx){
     minSkaterTeams: SHAPE === 'nhl' ? NHL_MIN_SKATER_TEAMS : 0, units: nhlUnits, unitPairs: nhlUnitPairs ? Int32Array.from(nhlUnitPairs) : null,   // ck138
     minStack: SHAPE === 'nhl' ? nhlMinStackOf(slate) : 0, unitA: nhlUnitA, unitB: nhlUnitB,   // ck139
     noVsG: SHAPE === 'nhl' && !!slate._nhlNoVsG,   // ck168: no skater against our own goalie
+    nhlShape: SHAPE === 'nhl' ? nhlShapeOf(slate) : null,   // ck177: full-slate stack shape
     cptOk: cptOkMask, flexOk: flexOkMask, noFlex: noFlexMask,
     // ck126: projection scenarios + counterfactual climbs
     projTau: (typeof window !== 'undefined' && window.__projTau != null) ? +window.__projTau : NFL_GPP_PROJ_TAU, projSd,
@@ -39236,7 +39547,7 @@ async function runNflGppEngine(ctx){
     groups: groupRules.map(g => ({mask:g.mask, min:g.min, max:g.max, conds:g.conds})),
     ownG: Float32Array.from(scen.flatMap(v => Array.from(v))),
     ownO: Float32Array.from(scen.flatMap(v => Array.from(v))),
-    theta: NFL_GPP_DUP_THETA, maxDupFrac: NFL_GPP_DUP_MAXFRAC,
+    theta: SD ? NFL_GPP_DUP_THETA : evDupTheta(slate.sport || 'nfl'), maxDupFrac: NFL_GPP_DUP_MAXFRAC,   // ck178: per sport
     fldLinG, fldLinS, fldLinR, payTable, paidRank: gppPaidRank(payout, F),
     // ck111: the record's shrink on the rank-1 / top-1% bands — the search and
     // selection folds maximize the CALIBRATED gross (see payFnCal in the kernel).
@@ -39783,7 +40094,7 @@ async function runNflGppBoard(ctx){
       const _floorIds = i => out[i].map(p => p.id).concat(SDb && out[i]._sdCaptain ? ['CPT:' + out[i]._sdCaptain] : []).concat(_stkIds(out[i]));
       // ck150: a captain pseudo id answers to the captain Max% (Infinity when unset).
       const _capSlotsF = id => /^CPT:/.test(String(id)) ? (SDb ? sdCptCapSlots(slate, String(id).slice(4), target) : Infinity)
-        : /^STK:/.test(String(id)) ? nhlStackCapSlots((_stkRule[String(id).slice(4)] || {}).max, target) : _capSlots(id);
+        : /^STK:/.test(String(id)) ? nhlStackCapSlots((_stkRule[String(id).slice(4)] || {}).max, target, (_stkRule[String(id).slice(4)] || {}).soft) : _capSlots(id);
       const _stkMinIds = _stkRules.filter(r => r.min != null).map(r => 'STK:' + r.team);
       const _topMode = gppObjectiveOf(slate).mode === 'top';   // ck134: no EV floors — the greedy's coverage order is the board
       const _scr = evScreenBoard(slate, _pr0, target, log,
@@ -39791,7 +40102,7 @@ async function runNflGppBoard(ctx){
          caps: {ids: _floorIds, cap: _capSlotsF}, extraOk: _fbRule,
          floors: (_minIds.length || _cptMinIds.length || _stkMinIds.length) ? {list:_minIds.concat(_cptMinIds, _stkMinIds), ids: _floorIds,
                                    min: id => /^CPT:/.test(String(id)) ? Math.ceil(Math.max(0, Math.min(100, _cm[String(id).slice(4)]||0))/100*target)
-                                            : /^STK:/.test(String(id)) ? Math.min(nhlStackMinSlots((_stkRule[String(id).slice(4)] || {}).min || 0, target), nhlStackCapSlots((_stkRule[String(id).slice(4)] || {}).max, target))
+                                            : /^STK:/.test(String(id)) ? Math.min(nhlStackMinSlots((_stkRule[String(id).slice(4)] || {}).min || 0, target), nhlStackCapSlots((_stkRule[String(id).slice(4)] || {}).max, target, (_stkRule[String(id).slice(4)] || {}).soft))
                                                                        : Math.ceil(Math.max(0, Math.min(100, _mo[id]||0))/100*target)} : null});
       const _pr = _scr.keep.map(i => _pr0[i]);
       out = _scr.keep.map(i => out[i]);
@@ -40177,7 +40488,7 @@ async function runNflGppBoard(ctx){
 // ═══════════════════════════════════════════════════════════════════════════
 const NHL_SIM = {
   goalsPerTeam: 3.05,        // league mean, used when a team total is missing
-  paceShape: 30,             // shared game pace ~ Gamma(k, k): CV ≈ 18%
+  paceShape: 50,             // shared game pace ~ Gamma(k, k): CV ≈ 14% (ck177: was 30 — teammates beyond the line co-moved more in the sim than in results)
   engPerGame: 0.25,          // empty-net goals per game (league; a check, not a parameter)
   lateTie: 0.20,             // one-goal game: P(the trailer ties it late)
   enOneGoal: 0.62,           // …else P(the leader scores into the empty net)
@@ -40201,6 +40512,25 @@ const NHL_SIM = {
   blkDefault: { F: 0.45, D: 1.2 },
   scoring: { g: 8.5, a: 5, sog: 1.5, blk: 1.3, sh: 2, hat: 3, sog5: 3, blk3: 3, pts3: 3,
              win: 6, save: 0.7, ga: -3.5, so: 4, otl: 2, sv35: 3 },
+  // ck177 — calibrated against 1,253 player results on three full main
+  // slates (10/22, 10/27, 10/29; 34 games):
+  // depthAdj: third-line forwards and third-pair D scored 0.80 / 0.83 of
+  //   what the sheet's numbers simmed, on every slate; their production
+  //   moves up the lineup (team goals still follow TmTot).
+  depthAdj: { F3: 0.85, D3: 0.88 },
+  // lineFidelity: the posted line is the one on the ice for this share of a
+  //   forward's even-strength goals; the rest come on mixed shifts (line
+  //   blender, special teams carry-over, a projected line that changed).
+  //   Measured linemate correlation was +0.21 against the old sim's +0.33.
+  lineFidelity: 0.76,
+  // rateNoise: a skater's role in one game is uncertain (TOI, deployment,
+  //   the projection itself) — a per-game lognormal on his scoring / shot
+  //   weights. Player results spread 6% wider than the old sim.
+  rateNoise: 0.26,
+  // scoreShots: score effects — the trailing team outshoots the leader.
+  //   Shot volume per goal of deficit (capped at 2): the winning goalie
+  //   faces more shots, which widens goalie outcomes the way results did.
+  scoreShots: 0.06,
 };
 
 function nhlRng(seed){ let a = seed >>> 0; return function(){ a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -40252,7 +40582,10 @@ function nhlBuildInputs(pool, posOf, opts){
     e.sogTarget = Number.isFinite(p.sogExp) && p.sogExp > 0 ? p.sogExp : Math.max(0.4, e.xg * C.sogPerXg);
     e.blkTarget = Number.isFinite(p.blkExp) && p.blkExp >= 0 ? p.blkExp : (e.isD ? C.blkDefault.D : C.blkDefault.F);
     e.ppFrac = C.ppGoalFrac[e.pp === 'PP1' ? 'PP1' : e.pp === 'PP2' ? 'PP2' : 'none'];
+    { const da = (C.depthAdj && C.depthAdj[lk]) || 1;
+      if(da !== 1){ e.xg *= da; e.astTarget *= da; e.sogTarget *= da; e.notes.push('depth adj ×' + da); } }
     e.aW = e.astTarget;          // assist weight, calibrated below
+    e.nz = 1;
     tm.sk.push(e);
     return e;
   });
@@ -40277,11 +40610,20 @@ function nhlBuildInputs(pool, posOf, opts){
   return { teams, games, idx };
 }
 
+// ck177: one game's role noise for every skater on both teams
+function nhlDrawNoise(g, R){
+  const sg = NHL_SIM.rateNoise || 0; if(!(sg > 0)) return;
+  for(const tm of [g.a, g.b]) for(const e of tm.sk) e.nz = Math.exp(sg * nhlNorm(R) - 0.5 * sg * sg);
+}
+// ck177: score effects — shot volume of a team that finished `dif` goals
+// behind (negative: ahead), regulation + late goals
+function nhlShotMult(dif){ const b = NHL_SIM.scoreShots || 0; return 1 + b * Math.max(-2, Math.min(2, dif)); }
 // ── ONE GAME ────────────────────────────────────────────────────────────────
 // Writes per-player counting stats for this world into `st` (flat arrays).
 function nhlSimGame(g, R, st){
   const C = NHL_SIM;
   const pace = nhlGamma(C.paceShape, R) / C.paceShape;
+  nhlDrawNoise(g, R);
   // regulation goals before the late push (tm.lamScale is calibrated so the
   // team's FINAL mean — late push, empty net and OT included — is its total)
   let gA = nhlPoisson(g.a.tot * g.a.lamScale * pace, R), gB = nhlPoisson(g.b.tot * g.b.lamScale * pace, R);
@@ -40317,11 +40659,13 @@ function nhlSimGame(g, R, st){
     for(const tm of [g.a, g.b]){ const n = goals.filter(x => x.tm === tm).length; d.teamHist[Math.min(8, n)]++; }
   }
   // shots + blocks per skater, goalie lines
+  const regA = goals.filter(x => x.tm === g.a && !x.ot).length, regB = goals.filter(x => x.tm === g.b && !x.ot).length;
+  const sm = new Map([[g.a, nhlShotMult(regB - regA) / (g.a.smMean || 1)], [g.b, nhlShotMult(regA - regB) / (g.b.smMean || 1)]]);
   for(const tm of [g.a, g.b]){
-    const op = tm === g.a ? g.b : g.a;
+    const op = tm === g.a ? g.b : g.a; const m = sm.get(tm);
     for(const e of tm.sk){
       const nonGoal = Math.max(0, e.sogTarget - e.goalsMean);
-      st.sog[e.i] += st.g[e.i] + nhlNegBin(nonGoal * pace, C.sogDispK, R);
+      st.sog[e.i] += st.g[e.i] + nhlNegBin(nonGoal * pace * m * e.nz, C.sogDispK, R);
       st.blk[e.i] += nhlNegBin(e.blkTarget, C.blkDispK, R);
     }
   }
@@ -40331,7 +40675,7 @@ function nhlSimGame(g, R, st){
     // shots against = the opponent's rostered shots + the rest of their team
     let rostered = 0; for(const e of op.sk) rostered += st.sog[e.i];
     const other = Math.max(0, op.shotsOther || 0);
-    const shotsAgainst = rostered + nhlNegBin(other * pace, 10, R);
+    const shotsAgainst = rostered + nhlNegBin(other * pace * sm.get(op), 10, R);
     const against = goals.filter(x => x.op === tm && !x.en);
     let ga = against.length;
     let saves = Math.max(0, shotsAgainst - ga);
@@ -40358,7 +40702,7 @@ function nhlCreditGoal(x, R, st){
   if(st.diag){ st.diag.type[type] = (st.diag.type[type] || 0) + 1; }
   const cand = tm.sk; const ws = new Array(cand.length); let tot = 0;
   for(let k = 0; k < cand.length; k++){ const e = cand[k];
-    let w = e.xgW;
+    let w = e.xgW * e.nz;
     if(type === 'PP') w *= (e.pp ? e.ppFrac : 0);
     else if(type === 'SH') w *= (e.line === 'F4' || e.line === 'F3' || e.line === 'D1' || e.line === 'D2' ? 1 : 0.4) * (1 - e.ppFrac);
     else w *= (1 - e.ppFrac);
@@ -40376,7 +40720,7 @@ function nhlCreditGoal(x, R, st){
   if(st.diag){ st.diag.ast += na; }
   const pool = unit.slice();
   for(let k = 0; k < na && pool.length; k++){
-    let t = 0; const aw = pool.map(e => { const w = e.aW; t += w; return w; });
+    let t = 0; const aw = pool.map(e => { const w = e.aW * e.nz; t += w; return w; });
     const j = nhlPick(aw, R, t); if(j < 0) break;
     const a = pool[j]; st.a[a.i] += 1; if(type === 'SH') st.sh[a.i] += 1;
     pool.splice(j, 1);
@@ -40386,7 +40730,14 @@ function nhlCreditGoal(x, R, st){
 function nhlEvMates(tm, s, R){
   const C = NHL_SIM, out = [];
   if(!s.isD){
-    for(const e of (tm.lines[s.line] || [])) if(e !== s) out.push(e);
+    const mates = (tm.lines[s.line] || []).filter(e => e !== s);
+    if(C.lineFidelity < 1 && R() > C.lineFidelity){
+      // a mixed shift: his two forward mates come from the team's other
+      // forwards, by ice time
+      const oth = []; const ow = [];
+      for(const [k, L] of Object.entries(tm.lines)) if(k !== s.line) for(const e of L){ oth.push(e); ow.push(C.fLineToi[k] || 0.15); }
+      for(let j = 0; j < Math.max(2, mates.length) && oth.length; j++){ const q = nhlPick(ow, R); out.push(oth[q]); oth.splice(q, 1); ow.splice(q, 1); }
+    } else out.push(...mates);
     const pk = Object.keys(tm.pairs); const pw = pk.map(k => C.dPairToi[k] || 0.2);
     const pair = tm.pairs[pk[nhlPick(pw, R)]] || [];
     out.push(...pair);
@@ -40425,9 +40776,12 @@ function nhlCalibrate(inp, R, pilot){
   for(const tm of inp.teams.values()) tm.lamScale = 0.92;
   for(let pass = 0; pass < 3; pass++){
     const gsum = new Map();
-    const P2 = pilot * 4, d = { byTeam: gsum };   // scoreboard only — cheap, so 4× the pilot
+    const P2 = pilot * 4, d = { byTeam: gsum, sm: pass === 2 ? new Map() : null };   // scoreboard only — cheap, so 4× the pilot
     for(let w = 0; w < P2; w++) for(const g of inp.games) nhlSimGameGoalsScore(g, R, d);
     for(const tm of inp.teams.values()){ const m = (gsum.get(tm) || 0) / P2; if(m > 0) tm.lamScale *= tm.tot / m; }
+    // ck177: a favourite trails less, so score effects shave his shots — the
+    // mean multiplier is divided out so the team still hits its shot line
+    if(d.sm) for(const tm of inp.teams.values()){ const v = (d.sm.get(tm) || 0) / P2; tm.smMean = v > 0 ? v : 1; }
   }
   // shots: the rest of the team's shots (unrostered players / sheet gaps)
   for(const tm of inp.teams.values()){
@@ -40443,6 +40797,7 @@ function nhlNewStats(n){ const f = () => new Float64Array(n); return { g: f(), a
 // pilot pass: goals + assists only
 function nhlSimGameGoalsOnly(g, R, st){
   const C = NHL_SIM, pace = nhlGamma(C.paceShape, R) / C.paceShape;
+  nhlDrawNoise(g, R);
   for(const tm of [g.a, g.b]){ const op = tm === g.a ? g.b : g.a; const n = nhlPoisson(tm.tot * pace, R); for(let k = 0; k < n; k++) nhlCreditGoal({ tm, op }, R, st); }
 }
 // the scoreboard of one game — the same regulation / late / OT logic as
@@ -40455,6 +40810,7 @@ function nhlSimGameGoalsScore(g, R, d){
     if(Math.abs(diff) === 1 && R() < C.lateTie){ if(diff > 0) b++; else a++; }
     else if(R() < (Math.abs(diff) === 1 ? C.enOneGoal : C.enTwoGoal)){ if(diff > 0) a++; else b++; }
   }
+  if(d.sm){ d.sm.set(g.a, (d.sm.get(g.a) || 0) + nhlShotMult(b - a)); d.sm.set(g.b, (d.sm.get(g.b) || 0) + nhlShotMult(a - b)); }
   if(a === b){ const aW = R() < g.a.tot / (g.a.tot + g.b.tot); if(R() < C.otDecidedInOT){ if(aW) a++; else b++; } }
   d.byTeam.set(g.a, (d.byTeam.get(g.a) || 0) + a); d.byTeam.set(g.b, (d.byTeam.get(g.b) || 0) + b);
 }
@@ -40672,8 +41028,11 @@ function nhlPerSimOptimals(slate, pool, simScoresById, simsDone, cap, minSal, ma
   const unitKeys = Object.keys(unitsOf).filter(k => unitsOf[k].length >= need);
   const stackOf = l => { const m = {}; let x = 0; for(const c of l){ if(c.pos === 'G') continue; for(const k of c.keys){ m[k] = (m[k] || 0) + 1; if(m[k] > x) x = m[k]; } } return x; };
   const tot = l => l.reduce((t, c) => t + c.score, 0);
+  const sh = nhlShapeOf(slate);   // ck177
   const solve = cands => {
-    const l0 = nhlOptimalForSim(cands, cap, minSal); if(!need || (l0 && stackOf(l0) >= need)) return l0;
+    const l0 = nhlOptimalForSim(cands, cap, minSal);
+    if(sh) return (l0 && nhlShapeOkC(l0, sh) && (!need || stackOf(l0) >= need)) ? l0 : nhlSolveShape(cands, sh, cap, minSal, null, null, need);
+    if(!need || (l0 && stackOf(l0) >= need)) return l0;
     const ranked = unitKeys.map(k => { const top = unitsOf[k].slice().sort((a, b) => b.score - a.score).slice(0, need); return { top, v: tot(top) }; })
                            .sort((a, b) => b.v - a.v).slice(0, 4);
     let best = null;
@@ -40715,6 +41074,7 @@ async function runNhlBoard(slate){
   const byPos = { G: 0, C: 0, W: 0, D: 0 }; pool.forEach(p => { const k = nhlPosOf(p); if(byPos[k] != null) byPos[k]++; });
   if(byPos.G < 1 || byPos.C < 2 || byPos.W < 3 || byPos.D < 2){ log(`⚠ The pool cannot fill an NHL roster (G ${byPos.G}, C ${byPos.C}, W ${byPos.W}, D ${byPos.D}) — unhide players.`); return null; }
   log(`Pool: ${pool.length} players (${byPos.C} C · ${byPos.W} W · ${byPos.D} D · ${byPos.G} G); the modelled field draws from ${fieldPool.length}.`);
+  { const _sh = nhlShapeOf(slate); if(_sh) log(nhlShapeLogLine(slate, _sh)); }   // ck177
   const t0 = Date.now();
   // Sim Score has no search to widen the candidate set, so it draws its
   // candidates from more worlds (every generation world up to 2,500).
@@ -40751,10 +41111,12 @@ async function runNhlBoard(slate){
 // min/max salary, the slate's stack minimum via nhlSolveWithStack) builds the
 // best lineup; duplicates and anything over Max% / a per-player cap are
 // skipped. Projection is the sheet's Proj column (hand edits included).
-function nhlSolveWithStack(cands, need, cap, minSal){
+function nhlSolveWithStack(cands, need, cap, minSal, sh){
   const tot = l => l.reduce((t, c) => t + c.score, 0);
   const stackOf = l => { const m = {}; let x = 0; for(const c of l){ if(c.pos === 'G') continue; for(const k of c.keys){ m[k] = (m[k] || 0) + 1; if(m[k] > x) x = m[k]; } } return x; };
-  const l0 = nhlOptimalForSim(cands, cap, minSal); if(!need || (l0 && stackOf(l0) >= need)) return l0;
+  const l0 = nhlOptimalForSim(cands, cap, minSal);
+  if(sh) return (l0 && nhlShapeOkC(l0, sh) && (!need || stackOf(l0) >= need)) ? l0 : nhlSolveShape(cands, sh, cap, minSal, null, null, need);   // ck177
+  if(!need || (l0 && stackOf(l0) >= need)) return l0;
   const unitsOf = {}; for(const c of cands){ if(c.pos === 'G') continue; for(const k of c.keys) (unitsOf[k] = unitsOf[k] || []).push(c); }
   const ranked = Object.keys(unitsOf).filter(k => unitsOf[k].length >= need)
     .map(k => { const top = unitsOf[k].slice().sort((a, b) => b.score - a.score).slice(0, need); return { top, v: tot(top) }; })
@@ -40781,6 +41143,8 @@ async function runNhlOptimize(slate){
     const byPos = { G: 0, C: 0, W: 0, D: 0 }; base.forEach(c => byPos[c.pos]++);
     if(byPos.G < 1 || byPos.C < 2 || byPos.W < 3 || byPos.D < 2){ log(`⚠ The pool cannot fill an NHL roster with a projection (G ${byPos.G}, C ${byPos.C}, W ${byPos.W}, D ${byPos.D}).`); return null; }
     const need = nhlMinStackOf(slate);
+    const _sh = nhlShapeOf(slate);   // ck177
+    if(_sh) log(nhlShapeLogLine(slate, _sh));
     log(`NHL optimizer (ck139d): ${base.length} players with a projection · optimizing ${optBy === 'proj' ? 'Projection' : 'Projection (NHL optimizes off the Proj column)'} · randomness ${Math.round(randomness * 100)}% (each player plus a shared draw per line / PP unit) · ${need ? 'every lineup stacks ' + need + '+ from a line / PP unit' : 'stack rule off'} · salary $${minSal.toLocaleString()}–$${maxSal.toLocaleString()}.`);
     const capOf = id => Math.max(1, Math.ceil(target * Math.min(100, overrides[id] != null ? overrides[id] : maxExpPct) / 100));
     const cnt = {}; const keys = new Set(); const out = [];
@@ -40793,7 +41157,7 @@ async function runNhlOptimize(slate){
         if(randomness > 0){ let shared = 0; for(const k of c.keys){ if(unitZ[k] == null) unitZ[k] = gauss(); shared += unitZ[k]; }
           m = Math.max(0.05, 1 + randomness * (0.7 * gauss() + 0.7 * (c.keys.length ? shared / c.keys.length : gauss()))); }
         c.score = c.proj * m; }
-      const l = nhlSolveWithStack(base.filter(c => !(cnt[c.p.id] >= capOf(c.p.id))), need, maxSal, minSal);
+      const l = nhlSolveWithStack(base.filter(c => !(cnt[c.p.id] >= capOf(c.p.id))), need, maxSal, minSal, _sh);
       if(!l){ capSkips++; continue; }
       const k = l.map(c => c.p.id).sort().join(',');
       if(keys.has(k)){ dupSkips++; if(randomness === 0) break; continue; }
@@ -41672,6 +42036,7 @@ function nhlStackCandGen(slate, o, K, genIdx, cap, lo, needLine){
   };
   const tot = l => l.reduce((t, c) => t + c.score, 0);
   const lineStack = l => { const m = {}; let x = 0; for(const c of l){ if(c.pos === 'G') continue; for(const k of c.keys){ m[k] = (m[k] || 0) + 1; if(m[k] > x) x = m[k]; } } return x; };
+  const _sh = nhlShapeOf(slate);   // ck177
   // n lineups; T: a team to stack at K+ (or null); ban: teams to keep under K
   return function(n, T, ban){
     const res = []; let tries = 0;
@@ -41696,6 +42061,11 @@ function nhlStackCandGen(slate, o, K, genIdx, cap, lo, needLine){
         if(best) fixedSets.push(best);
       }
       let pick = null;
+      if(_sh){   // ck177: build to the full-slate shape, primary = T when asked
+        const l = T ? nhlSolveShape(cands, _sh, cap, lo, T, null, needLine) : nhlSolveShape(cands, _sh, cap, lo, null, ban, needLine);
+        if(l) res.push(l.map(c => c.p));
+        continue;
+      }
       for(const fx of fixedSets){
         const l = fx ? nhlOptimalForSim(cands, cap, lo, fx) : nhlSolveWithStack(cands, needLine, cap, lo);
         if(!l || l.length !== 9) continue;
@@ -41717,7 +42087,7 @@ function nhlEnforceStackExposure(slate, out, o){
   const want = {}, capT = {}, clash = [];
   rules.forEach(r => {
     if(r.min != null) want[r.team] = nhlStackMinSlots(r.min, N);
-    if(r.max != null) capT[r.team] = nhlStackCapSlots(r.max, N);
+    if(r.max != null) capT[r.team] = nhlStackCapSlots(r.max, N, r.soft);
     if(want[r.team] != null && capT[r.team] != null && want[r.team] > capT[r.team]){ clash.push(r.team); want[r.team] = capT[r.team]; }
   });
   const wantOf = t => want[t] || 0, capOf = t => capT[t] != null ? capT[t] : Infinity;
@@ -41726,6 +42096,7 @@ function nhlEnforceStackExposure(slate, out, o){
   const minOv = slate.playerMinOverrides || {};
   const minP = id => (minOv[id] > 0) ? Math.ceil(Math.min(100, minOv[id]) / 100 * N - 1e-9) : 0;
   const needLine = nhlMinStackOf(slate);
+  const _shp = nhlShapeOf(slate);   // ck177
   // held-out worlds score, generation worlds build (the engines' split)
   const S = o.simScoresById || null, nS = o.simsDone || o.totalSims || 0;
   const hoIdx = [], genIdx = [];
@@ -41750,6 +42121,7 @@ function nhlEnforceStackExposure(slate, out, o){
     if(c.G !== 1 || c.C < 2 || c.W < 3 || c.D < 2) return false;
     if(Object.keys(nhlTeamSkaters(ps)).length < NHL_MIN_SKATER_TEAMS) return false;
     if(needLine && nhlStackMax(ps) < needLine) return false;
+    if(_shp && !nhlShapeOkP(slate, ps, _shp)) return false;   // ck177
     return true;
   };
   const stkOf = ps => nhlStackTeams(ps, K);
@@ -41823,8 +42195,12 @@ function nhlEnforceStackExposure(slate, out, o){
     if(need > 0) short.push(T);
   }
   if(log){
-    const parts = rules.map(r => `${r.team} ${have[r.team] || 0}` + (r.min != null ? ` (≥${wantOf(r.team)})` : '') + (r.max != null ? ` (≤${capOf(r.team)})` : '')
+    // ck177: the shape's default cap covers every team — list the teams that
+    // stack or were moved, and the default once
+    const softR = rules.filter(r => r.soft && r.min == null), shown = rules.filter(r => !(r.soft && r.min == null) || (have[r.team] || 0) > 0 || (have[r.team] || 0) !== before[r.team]);
+    const parts = shown.sort((a, b) => (have[b.team] || 0) - (have[a.team] || 0)).map(r => `${r.team} ${have[r.team] || 0}` + (r.min != null ? ` (≥${wantOf(r.team)})` : '') + (r.max != null && !r.soft ? ` (≤${capOf(r.team)})` : '')
       + ((have[r.team] || 0) !== before[r.team] ? ` was ${before[r.team]}` : ''));
+    if(softR.length) parts.push(`every team ≤${capOf(softR[0].team)} (shape default)`);
     const moves = [rep.capRepl && `${rep.capRepl} replaced for caps`, rep.minRepl && `${rep.minRepl} replaced for floors`].filter(Boolean);
     log(`Team stacks (ck152, ${K}+ skaters, of ${N}): ${parts.join(' · ')}` + (moves.length ? ` — ${moves.join(', ')}${rep.gen ? ` (${rep.gen} extra candidates solved)` : ''}.` : ' — already met.'));
     clash.forEach(t => log(`  ⚠ ${t}: stack Min% is above its Max% — the Max% wins (${capOf(t)}).`));
@@ -45817,6 +46193,41 @@ function renderAll(){renderPool();renderLineup();if(typeof renderPlayerExpList==
 function showToast(msg,type){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+type+' show';clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('show'),3000);}
 function hideToast(){document.getElementById('toast').classList.remove('show');}
 
+// ── ck176: file delivery that works on phones ────────────────────────────────
+// Every export used `a = createElement('a'); a.download = …; a.click()` on a
+// DETACHED anchor (and the backup revoked its URL before the browser had read
+// it). Desktop Chrome tolerates that; phones mostly don't — iOS Chrome, Android
+// Firefox and every in-app browser (a link opened from Messages / Discord /
+// Instagram) either do nothing or open the CSV as a page. On a touch device the
+// file now goes through the system share sheet (Save to Files, Drive, email,
+// AirDrop…), which is the one route that works across iOS and Android; the
+// anchor (attached, revoked a minute later) is the desktop path and the
+// fallback. Returns a promise of 'shared' | 'cancelled' | 'downloaded'.
+function isTouchDevice(){ try { return matchMedia('(pointer:coarse)').matches; } catch(e){ return false; } }
+function anchorDownload(f){
+  const url = URL.createObjectURL(f.blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = f.name; a.rel = 'noopener'; a.style.display = 'none';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { try { URL.revokeObjectURL(url); } catch(e){} a.remove(); }, 60000);
+}
+function deliverFiles(files){
+  const list = files.map(f => ({ name: f.name, type: f.type || 'application/octet-stream',
+    blob: f.blob || new Blob(Array.isArray(f.data) ? f.data : [f.data], { type: f.type || 'application/octet-stream' }) }));
+  if(isTouchDevice() && typeof navigator !== 'undefined' && navigator.share && navigator.canShare && typeof File === 'function'){
+    try {
+      const fl = list.map(f => new File([f.blob], f.name, { type: f.type }));
+      if(navigator.canShare({ files: fl })){
+        return navigator.share({ files: fl, title: fl.length === 1 ? fl[0].name : 'DFS Builder export' })
+          .then(() => 'shared')
+          .catch(e => { if(e && e.name === 'AbortError') return 'cancelled'; list.forEach(anchorDownload); return 'downloaded'; });
+      }
+    } catch(e){}
+  }
+  list.forEach(anchorDownload);
+  return Promise.resolve('downloaded');
+}
+
 // ═══════════════════════════════════════════════════════════
 // NEW SLATE MODAL
 // ═══════════════════════════════════════════════════════════
@@ -46689,12 +47100,10 @@ function backupData(){
     history: lineupHistory,
     stores
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
   const date = new Date().toISOString().slice(0,10);
-  a.href = url; a.download = `dfs-builder-backup-${date}.json`;
-  a.click(); URL.revokeObjectURL(url);
+  // ck176: the URL used to be revoked on the very next line, before a slower
+  // browser had read the blob — an empty or missing download.
+  deliverFiles([{ name: `dfs-builder-backup-${date}.json`, data: JSON.stringify(payload, null, 2), type: 'application/json' }]);
 }
 
 // The restore itself, separated from the file reader so it can be tested and
